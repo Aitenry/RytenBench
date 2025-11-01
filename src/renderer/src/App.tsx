@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { BrowserRouter } from 'react-router-dom' // Import BrowserRouter
+import { HashRouter } from 'react-router-dom' // Import BrowserRouter
 import { message } from 'antd'
 import type { MenuProps } from 'antd'
 import Header from './components/Header'
@@ -25,7 +25,7 @@ const App: React.FC = () => {
   }
 
   return (
-    <BrowserRouter>
+    <HashRouter>
       <div className="min-h-screen flex flex-col bg-gray-100">
         <Header
           currentKey={current}
@@ -36,7 +36,7 @@ const App: React.FC = () => {
         <Footer />
         {contextHolder}
       </div>
-    </BrowserRouter>
+    </HashRouter>
   )
 }
 
