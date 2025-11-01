@@ -16,6 +16,15 @@ export default defineConfig({
         '@renderer': resolve('src/renderer/src')
       }
     },
-    plugins: [tailwindcss(), react()]
+    plugins: [tailwindcss(), react()],
+    build: {
+      rollupOptions: {
+        input: {
+          // 定义多个入口点
+          main: resolve(__dirname, 'src/renderer/resource/index.html'),
+          loading: resolve(__dirname, 'src/renderer/resource/loading.html')
+        }
+      }
+    }
   }
 })
