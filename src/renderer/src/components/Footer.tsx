@@ -24,7 +24,7 @@ const Footer: React.FC = () => {
       >
         Aitenry
       </a>{' '}
-      ©{new Date().getFullYear()} ASETools - 轻量级个人工作台
+      ©{new Date().getFullYear()} RytenBench - 轻量级个人工作台
     </footer>
   )
 }

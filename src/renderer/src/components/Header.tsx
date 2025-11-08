@@ -144,7 +144,7 @@ const Header: React.FC<HeaderProps> = ({ currentKey, setCurrentKey, onUserMenuCl
     >
       {/* Logo 区域 */}
       <div className="flex items-center" style={{ width: '230px' }}>
-        <img alt="logo" style={{ height: '39px' }} src={Logo} />
+        <img alt="logo" style={{ height: '39px', imageRendering: 'crisp-edges' }} src={Logo} />
       </div>
 
       {/* 居中菜单 - 轻量级工作台功能 */}

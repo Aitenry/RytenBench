@@ -1,6 +1,6 @@
-# ASETools - Lightweight Personal AI Workbench
+# RytenBench - Lightweight Personal AI Workbench
 
-ASETools is a lightweight AI workbench designed specifically for individual users, integrating various commonly used functions in daily work and study, aimed at improving personal efficiency and productivity. It is built as a cross-platform desktop application using Electron, React, and TypeScript.
+RytenBench is a lightweight AI workbench designed specifically for individual users, integrating various commonly used functions in daily work and study, aimed at improving personal efficiency and productivity. It is built as a cross-platform desktop application using Electron, React, and TypeScript.
 
 ## Features
 
@@ -71,7 +71,7 @@ ASETools is a lightweight AI workbench designed specifically for individual user
 1.  Clone the project:
     ```bash
     git clone <repository-url>
-    cd asetools
+    cd RytenBench
     ```
 
 2.  Install dependencies (using pnpm is recommended based on the `pnpm` section in `package.json`):
@@ -125,18 +125,18 @@ ASETools is a lightweight AI workbench designed specifically for individual user
 
 Top navigation bar component, including:
 
-- **Logo Area**: Displays ASETools brand identity
+- **Logo Area**: Displays RytenBench brand identity
 - **Main Menu**: Quick access to 7 core function modules
 - **Search Function**: Global search box
 - **User Menu**: User-related operations (settings, notifications, messages, logout)
 
 ## Design Philosophy
 
-ASETools adopts a simple and intuitive interface design, using a combination of icons and text to allow users to quickly understand and use various functions. The overall design follows modern UI/UX principles, focusing on user experience and operational efficiency. Built with Electron, it provides a native desktop application experience across different operating systems.
+RytenBench adopts a simple and intuitive interface design, using a combination of icons and text to allow users to quickly understand and use various functions. The overall design follows modern UI/UX principles, focusing on user experience and operational efficiency. Built with Electron, it provides a native desktop application experience across different operating systems.
 
 ## Contributing
 
-Welcome to submit Issues and Pull Requests to help improve ASETools.
+Welcome to submit Issues and Pull Requests to help improve RytenBench.
 
 ## Support
 

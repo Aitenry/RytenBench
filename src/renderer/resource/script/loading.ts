@@ -44,10 +44,10 @@ document.addEventListener('DOMContentLoaded', () => {
   ;(window as unknown as Window).loading.onInitError((_event, errorMessage: string) => {
     console.error('Initialization error:', errorMessage)
     if (currentTask) {
-      currentTask.textContent = 'Error occurred during initialization'
+      currentTask.textContent = '初始化过程中出错!'
     }
     if (taskProgress) {
-      taskProgress.textContent = 'Please restart the application'
+      taskProgress.textContent = '请重新启动应用程序!'
     }
     if (progressFill) {
       progressFill.style.backgroundColor = '#e74c3c' // 红色表示错误
