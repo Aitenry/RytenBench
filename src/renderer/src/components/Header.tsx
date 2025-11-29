@@ -10,12 +10,12 @@ import {
   RiMusicLine,
   RiBook2Line,
   RiSettings2Line,
-  RiLogoutBoxLine,
   RiNotification3Line,
   RiMailLine,
   RiUserLine,
   RiSearchLine,
-  RiToolsLine
+  RiToolsLine,
+  RiShieldKeyholeLine
 } from '@remixicon/react'
 import Logo from '../assets/logo.png'
 
@@ -124,10 +124,9 @@ const Header: React.FC<HeaderProps> = ({ currentKey, setCurrentKey, onUserMenuCl
       type: 'divider'
     },
     {
-      key: 'logout',
-      label: '退出登录',
-      icon: <RiLogoutBoxLine size={16} />,
-      danger: true
+      key: 'lock',
+      label: '系统锁屏',
+      icon: <RiShieldKeyholeLine size={16} />
     }
   ]
 

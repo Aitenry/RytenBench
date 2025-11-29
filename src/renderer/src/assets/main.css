@@ -1,1 +1,35 @@
 @import "tailwindcss";
+@import "animate.css";
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background-color: #ffffff60;
+  border-radius: 100px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background-color: #d3d3d38f;
+  border-radius: 100px;
+}
+
+.custom-scrollbar:hover::-webkit-scrollbar-thumb {
+  background-color: rgba(173, 173, 173, 0.56);
+  border-radius: 100px;
+}
+
+/* 毛玻璃效果的蒙层 */
+.lock-screen-modal .ant-modal-mask {
+  background-color: rgba(255, 255, 255, 0.3) !important; /* 半透明白色背景 */
+  backdrop-filter: blur(10px); /* 模糊效果 */
+  -webkit-backdrop-filter: blur(10px); /* Safari 兼容 */
+}
+
+/* 可选：如果也需要模态框本身有毛玻璃效果 */
+.lock-screen-modal .ant-modal-content {
+  background-color: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}

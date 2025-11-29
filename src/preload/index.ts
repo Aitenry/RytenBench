@@ -1,8 +1,28 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
+import { TodoItemRow } from '../main/database/mapper/todo'
 
 // Custom APIs for renderer
-const api = {}
+const api = {
+  // TodoItems 相关 API
+  todoItems: {
+    getById: (id: number) => ipcRenderer.invoke('todo-items-get-by-id', id),
+    getByTitle: (title: string) => ipcRenderer.invoke('todo-items-get-by-title', title),
+    getByPriority: (priority: number) => ipcRenderer.invoke('todo-items-get-by-priority', priority),
+    getByCompletedStatus: (completed: boolean) =>
+      ipcRenderer.invoke('todo-items-get-by-completed-status', completed),
+    getAll: () => ipcRenderer.invoke('todo-items-get-all'),
+    getByDueDate: (dueDate: string) => ipcRenderer.invoke('todo-items-get-by-due-date', dueDate),
+    add: (todoItem: Omit<TodoItemRow, 'id'>) => ipcRenderer.invoke('todo-items-add', todoItem),
+    update: (id: number, updates: Partial<Omit<TodoItemRow, 'id'>>) =>
+      ipcRenderer.invoke('todo-items-update', id, updates),
+    delete: (id: number) => ipcRenderer.invoke('todo-items-delete', id)
+  },
+  setting: {
+    getLockScreenCode: () => ipcRenderer.invoke('lock-screen-code'),
+    setLockScreenView: (open: boolean) => ipcRenderer.invoke('lock-screen-view', open)
+  }
+}
 
 // 将特定的 API 暴露给渲染进程
 const loadingAPI = {

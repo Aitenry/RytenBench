@@ -6,8 +6,14 @@ import App from './App'
 
 import '@ant-design/v5-patch-for-react-19'
 
+import zhCN from 'antd/locale/zh_CN'
+import 'dayjs/locale/zh-cn'
+import { ConfigProvider } from 'antd'
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    <ConfigProvider locale={zhCN}>
+      <App />
+    </ConfigProvider>
   </StrictMode>
 )

@@ -31,6 +31,15 @@ CREATE TABLE IF NOT EXISTS hourly_weather (
     weather_image         VARCHAR(45)
 );
 
+CREATE TABLE IF NOT EXISTS todo_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title VARCHAR(255) NOT NULL,
+    description TEXT,
+    due_date DATE,
+    priority TINYINT DEFAULT 0,
+    completed BOOLEAN DEFAULT FALSE
+);
+
 -- 添加一个表来记录已执行的脚本
 CREATE TABLE IF NOT EXISTS schema_migrations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

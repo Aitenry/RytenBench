@@ -4,12 +4,27 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { createDatabase, Database } from './database/loading' // 确保导入 Database 类型
 import { getIp } from './address'
-
+import _Store from 'electron-store'
 import logger from 'electron-log'
+
+import {
+  getTodoItemById,
+  getTodoItemByTitle,
+  getTodoItemsByPriority,
+  getTodoItemsByCompletedStatus,
+  getAllTodoItems,
+  getTodoItemsByDueDate,
+  deleteTodoItem,
+  updateTodoItem,
+  addTodoItem,
+  TodoItemRow
+} from './database/mapper/todo' // 替换为实际路径
 
 logger.transports.file.format = '[{y}-{m}-{d} {h}:{i}:{s}.{ms}] [{level}] {text}'
 logger.transports.file.fileName = 'main.log'
 
+const Store = _Store['default'] || _Store
+const settingsStore = new Store({ name: 'settings' })
 let loadingWindow: BrowserWindow | null = null
 let database: Database | null = null // 保持模块级变量
 
@@ -65,11 +80,24 @@ async function performInitializationTasks(): Promise<void> {
 }
 
 async function loadConfig(): Promise<void> {
-  const configPromises = [
-    getIp().then((ip) => {
-      logger.info('Get IP Info:', ip)
-    })
-  ]
+  const ipConfig = settingsStore.get('ip')
+  const lockPermission = settingsStore.get('lock')
+  const configPromises: Promise<void>[] = []
+
+  if (!ipConfig) {
+    configPromises.push(
+      getIp().then((ip) => {
+        settingsStore.set('ip', ip)
+      })
+    )
+  }
+  if (!lockPermission) {
+    configPromises.push(
+      Promise.resolve().then(() => {
+        settingsStore.set('lock', { code: 'e10adc3949ba59abbe56e057f20f883e', view: false })
+      })
+    )
+  }
 
   try {
     await Promise.all(configPromises)
@@ -181,6 +209,111 @@ app.whenReady().then(async () => {
 
   ipcMain.on('init-progress', (_event, data) => {
     logger.info('Init progress:', data)
+  })
+
+  // 注册 IPC 处理器
+  ipcMain.handle('todo-items-get-by-id', async (_event, id: number) => {
+    try {
+      return await getTodoItemById(id)
+    } catch (error) {
+      console.error('Error in todo-items-get-by-id:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('todo-items-get-by-title', async (_event, title: string) => {
+    try {
+      return await getTodoItemByTitle(title)
+    } catch (error) {
+      console.error('Error in todo-items-get-by-title:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('todo-items-get-by-priority', async (_event, priority: number) => {
+    try {
+      return await getTodoItemsByPriority(priority)
+    } catch (error) {
+      console.error('Error in todo-items-get-by-priority:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('todo-items-get-by-completed-status', async (_event, completed: boolean) => {
+    try {
+      return await getTodoItemsByCompletedStatus(completed)
+    } catch (error) {
+      console.error('Error in todo-items-get-by-completed-status:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('todo-items-get-all', async () => {
+    try {
+      return await getAllTodoItems()
+    } catch (error) {
+      console.error('Error in todo-items-get-all:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('todo-items-get-by-due-date', async (_event, dueDate: string) => {
+    try {
+      return await getTodoItemsByDueDate(dueDate)
+    } catch (error) {
+      console.error('Error in todo-items-get-by-due-date:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('todo-items-add', async (_event, todoItem: Omit<TodoItemRow, 'id'>) => {
+    try {
+      return await addTodoItem(todoItem)
+    } catch (error) {
+      console.error('Error in todo-items-add:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle(
+    'todo-items-update',
+    async (_event, id: number, updates: Partial<Omit<TodoItemRow, 'id'>>) => {
+      try {
+        return await updateTodoItem(id, updates)
+      } catch (error) {
+        console.error('Error in todo-items-update:', error)
+        throw error
+      }
+    }
+  )
+
+  ipcMain.handle('todo-items-delete', async (_event, id: number) => {
+    try {
+      return await deleteTodoItem(id)
+    } catch (error) {
+      console.error('Error in todo-items-delete:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('lock-screen-code', async () => {
+    try {
+      return settingsStore.get('lock') as string
+    } catch (error) {
+      console.error('Error in todo-items-get-by-id:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('lock-screen-view', async (_event, open: boolean) => {
+    try {
+      const lock = settingsStore.get('lock')
+      lock.view = open
+      settingsStore.set('lock', lock)
+    } catch (error) {
+      console.error('Error in todo-items-get-by-id:', error)
+      throw error
+    }
   })
 
   await createLoadingWindow()
