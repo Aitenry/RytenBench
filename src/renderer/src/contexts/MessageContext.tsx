@@ -1,8 +1,10 @@
 // contexts/MessageContext.tsx
-import { createContext, useContext } from 'react'
+import { createContext } from 'react'
+import { MessageInstance } from 'antd/es/message/interface'
 
 // 定义Context类型
 export interface MessageContextType {
+  messageApi: MessageInstance
   viewMessage: (
     key: string,
     type: 'loading' | 'success' | 'info' | 'warning' | 'error',
@@ -13,12 +15,3 @@ export interface MessageContextType {
 
 // 创建Context
 export const MessageContext = createContext<MessageContextType | undefined>(undefined)
-
-// 自定义Hook用于在组件中使用消息上下文
-export const useMessageContext = (): MessageContextType => {
-  const context = useContext(MessageContext)
-  if (context === undefined) {
-    throw new Error('useMessageContext must be used within a MessageProvider')
-  }
-  return context
-}

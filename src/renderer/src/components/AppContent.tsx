@@ -1,23 +1,25 @@
+// AppContent.tsx
 import React, { useState, useEffect } from 'react'
-import { message } from 'antd'
-import type { MenuProps } from 'antd'
+import { type MenuProps } from 'antd'
 import Header from './Header'
 import MainContent from './MainContent'
 import Footer from './Footer'
 import LockScreen from './LockScreen'
 import CryptoJS from 'crypto-js'
 import { Window } from '../../resource/types/window'
+import { MessageProvider } from '../providers/MessageProvider'
+import { useMessage } from '../hooks/useMessage'
 
 const expected = await (window as unknown as Window).api.setting.getLockScreenCode()
+
 // MD5 密码验证函数
 const verifyPassword = async (inputPassword: string): Promise<boolean> => {
   const encryptedPassword = CryptoJS.MD5(inputPassword).toString()
   return encryptedPassword === expected.code
 }
 
-const AppContent: React.FC = () => {
-  type MessageType = 'loading' | 'success' | 'info' | 'warning' | 'error'
-  const [messageApi, contextHolder] = message.useMessage({ top: 90 })
+const AppContentInner: React.FC = () => {
+  const { viewMessage } = useMessage()
   const [current, setCurrent] = useState('home')
   const [isLocked, setIsLocked] = useState(false)
 
@@ -38,15 +40,6 @@ const AppContent: React.FC = () => {
     setIsLocked(locked)
   }
 
-  const viewMessage = (
-    key: string,
-    type: MessageType,
-    content: string,
-    duration?: number
-  ): void => {
-    messageApi.open({ key, type, content, duration }).then()
-  }
-
   const handleLockScreen = (): void => {
     updateLockStatus(true)
   }
@@ -64,7 +57,10 @@ const AppContent: React.FC = () => {
     if (e.key === 'lock') {
       handleLockScreen()
     } else {
-      viewMessage('user-menu-click', 'info', `执行: ${e.key}`)
+      viewMessage('user-menu-click', 'loading', `${e.key} loading...`)
+      setTimeout(() => {
+        viewMessage('user-menu-click', 'success', `${e.key} execution completed!`, 2)
+      }, 2000)
     }
   }
 
@@ -78,8 +74,15 @@ const AppContent: React.FC = () => {
       />
       <MainContent />
       <Footer />
-      {contextHolder}
     </>
+  )
+}
+
+const AppContent: React.FC = () => {
+  return (
+    <MessageProvider>
+      <AppContentInner />
+    </MessageProvider>
   )
 }
 

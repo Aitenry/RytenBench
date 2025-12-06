@@ -9,8 +9,8 @@ const api = {
     getById: (id: number) => ipcRenderer.invoke('todo-items-get-by-id', id),
     getByTitle: (title: string) => ipcRenderer.invoke('todo-items-get-by-title', title),
     getByPriority: (priority: number) => ipcRenderer.invoke('todo-items-get-by-priority', priority),
-    getByCompletedStatus: (completed: boolean) =>
-      ipcRenderer.invoke('todo-items-get-by-completed-status', completed),
+    getByCompletedStatus: (status: number) =>
+      ipcRenderer.invoke('todo-items-get-by-completed-status', status),
     getAll: () => ipcRenderer.invoke('todo-items-get-all'),
     getByDueDate: (dueDate: string) => ipcRenderer.invoke('todo-items-get-by-due-date', dueDate),
     add: (todoItem: Omit<TodoItemRow, 'id'>) => ipcRenderer.invoke('todo-items-add', todoItem),

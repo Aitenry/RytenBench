@@ -13,7 +13,7 @@ const dbPath = path.join(app.getPath('userData'), 'RytenBench.sqlite')
 // 定义 SQL 文件路径
 const sqlDir = path.join(app.getAppPath(), 'src', 'main', 'database', 'sql')
 const createTablesSqlPath = path.join(sqlDir, 'create_tables.sql')
-const cityCodeSqlPath = path.join(sqlDir, 'city_code.sql')
+const cityCodeSqlPath = path.join(sqlDir, 'urban_resource.sql')
 
 export class Database {
   private database: sqlite3.Database | null = null
@@ -51,7 +51,7 @@ export class Database {
       .then(() => {
         logger.info('Tables created successfully.')
         // 创建表后，执行插入初始数据的 SQL 文件
-        return this.executeSQLFileIfNotDone(cityCodeSqlPath, 'city_code.sql')
+        return this.executeSQLFileIfNotDone(cityCodeSqlPath, 'urban_resource.sql')
       })
       .then(() => {
         logger.info('Initialization and SQL file execution complete.')

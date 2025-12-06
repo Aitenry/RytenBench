@@ -11,14 +11,15 @@ import {
   getTodoItemById,
   getTodoItemByTitle,
   getTodoItemsByPriority,
-  getTodoItemsByCompletedStatus,
   getAllTodoItems,
   getTodoItemsByDueDate,
   deleteTodoItem,
   updateTodoItem,
   addTodoItem,
   TodoItemRow
-} from './database/mapper/todo' // 替换为实际路径
+} from './database/mapper/todo'
+import { FlexSearchIndexer } from './search/indexer'
+import path from 'path' // 替换为实际路径
 
 logger.transports.file.format = '[{y}-{m}-{d} {h}:{i}:{s}.{ms}] [{level}] {text}'
 logger.transports.file.fileName = 'main.log'
@@ -27,10 +28,11 @@ const Store = _Store['default'] || _Store
 const settingsStore = new Store({ name: 'settings' })
 let loadingWindow: BrowserWindow | null = null
 let database: Database | null = null // 保持模块级变量
+let flexSearchIndexer: FlexSearchIndexer | null = null
 
 // --- 获取数据库实例的函数 ---
 let initializationPromise: Promise<void> | null = null // 用于追踪初始化过程
-
+const flexSearchInitializationPromise: Promise<void> | null = null
 /**
  * 获取已初始化的数据库实例。
  * 如果数据库尚未初始化，它会等待初始化完成。
@@ -53,12 +55,37 @@ export async function getDatabaseInstance(): Promise<Database> {
   throw new Error('Database has not been initialized yet.')
 }
 
+export async function getFlexSearchIndexer(): Promise<FlexSearchIndexer> {
+  if (flexSearchIndexer && flexSearchIndexer.initialized) {
+    return flexSearchIndexer
+  }
+
+  if (flexSearchInitializationPromise) {
+    await flexSearchInitializationPromise
+    if (flexSearchIndexer && flexSearchIndexer.initialized) {
+      return flexSearchIndexer
+    }
+  }
+
+  throw new Error('FlexSearch indexer has not been initialized yet.')
+}
+
 async function performInitializationTasks(): Promise<void> {
   const tasks = [
     { name: '加载配置', execute: async () => await loadConfig() },
     { name: '初始化数据库', execute: async () => (database = await createDatabase()) },
-    { name: '加载服务', execute: async () => await loadServices() },
-    { name: '准备UI组件', execute: async () => await prepareUIComponents() }
+    {
+      name: '初始化索引',
+      execute: async () => {
+        if (database) {
+          const dbPath = path.join(app.getPath('userData'), 'RytenBenchIndex.sqlite')
+          flexSearchIndexer = new FlexSearchIndexer(dbPath) // 指定索引文件路径
+          await flexSearchIndexer.initializeIndex()
+        } else {
+          logger.warn('Database not available, skipping FlexSearch initialization.')
+        }
+      }
+    }
   ]
 
   for (let i = 0; i < tasks.length; i++) {
@@ -104,14 +131,6 @@ async function loadConfig(): Promise<void> {
   } catch (error) {
     logger.error('Error loading config:', error)
   }
-}
-
-async function loadServices(): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, 1800))
-}
-
-async function prepareUIComponents(): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, 1200))
 }
 
 async function createLoadingWindow(): Promise<void> {
@@ -239,9 +258,9 @@ app.whenReady().then(async () => {
     }
   })
 
-  ipcMain.handle('todo-items-get-by-completed-status', async (_event, completed: boolean) => {
+  ipcMain.handle('todo-items-get-by-completed-status', async (_event, status: number) => {
     try {
-      return await getTodoItemsByCompletedStatus(completed)
+      return await getTodoItemsByPriority(status)
     } catch (error) {
       console.error('Error in todo-items-get-by-completed-status:', error)
       throw error

@@ -1,17 +1,22 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { Modal, Form, Input, DatePicker, Select } from 'antd'
 import dayjs from 'dayjs'
-import { RiCheckFill, RiCloseFill, RiAddFill } from '@remixicon/react'
+import { RiCheckFill, RiCloseFill, RiAddFill, RiPlayFill } from '@remixicon/react'
 import { Window } from '../../../resource/types/window'
-import { useMessageContext } from '../../contexts/MessageContext'
+import { useMessage } from '../../hooks/useMessage'
 
 export interface TodoItem {
   id: number
   title: string
   description: string
-  due_date: string // 保持为字符串格式
-  priority: number
-  completed: boolean
+  due_date: string | null // 保持为字符串格式，可能为null
+  priority: number // 0-7
+  status: number // 0: 待办, 1: 进行中, 2: 已完成
+  category: string | null // 对应数据库的category字段
+  created_at: string // 对应数据库的created_at字段
+  updated_at: string // 对应数据库的updated_at字段
+  completed_at: string | null // 对应数据库的completed_at字段
+  started_at: string | null // 对应数据库的started_at字段
 }
 
 interface TodoListProps {
@@ -29,7 +34,7 @@ const TodoList: React.FC<TodoListProps> = ({ initialTodos = [] }) => {
   const [currentTodo, setCurrentTodo] = useState<TodoItem | null>(null)
   const [form] = Form.useForm()
   const [addForm] = Form.useForm()
-  const { viewMessage } = useMessageContext()
+  const { viewMessage } = useMessage()
 
   // 排序函数
   const sortTodos = (todoList: TodoItem[]): TodoItem[] => {
@@ -40,15 +45,22 @@ const TodoList: React.FC<TodoListProps> = ({ initialTodos = [] }) => {
       }
 
       // 如果优先级相同，按截止日期排序，快过期的在前面
-      const dateA = new Date(a.due_date)
-      const dateB = new Date(b.due_date)
-      return dateA.getTime() - dateB.getTime()
+      if (a.due_date && b.due_date) {
+        const dateA = new Date(a.due_date)
+        const dateB = new Date(b.due_date)
+        return dateA.getTime() - dateB.getTime()
+      } else if (a.due_date) {
+        return -1
+      } else if (b.due_date) {
+        return 1
+      }
+      return 0
     })
   }
 
-  // 过滤掉已完成的待办事项并排序
-  const activeTodos = sortTodos(todos.filter((todo) => !todo.completed))
-  const completedTodos = sortTodos(todos.filter((todo) => todo.completed))
+  // 过滤不同状态的待办事项并排序
+  const activeTodos = sortTodos(todos.filter((todo) => todo.status !== 2)) // 非已完成
+  const completedTodos = sortTodos(todos.filter((todo) => todo.status === 2))
 
   // 处理初始加载动画
   useEffect(() => {
@@ -84,7 +96,9 @@ const TodoList: React.FC<TodoListProps> = ({ initialTodos = [] }) => {
         title: currentTodo.title,
         description: currentTodo.description,
         due_date: currentTodo.due_date ? dayjs(currentTodo.due_date) : null,
-        priority: currentTodo.priority
+        priority: currentTodo.priority,
+        status: currentTodo.status,
+        category: currentTodo.category
       })
     }
   }, [currentTodo, form])
@@ -97,19 +111,19 @@ const TodoList: React.FC<TodoListProps> = ({ initialTodos = [] }) => {
     const todo = todos.find((t) => t.id === id)
     if (todo) {
       try {
+        // 切换状态：0->2, 1->2, 2->0
+        const newStatus = todo.status === 2 ? 0 : 2
         const success = await (window as unknown as Window).api.todoItems.update(id, {
-          completed: !todo.completed
+          status: newStatus
         })
         if (success) {
           setTodos((prevTodos) =>
-            sortTodos(
-              prevTodos.map((t) => (t.id === id ? { ...t, completed: !todo.completed } : t))
-            )
+            sortTodos(prevTodos.map((t) => (t.id === id ? { ...t, status: newStatus } : t)))
           )
           viewMessage(
             'todo-complete',
             'success',
-            `待办事项已${todo.completed ? '取消完成' : '标记为完成'}`
+            `待办事项已${todo.status === 2 ? '重新激活' : '标记为完成'}`
           )
         } else {
           viewMessage('todo-complete-fail', 'error', '更新状态失败')
@@ -117,6 +131,36 @@ const TodoList: React.FC<TodoListProps> = ({ initialTodos = [] }) => {
       } catch (error) {
         console.error('Failed to update todo completion status:', error)
         viewMessage('todo-complete-error', 'error', '更新状态失败')
+      }
+    }
+  }
+
+  const toggleInProgress = async (id: number): Promise<void> => {
+    const todo = todos.find((t) => t.id === id)
+    if (todo) {
+      try {
+        // 如果当前是进行中状态，不允许切换回待办状态
+        if (todo.status === 1) {
+          viewMessage('todo-in-progress', 'warning', '进行中的任务只能标记为完成，不能退回待办状态')
+          return
+        }
+
+        // 只有当状态为待办（0）时才能切换为进行中（1）
+        const newStatus = todo.status === 0 ? 1 : todo.status
+        const success = await (window as unknown as Window).api.todoItems.update(id, {
+          status: newStatus
+        })
+        if (success) {
+          setTodos((prevTodos) =>
+            sortTodos(prevTodos.map((t) => (t.id === id ? { ...t, status: newStatus } : t)))
+          )
+          viewMessage('todo-in-progress', 'success', `待办事项已标记为进行中`)
+        } else {
+          viewMessage('todo-in-progress-fail', 'error', '更新状态失败')
+        }
+      } catch (error) {
+        console.error('Failed to update todo in-progress status:', error)
+        viewMessage('todo-in-progress-error', 'error', '更新状态失败')
       }
     }
   }
@@ -182,15 +226,23 @@ const TodoList: React.FC<TodoListProps> = ({ initialTodos = [] }) => {
   const handleModalOk = async (): Promise<void> => {
     try {
       const values = await form.validateFields()
-
+      const messageKey = 'todo-update'
+      viewMessage(messageKey, 'loading', '正在更新代办事项...')
       if (currentTodo) {
+        // 检查是否尝试将进行中的任务改为待办状态
+        if (currentTodo.status === 1 && values.status === 0) {
+          viewMessage('todo-update', 'error', '进行中的任务不能退回待办状态')
+          return
+        }
+
         const success = await (window as unknown as Window).api.todoItems.update(currentTodo.id, {
           title: values.title,
           description: values.description,
           due_date: values.due_date ? values.due_date.format('YYYY-MM-DD') : currentTodo.due_date,
-          priority: values.priority
+          priority: values.priority,
+          status: values.status,
+          category: values.category
         })
-
         if (success) {
           setTodos((prevTodos) =>
             sortTodos(
@@ -203,16 +255,18 @@ const TodoList: React.FC<TodoListProps> = ({ initialTodos = [] }) => {
                       due_date: values.due_date
                         ? values.due_date.format('YYYY-MM-DD')
                         : todo.due_date,
-                      priority: values.priority
+                      priority: values.priority,
+                      status: values.status,
+                      category: values.category
                     }
                   : todo
               )
             )
           )
           setPreviewModalVisible(false)
-          viewMessage('todo-update', 'success', '待办事项更新成功')
+          viewMessage(messageKey, 'success', '待办事项更新成功！', 2)
         } else {
-          viewMessage('todo-update-fail', 'error', '更新待办事项失败')
+          viewMessage(messageKey, 'error', '更新待办事项失败！', 2)
         }
       }
     } catch (info) {
@@ -223,22 +277,29 @@ const TodoList: React.FC<TodoListProps> = ({ initialTodos = [] }) => {
   const handleAddModalOk = async (): Promise<void> => {
     try {
       const values = await addForm.validateFields()
-
-      const newTodo: Omit<TodoItem, 'id'> = {
+      const newTodo: Omit<
+        TodoItem,
+        'id' | 'created_at' | 'updated_at' | 'completed_at' | 'started_at'
+      > = {
         title: values.title,
         description: values.description,
         due_date: values.due_date
           ? values.due_date.format('YYYY-MM-DD')
-          : dayjs().add(7, 'day').format('YYYY-MM-DD'), // 默认7天后
-        priority: values.priority || 3, // 默认优先级为P3
-        completed: false
+          : dayjs().add(7, 'day').format('YYYY-MM-DD'),
+        priority: values.priority,
+        status: 0, // 新增待办事项默认为待办状态
+        category: values.category || null
       }
 
       const newId = await (window as unknown as Window).api.todoItems.add(newTodo)
 
       const todoWithId: TodoItem = {
         ...newTodo,
-        id: newId
+        id: newId,
+        created_at: new Date().toISOString(), // 假设后端会处理时间
+        updated_at: new Date().toISOString(),
+        completed_at: null,
+        started_at: null
       }
 
       setTodos((prevTodos) => sortTodos([...prevTodos, todoWithId]))
@@ -260,7 +321,8 @@ const TodoList: React.FC<TodoListProps> = ({ initialTodos = [] }) => {
     addForm.resetFields()
   }
 
-  const formatDate = (dateString: string): string => {
+  const formatDate = (dateString: string | null): string => {
+    if (!dateString) return '无截止日期'
     const date = new Date(dateString)
     return date.toLocaleDateString('zh-CN', {
       month: 'short',
@@ -289,7 +351,23 @@ const TodoList: React.FC<TodoListProps> = ({ initialTodos = [] }) => {
     return `P${priority}`
   }
 
-  const getDaysUntilDue = (due_date: string): { text: string; color: string } => {
+  const getStatusText = (status: number): string => {
+    if (status === 0) return '待办'
+    if (status === 1) return '进行中'
+    if (status === 2) return '已完成'
+    return '未知'
+  }
+
+  const getStatusColor = (status: number): string => {
+    if (status === 0) return 'bg-blue-200 text-blue-800' // 原版样式
+    if (status === 1) return 'bg-yellow-200 text-yellow-800' // 原版样式
+    if (status === 2) return 'bg-green-200 text-green-800' // 原版样式
+    return 'bg-gray-200 text-gray-800'
+  }
+
+  const getDaysUntilDue = (due_date: string | null): { text: string; color: string } => {
+    if (!due_date) return { text: '无截止日期', color: 'text-gray-500' }
+
     const today = new Date()
     const due = new Date(due_date)
     const diffTime = due.getTime() - today.getTime()
@@ -299,6 +377,29 @@ const TodoList: React.FC<TodoListProps> = ({ initialTodos = [] }) => {
     if (diffDays === 0) return { text: '今天到期', color: 'text-orange-500' }
     if (diffDays <= 3) return { text: `${diffDays}天后到期`, color: 'text-yellow-500' }
     return { text: `${diffDays}天后到期`, color: 'text-gray-500' }
+  }
+
+  // 根据当前状态决定可用的状态选项
+  interface StatusOption {
+    value: number
+    label: string
+  }
+
+  const getStatusOptions = (currentStatus: number): StatusOption[] => {
+    if (currentStatus === 1) {
+      // 如果当前是进行中状态，只允许改为已完成
+      return [
+        { value: 1, label: '进行中' },
+        { value: 2, label: '已完成' }
+      ]
+    } else {
+      // 如果当前不是进行中状态，允许所有选项
+      return [
+        { value: 0, label: '待办' },
+        { value: 1, label: '进行中' },
+        { value: 2, label: '已完成' }
+      ]
+    }
   }
 
   return (
@@ -337,8 +438,8 @@ const TodoList: React.FC<TodoListProps> = ({ initialTodos = [] }) => {
               key={todo.id}
               data-todo-id={todo.id}
               className={`
-                  group relative rounded-xl border-l-4 shadow-sm hover:shadow-md
-                  transition-all duration-500 overflow-hidden cursor-pointer
+                  group relative rounded-lg border-l-4 shadow-sm hover:shadow-md
+                  transition-all duration-300 overflow-hidden cursor-pointer
                   ${getPriorityColor(todo.priority)}
                   animate__animated
                   ${isRemoving ? 'animate__bounceOutLeft' : `${initialAnimationsComplete ? '' : 'hidden'}`}
@@ -350,32 +451,54 @@ const TodoList: React.FC<TodoListProps> = ({ initialTodos = [] }) => {
                 }
               }}
             >
-              <div className="p-4 relative z-20">
-                <div className="flex items-start justify-between mb-2">
-                  <h3 className="font-medium text-gray-800">{todo.title}</h3>
+              <div className="p-3 relative z-20">
+                <div className="flex items-start justify-between mb-1">
+                  <h3 className="font-medium text-gray-800 truncate max-w-[70%]">{todo.title}</h3>
                   <div className="flex space-x-1">
-                    <button
-                      onClick={async (e) => {
-                        e.stopPropagation() // 阻止事件冒泡
-                        // 显示确认对话框
-                        Modal.confirm({
-                          title: '确认操作',
-                          content: `确定要${todo.completed ? '取消完成' : '标记为完成'} "${todo.title}" 吗？`,
-                          okText: '确认',
-                          cancelText: '取消',
-                          centered: true,
-                          onOk: async () => {
-                            await toggleComplete(todo.id)
-                          }
-                        })
-                      }}
-                      className={`
-                          ml-2 p-1 rounded-full transition-all duration-200
-                          bg-gray-200 text-gray-400 hover:bg-blue-100 hover:text-blue-500
-                        `}
-                    >
-                      <RiCheckFill size={16} />
-                    </button>
+                    {/* 进行中按钮 */}
+                    {todo.status !== 1 && (
+                      <button
+                        onClick={async (e) => {
+                          e.stopPropagation() // 阻止事件冒泡
+                          Modal.confirm({
+                            title: '确认操作',
+                            content: `确定要 "${todo.title}" 标记为进行中吗？`,
+                            okText: '确认',
+                            cancelText: '取消',
+                            centered: true,
+                            onOk: async () => {
+                              await toggleInProgress(todo.id)
+                            }
+                          })
+                        }}
+                        className="ml-1 p-1 rounded-full transition-all duration-200 bg-gray-200 text-gray-400 hover:bg-blue-300 hover:text-white"
+                      >
+                        <RiPlayFill size={14} />
+                      </button>
+                    )}
+                    {/* 完成按钮 */}
+                    {todo.status === 1 && (
+                      <button
+                        onClick={async (e) => {
+                          e.stopPropagation() // 阻止事件冒泡
+                          // 显示确认对话框
+                          Modal.confirm({
+                            title: '确认操作',
+                            content: `确定要 "${todo.title}" ${todo.status === 2 ? '重新激活' : '标记为完成'}吗？`,
+                            okText: '确认',
+                            cancelText: '取消',
+                            centered: true,
+                            onOk: async () => {
+                              await toggleComplete(todo.id)
+                            }
+                          })
+                        }}
+                        className="ml-1 p-1 rounded-full transition-all duration-200 bg-gray-200 text-gray-400 hover:bg-green-200 hover:text-green-500"
+                      >
+                        <RiCheckFill size={14} />
+                      </button>
+                    )}
+                    {/* 删除按钮 */}
                     <button
                       onClick={async (e) => {
                         e.stopPropagation() // 阻止事件冒泡
@@ -394,38 +517,47 @@ const TodoList: React.FC<TodoListProps> = ({ initialTodos = [] }) => {
                       }}
                       className={`
                           ml-1 p-1 rounded-full transition-all duration-200
-                          bg-gray-200 text-gray-400 hover:bg-red-100 hover:text-red-500
+                          bg-gray-200 text-gray-400 hover:bg-red-200 hover:text-red-500
                         `}
                     >
-                      <RiCloseFill size={16} />
+                      <RiCloseFill size={14} />
                     </button>
                   </div>
                 </div>
 
-                <p className="text-sm text-gray-600 mb-3">{todo.description}</p>
+                <p className="text-xs text-gray-600 mb-2 line-clamp-2">{todo.description}</p>
 
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-3">
+                  <div className="flex items-center space-x-2">
                     <span
-                      className={`text-xs px-2 py-1 rounded-full ${getPriorityBadgeColor(todo.priority)}`}
+                      className={`text-xs px-2 py-0.5 rounded-full ${getPriorityBadgeColor(todo.priority)}`}
                     >
                       {getPriorityText(todo.priority)}
                     </span>
-                    <span className={`text-sm ${daysInfo.color}`}>{formatDate(todo.due_date)}</span>
+                    <span className={`text-xs ${daysInfo.color}`}>{formatDate(todo.due_date)}</span>
                   </div>
-                  <span className={`text-xs ${daysInfo.color}`}>{daysInfo.text}</span>
+                  <div className="flex items-center space-x-2">
+                    <span
+                      className={`text-xs px-2 py-0.5 rounded-full ${getStatusColor(todo.status)}`}
+                    >
+                      {getStatusText(todo.status)}
+                    </span>
+                    {todo.category && (
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-purple-100 text-purple-800">
+                        {todo.category}
+                      </span>
+                    )}
+                    <span className={`text-xs ${daysInfo.color}`}>{daysInfo.text}</span>
+                  </div>
                 </div>
               </div>
-
-              {/* 悬停效果 */}
-              <div className="absolute inset-0 bg-gradient-to-r from-blue-50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none"></div>
             </div>
           )
         })}
       </div>
 
       {/* 已完成事项计数 */}
-      <div className="pt-3 text-center border-t border-gray-200">
+      <div className="pt-2 text-center border-t border-gray-100">
         <span className="text-sm text-gray-500">
           已完成: <span className="font-medium text-gray-700">{completedTodos.length}</span> 项
         </span>
@@ -449,7 +581,9 @@ const TodoList: React.FC<TodoListProps> = ({ initialTodos = [] }) => {
               title: currentTodo.title,
               description: currentTodo.description,
               due_date: currentTodo.due_date ? dayjs(currentTodo.due_date) : null,
-              priority: currentTodo.priority
+              priority: currentTodo.priority,
+              status: currentTodo.status,
+              category: currentTodo.category
             }}
           >
             <Form.Item
@@ -472,33 +606,61 @@ const TodoList: React.FC<TodoListProps> = ({ initialTodos = [] }) => {
               />
             </Form.Item>
 
-            <Form.Item name="priority" label="优先级">
-              <Select placeholder="请选择优先级">
-                <Select.Option value={0}>P0</Select.Option>
-                <Select.Option value={1}>P1</Select.Option>
-                <Select.Option value={2}>P2</Select.Option>
-                <Select.Option value={3}>P3</Select.Option>
-                <Select.Option value={4}>P4</Select.Option>
-                <Select.Option value={5}>P5</Select.Option>
-                <Select.Option value={6}>P6</Select.Option>
-                <Select.Option value={7}>P7</Select.Option>
-              </Select>
-            </Form.Item>
+            <div className="grid grid-cols-3 gap-4">
+              <Form.Item name="priority" label="优先级" className="mb-0">
+                <Select placeholder="请选择优先级">
+                  <Select.Option value={0}>P0</Select.Option>
+                  <Select.Option value={1}>P1</Select.Option>
+                  <Select.Option value={2}>P2</Select.Option>
+                  <Select.Option value={3}>P3</Select.Option>
+                  <Select.Option value={4}>P4</Select.Option>
+                  <Select.Option value={5}>P5</Select.Option>
+                  <Select.Option value={6}>P6</Select.Option>
+                  <Select.Option value={7}>P7</Select.Option>
+                </Select>
+              </Form.Item>
 
-            <div className="mb-4 p-3 bg-gray-50 rounded-lg">
+              <Form.Item name="status" label="状态" className="mb-0">
+                <Select placeholder="请选择状态">
+                  {getStatusOptions(currentTodo.status).map((option) => (
+                    <Select.Option key={option.value} value={option.value}>
+                      {option.label}
+                    </Select.Option>
+                  ))}
+                </Select>
+              </Form.Item>
+
+              <Form.Item name="category" label="分类" className="mb-0">
+                <Input placeholder="请输入分类" />
+              </Form.Item>
+            </div>
+
+            <div className="mb-4 p-3 bg-gray-50 rounded-lg mt-4">
               <h4 className="font-medium text-gray-700 mb-2">当前状态</h4>
-              <div className="flex items-center space-x-4">
+              <div className="flex flex-wrap items-center gap-2">
                 <span
-                  className={`text-xs px-2 py-1 rounded-full ${getPriorityBadgeColor(currentTodo.priority)}`}
+                  className={`text-xs px-2 py-0.5 rounded-full ${getPriorityBadgeColor(currentTodo.priority)}`}
                 >
                   {getPriorityText(currentTodo.priority)}
                 </span>
+                <span
+                  className={`text-xs px-2 py-0.5 rounded-full ${getStatusColor(currentTodo.status)}`}
+                >
+                  {getStatusText(currentTodo.status)}
+                </span>
+                {currentTodo.category && (
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-purple-100 text-purple-800">
+                    {currentTodo.category}
+                  </span>
+                )}
                 <span className="text-sm text-gray-600">
                   截止日期: {formatDate(currentTodo.due_date)}
                 </span>
-                <span className="text-sm text-gray-600">
-                  状态: {currentTodo.completed ? '已完成' : '未完成'}
-                </span>
+                {currentTodo.started_at && (
+                  <span className="text-sm text-gray-600">
+                    开始时间: {new Date(currentTodo.started_at).toLocaleString('zh-CN')}
+                  </span>
+                )}
               </div>
             </div>
           </Form>
@@ -543,6 +705,10 @@ const TodoList: React.FC<TodoListProps> = ({ initialTodos = [] }) => {
               <Select.Option value={6}>P6</Select.Option>
               <Select.Option value={7}>P7</Select.Option>
             </Select>
+          </Form.Item>
+
+          <Form.Item name="category" label="分类">
+            <Input placeholder="请输入分类" />
           </Form.Item>
         </Form>
       </Modal>

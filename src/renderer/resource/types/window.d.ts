@@ -26,7 +26,12 @@ export interface Window {
       getByCompletedStatus: (completed: boolean) => Promise<TodoItemRow[]>
       getAll: () => Promise<TodoItemRow[]>
       getByDueDate: (dueDate: string) => Promise<TodoItemRow[]>
-      add: (todoItem: Omit<TodoItemRow, 'id'>) => Promise<number>
+      add: (
+        todoItem: Omit<
+          TodoItemRow,
+          'id' | 'created_at' | 'updated_at' | 'completed_at' | 'started_at'
+        >
+      ) => Promise<number>
       update: (id: number, updates: Partial<Omit<TodoItemRow, 'id'>>) => Promise<boolean>
       delete: (id: number) => Promise<boolean>
     }
