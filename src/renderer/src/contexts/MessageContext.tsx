@@ -4,7 +4,7 @@ import { MessageInstance } from 'antd/es/message/interface'
 
 // 定义Context类型
 export interface MessageContextType {
-  messageApi: MessageInstance
+  messageApi?: MessageInstance
   viewMessage: (
     key: string,
     type: 'loading' | 'success' | 'info' | 'warning' | 'error',

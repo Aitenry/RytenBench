@@ -1,58 +1,80 @@
 // AppContent.tsx
 import React, { useState, useEffect } from 'react'
 import { type MenuProps } from 'antd'
-import Header from './Header'
+import Sidebar from './Sidebar'
 import MainContent from './MainContent'
-import Footer from './Footer'
 import LockScreen from './LockScreen'
 import CryptoJS from 'crypto-js'
 import { Window } from '../../resource/types/window'
 import { MessageProvider } from '../providers/MessageProvider'
 import { useMessage } from '../hooks/useMessage'
 
-const expected = await (window as unknown as Window).api.setting.getLockScreenCode()
-
-// MD5 密码验证函数
-const verifyPassword = async (inputPassword: string): Promise<boolean> => {
-  const encryptedPassword = CryptoJS.MD5(inputPassword).toString()
-  return encryptedPassword === expected.code
-}
-
-const AppContentInner: React.FC = () => {
+const AppContent: React.FC = () => {
   const { viewMessage } = useMessage()
   const [current, setCurrent] = useState('home')
   const [isLocked, setIsLocked] = useState(false)
+  const [lockCode, setLockCode] = useState<string | null>(null)
 
-  // 组件挂载时检查锁屏状态
+  // Initialize lock screen settings
   useEffect(() => {
-    const checkLockStatus = (): void => {
-      if (expected.view) {
-        setIsLocked(true)
+    const initializeLockScreen = async () => {
+      try {
+        const result = await (window as unknown as Window).api.setting.getLockScreenCode()
+        setLockCode(result.code)
+
+        if (result.view) {
+          setIsLocked(true)
+        }
+      } catch (error) {
+        console.error('Failed to initialize lock screen:', error)
+        // Default to unlocked if there's an error
+        setIsLocked(false)
       }
     }
 
-    checkLockStatus()
+    initializeLockScreen().then()
   }, [])
 
-  // 更新锁屏状态时同时更新本地存储
+  // Update lock screen status in both local storage and backend
   const updateLockStatus = (locked: boolean): void => {
-    ;(window as unknown as Window).api.setting.setLockScreenView(locked)
+    // Update backend setting
+    (window as unknown as Window).api.setting.setLockScreenView(locked)
+
+    // Update local state
     setIsLocked(locked)
   }
 
+  // Handle lock screen action
   const handleLockScreen = (): void => {
     updateLockStatus(true)
   }
 
+  // Verify password against stored hash
+  const verifyPassword = async (inputPassword: string): Promise<boolean> => {
+    if (!lockCode) return false
+
+    const encryptedPassword = CryptoJS.MD5(inputPassword).toString()
+    return encryptedPassword === lockCode
+  }
+
+  // Handle unlock process
   const handleUnlock = async (password: string): Promise<void> => {
-    if (await verifyPassword(password)) {
-      updateLockStatus(false)
-      viewMessage('unlock-success', 'success', '解锁成功')
-    } else {
-      viewMessage('unlock-error', 'error', '解锁密码错误')
+    try {
+      const isValid = await verifyPassword(password)
+
+      if (isValid) {
+        updateLockStatus(false)
+        viewMessage('unlock-success', 'success', '解锁成功')
+      } else {
+        viewMessage('unlock-error', 'error', '解锁密码错误')
+      }
+    } catch (error) {
+      console.error('Unlock verification failed:', error)
+      viewMessage('unlock-error', 'error', '解锁验证失败')
     }
   }
 
+  // Handle user menu clicks
   const handleUserMenuClick: MenuProps['onClick'] = (e) => {
     if (e.key === 'lock') {
       handleLockScreen()
@@ -65,23 +87,18 @@ const AppContentInner: React.FC = () => {
   }
 
   return (
-    <>
-      {isLocked && <LockScreen onUnlock={handleUnlock} />}
-      <Header
-        currentKey={current}
-        setCurrentKey={setCurrent}
-        onUserMenuClick={handleUserMenuClick}
-      />
-      <MainContent />
-      <Footer />
-    </>
-  )
-}
-
-const AppContent: React.FC = () => {
-  return (
     <MessageProvider>
-      <AppContentInner />
+      {isLocked && <LockScreen onUnlock={handleUnlock} />}
+      <div className="flex h-screen">
+        <Sidebar
+          currentKey={current}
+          setCurrentKey={setCurrent}
+          onUserMenuClick={handleUserMenuClick}
+        />
+        <div className="flex-1 overflow-auto py-2.5 pr-2.5">
+          <MainContent />
+        </div>
+      </div>
     </MessageProvider>
   )
 }

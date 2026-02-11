@@ -403,9 +403,9 @@ const TodoList: React.FC<TodoListProps> = ({ initialTodos = [] }) => {
   }
 
   return (
-    <div className="p-6 space-y-4 h-full flex flex-col">
+    <div className="p-3 space-y-4 h-full flex flex-col">
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-xl font-semibold text-gray-800">待办事项</h2>
+        <h2 className="text-lg font-semibold text-gray-800">待办事项</h2>
         <div className="flex items-center space-x-2">
           <span className="bg-blue-100 text-blue-800 text-sm px-2 py-1 rounded-full">
             {activeTodos.length} 项
@@ -427,7 +427,7 @@ const TodoList: React.FC<TodoListProps> = ({ initialTodos = [] }) => {
       {/* 滚动容器 */}
       <div
         className="flex-1 overflow-x-hidden overflow-y-auto p-2 space-y-3 custom-scrollbar"
-        style={{ maxHeight: 'calc(100vh - 315px)' }}
+        style={{ maxHeight: 'calc(100vh - 40px)' }}
       >
         {activeTodos.map((todo) => {
           const daysInfo = getDaysUntilDue(todo.due_date)
