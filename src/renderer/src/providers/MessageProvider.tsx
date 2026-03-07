@@ -7,7 +7,7 @@ interface MessageProviderProps {
 }
 
 export const MessageProvider: React.FC<MessageProviderProps> = ({ children }) => {
-  const [messageApi, contextHolder] = message.useMessage({ top: 90 })
+  const [messageApi, contextHolder] = message.useMessage({ top: 20 })
 
   const viewMessage = (
     key: string,

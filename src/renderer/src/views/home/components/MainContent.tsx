@@ -1,27 +1,30 @@
-import React from 'react'
-import { theme } from 'antd'
-import { Card, Typography, Tag, Space, Masonry, Flex, Image } from 'antd' // 引入需要的 Ant Design 组件
+import React, { useState } from 'react'
+import { theme, Modal } from 'antd' // 增加 Modal, Button
+import { Card, Typography, Tag, Space, Masonry, Flex, Image } from 'antd'
 import { PushpinOutlined } from '@ant-design/icons'
-import { RiBook2Line, RiQuillPenAiLine } from '@remixicon/react' // 引入图标
+import { RiBook2Line, RiQuillPenAiLine } from '@remixicon/react'
+import MarkdownEditor from '../../../components/MarkdownEditor'
+import { useMessage } from '@renderer/hooks/useMessage'
 
 const { Title, Text } = Typography
 
-// 定义笔记/知识库项的类型
+// 定义笔记/知识库项的类型（增加 content 字段）
 interface ContentItem {
   id: string
   title: string
   type: 'note' | 'knowledge'
-  lastEdited: string // 例如 "2025-01-14 10:30"
-  isPinned?: boolean // 是否置顶
-  summary?: string // 内容摘要
-  wordCount?: number // 字数
-  noteCount?: number // 笔记数量（仅知识库类型）
-  coverImage?: string // 封面图片 URL
-  tags?: string[] // 标签数组
-  category?: string // 分类
+  lastEdited: string
+  isPinned?: boolean
+  summary?: string
+  wordCount?: number
+  noteCount?: number
+  coverImage?: string
+  tags?: string[]
+  category?: string
+  content?: string // 新增：Markdown 正文内容
 }
 
-// 模拟数据
+// 模拟数据（增加 content 字段）
 const mockItems: ContentItem[] = [
   {
     id: '6',
@@ -33,7 +36,9 @@ const mockItems: ContentItem[] = [
     wordCount: 670,
     coverImage: 'https://dummyimage.com/300x200',
     tags: ['决策', '重要', '记录'],
-    category: '项目'
+    category: '项目',
+    content:
+      '# 重要决策记录\n\n## 技术选型\n决定使用 React + TypeScript 作为前端技术栈。\n\n## 架构设计\n采用微前端架构，主应用负责路由分发。'
   },
   {
     id: '7',
@@ -46,7 +51,9 @@ const mockItems: ContentItem[] = [
     noteCount: 12,
     coverImage: 'https://dummyimage.com/300x200',
     tags: ['API', '规范', '后端'],
-    category: '技术'
+    category: '技术',
+    content:
+      '# API 接口规范\n\n## 命名规则\n- 使用 RESTful 风格\n- 路径使用小写字母，单词间用连字符分隔\n\n## 错误处理\n统一返回 `{ code, message, data }` 格式。'
   },
   {
     id: '1',
@@ -58,7 +65,9 @@ const mockItems: ContentItem[] = [
     noteCount: 8,
     coverImage: 'https://dummyimage.com/300x200',
     tags: ['架构', '设计', '后端'],
-    category: '技术'
+    category: '技术',
+    content:
+      '# 项目架构设计\n\n## 技术选型\n- 前端：React + TypeScript\n- 后端：Node.js + Express\n- 数据库：PostgreSQL\n\n## 架构图\n\n```mermaid\nflowchart TD\n    A[客户端] --> B[API网关]\n    B --> C[服务A]\n    B --> D[服务B]\n```'
   },
   {
     id: '2',
@@ -69,7 +78,9 @@ const mockItems: ContentItem[] = [
     wordCount: 450,
     coverImage: 'https://dummyimage.com/300x200',
     tags: ['会议', '计划', '团队'],
-    category: '工作'
+    category: '工作',
+    content:
+      '# 今日会议纪要\n\n## 讨论内容\n1. 下阶段开发任务：完成用户模块和权限管理。\n2. 优先级：用户模块优先。\n3. 时间节点：两周内完成。\n\n## 分工\n- 前端：张三\n- 后端：李四'
   },
   {
     id: '3',
@@ -80,7 +91,9 @@ const mockItems: ContentItem[] = [
     wordCount: 890,
     coverImage: 'https://dummyimage.com/300x200',
     tags: ['TypeScript', '编程', '学习'],
-    category: '技术'
+    category: '技术',
+    content:
+      '# TypeScript 学习笔记\n\n## 泛型\n```typescript\nfunction identity<T>(arg: T): T {\n    return arg;\n}\n```\n\n## 类型守卫\n使用 `typeof`、`instanceof` 或自定义类型谓词。'
   },
   {
     id: '4',
@@ -91,7 +104,8 @@ const mockItems: ContentItem[] = [
     wordCount: 230,
     coverImage: 'https://dummyimage.com/300x200',
     tags: ['笔记', '思考'],
-    category: '生活'
+    category: '生活',
+    content: '# 新的笔记\n\n今天想到一个创意：...'
   },
   {
     id: '5',
@@ -103,7 +117,8 @@ const mockItems: ContentItem[] = [
     noteCount: 5,
     coverImage: 'https://dummyimage.com/300x200',
     tags: ['知识库', '整理', '学习'],
-    category: '学习'
+    category: '学习',
+    content: '# 新的知识库\n\n## 主题一\n...\n\n## 主题二\n...'
   }
 ]
 
@@ -127,8 +142,8 @@ const getTypeColor = (type: ContentItem['type']): string => {
   }
 }
 
-// 用于渲染单个内容项的子组件
-const ContentCard: React.FC<{ item: ContentItem }> = ({ item }) => {
+// 用于渲染单个内容项的子组件（增加 onClick 属性）
+const ContentCard: React.FC<{ item: ContentItem; onClick?: () => void }> = ({ item, onClick }) => {
   const { token } = theme.useToken()
   const typeColor = getTypeColor(item.type)
   const typeMapping = {
@@ -144,17 +159,19 @@ const ContentCard: React.FC<{ item: ContentItem }> = ({ item }) => {
     <Card
       size="small"
       hoverable
+      onClick={onClick} // 绑定点击事件
       style={{
-        background: token.colorFillAlter, // 使用填充色作为背景，更柔和
+        background: token.colorFillAlter,
         border: `1px solid ${token.colorBorderSecondary}`,
-        minHeight: 200, // 设置最小高度以适应不同内容长度
+        minHeight: 200,
         display: 'flex',
         flexDirection: 'column',
-        position: 'relative' // 为置顶图标定位
+        position: 'relative',
+        cursor: 'pointer' // 添加手型光标
       }}
       styles={{
         body: {
-          padding: 0, // 图片卡片通常需要从顶部开始
+          padding: 0,
           display: 'flex',
           flexDirection: 'column',
           flex: 1
@@ -193,7 +210,6 @@ const ContentCard: React.FC<{ item: ContentItem }> = ({ item }) => {
             height={120}
             style={{ objectFit: 'cover' }}
           />
-          {/* 类型标签覆盖在图片上 */}
           <Tag
             color={typeColor}
             style={{
@@ -216,7 +232,7 @@ const ContentCard: React.FC<{ item: ContentItem }> = ({ item }) => {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <div>
             <Space align="start" style={{ display: 'flex', alignItems: 'center' }} size="small">
-              {!item.coverImage && ( // 如果没有封面图片，显示标签在顶部
+              {!item.coverImage && (
                 <Tag
                   color={typeColor}
                   style={{ userSelect: 'none', display: 'flex', alignItems: 'center', margin: 0 }}
@@ -289,6 +305,11 @@ const ContentCard: React.FC<{ item: ContentItem }> = ({ item }) => {
 
 // 主内容区组件
 const MainContent: React.FC = () => {
+  // 模态框状态
+  const [isModalOpen, setIsModalOpen] = useState(false)
+  const [currentItem, setCurrentItem] = useState<ContentItem | null>(null)
+
+  const { viewMessage } = useMessage()
   // 分离置顶和非置顶项目
   const pinnedItems = mockItems.filter((item) => item.isPinned)
   const recentItems = mockItems.filter((item) => !item.isPinned)
@@ -296,30 +317,72 @@ const MainContent: React.FC = () => {
   // 合并数组，置顶项目在前
   const allItems = [...pinnedItems, ...recentItems]
 
+  // 处理卡片点击
+  const handleCardClick = (item: ContentItem): void => {
+    setCurrentItem(item)
+    setIsModalOpen(true)
+  }
+
+  // 编辑器保存回调（示例：打印新内容，实际应更新数据源或调用 API）
+  const handleEditorSave = (newContent: string): void => {
+    console.log('保存的内容：', newContent)
+    // 这里可以更新 mockItems 中对应项的内容，但出于演示，仅打印
+    // 实际项目可能需要调用 API 或更新状态管理
+    // 例如：找到 currentItem 并更新其 content
+    if (currentItem) {
+      // 更新本地数据（仅示例，实际可能用状态管理）
+      const updatedItem = { ...currentItem, content: newContent }
+      // 如果需要更新 mockItems，可以在这里实现，但注意 mockItems 是常量
+      // 更合适的做法是将 mockItems 提升为 useState 或使用状态管理库
+      console.log(updatedItem)
+      viewMessage('unlock-success', 'success', '保存成功！')
+    }
+    // 可选：关闭模态框
+    // setIsModalOpen(false)
+  }
+
   return (
-    <div style={{ padding: '12px 6px' }}>
-      <div
-        className="overflow-x-hidden overflow-y-auto custom-scrollbar"
-        style={{
-          maxHeight: 'calc(100vh - 40px)',
-          padding: '0 6px'
-        }}
-      >
-        <Flex vertical gap={16}>
-          {/* 所有内容列表 - 使用 Masonry 布局 */}
-          <Masonry
-            columns={3}
-            gutter={16}
-            items={allItems.map((item, index) => ({
-              key: item.id,
-              column: index % 3,
-              data: item // 修改这里：使用data而不是item
-            }))}
-            itemRender={(record) => <ContentCard item={record.data} />} // 修改这里：从record.data获取item
-          />
-        </Flex>
+    <>
+      <div style={{ padding: '12px 6px' }}>
+        <div
+          className="overflow-x-hidden overflow-y-auto custom-scrollbar"
+          style={{
+            maxHeight: 'calc(100vh - 40px)',
+            padding: '0 6px'
+          }}
+        >
+          <Flex vertical gap={16}>
+            {/* 所有内容列表 - 使用 Masonry 布局 */}
+            <Masonry
+              columns={3}
+              gutter={16}
+              items={allItems.map((item, index) => ({
+                key: item.id,
+                column: index % 3,
+                data: item
+              }))}
+              itemRender={(record) => (
+                <ContentCard item={record.data} onClick={() => handleCardClick(record.data)} />
+              )}
+            />
+          </Flex>
+        </div>
       </div>
-    </div>
+
+      {/* 编辑器模态框 */}
+      <Modal
+        title={currentItem?.title || '编辑内容'}
+        open={isModalOpen}
+        onCancel={() => setIsModalOpen(false)}
+        width="80%"
+        style={{ top: 20 }}
+        footer={null} // 编辑器内部自带保存按钮，所以隐藏默认底部
+      >
+        {currentItem && (
+          <MarkdownEditor initialValue={currentItem.content || ''} onSave={handleEditorSave} />
+        )}
+      </Modal>
+    </>
   )
 }
 
