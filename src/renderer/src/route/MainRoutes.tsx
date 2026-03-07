@@ -8,11 +8,11 @@ import Tools from '../views/Tools'
 import Weather from '../views/Weather'
 import Music from '../views/Music'
 
-interface MainContentProps {
+interface MainRoutesProps {
   defaultRoute?: string // 默认路由参数
 }
 
-const MainContent: React.FC<MainContentProps> = ({ defaultRoute = '/home' }) => {
+const MainRoutes: React.FC<MainRoutesProps> = ({ defaultRoute = '/home' }) => {
   return (
     <Routes>
       {/* 根据参数设置默认路由 */}
@@ -29,4 +29,4 @@ const MainContent: React.FC<MainContentProps> = ({ defaultRoute = '/home' }) => 
   )
 }
 
-export default MainContent
+export default MainRoutes

@@ -2,13 +2,7 @@ import React from 'react'
 import { theme } from 'antd'
 import { Card, Typography, Tag, Space, Masonry, Flex, Image } from 'antd' // 引入需要的 Ant Design 组件
 import { PushpinOutlined } from '@ant-design/icons'
-import {
-  RiBook2Line,
-  RiQuillPenAiLine,
-  RiCodeBoxLine,
-  RiImageLine,
-  RiFileTextLine
-} from '@remixicon/react' // 引入图标
+import { RiBook2Line, RiQuillPenAiLine } from '@remixicon/react' // 引入图标
 
 const { Title, Text } = Typography
 
@@ -16,7 +10,7 @@ const { Title, Text } = Typography
 interface ContentItem {
   id: string
   title: string
-  type: 'note' | 'knowledge' | 'image' | 'code' | 'document' // 区分笔记、知识库、图片、代码、文档
+  type: 'note' | 'knowledge'
   lastEdited: string // 例如 "2025-01-14 10:30"
   isPinned?: boolean // 是否置顶
   summary?: string // 内容摘要
@@ -110,38 +104,6 @@ const mockItems: ContentItem[] = [
     coverImage: 'https://dummyimage.com/300x200',
     tags: ['知识库', '整理', '学习'],
     category: '学习'
-  },
-  {
-    id: '8',
-    title: '代码片段收藏',
-    type: 'code',
-    lastEdited: '2025-01-09 15:30',
-    summary: '收集了一些常用的代码片段和最佳实践，方便快速复用。',
-    wordCount: 680,
-    coverImage: 'https://dummyimage.com/300x200',
-    tags: ['代码', '片段', '工具'],
-    category: '开发'
-  },
-  {
-    id: '9',
-    title: '风景摄影集',
-    type: 'image',
-    lastEdited: '2025-01-08 18:45',
-    summary: '最近拍摄的一些风景照片，记录了美好的瞬间。',
-    coverImage: 'https://dummyimage.com/300x200',
-    tags: ['摄影', '风景', '艺术'],
-    category: '生活'
-  },
-  {
-    id: '10',
-    title: '项目需求文档',
-    type: 'document',
-    lastEdited: '2025-01-07 14:20',
-    summary: '详细的需求文档，包括功能描述、用户故事和验收标准。',
-    wordCount: 2100,
-    coverImage: 'https://dummyimage.com/300x200',
-    tags: ['文档', '需求', '产品'],
-    category: '产品'
   }
 ]
 
@@ -152,14 +114,6 @@ const getTypeIcon = (type: ContentItem['type']): React.ReactNode => {
       return <RiQuillPenAiLine size={12} />
     case 'knowledge':
       return <RiBook2Line size={12} />
-    case 'code':
-      return <RiCodeBoxLine size={12} />
-    case 'image':
-      return <RiImageLine size={12} />
-    case 'document':
-      return <RiFileTextLine size={12} />
-    default:
-      return <RiQuillPenAiLine size={12} />
   }
 }
 
@@ -170,14 +124,6 @@ const getTypeColor = (type: ContentItem['type']): string => {
       return 'blue'
     case 'knowledge':
       return 'green'
-    case 'code':
-      return 'purple'
-    case 'image':
-      return 'orange'
-    case 'document':
-      return 'geekblue'
-    default:
-      return 'blue'
   }
 }
 

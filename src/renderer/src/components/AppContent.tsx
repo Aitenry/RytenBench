@@ -1,8 +1,8 @@
 // AppContent.tsx
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { type MenuProps } from 'antd'
 import Sidebar from './Sidebar'
-import MainContent from './MainContent'
+import MainRoutes from '../route/MainRoutes'
 import LockScreen from './LockScreen'
 import CryptoJS from 'crypto-js'
 import { Window } from '../../resource/types/window'
@@ -17,7 +17,7 @@ const AppContent: React.FC = () => {
 
   // Initialize lock screen settings
   useEffect(() => {
-    const initializeLockScreen = async () => {
+    const initializeLockScreen = async (): Promise<void> => {
       try {
         const result = await (window as unknown as Window).api.setting.getLockScreenCode()
         setLockCode(result.code)
@@ -27,7 +27,6 @@ const AppContent: React.FC = () => {
         }
       } catch (error) {
         console.error('Failed to initialize lock screen:', error)
-        // Default to unlocked if there's an error
         setIsLocked(false)
       }
     }
@@ -36,18 +35,18 @@ const AppContent: React.FC = () => {
   }, [])
 
   // Update lock screen status in both local storage and backend
-  const updateLockStatus = (locked: boolean): void => {
+  const updateLockStatus = useCallback((locked: boolean): void => {
     // Update backend setting
-    (window as unknown as Window).api.setting.setLockScreenView(locked)
+    ;(window as unknown as Window).api.setting.setLockScreenView(locked)
 
     // Update local state
     setIsLocked(locked)
-  }
+  }, [])
 
   // Handle lock screen action
-  const handleLockScreen = (): void => {
+  const handleLockScreen = useCallback((): void => {
     updateLockStatus(true)
-  }
+  }, [updateLockStatus])
 
   // Verify password against stored hash
   const verifyPassword = async (inputPassword: string): Promise<boolean> => {
@@ -78,13 +77,23 @@ const AppContent: React.FC = () => {
   const handleUserMenuClick: MenuProps['onClick'] = (e) => {
     if (e.key === 'lock') {
       handleLockScreen()
-    } else {
-      viewMessage('user-menu-click', 'loading', `${e.key} loading...`)
-      setTimeout(() => {
-        viewMessage('user-menu-click', 'success', `${e.key} execution completed!`, 2)
-      }, 2000)
     }
   }
+
+  useEffect(() => {
+    const handleKeyPress = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        handleLockScreen()
+      }
+    }
+
+    document.addEventListener('keydown', handleKeyPress)
+
+    return () => {
+      document.removeEventListener('keydown', handleKeyPress)
+    }
+  }, [handleLockScreen])
 
   return (
     <MessageProvider>
@@ -96,7 +105,7 @@ const AppContent: React.FC = () => {
           onUserMenuClick={handleUserMenuClick}
         />
         <div className="flex-1 overflow-auto py-2.5 pr-2.5">
-          <MainContent />
+          <MainRoutes />
         </div>
       </div>
     </MessageProvider>

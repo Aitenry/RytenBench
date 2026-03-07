@@ -1,6 +1,6 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { theme, Menu, Avatar, Dropdown, Input, Layout } from 'antd'
+import { theme, Menu, Input, Card, Button, Space, Slider, Select } from 'antd'
 import type { MenuProps } from 'antd'
 import {
   RiDashboardLine,
@@ -9,93 +9,80 @@ import {
   RiSunCloudyLine,
   RiMusicLine,
   RiBook2Line,
-  RiSettings2Line,
-  RiNotification3Line,
-  RiMailLine,
-  RiUserLine,
   RiSearchLine,
   RiToolsLine,
-  RiShieldKeyholeLine
+  RiPlayLine,
+  RiPauseLine,
+  RiSkipLeftLine,
+  RiSkipRightLine,
+  RiFileListLine,
+  RiPriceTag3Line,
+  RiDatabase2Line,
+  RiBubbleChartLine,
+  RiCodeSSlashLine,
+  RiAiGenerate3dLine,
+  RiTodoLine,
+  RiCalendarTodoLine,
+  RiChatAiLine
 } from '@remixicon/react'
 import Logo from '../assets/logo.png'
 
 interface SidebarProps {
   currentKey: string
   setCurrentKey: (key: string) => void
-  onUserMenuClick: MenuProps['onClick']
+  onUserMenuClick?: MenuProps['onClick']
 }
 
-const Sidebar: React.FC<SidebarProps> = ({ currentKey, setCurrentKey, onUserMenuClick }) => {
+const Sidebar: React.FC<SidebarProps> = ({ currentKey, setCurrentKey }) => {
   const navigate = useNavigate()
-  const {
-    token: { colorBgContainer, borderRadiusLG, colorPrimary, colorText }
-  } = theme.useToken()
+  const { token } = theme.useToken()
 
-  // 工作台主菜单
+  const [cardType, setCardType] = useState<'music' | 'weather'>('music')
+  const [isPlaying, setIsPlaying] = useState(false)
+  const [progress, setProgress] = useState(30)
+
+  // 主菜单项
   const mainMenuItems: MenuProps['items'] = [
-    {
-      key: 'home',
-      label: (
-        <div className="flex items-center">
-          <span>首页</span>
-        </div>
-      ),
-      icon: <RiDashboardLine size={18} />
-    },
+    { key: 'home', label: '首页', icon: <RiDashboardLine size={18} /> },
     {
       key: 'notes',
-      label: (
-        <div className="flex items-center">
-          <span>笔记</span>
-        </div>
-      ),
-      icon: <RiQuillPenAiLine size={18} />
+      label: '笔记',
+      icon: <RiQuillPenAiLine size={18} />,
+      children: [
+        { key: 'notes/all', label: '所有笔记', icon: <RiFileListLine size={18} /> },
+        { key: 'notes/tags', label: '标签管理', icon: <RiPriceTag3Line size={18} /> }
+      ]
     },
     {
       key: 'knowledge',
-      label: (
-        <div className="flex items-center">
-          <span>知识</span>
-        </div>
-      ),
-      icon: <RiBook2Line size={18} />
+      label: '知识',
+      icon: <RiBook2Line size={18} />,
+      children: [
+        { key: 'knowledge/base', label: '知识库', icon: <RiDatabase2Line size={18} /> },
+        { key: 'knowledge/graph', label: '知识图谱', icon: <RiBubbleChartLine size={18} /> }
+      ]
     },
     {
       key: 'planner',
-      label: (
-        <div className="flex items-center">
-          <span>计划</span>
-        </div>
-      ),
-      icon: <RiCalendar2Line size={18} />
+      label: '计划',
+      icon: <RiCalendar2Line size={18} />,
+      children: [
+        { key: 'planner/schedule', label: '计划总览', icon: <RiCalendarTodoLine size={18} /> },
+        { key: 'planner/matters', label: '待办事项', icon: <RiTodoLine size={18} /> }
+      ]
     },
     {
       key: 'tools',
-      label: (
-        <div className="flex items-center">
-          <span>工具</span>
-        </div>
-      ),
-      icon: <RiToolsLine size={18} />
+      label: '工具',
+      icon: <RiToolsLine size={18} />,
+      children: [
+        { key: 'tools/mcp', label: 'MCP 仓库', icon: <RiAiGenerate3dLine size={18} /> },
+        { key: 'tools/api', label: 'API 调用', icon: <RiCodeSSlashLine size={18} /> }
+      ]
     },
-    {
-      key: 'weather',
-      label: (
-        <div className="flex items-center">
-          <span>天气</span>
-        </div>
-      ),
-      icon: <RiSunCloudyLine size={18} />
-    },
-    {
-      key: 'music',
-      label: (
-        <div className="flex items-center">
-          <span>音乐</span>
-        </div>
-      ),
-      icon: <RiMusicLine size={18} />
-    }
+    { key: 'chat', label: '助手', icon: <RiChatAiLine size={18} /> },
+    { key: 'weather', label: '天气', icon: <RiSunCloudyLine size={18} /> },
+    { key: 'music', label: '音乐', icon: <RiMusicLine size={18} /> }
   ]
 
   const onClickMenu: MenuProps['onClick'] = (e) => {
@@ -103,106 +90,157 @@ const Sidebar: React.FC<SidebarProps> = ({ currentKey, setCurrentKey, onUserMenu
     setCurrentKey(e.key)
   }
 
-  // 用户菜单
-  const userMenuItems: MenuProps['items'] = [
-    {
-      key: 'settings',
-      label: '系统设置',
-      icon: <RiSettings2Line size={16} />
-    },
-    {
-      key: 'notifications',
-      label: '系统通知',
-      icon: <RiNotification3Line size={16} />
-    },
-    {
-      key: 'messages',
-      label: '邮件消息',
-      icon: <RiMailLine size={16} />
-    },
-    {
-      type: 'divider'
-    },
-    {
-      key: 'lock',
-      label: '系统锁屏',
-      icon: <RiShieldKeyholeLine size={16} />
-    }
-  ]
+  const togglePlayPause = (): void => setIsPlaying(!isPlaying)
+
+  const MusicMiniPlayer = (): React.JSX.Element => (
+    <div className="flex flex-col items-center">
+      <div className="text-sm1">Lemon Tree</div>
+      <div className="text-xs text-gray-500 mb-2">Garden</div>
+      <div className="w-full mb-2">
+        <Slider
+          value={progress}
+          onChange={(value) => setProgress(value)}
+          tooltip={{ open: false }}
+        />
+        <div className="flex justify-between text-xs text-gray-500 mt-1">
+          <span>0:30</span>
+          <span>3:47</span>
+        </div>
+      </div>
+      <Space size={4}>
+        <Button type="text" icon={<RiSkipLeftLine size={16} />} size="small" />
+        <Button
+          type="text"
+          icon={isPlaying ? <RiPauseLine size={16} /> : <RiPlayLine size={16} />}
+          size="small"
+          onClick={togglePlayPause}
+        />
+        <Button type="text" icon={<RiSkipRightLine size={16} />} size="small" />
+      </Space>
+    </div>
+  )
+
+  const WeatherMiniCard = (): React.JSX.Element => (
+    <div className="flex items-center justify-between">
+      <div>
+        <div className="text-sm font-medium">上海</div>
+        <div className="text-xs text-gray-500">多云</div>
+      </div>
+      <div className="text-2xl font-light">18°</div>
+    </div>
+  )
 
   return (
-    <Layout.Sider
-      width={240}
-      style={{
-        background: colorBgContainer,
-        height: 'calc(100vh - 16px)',
-        margin: '8px',
-        borderRadius: borderRadiusLG,
-        padding: '16px 0',
-        boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
-        overflow: 'hidden'
-      }}
-      collapsible={false}
-      collapsed={false}
-    >
-      {/* Logo 区域 */}
-      <div className="flex items-center justify-center mb-6">
-        <img alt="logo" style={{ height: '40px', imageRendering: 'crisp-edges' }} src={Logo} />
-      </div>
+    <>
+      {/* 自定义滚动条样式 - 仅作用于侧边栏菜单区域 */}
+      <style>{`
+        .sidebar-menu-container::-webkit-scrollbar {
+          width: 6px;
+          height: 6px;
+        }
+        .sidebar-menu-container::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        .sidebar-menu-container::-webkit-scrollbar-thumb {
+          background: rgba(0, 0, 0, 0.15);
+          border-radius: 4px;
+          transition: background 0.2s;
+        }
+        .sidebar-menu-container::-webkit-scrollbar-thumb:hover {
+          background: rgba(0, 0, 0, 0.3);
+        }
+        /* Firefox 兼容 */
+        .sidebar-menu-container {
+          scrollbar-width: none;
+          scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
+        }
+      `}</style>
 
-      {/* 搜索框 */}
-      <div className="px-4 mb-6">
-        <Input
-          placeholder="搜索..."
-          prefix={<RiSearchLine size={16} />}
-          style={{ width: '100%' }}
-        />
-      </div>
-
-      {/* 主菜单 */}
-      <Menu
-        mode="inline"
-        items={mainMenuItems}
-        onClick={onClickMenu}
+      <div
         style={{
-          background: 'transparent',
-          border: 'none',
-          padding: '0 8px'
+          width: 240,
+          background: token.colorBgContainer,
+          height: 'calc(100vh - 16px)',
+          margin: '8px',
+          borderRadius: token.borderRadiusLG,
+          boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden'
         }}
-        selectedKeys={[currentKey]}
-      />
+      >
+        {/* Logo */}
+        <div className="flex items-center justify-center pt-4 pb-2">
+          <img alt="logo" style={{ height: '40px', imageRendering: 'crisp-edges' }} src={Logo} />
+        </div>
 
-      {/* 用户区域 */}
-      <div className="absolute bottom-4 left-0 right-0 px-4">
-        <Dropdown
-          menu={{
-            items: userMenuItems,
-            onClick: onUserMenuClick,
-            style: { width: '208px' }
-          }}
-          trigger={['click']}
-          placement="topRight"
+        {/* 搜索框 */}
+        <div className="px-4 mb-4">
+          <Input
+            placeholder="搜索..."
+            prefix={<RiSearchLine size={16} />}
+            style={{ width: '100%' }}
+          />
+        </div>
+
+        {/* 主菜单区域 - 可滚动，添加自定义滚动条类名 */}
+        <div
+          style={{ flex: 1, overflow: 'auto', minHeight: 0 }}
+          className="px-2 sidebar-menu-container"
         >
-          <div className="flex items-start justify-center cursor-pointer">
-            <div className="flex items-center px-6 py-2 hover:bg-gray-100 rounded-lg transition-colors duration-200">
-              <Avatar
-                size={39}
-                style={{ backgroundColor: colorPrimary }}
-                icon={<RiUserLine size={16} />}
-              />
-              <div className="ml-2 flex flex-col">
-                <span className="font-medium" style={{ color: colorText }}>
-                  Aitenry
+          <Menu
+            mode="inline"
+            items={mainMenuItems}
+            onClick={onClickMenu}
+            style={{ background: 'transparent', border: 'none' }}
+            selectedKeys={[currentKey]}
+          />
+        </div>
+
+        {/* 底部卡片 - 固定 */}
+        <div className="px-1 pb-1" style={{ flexShrink: 0 }}>
+          <Card
+            size="small"
+            variant="borderless"
+            style={{
+              background: '#f8f9fa',
+              borderRadius: 16,
+              boxShadow: '0 2px 6px rgba(0,0,0,0.03)'
+            }}
+            styles={{ body: { padding: '12px' } }}
+            title={
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-gray-500">
+                  {cardType === 'music' ? '当前播放' : '本地天气'}
                 </span>
-                <span className="text-sm" style={{ color: colorText }}>
-                  aitenry@126.com
-                </span>
+                <Select
+                  value={cardType}
+                  onChange={(value) => setCardType(value as 'music' | 'weather')}
+                  variant="borderless"
+                  size="small"
+                  popupMatchSelectWidth={false}
+                  style={{ width: 49 }}
+                  options={[
+                    {
+                      value: 'music',
+                      label: <RiMusicLine style={{ margin: '4px 0' }} size={16} />
+                    },
+                    {
+                      value: 'weather',
+                      label: <RiSunCloudyLine style={{ margin: '4px 0' }} size={16} />
+                    }
+                  ]}
+                />
               </div>
+            }
+          >
+            <div key={cardType} className="animate__animated animate__slideInUp animate__faster">
+              {cardType === 'music' ? <MusicMiniPlayer /> : <WeatherMiniCard />}
             </div>
-          </div>
-        </Dropdown>
+          </Card>
+        </div>
       </div>
-    </Layout.Sider>
+    </>
   )
 }
 
