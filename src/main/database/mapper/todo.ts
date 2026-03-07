@@ -132,7 +132,7 @@ async function getAllTodoItems(): Promise<TodoItemRow[]> {
     return new Promise((resolve, reject) => {
       db!.all(sql, [], (err, rows: TodoItemRow[]) => {
         if (err) {
-          logger.error('Error executing query for all todo items:', err.message)
+          logger.error('Error executing query for schedule todo items:', err.message)
           reject(err)
         } else {
           logger.info(`Query for all todo items returned ${rows.length} rows.`)
@@ -141,7 +141,7 @@ async function getAllTodoItems(): Promise<TodoItemRow[]> {
       })
     })
   } catch (error) {
-    logger.error('Failed to get database instance for all todo items query:', error)
+    logger.error('Failed to get database instance for schedule todo items query:', error)
     throw error
   }
 }

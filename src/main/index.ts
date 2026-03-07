@@ -267,11 +267,11 @@ app.whenReady().then(async () => {
     }
   })
 
-  ipcMain.handle('todo-items-get-all', async () => {
+  ipcMain.handle('todo-items-get-schedule', async () => {
     try {
       return await getAllTodoItems()
     } catch (error) {
-      console.error('Error in todo-items-get-all:', error)
+      console.error('Error in todo-items-get-schedule:', error)
       throw error
     }
   })

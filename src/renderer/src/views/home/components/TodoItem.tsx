@@ -2,8 +2,8 @@ import React, { useState, useEffect, useRef } from 'react'
 import { Modal, Form, Input, DatePicker, Select } from 'antd'
 import dayjs from 'dayjs'
 import { RiCheckFill, RiCloseFill, RiAddFill, RiPlayFill } from '@remixicon/react'
-import { Window } from '../../../resource/types/window'
-import { useMessage } from '../../hooks/useMessage'
+import { Window } from '../../../../resource/types/window'
+import { useMessage } from '../../../hooks/useMessage'
 
 export interface TodoItem {
   id: number

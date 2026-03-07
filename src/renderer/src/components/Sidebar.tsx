@@ -134,6 +134,9 @@ const Sidebar: React.FC<SidebarProps> = ({ currentKey, setCurrentKey }) => {
     <>
       {/* 自定义滚动条样式 - 仅作用于侧边栏菜单区域 */}
       <style>{`
+        .ant-menu-submenu-title {
+          padding-left: 16px !important;
+        }
         .sidebar-menu-container::-webkit-scrollbar {
           width: 6px;
           height: 6px;
@@ -193,6 +196,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentKey, setCurrentKey }) => {
             items={mainMenuItems}
             onClick={onClickMenu}
             style={{ background: 'transparent', border: 'none' }}
+            styles={{ item: { paddingLeft: 16 }, subMenu: { item: { paddingLeft: 26 } } }}
             selectedKeys={[currentKey]}
           />
         </div>

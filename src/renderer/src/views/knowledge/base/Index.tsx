@@ -1,7 +1,7 @@
 import React from 'react'
 import { theme } from 'antd'
 
-const Weather: React.FC = () => {
+const Index: React.FC = () => {
   const {
     token: { colorBgContainer, borderRadiusLG }
   } = theme.useToken()
@@ -18,4 +18,4 @@ const Weather: React.FC = () => {
   )
 }
 
-export default Weather
+export default Index

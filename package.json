@@ -44,6 +44,7 @@
     "electron-updater": "^6.3.9",
     "flexsearch": "^0.8.212",
     "langchain": "^1.2.30",
+    "react-markdown": "^10.1.0",
     "react-router-dom": "^7.9.4",
     "sqlite3": "^5.1.7",
     "tailwindcss": "^4.1.14"

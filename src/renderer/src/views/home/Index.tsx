@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from 'react'
 import { theme } from 'antd'
-import TodoList, { TodoItem } from '@renderer/components/home/TodoItem'
-import { Window } from '../../resource/types/window'
-import MainContent from '@renderer/components/home/MainContent'
+import TodoList, { TodoItem } from '@renderer/views/home/components/TodoItem'
+import { Window } from '../../../resource/types/window'
+import MainContent from '@renderer/views/home/components/MainContent'
 
-const Home: React.FC = () => {
+const Index: React.FC = () => {
   const {
     token: { colorBgContainer, borderRadiusLG }
   } = theme.useToken()
@@ -50,4 +50,4 @@ const Home: React.FC = () => {
   )
 }
 
-export default Home
+export default Index

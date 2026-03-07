@@ -1,7 +1,7 @@
 import React from 'react'
 import { theme } from 'antd'
 
-const Tools: React.FC = () => {
+const Index: React.FC = () => {
   const {
     token: { colorBgContainer, borderRadiusLG }
   } = theme.useToken()
@@ -18,4 +18,4 @@ const Tools: React.FC = () => {
   )
 }
 
-export default Tools
+export default Index

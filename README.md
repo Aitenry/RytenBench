@@ -17,15 +17,15 @@ RytenBench is a lightweight AI workbench designed specifically for individual us
 - Quick access entry
 - Personal data statistics
 
-### 📝 Notes
+### 📝 Index
 - Smart note-taking
 - AI-assisted writing
 - Note classification management
 
-### 🧠 Knowledge
-- Knowledge base management
+### 🧠 Index
+- Index base management
 - Intelligent knowledge organization
-- Knowledge graph construction
+- Index graph construction
 
 ### 📅 Planner
 - Schedule arrangement
@@ -37,15 +37,15 @@ RytenBench is a lightweight AI workbench designed specifically for individual us
 - Efficiency enhancement tools
 - Convenient mini tools
 
-### ☀️ Weather
+### ☀️ Index
 - Real-time weather information
-- Weather forecast
+- Index forecast
 - Life index
 
-### 🎵 Music
+### 🎵 Index
 - Background music playback
 - Focus music recommendations
-- Music playback control
+- Index playback control
 
 ## Tech Stack
 
