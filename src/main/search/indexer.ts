@@ -8,8 +8,7 @@ import logger from 'electron-log'
 interface IndexableDocument {
   id: number | string
   title: string
-  content: string
-  // 可以添加更多需要索引的字段
+  summary: string | null
 }
 
 class FlexSearchIndexer {
@@ -63,15 +62,28 @@ class FlexSearchIndexer {
   }
 
   /**
-   * 添加或更新文档到索引
+   * 添加文档到索引
    */
-  async addOrUpdateDocument(doc: IndexableDocument): Promise<void> {
+  async addDocument(doc: IndexableDocument): Promise<void> {
     if (!this.isInitialized) {
       throw new Error('FlexSearch index not initialized. Call initializeIndex first.')
     }
 
-    const contentToIndex = `${doc.title || ''} ${doc.content}`.trim()
+    const contentToIndex = `${doc.title || ''} ${doc.summary || ''}`.trim()
     this.index.add(doc.id, contentToIndex)
+    logger.debug(`Document ID ${doc.id} added/updated in index.`)
+  }
+
+  /**
+   * 更新文档到索引
+   */
+  async updateDocument(doc: IndexableDocument): Promise<void> {
+    if (!this.isInitialized) {
+      throw new Error('FlexSearch index not initialized. Call initializeIndex first.')
+    }
+
+    const contentToIndex = `${doc.title || ''} ${doc.summary || ''}`.trim()
+    this.index.update(doc.id, contentToIndex)
     logger.debug(`Document ID ${doc.id} added/updated in index.`)
   }
 

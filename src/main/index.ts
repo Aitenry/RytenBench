@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, ipcMain } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
@@ -6,6 +6,7 @@ import { createDatabase, Database } from './database/loading' // 确保导入 Da
 import { getIp } from './address'
 import _Store from 'electron-store'
 import logger from 'electron-log'
+import * as fs from 'fs'
 
 import {
   getTodoItemById,
@@ -18,8 +19,17 @@ import {
   addTodoItem,
   TodoItemRow
 } from './database/mapper/todo'
+import {
+  getNoteById,
+  getAllNotes,
+  getNotePage,
+  addNote,
+  updateNote,
+  deleteNote,
+  NoteRow
+} from './database/mapper/note'
 import { FlexSearchIndexer } from './search/indexer'
-import path from 'path' // 替换为实际路径
+import path from 'path'
 
 logger.transports.file.format = '[{y}-{m}-{d} {h}:{i}:{s}.{ms}] [{level}] {text}'
 logger.transports.file.fileName = 'main.log'
@@ -33,6 +43,7 @@ let flexSearchIndexer: FlexSearchIndexer | null = null
 // --- 获取数据库实例的函数 ---
 let initializationPromise: Promise<void> | null = null // 用于追踪初始化过程
 const flexSearchInitializationPromise: Promise<void> | null = null
+
 /**
  * 获取已初始化的数据库实例。
  * 如果数据库尚未初始化，它会等待初始化完成。
@@ -331,6 +342,106 @@ app.whenReady().then(async () => {
       settingsStore.set('lock', lock)
     } catch (error) {
       console.error('Error in todo-items-get-by-id:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('note-get-by-id', async (_event, id: number) => {
+    try {
+      return await getNoteById(id)
+    } catch (error) {
+      console.error('Error in note-get-by-id:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('note-get-all', async (_event, page?: number, pageSize?: number) => {
+    try {
+      return await getAllNotes(page, pageSize)
+    } catch (error) {
+      console.error('Error in note-get-all:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle(
+    'note-page-get',
+    async (_event, query: string, page?: number, pageSize?: number) => {
+      try {
+        return await getNotePage(query, page, pageSize)
+      } catch (error) {
+        console.error('Error in note-get-by-title:', error)
+        throw error
+      }
+    }
+  )
+
+  ipcMain.handle(
+    'note-add',
+    async (
+      _event,
+      note: Omit<NoteRow, 'id' | 'created_at' | 'updated_at' | 'version'> & {
+        image?: string | null
+        content?: string | null
+      }
+    ) => {
+      try {
+        return await addNote(note)
+      } catch (error) {
+        console.error('Error in note-add:', error)
+        throw error
+      }
+    }
+  )
+
+  ipcMain.handle(
+    'note-update',
+    async (
+      _event,
+      id: number,
+      updates: Partial<Omit<NoteRow, 'id' | 'created_at' | 'version'>> & {
+        image?: string | null
+        content?: string | null
+      }
+    ) => {
+      try {
+        return await updateNote(id, updates)
+      } catch (error) {
+        console.error('Error in note-update:', error)
+        throw error
+      }
+    }
+  )
+
+  ipcMain.handle('note-delete', async (_event, id: number) => {
+    try {
+      return await deleteNote(id)
+    } catch (error) {
+      console.error('Error in note-delete:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('select-image-file', async () => {
+    try {
+      const result = await dialog.showOpenDialog({
+        properties: ['openFile'],
+        filters: [{ name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'] }]
+      })
+
+      if (result.canceled || result.filePaths.length === 0) {
+        return null
+      }
+
+      const filePath = result.filePaths[0]
+      const fileBuffer = fs.readFileSync(filePath)
+      const base64 = fileBuffer.toString('base64')
+      const ext = filePath.split('.').pop()?.toLowerCase() || 'png'
+      const mimeType = `image/${ext === 'jpg' ? 'jpeg' : ext}`
+
+      return `data:${mimeType};base64,${base64}`
+    } catch (error) {
+      console.error('Error selecting image file:', error)
       throw error
     }
   })

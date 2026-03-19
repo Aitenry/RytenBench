@@ -33,3 +33,28 @@
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
 }
+
+/* 自定义滚动条样式 - 更现代化的版本 */
+.custom-container-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.custom-container-scrollbar::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 3px;
+}
+
+.custom-container-scrollbar::-webkit-scrollbar-thumb {
+  background-color: rgba(0, 0, 0, 0.3);
+  border-radius: 3px;
+  transition: background-color 0.2s ease;
+}
+
+.custom-container-scrollbar::-webkit-scrollbar-thumb:hover{
+  background-color: rgba(0, 0, 0, 0.5);
+}
+
+.custom-container-scrollbar::-webkit-scrollbar-corner {
+  background: transparent;
+}

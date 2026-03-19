@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import { TodoItemRow } from '../main/database/mapper/todo'
+import { NoteRow } from '../main/database/mapper/note'
 
 // Custom APIs for renderer
 const api = {
@@ -17,6 +18,30 @@ const api = {
     update: (id: number, updates: Partial<Omit<TodoItemRow, 'id'>>) =>
       ipcRenderer.invoke('todo-items-update', id, updates),
     delete: (id: number) => ipcRenderer.invoke('todo-items-delete', id)
+  },
+  notes: {
+    getById: (id: number) => ipcRenderer.invoke('note-get-by-id', id),
+    getAll: (page?: number, pageSize?: number) =>
+      ipcRenderer.invoke('note-get-all', page, pageSize),
+    getPage: (query: string, page?: number, pageSize?: number) =>
+      ipcRenderer.invoke('note-page-get', query, page, pageSize),
+    add: (
+      note: Omit<NoteRow, 'id' | 'created_at' | 'updated_at' | 'version'> & {
+        image?: string | null
+        content?: string | null
+      }
+    ) => ipcRenderer.invoke('note-add', note),
+    update: (
+      id: number,
+      updates: Partial<Omit<NoteRow, 'id' | 'created_at' | 'version'>> & {
+        image?: string | null
+        content?: string | null
+      }
+    ) => ipcRenderer.invoke('note-update', id, updates),
+    delete: (id: number) => ipcRenderer.invoke('note-delete', id)
+  },
+  file: {
+    selectImageFile: () => ipcRenderer.invoke('select-image-file')
   },
   setting: {
     getLockScreenCode: () => ipcRenderer.invoke('lock-screen-code'),

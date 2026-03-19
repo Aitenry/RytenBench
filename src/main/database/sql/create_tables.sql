@@ -79,10 +79,9 @@ CREATE INDEX IF NOT EXISTS idx_todo_created_at ON todo_items(created_at);
 -- 知识库表
 CREATE TABLE IF NOT EXISTS wiki (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    description TEXT,
-    owner_id TEXT,
-    is_public BOOLEAN DEFAULT 0,
+    title TEXT NOT NULL,
+    summary TEXT,
+    image TEXT,
     created_at DATETIME DEFAULT (datetime('now')),
     updated_at DATETIME DEFAULT (datetime('now'))
 );
@@ -91,40 +90,65 @@ CREATE INDEX IF NOT EXISTS idx_wiki_name ON wiki(name);
 CREATE INDEX IF NOT EXISTS idx_wiki_owner ON wiki(owner_id);
 CREATE INDEX IF NOT EXISTS idx_wiki_is_public ON wiki(is_public);
 
--- 目录表
-CREATE TABLE IF NOT EXISTS directories (
+-- 知识库目录表 - 修正外键引用
+CREATE TABLE IF NOT EXISTS wiki_directories (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     wiki_id INTEGER NOT NULL,
     parent_id INTEGER,
     name TEXT NOT NULL,
-    level INTEGER DEFAULT 0 CHECK (level >= 0 AND level <= 10),
     sort_order INTEGER DEFAULT 0,
-    path TEXT,
+    level INTEGER DEFAULT 0,  -- 添加层级字段用于树形结构
     created_at DATETIME DEFAULT (datetime('now')),
     updated_at DATETIME DEFAULT (datetime('now')),
     FOREIGN KEY (wiki_id) REFERENCES wiki(id) ON DELETE CASCADE,
-    FOREIGN KEY (parent_id) REFERENCES directories(id) ON DELETE CASCADE
+    FOREIGN KEY (parent_id) REFERENCES wiki_directories(id) ON DELETE CASCADE  -- 修正：指向自己表的id
 );
 
-CREATE INDEX IF NOT EXISTS idx_directories_wiki_parent ON directories(wiki_id, parent_id);
-CREATE INDEX IF NOT EXISTS idx_directories_wiki_level ON directories(wiki_id, level);
-CREATE INDEX IF NOT EXISTS idx_directories_sort_order ON directories(sort_order);
+-- 创建目录与笔记的关联表（多对多关系）
+CREATE TABLE IF NOT EXISTS directory_notes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    directory_id INTEGER NOT NULL,
+    note_id INTEGER NOT NULL,
+    sort_order INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT (datetime('now')),
+    FOREIGN KEY (directory_id) REFERENCES wiki_directories(id) ON DELETE CASCADE,
+    FOREIGN KEY (note_id) REFERENCES notes(id) ON DELETE CASCADE,
+    UNIQUE(directory_id, note_id)  -- 防止重复关联
+);
 
 -- 笔记表
 CREATE TABLE IF NOT EXISTS notes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    directory_id INTEGER NOT NULL,
     title TEXT NOT NULL,
-    content TEXT,
+    summary TEXT,
     tags TEXT,
     version INTEGER DEFAULT 1,
     created_at DATETIME DEFAULT (datetime('now')),
-    updated_at DATETIME DEFAULT (datetime('now')),
-    FOREIGN KEY (directory_id) REFERENCES directories(id) ON DELETE CASCADE
+    updated_at DATETIME DEFAULT (datetime('now'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_notes_directory_id ON notes(directory_id);
+CREATE TABLE IF NOT EXISTS notes_content (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    note_id INTEGER NOT NULL UNIQUE,
+    image TEXT,
+    content TEXT,
+    chunk_key TEXT,
+    created_at DATETIME DEFAULT (datetime('now')),
+    updated_at DATETIME DEFAULT (datetime('now')),
+    FOREIGN KEY (note_id) REFERENCES notes(id) ON DELETE CASCADE
+);
+
+-- 修正索引名称
+CREATE INDEX IF NOT EXISTS idx_wiki_directories_wiki_parent ON wiki_directories(wiki_id, parent_id);
+CREATE INDEX IF NOT EXISTS idx_wiki_directories_sort_order ON wiki_directories(sort_order);
+
+-- 笔记表索引
+CREATE INDEX IF NOT EXISTS idx_notes_title ON notes(title);
 CREATE INDEX IF NOT EXISTS idx_notes_updated_at ON notes(updated_at);
+
+-- 关联表索引
+CREATE INDEX IF NOT EXISTS idx_directory_notes_dir ON directory_notes(directory_id);
+CREATE INDEX IF NOT EXISTS idx_directory_notes_note ON directory_notes(note_id);
 
 -- 数据库迁移记录表
 CREATE TABLE IF NOT EXISTS schema_migrations (

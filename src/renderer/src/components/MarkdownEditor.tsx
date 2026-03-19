@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import MDEditor from '@uiw/react-md-editor'
+import { Input } from 'antd'
 
 interface MarkdownEditorProps {
   initialValue?: string
   onSave?: (content: string) => void
 }
+
+const { TextArea } = Input
 
 const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialValue = '', onSave }) => {
   const [value, setValue] = useState(initialValue)
@@ -18,6 +20,11 @@ const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialValue = '', onSa
       onSave(value)
     }
   }, [onSave, value])
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>): void => {
+    const newValue = e.target.value
+    setValue(newValue)
+  }
 
   // 监听快捷键 Ctrl+S / Command+S
   useEffect(() => {
@@ -36,13 +43,25 @@ const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialValue = '', onSa
   }, [handleSave]) // 依赖 handleSave，确保它始终是最新的
 
   return (
-    <div>
-      <MDEditor
+    <div
+      style={{
+        height: '100%',
+        display: 'grid',
+        gridTemplateRows: '1fr',
+        // 自定义滚动条样式
+        scrollbarWidth: 'thin',
+        scrollbarColor: '#c1c1c1 transparent'
+      }}
+    >
+      <TextArea
+        showCount
+        onChange={handleChange}
         value={value}
-        onChange={(val) => setValue(val || '')}
-        preview="live"
-        height={500}
-        highlightEnable
+        placeholder="请输入内容..."
+        style={{
+          height: '100%',
+          resize: 'none'
+        }}
       />
     </div>
   )
