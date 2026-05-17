@@ -86,9 +86,8 @@ CREATE TABLE IF NOT EXISTS wiki (
     updated_at DATETIME DEFAULT (datetime('now'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_wiki_name ON wiki(name);
-CREATE INDEX IF NOT EXISTS idx_wiki_owner ON wiki(owner_id);
-CREATE INDEX IF NOT EXISTS idx_wiki_is_public ON wiki(is_public);
+CREATE INDEX IF NOT EXISTS idx_wiki_title ON wiki(title);
+CREATE INDEX IF NOT EXISTS idx_wiki_created_at ON wiki(created_at);
 
 -- 知识库目录表 - 修正外键引用
 CREATE TABLE IF NOT EXISTS wiki_directories (

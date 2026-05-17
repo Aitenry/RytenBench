@@ -51,6 +51,7 @@ interface MarkdownViewProps {
 const MarkdownLoad = ({ content, isDarkMode = false }: MarkdownViewProps): JSX.Element => {
   // 动态样式（基于 isDarkMode）
   const dynamicStyles = `
+    .markdown-body > *:first-child { margin-top: 0; }
     .markdown-body h1 { font-size: 2em; font-weight: 700; margin: 1em 0 0.5em; }
     .markdown-body h2 { font-size: 1.5em; font-weight: 600; margin: 1em 0 0.5em; }
     .markdown-body h3 { font-size: 1.25em; font-weight: 600; margin: 1em 0 0.5em; }

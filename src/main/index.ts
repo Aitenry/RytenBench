@@ -28,8 +28,28 @@ import {
   deleteNote,
   NoteRow
 } from './database/mapper/note'
+import {
+  getWikiById,
+  getAllWikis,
+  addWiki,
+  updateWiki,
+  deleteWiki,
+  getDirectoriesByWikiId,
+  addDirectory,
+  updateDirectory,
+  deleteDirectory,
+  getNotesByDirectoryId,
+  addNoteToDirectory,
+  removeNoteFromDirectory,
+  getDirectoriesByNoteId,
+  WikiRow,
+  WikiDirectoryRow
+} from './database/mapper/wiki'
 import { FlexSearchIndexer } from './search/indexer'
 import path from 'path'
+import * as z from 'zod'
+import { tool } from '@langchain/core/tools'
+import { ChatService } from './chat/service'
 
 logger.transports.file.format = '[{y}-{m}-{d} {h}:{i}:{s}.{ms}] [{level}] {text}'
 logger.transports.file.fileName = 'main.log'
@@ -422,6 +442,141 @@ app.whenReady().then(async () => {
     }
   })
 
+  ipcMain.handle('wiki-get-by-id', async (_event, id: number) => {
+    try {
+      return await getWikiById(id)
+    } catch (error) {
+      console.error('Error in wiki-get-by-id:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('wiki-get-all', async (_event, page?: number, pageSize?: number) => {
+    try {
+      return await getAllWikis(page, pageSize)
+    } catch (error) {
+      console.error('Error in wiki-get-all:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle(
+    'wiki-add',
+    async (_event, wiki: Omit<WikiRow, 'id' | 'created_at' | 'updated_at'>) => {
+      try {
+        return await addWiki(wiki)
+      } catch (error) {
+        console.error('Error in wiki-add:', error)
+        throw error
+      }
+    }
+  )
+
+  ipcMain.handle(
+    'wiki-update',
+    async (_event, id: number, updates: Partial<Omit<WikiRow, 'id' | 'created_at'>>) => {
+      try {
+        return await updateWiki(id, updates)
+      } catch (error) {
+        console.error('Error in wiki-update:', error)
+        throw error
+      }
+    }
+  )
+
+  ipcMain.handle('wiki-delete', async (_event, id: number) => {
+    try {
+      return await deleteWiki(id)
+    } catch (error) {
+      console.error('Error in wiki-delete:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('wiki-directories-get', async (_event, wikiId: number) => {
+    try {
+      return await getDirectoriesByWikiId(wikiId)
+    } catch (error) {
+      console.error('Error in wiki-directories-get:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle(
+    'wiki-directory-add',
+    async (_event, directory: Omit<WikiDirectoryRow, 'id' | 'created_at' | 'updated_at'>) => {
+      try {
+        return await addDirectory(directory)
+      } catch (error) {
+        console.error('Error in wiki-directory-add:', error)
+        throw error
+      }
+    }
+  )
+
+  ipcMain.handle(
+    'wiki-directory-update',
+    async (_event, id: number, updates: Partial<Omit<WikiDirectoryRow, 'id' | 'created_at'>>) => {
+      try {
+        return await updateDirectory(id, updates)
+      } catch (error) {
+        console.error('Error in wiki-directory-update:', error)
+        throw error
+      }
+    }
+  )
+
+  ipcMain.handle('wiki-directory-delete', async (_event, id: number) => {
+    try {
+      return await deleteDirectory(id)
+    } catch (error) {
+      console.error('Error in wiki-directory-delete:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('wiki-directory-notes-get', async (_event, directoryId: number) => {
+    try {
+      return await getNotesByDirectoryId(directoryId)
+    } catch (error) {
+      console.error('Error in wiki-directory-notes-get:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle(
+    'wiki-directory-note-add',
+    async (_event, directoryId: number, noteId: number, sortOrder?: number) => {
+      try {
+        return await addNoteToDirectory(directoryId, noteId, sortOrder)
+      } catch (error) {
+        console.error('Error in wiki-directory-note-add:', error)
+        throw error
+      }
+    }
+  )
+
+  ipcMain.handle(
+    'wiki-directory-note-remove',
+    async (_event, directoryId: number, noteId: number) => {
+      try {
+        return await removeNoteFromDirectory(directoryId, noteId)
+      } catch (error) {
+        console.error('Error in wiki-directory-note-remove:', error)
+        throw error
+      }
+    }
+  )
+
+  ipcMain.handle('wiki-note-directories-get', async (_event, noteId: number) => {
+    try {
+      return await getDirectoriesByNoteId(noteId)
+    } catch (error) {
+      console.error('Error in wiki-note-directories-get:', error)
+      throw error
+    }
+  })
+
   ipcMain.handle('select-image-file', async () => {
     try {
       const result = await dialog.showOpenDialog({
@@ -445,6 +600,58 @@ app.whenReady().then(async () => {
       throw error
     }
   })
+
+  ipcMain.handle(
+    'chat-send-message',
+    async (
+      _event,
+      question: string,
+      options?: { deepThinking?: boolean; smartSearch?: boolean }
+    ) => {
+      const getWeather = tool((input: { location: string }) => `It's sunny in ${input.location}.`, {
+        name: 'get_weather',
+        description: 'Get the weather at a location.',
+        schema: z.object({
+          location: z.string().describe('The location to get the weather for')
+        })
+      })
+
+      // 创建服务并传入工具
+      const chatService = new ChatService([getWeather])
+      return await chatService.sendMessage(question, options)
+    }
+  )
+
+  ipcMain.on(
+    'chat-start-stream',
+    async (
+      event,
+      question: string,
+      options?: { deepThinking?: boolean; smartSearch?: boolean }
+    ) => {
+      const getWeather = tool((input: { location: string }) => `It's sunny in ${input.location}.`, {
+        name: 'get_weather',
+        description: 'Get the weather at a location.',
+        schema: z.object({
+          location: z.string().describe('The location to get the weather for')
+        })
+      })
+
+      // 创建服务并传入工具
+      const chatService = new ChatService([getWeather])
+
+      // 开始流式输出
+      const stream = chatService.sendMessageStream(question, options)
+
+      try {
+        for await (const chunk of stream) {
+          event.sender.send('chat-stream-chunk', chunk)
+        }
+      } catch (error) {
+        logger.error('Error in chat stream:', error)
+      }
+    }
+  )
 
   await createLoadingWindow()
 

@@ -6,7 +6,7 @@ import rehypeSanitize from 'rehype-sanitize'
 import rehypeRaw from 'rehype-raw'
 import { RiCheckLine, RiFileCopyLine, RiArrowRightSLine, RiArrowDownSLine } from '@remixicon/react'
 import { extractTextFromChildren } from '@renderer/utils/markdown'
-
+import { useMessage } from '@renderer/hooks/useMessage'
 const CopyButton = ({
   text,
   isDarkMode
@@ -38,6 +38,40 @@ const CopyButton = ({
     >
       {copied ? <RiCheckLine size={16} /> : <RiFileCopyLine size={16} />}
     </button>
+  )
+}
+
+const InlineCodeCopy = ({
+  text,
+  children
+}: {
+  text: string
+  children: React.ReactNode
+  isDarkMode?: boolean
+}): React.ReactNode => {
+  const [copied, setCopied] = useState(false)
+
+  const { viewMessage } = useMessage()
+  const handleCopy = async (e: React.MouseEvent): Promise<void> => {
+    e.stopPropagation()
+    try {
+      await navigator.clipboard.writeText(text)
+      viewMessage('copy-code', 'success', '已复制！')
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch (err) {
+      console.error('Failed to copy:', err)
+    }
+  }
+
+  return (
+    <span
+      onClick={handleCopy}
+      className={`inline-flex items-center gap-1 cursor-pointer transition-all`}
+      title={copied ? '已复制' : '点击复制'}
+    >
+      {children}
+    </span>
   )
 }
 
@@ -327,6 +361,24 @@ const MarkdownView = ({ content, isDarkMode = false }: MarkdownViewProps): React
             rehypePlugins={[rehypeRaw, rehypeHighlight, rehypeSanitize]}
             components={{
               a: (props) => <a {...props} target="_blank" rel="noopener noreferrer" />,
+              code: ({ children, className, ...props }) => {
+                const text = extractTextFromChildren(children)
+                const isInline = !className?.includes('language-')
+                if (isInline) {
+                  return (
+                    <InlineCodeCopy text={text}>
+                      <code className={className} {...props}>
+                        {children}
+                      </code>
+                    </InlineCodeCopy>
+                  )
+                }
+                return (
+                  <code className={className} {...props}>
+                    {children}
+                  </code>
+                )
+              },
               h1: ({ children, ...props }) => {
                 const text = extractTextFromChildren(children)
                 const id = getHeadingId(text)

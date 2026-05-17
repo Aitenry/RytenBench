@@ -1,195 +1,27 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
-import { theme, Modal, Button, Input, Popconfirm, Empty, Tag as AntTag } from 'antd'
-import { Card, Typography, Tag, Space, Masonry, Flex } from 'antd'
+import { theme, Modal, Button, Input, Empty, Tag as AntTag } from 'antd'
+import { Space, Masonry, Flex } from 'antd'
 import { PlusOutlined, DeleteOutlined, EditOutlined, SearchOutlined } from '@ant-design/icons'
-import { RiQuillPenAiLine } from '@remixicon/react'
 import MarkdownEditor from '@renderer/components/MarkdownEditor'
-import MarkdownView from '@renderer/components/MarkdownView'
 import { useMessage } from '@renderer/hooks/useMessage'
 import { Window } from '../../../../resource/types/window'
-import { NoteListItem } from '../../../../../main/database/mapper/note'
+import NoteCard from '@renderer/components/NoteCard'
+import NotePreviewModal from '@renderer/components/NotePreviewModal'
+import { getTagsArray } from '@renderer/utils/note'
 
-const { Title, Text } = Typography
 const { Search } = Input
 
-interface NoteItem extends NoteListItem {
+interface NoteItem {
+  id: number
+  title: string
+  image: string | null
+  summary: string | null
+  tags: string | null
+  version: number
+  created_at: string
+  updated_at: string
+  word_count: number
   content?: string | null
-}
-
-const NoteCard: React.FC<{
-  item: NoteItem
-  onPreview: () => void
-  onEdit: () => void
-  onDelete: () => void
-}> = ({ item, onPreview, onEdit, onDelete }) => {
-  const { token } = theme.useToken()
-
-  const getTagsArray = (tagsStr: string | null): string[] => {
-    if (!tagsStr) return []
-    try {
-      const parsed = JSON.parse(tagsStr)
-      return Array.isArray(parsed) ? parsed : []
-    } catch {
-      return tagsStr
-        .split(',')
-        .map((t) => t.trim())
-        .filter(Boolean)
-    }
-  }
-
-  const tags = getTagsArray(item.tags)
-  const word_count = item.word_count || (item.content ? item.content.replace(/\s/g, '').length : 0)
-
-  return (
-    <Card
-      size="small"
-      hoverable
-      onClick={onPreview}
-      style={{
-        background: token.colorFillAlter,
-        border: `1px solid ${token.colorBorderSecondary}`,
-        minHeight: 180,
-        display: 'flex',
-        flexDirection: 'column',
-        position: 'relative',
-        cursor: 'pointer',
-        overflow: 'hidden'
-      }}
-      styles={{
-        body: {
-          padding: 0,
-          display: 'flex',
-          flexDirection: 'column',
-          flex: 1,
-          position: 'relative',
-          zIndex: 1
-        }
-      }}
-      actions={[
-        <EditOutlined
-          key="edit"
-          onClick={(e) => {
-            e.stopPropagation()
-            onEdit()
-          }}
-        />,
-        <Popconfirm
-          key="delete"
-          title="确定要删除这篇笔记吗？"
-          onConfirm={(e) => {
-            e?.stopPropagation()
-            onDelete()
-          }}
-          okText="确定"
-          cancelText="取消"
-        >
-          <DeleteOutlined onClick={(e) => e.stopPropagation()} />
-        </Popconfirm>
-      ]}
-    >
-      {item.image && (
-        <div
-          style={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            zIndex: 0,
-            opacity: 0.3
-          }}
-        >
-          <img
-            src={item.image}
-            alt={item.title}
-            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-          />
-        </div>
-      )}
-      <div style={{ padding: token.paddingSM, flex: 1, display: 'flex', flexDirection: 'column' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-          <Space align="start" style={{ display: 'flex', alignItems: 'center' }} size="small">
-            <Tag
-              color="blue"
-              style={{ userSelect: 'none', display: 'flex', alignItems: 'center', margin: 0 }}
-            >
-              <RiQuillPenAiLine size={12} />
-              笔记
-            </Tag>
-            <Title level={5} style={{ margin: 0, color: token.colorTextHeading, flex: 1 }}>
-              {item.title}
-            </Title>
-          </Space>
-        </div>
-
-        {item.summary && (
-          <Text
-            type="secondary"
-            style={{
-              marginTop: token.marginXS,
-              fontSize: token.fontSizeSM,
-              fontStyle: 'italic'
-            }}
-          >
-            {item.summary}
-          </Text>
-        )}
-
-        {!item.summary && item.content && (
-          <Text
-            type="secondary"
-            style={{
-              marginTop: token.marginXS,
-              flex: 1,
-              fontSize: token.fontSizeSM
-            }}
-          >
-            {item.content.replace(/[#*`[\]]/g, '').substring(0, 200)}
-          </Text>
-        )}
-
-        {tags.length > 0 && (
-          <div
-            style={{
-              marginTop: token.marginXS,
-              display: 'flex',
-              flexWrap: 'wrap',
-              gap: token.marginXS / 2
-            }}
-          >
-            {tags.slice(0, 3).map((tag, index) => (
-              <Tag
-                key={index}
-                color="processing"
-                style={{ margin: 0, fontSize: token.fontSizeSM - 2 }}
-              >
-                {tag}
-              </Tag>
-            ))}
-            {tags.length > 3 && (
-              <Tag color="default" style={{ margin: 0, fontSize: token.fontSizeSM - 2 }}>
-                +{tags.length - 3}
-              </Tag>
-            )}
-          </div>
-        )}
-
-        <div
-          style={{ display: 'flex', justifyContent: 'space-between', marginTop: token.marginXS }}
-        >
-          <Tag style={{ margin: 0, fontSize: token.fontSizeSM - 2 }}>
-            {new Date(item.updated_at).toLocaleString()}
-          </Tag>
-          <div style={{ display: 'flex', gap: token.marginXS / 2 }}>
-            <Tag style={{ margin: 0, fontSize: token.fontSizeSM - 2 }}>v{item.version}</Tag>
-            {word_count > 0 && (
-              <Tag style={{ margin: 0, fontSize: token.fontSizeSM - 2 }}>{word_count}字</Tag>
-            )}
-          </div>
-        </div>
-      </div>
-    </Card>
-  )
 }
 
 const Index: React.FC = () => {
@@ -197,7 +29,6 @@ const Index: React.FC = () => {
     token: { colorBgContainer, borderRadiusLG }
   } = theme.useToken()
 
-  const [notes, setNotes] = useState<NoteItem[]>([])
   const [filteredNotes, setFilteredNotes] = useState<NoteItem[]>([])
   const [searchText, setSearchText] = useState('')
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
@@ -212,7 +43,10 @@ const Index: React.FC = () => {
   const [page, setPage] = useState(1)
   const [hasMore, setHasMore] = useState(true)
   const [isLoading, setIsLoading] = useState(false)
+  const [masonryKey, setMasonryKey] = useState(0)
   const loadMoreRef = useRef<HTMLDivElement>(null)
+  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const isComposingRef = useRef(false)
 
   const { viewMessage } = useMessage()
 
@@ -221,14 +55,12 @@ const Index: React.FC = () => {
       if (isLoading || (!hasMore && isAppend)) return
       try {
         setIsLoading(true)
-        const result = await (window as unknown as Window).api.notes.getAll(pageNum, 20)
-
+        const result = await (window as unknown as Window).api.notes.getAll(pageNum, 10)
         if (isAppend) {
-          setNotes((prev) => [...prev, ...result.items])
           setFilteredNotes((prev) => [...prev, ...result.items])
         } else {
-          setNotes(result.items)
           setFilteredNotes(result.items)
+          setMasonryKey((prev) => prev + 1)
         }
 
         setHasMore(result.hasMore)
@@ -239,7 +71,7 @@ const Index: React.FC = () => {
         setIsLoading(false)
       }
     },
-    [isLoading, hasMore, viewMessage]
+    [isLoading, hasMore]
   )
 
   const searchNotes = useCallback(
@@ -253,11 +85,11 @@ const Index: React.FC = () => {
           viewMessage(messageKey, 'loading', '正在搜索笔记...')
         }
         const result = await (window as unknown as Window).api.notes.getPage(searchStr, pageNum, 20)
-
         if (isAppend) {
           setFilteredNotes((prev) => [...prev, ...result.items])
         } else {
           setFilteredNotes(result.items)
+          setMasonryKey((prev) => prev + 1)
         }
 
         setHasMore(result.hasMore)
@@ -278,19 +110,73 @@ const Index: React.FC = () => {
     [isLoading, hasMore, viewMessage]
   )
 
+  const executeSearch = useCallback(
+    (text: string) => {
+      if (text.trim()) {
+        setPage(1)
+        setHasMore(true)
+        searchNotes(text, 1, false)
+      } else {
+        setPage(1)
+        setHasMore(true)
+        setFilteredNotes([])
+        setMasonryKey((prev) => prev + 1)
+        setTimeout(() => {
+          loadNotes(1, false)
+        }, 0)
+      }
+    },
+    [searchNotes, loadNotes]
+  )
+
+  const debouncedSearch = useCallback(
+    (text: string) => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current)
+      }
+      debounceTimerRef.current = setTimeout(() => {
+        executeSearch(text)
+      }, 300)
+    },
+    [executeSearch]
+  )
+
+  const handleSearchInputChange = (e: React.ChangeEvent<HTMLInputElement>): void => {
+    const value = e.target.value
+    setSearchText(value)
+    if (!isComposingRef.current) {
+      debouncedSearch(value)
+    }
+  }
+
+  const handleCompositionStart = (): void => {
+    isComposingRef.current = true
+  }
+
+  const handleCompositionEnd = (e: React.CompositionEvent<HTMLInputElement>): void => {
+    isComposingRef.current = false
+    const value = (e.target as HTMLInputElement).value
+    debouncedSearch(value)
+  }
+
+  const handleSearch = (value: string): void => {
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current)
+    }
+    executeSearch(value)
+  }
+
   useEffect(() => {
     loadNotes(1, false).then()
   }, [])
 
   useEffect(() => {
-    if (searchText.trim()) {
-      searchNotes(searchText, 1, false).then()
-    } else {
-      setPage(1)
-      setHasMore(true)
-      setFilteredNotes(notes)
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current)
+      }
     }
-  }, [searchText])
+  }, [])
 
   useEffect(() => {
     const observer = new IntersectionObserver(
@@ -358,18 +244,6 @@ const Index: React.FC = () => {
         setCurrentNote({ ...note, content: fullNote.content })
         setIsNewNote(false)
         setEditTitle(note.title)
-        const getTagsArray = (tagsStr: string | null): string[] => {
-          if (!tagsStr) return []
-          try {
-            const parsed = JSON.parse(tagsStr)
-            return Array.isArray(parsed) ? parsed : []
-          } catch {
-            return tagsStr
-              .split(',')
-              .map((t) => t.trim())
-              .filter(Boolean)
-          }
-        }
         setEditTags(getTagsArray(note.tags))
         setTagInput('')
         setEditImage(fullNote.image)
@@ -490,7 +364,11 @@ const Index: React.FC = () => {
                 enterButton={<SearchOutlined />}
                 size="middle"
                 style={{ width: 300 }}
-                onChange={(e) => setSearchText(e.target.value)}
+                value={searchText}
+                onChange={handleSearchInputChange}
+                onSearch={handleSearch}
+                onCompositionStart={handleCompositionStart}
+                onCompositionEnd={handleCompositionEnd}
               />
               <Button type="primary" icon={<PlusOutlined />} onClick={handleCreateNote}>
                 新建笔记
@@ -522,19 +400,38 @@ const Index: React.FC = () => {
               ) : (
                 <>
                   <Masonry
+                    key={masonryKey}
                     columns={4}
                     gutter={16}
-                    items={filteredNotes.map((item, index) => ({
+                    items={filteredNotes.map((item) => ({
                       key: item.id,
-                      column: index % 4,
                       data: item
                     }))}
                     itemRender={(record) => (
                       <NoteCard
                         item={record.data}
-                        onPreview={() => handlePreviewNote(record.data)}
-                        onEdit={() => handleEditNote(record.data)}
-                        onDelete={() => handleDeleteNote(record.data.id)}
+                        onClick={() => handlePreviewNote(record.data)}
+                        actions={[
+                          <EditOutlined
+                            key="edit"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleEditNote(record.data)
+                            }}
+                          />,
+                          <DeleteOutlined
+                            key="delete"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              Modal.confirm({
+                                title: '确定要删除这篇笔记吗？',
+                                onOk: () => handleDeleteNote(record.data.id),
+                                okText: '确定',
+                                cancelText: '取消'
+                              })
+                            }}
+                          />
+                        ]}
                       />
                     )}
                   />
@@ -555,7 +452,6 @@ const Index: React.FC = () => {
         </div>
       </main>
 
-      {/* 编辑弹窗 */}
       <Modal
         title={isNewNote ? '新建笔记' : '编辑笔记'}
         open={isEditModalOpen}
@@ -643,28 +539,11 @@ const Index: React.FC = () => {
         </div>
       </Modal>
 
-      {/* 预览弹窗 */}
-      <Modal
-        title={currentNote?.title || '笔记预览'}
+      <NotePreviewModal
         open={isPreviewModalOpen}
         onCancel={() => setIsPreviewModalOpen(false)}
-        width="calc(100vw - 137px)"
-        centered={true}
-        maskClosable={false}
-        className="custom-container-scrollbar"
-        styles={{ body: { height: 'calc(100vh - 205px)', overflow: 'auto' } }}
-        footer={null}
-      >
-        <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-          <div style={{ flex: 1, overflow: 'auto' }}>
-            {currentNote?.content ? (
-              <MarkdownView content={currentNote.content} />
-            ) : (
-              <Empty description="暂无内容" />
-            )}
-          </div>
-        </div>
-      </Modal>
+        currentNote={currentNote}
+      />
     </div>
   )
 }

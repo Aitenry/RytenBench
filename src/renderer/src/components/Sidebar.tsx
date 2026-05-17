@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { theme, Menu, Input, Card, Button, Space, Slider, Select } from 'antd'
+import { theme, Menu, Card, Button, Space, Slider, Select } from 'antd'
 import type { MenuProps } from 'antd'
 import {
   RiDashboardLine,
@@ -9,14 +9,12 @@ import {
   RiSunCloudyLine,
   RiMusicLine,
   RiBook2Line,
-  RiSearchLine,
   RiToolsLine,
   RiPlayLine,
   RiPauseLine,
   RiSkipLeftLine,
   RiSkipRightLine,
   RiFileListLine,
-  RiPriceTag3Line,
   RiDatabase2Line,
   RiBubbleChartLine,
   RiCodeSSlashLine,
@@ -48,17 +46,14 @@ const Sidebar: React.FC<SidebarProps> = ({ currentKey, setCurrentKey }) => {
       key: 'notes',
       label: '笔记',
       icon: <RiQuillPenAiLine size={18} />,
-      children: [
-        { key: 'notes/all', label: '所有笔记', icon: <RiFileListLine size={18} /> },
-        { key: 'notes/tags', label: '标签管理', icon: <RiPriceTag3Line size={18} /> }
-      ]
+      children: [{ key: 'notes/manage', label: '所有笔记', icon: <RiFileListLine size={18} /> }]
     },
     {
       key: 'knowledge',
       label: '知识',
       icon: <RiBook2Line size={18} />,
       children: [
-        { key: 'knowledge/base', label: '知识库', icon: <RiDatabase2Line size={18} /> },
+        { key: 'knowledge/manage', label: '知识库', icon: <RiDatabase2Line size={18} /> },
         { key: 'knowledge/graph', label: '知识图谱', icon: <RiBubbleChartLine size={18} /> }
       ]
     },
@@ -173,17 +168,8 @@ const Sidebar: React.FC<SidebarProps> = ({ currentKey, setCurrentKey }) => {
         }}
       >
         {/* Logo */}
-        <div className="flex items-center justify-center pt-4 pb-2">
+        <div className="flex items-center justify-center py-3">
           <img alt="logo" style={{ height: '40px', imageRendering: 'crisp-edges' }} src={Logo} />
-        </div>
-
-        {/* 搜索框 */}
-        <div className="px-4 mb-4">
-          <Input
-            placeholder="搜索..."
-            prefix={<RiSearchLine size={16} />}
-            style={{ width: '100%' }}
-          />
         </div>
 
         {/* 主菜单区域 - 可滚动，添加自定义滚动条类名 */}

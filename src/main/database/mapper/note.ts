@@ -12,16 +12,6 @@ export interface NoteRow {
   updated_at: string
 }
 
-export interface NoteContentRow {
-  id: number
-  note_id: number
-  image: string | null
-  content: string | null
-  chunk_key: string | null
-  created_at: string
-  updated_at: string
-}
-
 export interface NoteListItem {
   id: number
   title: string
@@ -88,7 +78,7 @@ async function getNoteById(id: number): Promise<NoteWithContent | null> {
 
 async function getAllNotes(
   page: number = 1,
-  pageSize: number = 20
+  pageSize: number = 10
 ): Promise<PaginatedResult<NoteListItem>> {
   let db: sqlite3.Database | null = null
   try {
