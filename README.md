@@ -1,146 +1,126 @@
-# RytenBench - Lightweight Personal AI Workbench
+<p align="center">
+  <img src="./resources/icon.png" alt="RytenBench Logo" width="120" />
+</p>
 
-RytenBench is a lightweight AI workbench designed specifically for individual users, integrating various commonly used functions in daily work and study, aimed at improving personal efficiency and productivity. It is built as a cross-platform desktop application using Electron, React, and TypeScript.
+<h1 align="center">RytenBench</h1>
 
-## Features
+> A modern personal productivity desktop application built with Electron, React, and TypeScript.
 
-- **Lightweight Design**: Clean interface design, fast loading, low resource consumption
-- **Multi-Function Integration**: Integrate multiple commonly used tools in one platform
-- **AI Powered**: Integrated AI functions, providing intelligent assistance
-- **Cross-Platform**: Runs natively on Windows, macOS, and Linux
-- **Personalization**: Support for personalized settings and customization
+<p align="center">
+  <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blue" alt="Platform" />
+  <img src="https://img.shields.io/badge/electron-38.x-9feaf9" alt="Electron" />
+  <img src="https://img.shields.io/badge/react-19.x-61dafb" alt="React" />
+  <img src="https://img.shields.io/badge/typescript-5.9-3178c6" alt="TypeScript" />
+  <img src="https://img.shields.io/badge/license-MIT-green" alt="License" />
+</p>
 
-## Function Modules
+## ✨ Features
 
-### 📊 Dashboard
-- Workbench overview
-- Quick access entry
-- Personal data statistics
+- **📝 Notes** — Create, edit, and manage markdown notes with full CRUD support and image embedding.
+- **📚 Knowledge Base** — Organize notes into wikis with a directory tree structure and knowledge graph visualization.
+- **📅 Planner** — Schedule overview and todo management with priority and due-date tracking.
+- **🤖 AI Chat Assistant** — Built-in AI chat powered by LangChain with streaming response, deep thinking, and smart search.
+- **🔧 Developer Tools** — MCP repository browser and API calling interface.
+- **🌤️ Weather** — Local weather display with real-time information.
+- **🎵 Music Player** — Built-in mini music player widget.
+- **🔒 Lock Screen** — Privacy protection with password-based lock screen.
+- **🔍 Full-Text Search** — Fast local search powered by FlexSearch with SQLite indexing.
+- **🎨 Modern UI** — Clean interface built with Ant Design 6 and Tailwind CSS 4.
+- **✈️ Cross-Platform** — Runs on Windows, macOS, and Linux.
 
-### 📝 Index
-- Smart note-taking
-- AI-assisted writing
-- Note classification management
+## 🛠️ Tech Stack
 
-### 🧠 Index
-- Index base management
-- Intelligent knowledge organization
-- Index graph construction
+| Layer           | Technology                                                                |
+| --------------- | ------------------------------------------------------------------------- |
+| Framework       | [Electron](https://www.electronjs.org/) 38                                |
+| Frontend        | [React](https://react.dev/) 19 + [TypeScript](https://www.typescriptlang.org/) 5.9 |
+| Build Tool      | [electron-vite](https://electron-vite.org/) 4                             |
+| UI Library      | [Ant Design](https://ant.design/) 6 + [Tailwind CSS](https://tailwindcss.com/) 4 |
+| Routing         | [React Router](https://reactrouter.com/) 7                                |
+| Markdown        | [react-markdown](https://github.com/remarkjs/react-markdown) 10 + [@uiw/react-md-editor](https://uiwjs.github.io/react-md-editor/) 4 |
+| AI / LLM        | [LangChain](https://www.langchain.com/) + [@langchain/openai](https://js.langchain.com/) |
+| Database        | [PGLite](https://pglite.dev/) + [SQLite3](https://www.sqlite.org/)       |
+| Search Engine   | [FlexSearch](https://github.com/nextapps-de/flexsearch)                   |
+| Icons           | [Remix Icon](https://remixicon.com/)                                      |
+| Packaging       | [electron-builder](https://www.electron.build/)                           |
 
-### 📅 Planner
-- Schedule arrangement
-- Task management
-- Time planning
+## 📂 Project Structure
 
-### 🔧 Tools
-- Utility tool collection
-- Efficiency enhancement tools
-- Convenient mini tools
+```
+RytenBench/
+├── src/
+│   ├── main/                  # Electron main process
+│   │   ├── address/           # IP address utilities
+│   │   ├── chat/              # AI chat service (LangChain)
+│   │   ├── database/          # SQLite database & mappers
+│   │   ├── search/            # FlexSearch indexer
+│   │   └── index.ts           # Main entry & IPC handlers
+│   ├── preload/               # Preload scripts
+│   └── renderer/              # Renderer process (React UI)
+│       ├── resource/          # Static HTML & assets
+│       └── src/
+│           ├── assets/        # Images & CSS
+│           ├── components/    # Shared components
+│           ├── hooks/         # Custom React hooks
+│           ├── providers/     # Context providers
+│           ├── route/         # Route configuration
+│           ├── utils/         # Utility functions
+│           └── views/         # Page views
+│               ├── chat/      # AI Chat
+│               ├── home/      # Dashboard
+│               ├── knowledge/ # Knowledge base & graph
+│               ├── music/     # Music player
+│               ├── notes/     # Note management
+│               ├── planner/   # Schedule & todos
+│               ├── tools/     # MCP & API tools
+│               └── weather/   # Weather display
+├── resources/                 # Application icons
+├── package.json
+├── electron-builder.yml       # Build configuration
+├── electron.vite.config.ts    # Vite bundler config
+└── tsconfig.json
+```
 
-### ☀️ Index
-- Real-time weather information
-- Index forecast
-- Life index
-
-### 🎵 Index
-- Background music playback
-- Focus music recommendations
-- Index playback control
-
-## Tech Stack
-
-- **Desktop Framework**: [Electron](https://www.electronjs.org/)
-- **Build Tooling**: [electron-vite](https://electron-vite.org) (Next Generation Electron Build Tooling)
-- **Frontend Framework**: React (v19)
-- **Language**: TypeScript
-- **UI Library**: Ant Design (v5)
-- **Icons**: Remix Icon
-- **Styling**: Tailwind CSS
-- **Packaging**: electron-builder
-- **Routing**: React Router DOM
-
-## Installation & Usage
+## 🚀 Getting Started
 
 ### Prerequisites
 
-- Node.js (>=18.0.0 recommended based on dependencies)
-- pnpm
+- [Node.js](https://nodejs.org/) >= 18
+- [pnpm](https://pnpm.io/) (recommended)
 
-### Installation Steps
+### Installation
 
-1.  Clone the project:
-    ```bash
-    git clone <repository-url>
-    cd RytenBench
-    ```
+```bash
+# Clone the repository
+git clone https://github.com/Aitenry/RytenBench.git
+cd RytenBench
 
-2.  Install dependencies (using pnpm is recommended based on the `pnpm` section in `package.json`):
-    ```bash
-    pnpm install
-    # Or if pnpm is not installed globally:
-    # npx pnpm install
-    ```
+# Install dependencies
+pnpm install
+```
 
-3.  **Development Mode**: To start the application in development mode with hot reloading:
-    ```bash
-    pnpm dev
-    ```
+### Development
 
-4.  **Preview Production Build**: To build the application and run a preview:
-    ```bash
-    pnpm start
-    ```
+```bash
+# Start development server
+pnpm dev
+```
 
-5.  **Build for Production**: To create distributable packages for your platform:
-    ```bash
-    # For Windows:
-    pnpm build:win
+### Build
 
-    # For macOS:
-    pnpm build:mac
+```bash
+# Build for Windows
+pnpm build:win
 
-    # For Linux:
-    pnpm build:linux
+# Build for macOS
+pnpm build:mac
 
-    # For a platform-specific unpacked directory (for testing):
-    pnpm build:unpack
-    ```
+# Build for Linux
+pnpm build:linux
+```
 
-## Project Structure & Scripts
+## 📄 License
 
-- **`main`**: Points to the compiled Electron main process entry point (`./out/main/index.js`).
-- **`scripts`**:
-  - `dev`: Starts the application in development mode using `electron-vite dev`.
-  - `start`: Builds and previews the production build using `electron-vite preview`.
-  - `build`: Runs type checks and then builds the application using `electron-vite build`.
-  - `build:win/mac/linux/unpack`: Scripts to build distributable packages for specific platforms using `electron-builder`.
-  - `typecheck`: Runs TypeScript type checks for both main and renderer processes.
-  - `lint`: Lints the codebase using ESLint.
-  - `format`: Formats the codebase using Prettier.
-  - `postinstall`: Runs `electron-builder install-app-deps` after dependencies are installed.
+[MIT](./LICENSE) © [Aitenry](https://github.com/Aitenry)
 
-## Main Components
 
-### Header Component
-
-Top navigation bar component, including:
-
-- **Logo Area**: Displays RytenBench brand identity
-- **Main Menu**: Quick access to 7 core function modules
-- **Search Function**: Global search box
-- **User Menu**: User-related operations (settings, notifications, messages, logout)
-
-## Design Philosophy
-
-RytenBench adopts a simple and intuitive interface design, using a combination of icons and text to allow users to quickly understand and use various functions. The overall design follows modern UI/UX principles, focusing on user experience and operational efficiency. Built with Electron, it provides a native desktop application experience across different operating systems.
-
-## Contributing
-
-Welcome to submit Issues and Pull Requests to help improve RytenBench.
-
-## Support
-
-For help or suggestions, please contact us through the following methods:
-
-- Author: [Aitenry](https://github.com/Aitenry)
-- Build Tooling: [electron-vite](https://electron-vite.org)

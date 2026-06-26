@@ -3,6 +3,7 @@ import { electronAPI } from '@electron-toolkit/preload'
 import { TodoItemRow } from '../main/database/mapper/todo'
 import { NoteRow } from '../main/database/mapper/note'
 import { WikiRow, WikiDirectoryRow } from '../main/database/mapper/wiki'
+import { ChatTopicRow, ChatDialogueRow } from '../main/database/mapper/chat'
 
 // Custom APIs for renderer
 const api = {
@@ -73,18 +74,96 @@ const api = {
     setLockScreenView: (open: boolean) => ipcRenderer.invoke('lock-screen-view', open)
   },
   chat: {
-    sendMessage: (message: string, options?: { deepThinking?: boolean; smartSearch?: boolean }) =>
-      ipcRenderer.invoke('chat-send-message', message, options),
-    startMessageStream: (message: string, options?: { deepThinking?: boolean; smartSearch?: boolean }) => {
+    sendMessage: (
+      message: string,
+      options?: { deepThinking?: boolean; smartSearch?: boolean; tools?: string[] }
+    ) => ipcRenderer.invoke('chat-send-message', message, options),
+    startMessageStream: (
+      message: string,
+      options?: {
+        deepThinking?: boolean
+        smartSearch?: boolean
+        tools?: string[]
+        topicId?: number
+      }
+    ) => {
       ipcRenderer.send('chat-start-stream', message, options)
     },
-    onStreamChunk: (callback: (chunk: any) => void) => {
-      // 先移除所有旧的监听器
+    getTools: () => ipcRenderer.invoke('chat-get-tools'),
+    onStreamChunk: (callback: (chunk: Record<string, unknown>) => void) => {
       ipcRenderer.removeAllListeners('chat-stream-chunk')
-      // 添加新的监听器
       ipcRenderer.on('chat-stream-chunk', (_event, chunk) => callback(chunk))
       return () => {
         ipcRenderer.removeAllListeners('chat-stream-chunk')
+      }
+    },
+    onStreamDone: (callback: (result: { topicId: number }) => void) => {
+      ipcRenderer.removeAllListeners('chat-stream-done')
+      ipcRenderer.on('chat-stream-done', (_event, result) => callback(result))
+      return () => {
+        ipcRenderer.removeAllListeners('chat-stream-done')
+      }
+    },
+    // 话题管理
+    getAllTopics: () => ipcRenderer.invoke('chat-topic-get-all'),
+    getTopicById: (id: number) => ipcRenderer.invoke('chat-topic-get-by-id', id),
+    createTopic: (title: string, model?: string, selectedTools?: string) =>
+      ipcRenderer.invoke('chat-topic-create', title, model, selectedTools),
+    updateTopic: (
+      id: number,
+      updates: Partial<Pick<ChatTopicRow, 'title' | 'model' | 'selected_tools'>>
+    ) => ipcRenderer.invoke('chat-topic-update', id, updates),
+    deleteTopic: (id: number) => ipcRenderer.invoke('chat-topic-delete', id),
+    // 消息管理
+    getDialoguesByTopic: (topicId: number) =>
+      ipcRenderer.invoke('chat-dialogue-get-by-topic', topicId),
+    addDialogue: (dialogue: Omit<ChatDialogueRow, 'id' | 'created_at'>) =>
+      ipcRenderer.invoke('chat-dialogue-add', dialogue),
+    deleteDialoguesByTopic: (topicId: number) =>
+      ipcRenderer.invoke('chat-dialogue-delete-by-topic', topicId)
+  },
+  graph: {
+    getData: (wikiId: number, typeFilter?: string) =>
+      ipcRenderer.invoke('graph-data-get', wikiId, typeFilter),
+    getEntity: (entityId: number) => ipcRenderer.invoke('graph-entity-get', entityId),
+    searchEntities: (wikiId: number, query: string) =>
+      ipcRenderer.invoke('graph-entity-search', wikiId, query),
+    updateEntity: (id: number, updates: Record<string, unknown>) =>
+      ipcRenderer.invoke('graph-entity-update', id, updates),
+    deleteEntity: (id: number) => ipcRenderer.invoke('graph-entity-delete', id),
+    deleteRelation: (id: number) => ipcRenderer.invoke('graph-relation-delete', id),
+    getBuildStatus: (wikiId: number) => ipcRenderer.invoke('graph-build-status', wikiId),
+    buildGraph: (wikiId: number, config?: Record<string, unknown>) => {
+      ipcRenderer.send('graph-build-start', wikiId, config)
+    },
+    onBuildProgress: (
+      callback: (progress: {
+        phase: string
+        processedNotes: number
+        totalNotes: number
+        message: string
+      }) => void
+    ) => {
+      ipcRenderer.removeAllListeners('graph-build-progress')
+      ipcRenderer.on('graph-build-progress', (_event, progress) => callback(progress))
+      return () => {
+        ipcRenderer.removeAllListeners('graph-build-progress')
+      }
+    },
+    onBuildComplete: (
+      callback: (result: { wikiId: number; entityCount: number; relationCount: number }) => void
+    ) => {
+      ipcRenderer.removeAllListeners('graph-build-complete')
+      ipcRenderer.on('graph-build-complete', (_event, result) => callback(result))
+      return () => {
+        ipcRenderer.removeAllListeners('graph-build-complete')
+      }
+    },
+    onBuildError: (callback: (error: { wikiId: number; error: string }) => void) => {
+      ipcRenderer.removeAllListeners('graph-build-error')
+      ipcRenderer.on('graph-build-error', (_event, error) => callback(error))
+      return () => {
+        ipcRenderer.removeAllListeners('graph-build-error')
       }
     }
   }

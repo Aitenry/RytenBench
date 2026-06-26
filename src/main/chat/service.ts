@@ -1,4 +1,4 @@
-import { StructuredTool } from 'langchain'
+import type { StructuredToolInterface } from '@langchain/core/tools'
 import { ChatOpenAI } from '@langchain/openai'
 import { Runnable } from '@langchain/core/runnables'
 import { BaseMessage, HumanMessage, ToolMessage } from '@langchain/core/messages'
@@ -8,14 +8,14 @@ import { ChatOptions, StructuredMessage } from './types'
 class ChatService {
   private model: ChatOpenAI | null = null
   private modelWithTools: Runnable | null = null
-  private toolsMap: Map<string, StructuredTool> = new Map()
+  private toolsMap: Map<string, StructuredToolInterface> = new Map()
 
-  constructor(tools: StructuredTool[] = [], modelConfig?: Partial<ChatOpenAI['fields']>) {
+  constructor(tools: StructuredToolInterface[] = [], modelConfig?: Partial<ChatOpenAI['fields']>) {
     this.initializeModel(tools, modelConfig)
   }
 
   private initializeModel(
-    tools: StructuredTool[],
+    tools: StructuredToolInterface[],
     modelConfig?: Partial<ChatOpenAI['fields']>
   ): void {
     try {
@@ -24,11 +24,11 @@ class ChatService {
       }
 
       this.model = new ChatOpenAI({
-        model: 'qwen3:8b',
+        model: 'deepseek-v4-flash',
         configuration: {
-          baseURL: 'http://localhost:11434/v1'
+          baseURL: 'https://api.deepseek.com/v1'
         },
-        apiKey: '',
+        apiKey: 'sk-528729a68e224c06848e7971fba9ddba',
         temperature: 0.7,
         ...modelConfig
       })
@@ -136,7 +136,10 @@ class ChatService {
    * @param options 可选配置
    * @returns 异步生成器，返回 StructuredMessage
    */
-  async *sendMessageStream(message: string, options?: ChatOptions): AsyncGenerator<StructuredMessage> {
+  async *sendMessageStream(
+    message: string,
+    options?: ChatOptions
+  ): AsyncGenerator<StructuredMessage> {
     if (!this.modelWithTools) {
       throw new Error('Chat model is not initialized')
     }

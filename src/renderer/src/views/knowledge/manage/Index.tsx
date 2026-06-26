@@ -484,16 +484,18 @@ const Index: React.FC = () => {
                 padding: '0 6px'
               }}
             >
-              <Flex vertical gap={16}>
+              <Flex vertical gap={16} style={{ height: '100%' }}>
                 {wikis.length === 0 && !isLoading ? (
-                  <Empty
-                    description="暂无知识库，点击新建知识库开始"
-                    image={Empty.PRESENTED_IMAGE_SIMPLE}
-                  >
-                    <Button type="primary" icon={<PlusOutlined />} onClick={handleCreateWiki}>
-                      新建知识库
-                    </Button>
-                  </Empty>
+                  <Flex flex={1} justify="center" align="center">
+                    <Empty
+                      description="暂无知识库，点击新建知识库开始"
+                      image={Empty.PRESENTED_IMAGE_SIMPLE}
+                    >
+                      <Button type="primary" icon={<PlusOutlined />} onClick={handleCreateWiki}>
+                        新建知识库
+                      </Button>
+                    </Empty>
+                  </Flex>
                 ) : (
                   <>
                     <Masonry

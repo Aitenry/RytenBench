@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react'
-import { theme, Input, Button, Tooltip } from 'antd'
+import { theme, Input, Button, Tooltip, Select, Tag } from 'antd'
+import type { TextAreaRef } from 'antd/es/input/TextArea'
 import {
   RiArrowUpLine,
   RiLoader4Line,
@@ -8,13 +9,23 @@ import {
   RiThumbUpLine,
   RiThumbDownLine,
   RiRefreshLine,
-  RiSparklingLine,
-  RiSearchAi2Line
+  RiSunCloudyLine,
+  RiTimeLine,
+  RiAddLine,
+  RiHistoryLine,
+  RiDeleteBin6Line,
+  RiSidebarFoldLine,
+  RiSidebarUnfoldLine
 } from '@remixicon/react'
+import { ChatDialogueRow, ChatTopicRow } from '../../../../main/database/mapper/chat'
 import MarkdownLoad from '@renderer/components/MarkdownLoad'
-import { Window } from '../../../resource/types/window'
+import { Window, ToolInfo } from '../../../resource/types/window'
 import { Collapse } from 'antd'
-import type { CollapseProps } from 'antd'
+
+const toolIconMap: Record<string, React.ReactNode> = {
+  RiSunCloudyLine: <RiSunCloudyLine size={16} />,
+  RiTimeLine: <RiTimeLine size={16} />
+}
 
 interface ToolCall {
   name: string
@@ -22,10 +33,17 @@ interface ToolCall {
   output: string
 }
 
+interface MessageBlock {
+  type: 'text' | 'tool'
+  text?: string
+  tool?: ToolCall
+}
+
 interface Message {
   id: string
   role: 'user' | 'assistant'
   content: string
+  blocks: MessageBlock[]
   timestamp: number
   toolCalls?: ToolCall[]
   loading?: boolean
@@ -38,13 +56,17 @@ const Index: React.FC = () => {
 
   const [messages, setMessages] = useState<Message[]>([])
   const [inputValue, setInputValue] = useState('')
-  const [isDeepThinking, setIsDeepThinking] = useState(false)
-  const [isSmartSearch, setIsSmartSearch] = useState(false)
+  const [selectedTools, setSelectedTools] = useState<string[]>([])
+  const [availableTools, setAvailableTools] = useState<ToolInfo[]>([])
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const textareaRef = useRef<TextAreaRef>(null)
   const streamTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const currentSessionIdRef = useRef<string | null>(null)
+  const currentTopicIdRef = useRef<number | null>(null)
+  const [currentTopicId, setCurrentTopicId] = useState<number | null>(null)
+  const [topics, setTopics] = useState<ChatTopicRow[]>([])
+  const [sidebarOpen, setSidebarOpen] = useState(true)
 
   const scrollToBottom = (): void => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -55,12 +77,78 @@ const Index: React.FC = () => {
   }, [messages])
 
   useEffect(() => {
-    // 组件卸载时清理超时和监听器
+    ;(window as unknown as Window).api.chat.getTools().then(setAvailableTools).catch(console.error)
+  }, [])
+
+  // 加载话题列表
+  const refreshTopics = async (): Promise<void> => {
+    try {
+      const list = await (window as unknown as Window).api.chat.getAllTopics()
+      setTopics(list)
+    } catch (err) {
+      console.error('Failed to load topics:', err)
+    }
+  }
+
+  useEffect(() => {
+    refreshTopics().then()
+  }, [])
+
+  // 选择话题并加载历史消息
+  const handleSelectTopic = async (topic: ChatTopicRow): Promise<void> => {
+    if (messages.some((msg) => msg.loading)) return // 正在生成中不允许切换
+
+    currentTopicIdRef.current = topic.id
+    setCurrentTopicId(topic.id)
+
+    // 恢复工具选择
+    if (topic.selected_tools) {
+      try {
+        setSelectedTools(JSON.parse(topic.selected_tools))
+      } catch {
+        setSelectedTools([])
+      }
+    } else {
+      setSelectedTools([])
+    }
+
+    try {
+      const dialogues: ChatDialogueRow[] = await (
+        window as unknown as Window
+      ).api.chat.getDialoguesByTopic(topic.id)
+      const loadedMessages: Message[] = dialogues.map((d) => ({
+        id: String(d.id),
+        role: d.role,
+        content: d.content,
+        blocks: d.blocks ? JSON.parse(d.blocks) : [],
+        timestamp: new Date(d.created_at).getTime(),
+        loading: false
+      }))
+      setMessages(loadedMessages)
+    } catch (err) {
+      console.error('Failed to load dialogues:', err)
+    }
+  }
+
+  // 删除话题
+  const handleDeleteTopic = async (topicId: number, e: React.MouseEvent): Promise<void> => {
+    e.stopPropagation()
+    try {
+      await (window as unknown as Window).api.chat.deleteTopic(topicId)
+      if (currentTopicIdRef.current === topicId) {
+        handleNewChat()
+      }
+      await refreshTopics()
+    } catch (err) {
+      console.error('Failed to delete topic:', err)
+    }
+  }
+
+  useEffect(() => {
     return () => {
       if (streamTimeoutRef.current) {
         clearTimeout(streamTimeoutRef.current)
       }
-      // 清理之前的监听器
       ;(window as unknown as Window).api.chat.onStreamChunk(() => {})
     }
   }, [])
@@ -76,21 +164,21 @@ const Index: React.FC = () => {
   }
 
   const handleSend = async (): Promise<void> => {
-    // 检查是否有正在加载的消息
     const hasLoadingMessage = messages.some((msg) => msg.loading)
     if (!inputValue.trim() || hasLoadingMessage) return
 
+    // 用户消息（仅 UI，持久化由主进程处理）
     const userMessage: Message = {
       id: Date.now().toString(),
       role: 'user',
       content: inputValue.trim(),
+      blocks: [],
       timestamp: Date.now()
     }
 
     setMessages((prev) => [...prev, userMessage])
     setInputValue('')
 
-    // 初始化 AI 消息和当前会话 ID
     const aiMessageId = (Date.now() + 1).toString()
     currentSessionIdRef.current = aiMessageId
 
@@ -98,18 +186,18 @@ const Index: React.FC = () => {
       id: aiMessageId,
       role: 'assistant',
       content: '',
+      blocks: [],
       timestamp: Date.now(),
       toolCalls: [],
       loading: true
     }
     setMessages((prev) => [...prev, initialAiMessage])
 
-    // 清除之前的超时
     if (streamTimeoutRef.current) {
       clearTimeout(streamTimeoutRef.current)
     }
 
-    // 设置超时，5秒后自动结束加载状态
+    // 安全兜底超时（仅设 loading=false，主进程已负责持久化）
     const resetTimeout = (): void => {
       if (streamTimeoutRef.current) {
         clearTimeout(streamTimeoutRef.current)
@@ -122,57 +210,79 @@ const Index: React.FC = () => {
     }
 
     try {
-      // 清理之前的监听器
+      // 清理旧监听器，注册 chunk 回调
       ;(window as unknown as Window).api.chat.onStreamChunk(() => {})
-
-      // 注册新的流式回调
       ;(window as unknown as Window).api.chat.onStreamChunk((chunk) => {
-        // 检查是否是当前会话的消息
         if (currentSessionIdRef.current !== aiMessageId) {
           return
         }
-        // 每次收到块时重置超时
         resetTimeout()
 
         setMessages((prev) =>
           prev.map((msg) => {
             if (msg.id !== aiMessageId) return msg
 
-            let updatedContent = msg.content
-            let updatedToolCalls = msg.toolCalls || []
+            const updatedContent = chunk.content ? msg.content + chunk.content : msg.content
+            const updatedToolCalls = chunk.tool
+              ? [...(msg.toolCalls || []), chunk.tool]
+              : msg.toolCalls || []
+            const updatedBlocks = [...msg.blocks]
 
             if (chunk.content) {
-              updatedContent += chunk.content
+              const lastBlock = updatedBlocks[updatedBlocks.length - 1]
+              if (lastBlock && lastBlock.type === 'text') {
+                updatedBlocks[updatedBlocks.length - 1] = {
+                  type: 'text',
+                  text: (lastBlock.text || '') + chunk.content
+                }
+              } else {
+                updatedBlocks.push({ type: 'text', text: chunk.content })
+              }
             }
 
             if (chunk.tool) {
-              updatedToolCalls = [
-                ...updatedToolCalls,
-                {
+              updatedBlocks.push({
+                type: 'tool',
+                tool: {
                   name: chunk.tool.name,
                   input: chunk.tool.input,
                   output: chunk.tool.output
                 }
-              ]
+              })
             }
 
             return {
               ...msg,
               content: updatedContent,
-              toolCalls: updatedToolCalls.length > 0 ? updatedToolCalls : undefined,
-              loading: false
+              blocks: updatedBlocks,
+              toolCalls: updatedToolCalls.length > 0 ? updatedToolCalls : undefined
             }
           })
         )
       })
 
-      // 启动流式请求
-      ;(window as unknown as Window).api.chat.startMessageStream(userMessage.content, {
-        deepThinking: isDeepThinking,
-        smartSearch: isSmartSearch
+      // 注册流结束回调（主进程持久化完成后通知）
+      ;(window as unknown as Window).api.chat.onStreamDone(({ topicId }) => {
+        if (currentSessionIdRef.current !== aiMessageId) return
+        if (streamTimeoutRef.current) {
+          clearTimeout(streamTimeoutRef.current)
+        }
+        // 更新话题 ID
+        currentTopicIdRef.current = topicId
+        setCurrentTopicId(topicId)
+        refreshTopics()
+        // 设置 loading 为 false
+        setMessages((prev) =>
+          prev.map((msg) => (msg.id === aiMessageId ? { ...msg, loading: false } : msg))
+        )
       })
 
-      // 启动初始超时
+      // 发起流式请求，传递当前话题 ID（主进程负责创建/复用话题 + 保存消息）
+      ;(window as unknown as Window).api.chat.startMessageStream(userMessage.content, {
+        tools: selectedTools,
+        topicId: currentTopicIdRef.current ?? undefined
+      })
+
       resetTimeout()
     } catch (error) {
       console.error('Error sending message:', error)
@@ -180,6 +290,7 @@ const Index: React.FC = () => {
         id: aiMessageId,
         role: 'assistant',
         content: '抱歉，发生了错误，请稍后重试。',
+        blocks: [],
         timestamp: Date.now(),
         loading: false
       }
@@ -188,6 +299,14 @@ const Index: React.FC = () => {
         clearTimeout(streamTimeoutRef.current)
       }
     }
+  }
+
+  const handleNewChat = (): void => {
+    setMessages([])
+    setCurrentTopicId(null)
+    currentTopicIdRef.current = null
+    setInputValue('')
+    setSelectedTools([])
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
@@ -210,7 +329,6 @@ const Index: React.FC = () => {
   const AssistantMessage = ({ message }: { message: Message }): React.ReactNode => {
     const isCopied = copiedId === message.id
 
-    // 如果消息正在加载，显示加载状态
     if (
       message.loading &&
       !message.content &&
@@ -219,42 +337,65 @@ const Index: React.FC = () => {
       return <LoadingMessage />
     }
 
-    // 构建折叠面板的 items
-    const collapseItems: CollapseProps['items'] =
-      message.toolCalls?.map((tool, index) => ({
-        key: index,
-        label: `${tool.name}`,
-        children: (
-          <div>
-            <div className="font-medium text-gray-700 mb-1">输入：</div>
-            <pre className="bg-gray-100 p-2 rounded text-sm overflow-x-auto">
-              {JSON.stringify(tool.input, null, 2)}
-            </pre>
-            <div className="font-medium text-gray-700 mt-2 mb-1">输出：</div>
-            <pre className="bg-gray-100 p-2 rounded text-sm overflow-x-auto whitespace-pre-wrap">
-              {tool.output}
-            </pre>
-          </div>
-        )
-      })) || []
+    // 按时间顺序渲染 blocks（text / tool 交替）
+    const renderBlocks = (): React.ReactNode => {
+      if (message.blocks.length === 0) {
+        // fallback: 无 blocks 时使用 content
+        if (message.content) {
+          return (
+            <div className="text-gray-800 mb-2">
+              <MarkdownLoad content={message.content} isDarkMode={false} />
+            </div>
+          )
+        }
+        return null
+      }
 
-    return (
-      <div className="flex mb-6">
-        <div className="max-w-[85%] w-full">
-          {/* 工具调用折叠面板 */}
-          {collapseItems.length > 0 && (
+      return message.blocks.map((block, index) => {
+        if (block.type === 'text' && block.text) {
+          return (
+            <div key={index} className="text-gray-800 mb-2">
+              <MarkdownLoad content={block.text} isDarkMode={false} />
+            </div>
+          )
+        }
+        if (block.type === 'tool' && block.tool) {
+          return (
             <Collapse
-              items={collapseItems}
+              key={index}
+              items={[
+                {
+                  key: index,
+                  label: `${block.tool.name}`,
+                  children: (
+                    <div>
+                      <div className="font-medium text-gray-700 mb-1">输入：</div>
+                      <pre className="bg-gray-100 p-2 rounded text-sm overflow-x-auto">
+                        {JSON.stringify(block.tool.input, null, 2)}
+                      </pre>
+                      <div className="font-medium text-gray-700 mt-2 mb-1">输出：</div>
+                      <pre className="bg-gray-100 p-2 rounded text-sm overflow-x-auto whitespace-pre-wrap">
+                        {block.tool.output}
+                      </pre>
+                    </div>
+                  )
+                }
+              ]}
               defaultActiveKey={[]}
               size="small"
               style={{ marginBottom: '6px' }}
               className="bg-gray-50 rounded-lg border-0"
             />
-          )}
-          {/* 主要内容 */}
-          <div className="text-gray-800">
-            <MarkdownLoad content={message.content} isDarkMode={false} />
-          </div>
+          )
+        }
+        return null
+      })
+    }
+
+    return (
+      <div className="flex mb-6">
+        <div className="max-w-[85%] w-full">
+          {renderBlocks()}
           <div className="flex items-center gap-2 mt-3">
             <Tooltip title={isCopied ? '已复制' : '复制'}>
               <button
@@ -288,24 +429,16 @@ const Index: React.FC = () => {
   const LoadingMessage = (): React.ReactNode => (
     <div className="flex mb-6">
       <div className="max-w-[85%]">
-        <div className="text-gray-800">
-          {isDeepThinking && (
-            <div className="flex items-center gap-2 text-sm text-gray-500 mb-2">
-              <RiSparklingLine size={16} className="animate-pulse" />
-              <span>深度思考中...</span>
-            </div>
-          )}
-          <div className="flex items-center gap-2">
-            <RiLoader4Line size={16} className="animate-spin text-gray-500" />
-            <span className="text-gray-500">正在生成...</span>
-          </div>
+        <div className="flex items-center gap-2 text-gray-500">
+          <RiLoader4Line size={16} className="animate-spin" />
+          <span>正在生成...</span>
         </div>
       </div>
     </div>
   )
 
   return (
-    <div className="h-full flex-1 flex flex-col">
+    <div className="h-full flex-1 flex">
       <style>{`
         .chat-scrollbar::-webkit-scrollbar {
           width: 6px;
@@ -344,14 +477,95 @@ const Index: React.FC = () => {
           scrollbar-width: thin;
           scrollbar-color: rgba(0, 0, 0, 0.1) transparent;
         }
+        .history-scrollbar::-webkit-scrollbar {
+          width: 4px;
+        }
+        .history-scrollbar::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        .history-scrollbar::-webkit-scrollbar-thumb {
+          background: rgba(0, 0, 0, 0.1);
+          border-radius: 2px;
+        }
+        .history-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: rgba(0, 0, 0, 0.2);
+        }
       `}</style>
+
+      {/* 历史记录侧边栏 */}
+      <div
+        className="flex flex-col border-r border-gray-100 transition-all duration-200 overflow-hidden"
+        style={{
+          width: sidebarOpen ? 260 : 0,
+          minWidth: sidebarOpen ? 260 : 0,
+          background: colorBgContainer,
+          borderRadius: borderRadiusLG,
+          marginRight: `${sidebarOpen ? '6px' : '0'}`
+        }}
+      >
+        <div
+          style={{ display: `${sidebarOpen ? 'flex' : 'none'}` }}
+          className="items-center justify-between px-4 py-3 border-b border-gray-100"
+        >
+          <span className="text-sm font-medium text-gray-700">历史记录</span>
+        </div>
+        <div
+          style={{ display: `${sidebarOpen ? 'block' : 'none'}` }}
+          className="flex-1 overflow-y-auto py-2 history-scrollbar"
+        >
+          {topics.length === 0 ? (
+            <p className="text-xs text-gray-400 text-center py-8">暂无历史记录</p>
+          ) : (
+            topics.map((topic) => (
+              <div
+                key={topic.id}
+                onClick={() => handleSelectTopic(topic)}
+                className={`group flex items-center gap-2 px-4 py-2.5 mb-1 mx-2 rounded-lg cursor-pointer transition-colors ${
+                  currentTopicId === topic.id
+                    ? 'bg-blue-50 text-blue-700'
+                    : 'hover:bg-gray-50 text-gray-700'
+                }`}
+              >
+                <RiHistoryLine size={16} className="shrink-0 text-gray-400" />
+                <span className="flex-1 text-sm truncate">{topic.title}</span>
+                <button
+                  onClick={(e) => handleDeleteTopic(topic.id, e)}
+                  className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-red-50 rounded transition-all"
+                >
+                  <RiDeleteBin6Line size={14} className="text-gray-400 hover:text-red-500" />
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+
+      {/* 主聊天区域 */}
       <main
-        className="w-full flex-1 flex flex-col overflow-hidden"
+        className="flex-1 flex flex-col overflow-hidden"
         style={{
           background: colorBgContainer,
           borderRadius: borderRadiusLG
         }}
       >
+        <div className="flex items-center justify-between px-4 py-2 border-b border-gray-100">
+          <div className="flex items-center gap-2">
+            <Button
+              type="text"
+              size="small"
+              icon={
+                sidebarOpen ? <RiSidebarFoldLine size={16} /> : <RiSidebarUnfoldLine size={16} />
+              }
+              onClick={() => setSidebarOpen(!sidebarOpen)}
+            />
+            <span className="text-sm text-gray-500">
+              {currentTopicId ? `对话 #${currentTopicId}` : '新对话'}
+            </span>
+          </div>
+          <Button type="text" size="small" icon={<RiAddLine size={16} />} onClick={handleNewChat}>
+            新对话
+          </Button>
+        </div>
         <div className="flex-1 overflow-y-scroll my-1 mr-1 ml-3 px-16 py-8 chat-scrollbar">
           {messages.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center">
@@ -401,26 +615,65 @@ const Index: React.FC = () => {
               </div>
               <div className="flex items-center justify-between px-4 pb-4">
                 <div className="flex items-center gap-2">
-                  <Button
-                    type={isDeepThinking ? 'primary' : 'default'}
+                  <Select
+                    mode="multiple"
+                    placeholder="选择工具"
+                    value={selectedTools}
+                    onChange={setSelectedTools}
+                    style={{ minWidth: 140, padding: '6px', borderRadius: '10px' }}
                     size="small"
-                    shape="round"
-                    icon={<RiSparklingLine size={14} />}
-                    onClick={() => setIsDeepThinking(!isDeepThinking)}
-                    className={`rounded-full ${isDeepThinking ? 'bg-blue-600' : ''}`}
-                  >
-                    深度思考
-                  </Button>
-                  <Button
-                    type={isSmartSearch ? 'primary' : 'default'}
-                    size="small"
-                    shape="round"
-                    icon={<RiSearchAi2Line size={14} />}
-                    onClick={() => setIsSmartSearch(!isSmartSearch)}
-                    className={`rounded-full ${isSmartSearch ? 'bg-blue-600' : ''}`}
-                  >
-                    智能搜索
-                  </Button>
+                    allowClear
+                    maxTagCount={1}
+                    maxTagPlaceholder={(omitted) => <span>+{omitted.length}</span>}
+                    optionRender={(option) => {
+                      const tool = availableTools.find((t) => t.name === option.value)
+                      if (!tool) return option.label as React.ReactNode
+                      return (
+                        <div className="flex items-center gap-2">
+                          <span
+                            style={{
+                              color: tool.color
+                            }}
+                          >
+                            {toolIconMap[tool.icon]}
+                          </span>
+                          <span>{tool.label}</span>
+                        </div>
+                      )
+                    }}
+                    tagRender={(props) => {
+                      const tool = availableTools.find((t) => t.name === props.value)
+                      const { label, closable, onClose } = props
+                      return (
+                        <Tag
+                          closable={closable}
+                          onClose={onClose}
+                          style={{
+                            marginInlineEnd: 4,
+                            background: tool ? `${tool.color}12` : undefined,
+                            border: tool ? `1px solid ${tool.color}30` : undefined,
+                            color: tool?.color,
+                            borderRadius: 12,
+                            paddingInline: 8,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between'
+                          }}
+                        >
+                          <span style={{ marginRight: 4 }}>
+                            {tool ? toolIconMap[tool.icon] : null}
+                          </span>
+                          {label}
+                        </Tag>
+                      )
+                    }}
+                    options={availableTools.map((t) => ({
+                      value: t.name,
+                      label: t.label,
+                      icon: t.icon,
+                      color: t.color
+                    }))}
+                  />
                 </div>
                 <div className="flex items-center gap-2">
                   <Button

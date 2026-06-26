@@ -46,10 +46,31 @@ import {
   WikiDirectoryRow
 } from './database/mapper/wiki'
 import { FlexSearchIndexer } from './search/indexer'
-import path from 'path'
-import * as z from 'zod'
-import { tool } from '@langchain/core/tools'
 import { ChatService } from './chat/service'
+import { buildTools, availableTools } from './chat/tools'
+import type { ToolCallDetail } from './chat/types'
+import { KnowledgeGraphService, BuildConfig } from './graph'
+import {
+  getEntityById,
+  searchEntities,
+  updateEntity,
+  deleteEntity,
+  deleteRelation,
+  getFullGraphData,
+  getLatestBuildJob
+} from './database/mapper/graph'
+import {
+  getAllTopics,
+  getTopicById,
+  createTopic,
+  updateTopic,
+  deleteTopic,
+  getDialoguesByTopicId,
+  addDialogue,
+  deleteDialoguesByTopicId,
+  ChatTopicRow,
+  ChatDialogueRow
+} from './database/mapper/chat'
 
 logger.transports.file.format = '[{y}-{m}-{d} {h}:{i}:{s}.{ms}] [{level}] {text}'
 logger.transports.file.fileName = 'main.log'
@@ -109,9 +130,25 @@ async function performInitializationTasks(): Promise<void> {
       name: '初始化索引',
       execute: async () => {
         if (database) {
-          const dbPath = path.join(app.getPath('userData'), 'RytenBenchIndex.sqlite')
-          flexSearchIndexer = new FlexSearchIndexer(dbPath) // 指定索引文件路径
+          flexSearchIndexer = new FlexSearchIndexer()
           await flexSearchIndexer.initializeIndex()
+
+          // 从数据库重建搜索索引
+          try {
+            const db = database.getDatabase()
+            const result = await db.query<{ id: number; title: string; summary: string | null }>(
+              'SELECT id, title, summary FROM notes'
+            )
+            await flexSearchIndexer.rebuildFromDocuments(
+              result.rows.map((row) => ({
+                id: row.id,
+                title: row.title,
+                summary: row.summary
+              }))
+            )
+          } catch (rebuildError) {
+            logger.warn('Failed to rebuild FlexSearch index:', rebuildError)
+          }
         } else {
           logger.warn('Database not available, skipping FlexSearch initialization.')
         }
@@ -256,6 +293,10 @@ app.whenReady().then(async () => {
   })
 
   ipcMain.on('ping', () => logger.info('pong'))
+
+  ipcMain.handle('chat-get-tools', async () => {
+    return availableTools
+  })
 
   ipcMain.on('init-progress', (_event, data) => {
     logger.info('Init progress:', data)
@@ -606,18 +647,10 @@ app.whenReady().then(async () => {
     async (
       _event,
       question: string,
-      options?: { deepThinking?: boolean; smartSearch?: boolean }
+      options?: { deepThinking?: boolean; smartSearch?: boolean; tools?: string[] }
     ) => {
-      const getWeather = tool((input: { location: string }) => `It's sunny in ${input.location}.`, {
-        name: 'get_weather',
-        description: 'Get the weather at a location.',
-        schema: z.object({
-          location: z.string().describe('The location to get the weather for')
-        })
-      })
-
-      // 创建服务并传入工具
-      const chatService = new ChatService([getWeather])
+      const tools = buildTools(options?.tools || [])
+      const chatService = new ChatService(tools)
       return await chatService.sendMessage(question, options)
     }
   )
@@ -627,28 +660,274 @@ app.whenReady().then(async () => {
     async (
       event,
       question: string,
-      options?: { deepThinking?: boolean; smartSearch?: boolean }
+      options?: {
+        deepThinking?: boolean
+        smartSearch?: boolean
+        tools?: string[]
+        topicId?: number
+      }
     ) => {
-      const getWeather = tool((input: { location: string }) => `It's sunny in ${input.location}.`, {
-        name: 'get_weather',
-        description: 'Get the weather at a location.',
-        schema: z.object({
-          location: z.string().describe('The location to get the weather for')
+      const tools = buildTools(options?.tools || [])
+
+      // 1. 确保话题存在
+      let topicId = options?.topicId
+      if (!topicId) {
+        const title = question.slice(0, 50)
+        try {
+          topicId = await createTopic(
+            title,
+            undefined,
+            options?.tools ? JSON.stringify(options.tools) : undefined
+          )
+        } catch (err) {
+          logger.error('Failed to create topic:', err)
+          topicId = 0
+        }
+      }
+
+      // 2. 保存用户消息
+      try {
+        await addDialogue({
+          topic_id: topicId,
+          role: 'user',
+          content: question,
+          blocks: JSON.stringify([])
         })
-      })
+      } catch (err) {
+        logger.error('Failed to save user message:', err)
+      }
 
-      // 创建服务并传入工具
-      const chatService = new ChatService([getWeather])
-
-      // 开始流式输出
+      // 3. 流式输出 + 累积完整内容
+      const chatService = new ChatService(tools)
       const stream = chatService.sendMessageStream(question, options)
+      const accumulatedBlocks: { type: string; text?: string; tool?: ToolCallDetail }[] = []
+      let fullContent = ''
 
       try {
         for await (const chunk of stream) {
+          if (chunk.content) {
+            fullContent += chunk.content
+            // 合并连续 text block，避免每个 chunk 独立成块导致渲染间距
+            const lastBlock = accumulatedBlocks[accumulatedBlocks.length - 1]
+            if (lastBlock && lastBlock.type === 'text') {
+              lastBlock.text = (lastBlock.text || '') + chunk.content
+            } else {
+              accumulatedBlocks.push({ type: 'text', text: chunk.content })
+            }
+          }
+          if (chunk.tool) {
+            accumulatedBlocks.push({
+              type: 'tool',
+              tool: {
+                name: chunk.tool.name,
+                input: chunk.tool.input,
+                output: chunk.tool.output
+              }
+            })
+          }
           event.sender.send('chat-stream-chunk', chunk)
         }
       } catch (error) {
         logger.error('Error in chat stream:', error)
+      }
+
+      // 4. 保存完整的 AI 回复
+      try {
+        await addDialogue({
+          topic_id: topicId,
+          role: 'assistant',
+          content: fullContent,
+          blocks: JSON.stringify(accumulatedBlocks)
+        })
+      } catch (err) {
+        logger.error('Failed to save AI message:', err)
+      }
+
+      // 5. 通知渲染进程流式输出已完成
+      event.sender.send('chat-stream-done', { topicId })
+    }
+  )
+
+  // --- Chat Topic IPC handlers ---
+
+  ipcMain.handle('chat-topic-get-all', async () => {
+    try {
+      return await getAllTopics()
+    } catch (error) {
+      logger.error('Error in chat-topic-get-all:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('chat-topic-get-by-id', async (_event, id: number) => {
+    try {
+      return await getTopicById(id)
+    } catch (error) {
+      logger.error('Error in chat-topic-get-by-id:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle(
+    'chat-topic-create',
+    async (_event, title: string, model?: string, selectedTools?: string) => {
+      try {
+        return await createTopic(title, model, selectedTools)
+      } catch (error) {
+        logger.error('Error in chat-topic-create:', error)
+        throw error
+      }
+    }
+  )
+
+  ipcMain.handle(
+    'chat-topic-update',
+    async (
+      _event,
+      id: number,
+      updates: Partial<Pick<ChatTopicRow, 'title' | 'model' | 'selected_tools'>>
+    ) => {
+      try {
+        return await updateTopic(id, updates)
+      } catch (error) {
+        logger.error('Error in chat-topic-update:', error)
+        throw error
+      }
+    }
+  )
+
+  ipcMain.handle('chat-topic-delete', async (_event, id: number) => {
+    try {
+      return await deleteTopic(id)
+    } catch (error) {
+      logger.error('Error in chat-topic-delete:', error)
+      throw error
+    }
+  })
+
+  // --- Chat Dialogue IPC handlers ---
+
+  ipcMain.handle('chat-dialogue-get-by-topic', async (_event, topicId: number) => {
+    try {
+      return await getDialoguesByTopicId(topicId)
+    } catch (error) {
+      logger.error('Error in chat-dialogue-get-by-topic:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle(
+    'chat-dialogue-add',
+    async (_event, dialogue: Omit<ChatDialogueRow, 'id' | 'created_at'>) => {
+      try {
+        return await addDialogue(dialogue)
+      } catch (error) {
+        logger.error('Error in chat-dialogue-add:', error)
+        throw error
+      }
+    }
+  )
+
+  ipcMain.handle('chat-dialogue-delete-by-topic', async (_event, topicId: number) => {
+    try {
+      return await deleteDialoguesByTopicId(topicId)
+    } catch (error) {
+      logger.error('Error in chat-dialogue-delete-by-topic:', error)
+      throw error
+    }
+  })
+
+  // --- Graph IPC handlers ---
+
+  ipcMain.handle('graph-data-get', async (_event, wikiId: number, typeFilter?: string) => {
+    try {
+      return await getFullGraphData(wikiId, typeFilter)
+    } catch (error) {
+      logger.error('Error in graph-data-get:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('graph-entity-get', async (_event, entityId: number) => {
+    try {
+      return await getEntityById(entityId)
+    } catch (error) {
+      logger.error('Error in graph-entity-get:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('graph-entity-search', async (_event, wikiId: number, query: string) => {
+    try {
+      return await searchEntities(wikiId, query)
+    } catch (error) {
+      logger.error('Error in graph-entity-search:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle(
+    'graph-entity-update',
+    async (_event, id: number, updates: Record<string, unknown>) => {
+      try {
+        return await updateEntity(id, updates as Record<string, unknown>)
+      } catch (error) {
+        logger.error('Error in graph-entity-update:', error)
+        throw error
+      }
+    }
+  )
+
+  ipcMain.handle('graph-entity-delete', async (_event, id: number) => {
+    try {
+      return await deleteEntity(id)
+    } catch (error) {
+      logger.error('Error in graph-entity-delete:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('graph-relation-delete', async (_event, id: number) => {
+    try {
+      return await deleteRelation(id)
+    } catch (error) {
+      logger.error('Error in graph-relation-delete:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('graph-build-status', async (_event, wikiId: number) => {
+    try {
+      return await getLatestBuildJob(wikiId)
+    } catch (error) {
+      logger.error('Error in graph-build-status:', error)
+      throw error
+    }
+  })
+
+  ipcMain.on(
+    'graph-build-start',
+    async (event, wikiId: number, config?: Record<string, unknown>) => {
+      const graphService = new KnowledgeGraphService()
+      try {
+        const result = await graphService.buildGraph(
+          wikiId,
+          (progress) => {
+            event.sender.send('graph-build-progress', progress)
+          },
+          config as BuildConfig | undefined
+        )
+        event.sender.send('graph-build-complete', {
+          wikiId,
+          entityCount: result.entities.length,
+          relationCount: result.relations.length
+        })
+      } catch (error) {
+        logger.error('Error in graph-build-start:', error)
+        event.sender.send('graph-build-error', {
+          wikiId,
+          error: error instanceof Error ? error.message : String(error)
+        })
       }
     }
   )

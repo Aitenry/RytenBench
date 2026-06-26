@@ -6,7 +6,11 @@ import AppContent from './components/AppContent'
 const App: React.FC = () => {
   return (
     <HashRouter>
-      <MessageContext.Provider value={{ viewMessage: () => {} }}>
+      <MessageContext.Provider
+        value={{
+          viewMessage: () => {}
+        }}
+      >
         <div className="min-h-screen flex flex-col bg-gray-100">
           <AppContent />
         </div>

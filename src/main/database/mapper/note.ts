@@ -1,6 +1,5 @@
 import { getDatabaseInstance, getFlexSearchIndexer } from '../../index'
 import logger from 'electron-log'
-import * as sqlite3 from 'sqlite3'
 
 export interface NoteRow {
   id: number
@@ -35,9 +34,8 @@ export interface PaginatedResult<T> {
 }
 
 async function getNoteById(id: number): Promise<NoteWithContent | null> {
-  let db: sqlite3.Database | null = null
   try {
-    db = (await getDatabaseInstance()).getDatabase()
+    const db = (await getDatabaseInstance()).getDatabase()
     const sql = `
       SELECT
         n.id, n.title, n.summary, n.tags, n.version, n.created_at, n.updated_at,
@@ -45,33 +43,27 @@ async function getNoteById(id: number): Promise<NoteWithContent | null> {
         LENGTH(nc.content) as word_count
       FROM notes n
       LEFT JOIN notes_content nc ON n.id = nc.note_id
-      WHERE n.id = ?
+      WHERE n.id = $1
     `
-    return new Promise((resolve, reject) => {
-      db!.get(sql, [id], (err, row: NoteWithContent | null) => {
-        if (err) {
-          logger.error('Error executing query by id:', err.message)
-          reject(err)
-        } else if (row) {
-          resolve({
-            id: row.id,
-            title: row.title,
-            image: row.image,
-            summary: row.summary,
-            tags: row.tags,
-            version: row.version,
-            created_at: row.created_at,
-            updated_at: row.updated_at,
-            word_count: row.word_count || 0,
-            content: row.content
-          })
-        } else {
-          resolve(null)
-        }
-      })
-    })
+    const result = await db.query<NoteWithContent>(sql, [id])
+    if (result.rows.length > 0) {
+      const row = result.rows[0]
+      return {
+        id: row.id,
+        title: row.title,
+        image: row.image,
+        summary: row.summary,
+        tags: row.tags,
+        version: row.version,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+        word_count: row.word_count || 0,
+        content: row.content
+      }
+    }
+    return null
   } catch (error) {
-    logger.error('Failed to get database instance for id query:', error)
+    logger.error('Failed to get note by id:', error)
     throw error
   }
 }
@@ -80,12 +72,13 @@ async function getAllNotes(
   page: number = 1,
   pageSize: number = 10
 ): Promise<PaginatedResult<NoteListItem>> {
-  let db: sqlite3.Database | null = null
   try {
-    db = (await getDatabaseInstance()).getDatabase()
+    const db = (await getDatabaseInstance()).getDatabase()
     const offset = (page - 1) * pageSize
 
-    const countSql = 'SELECT COUNT(*) as total FROM notes'
+    const countResult = await db.query<{ total: number }>('SELECT COUNT(*) as total FROM notes')
+    const total = Number(countResult.rows[0]?.total) || 0
+
     const dataSql = `
       SELECT
         n.id, n.title, n.summary, n.tags, n.version, n.created_at, n.updated_at,
@@ -94,45 +87,27 @@ async function getAllNotes(
       FROM notes n
       LEFT JOIN notes_content nc ON n.id = nc.note_id
       ORDER BY n.updated_at DESC
-      LIMIT ? OFFSET ?
+      LIMIT $1 OFFSET $2
     `
 
-    return new Promise((resolve, reject) => {
-      db!.get(countSql, [], (err, countRow: { total: number } | null) => {
-        if (err) {
-          logger.error('Error counting notes:', err.message)
-          reject(err)
-          return
-        }
+    const result = await db.query<NoteListItem>(dataSql, [pageSize, offset])
 
-        const total = countRow?.total || 0
+    const items = result.rows.map((row) => ({
+      id: row.id,
+      title: row.title,
+      image: row.image,
+      summary: row.summary,
+      tags: row.tags,
+      version: row.version,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+      word_count: row.word_count || 0
+    }))
 
-        db!.all(dataSql, [pageSize, offset], (err, rows: NoteListItem[]) => {
-          if (err) {
-            logger.error('Error executing query for all notes:', err.message)
-            reject(err)
-          } else {
-            const items = rows.map((row) => ({
-              id: row.id,
-              title: row.title,
-              image: row.image,
-              summary: row.summary,
-              tags: row.tags,
-              version: row.version,
-              created_at: row.created_at,
-              updated_at: row.updated_at,
-              word_count: row.word_count || 0
-            }))
-
-            const hasMore = offset + items.length < total
-
-            resolve({ items, hasMore, total })
-          }
-        })
-      })
-    })
+    const hasMore = offset + items.length < total
+    return { items, hasMore, total }
   } catch (error) {
-    logger.error('Failed to get database instance for all notes query:', error)
+    logger.error('Failed to get all notes:', error)
     throw error
   }
 }
@@ -142,9 +117,8 @@ async function getNotePage(
   page: number = 1,
   pageSize: number = 20
 ): Promise<PaginatedResult<NoteListItem>> {
-  let db: sqlite3.Database | null = null
   try {
-    db = (await getDatabaseInstance()).getDatabase()
+    const db = (await getDatabaseInstance()).getDatabase()
     const offset = (page - 1) * pageSize
 
     const indexer = await getFlexSearchIndexer()
@@ -154,7 +128,8 @@ async function getNotePage(
       return { items: [], hasMore: false, total: 0 }
     }
 
-    const placeholders = searchResults.map(() => '?').join(',')
+    // Build parameterized IN clause
+    const placeholders = searchResults.map((_, i) => `$${i + 1}`).join(',')
     const dataSql = `
       SELECT
         n.id, n.title, n.summary, n.tags, n.version, n.created_at, n.updated_at,
@@ -166,33 +141,26 @@ async function getNotePage(
       ORDER BY n.updated_at DESC
     `
 
-    return new Promise((resolve, reject) => {
-      db!.all(dataSql, searchResults, (err, rows: NoteListItem[]) => {
-        if (err) {
-          logger.error('Error executing search query:', err.message)
-          reject(err)
-        } else {
-          const items = rows.map((row) => ({
-            id: row.id,
-            title: row.title,
-            image: row.image,
-            summary: row.summary,
-            tags: row.tags,
-            version: row.version,
-            created_at: row.created_at,
-            updated_at: row.updated_at,
-            word_count: row.word_count || 0
-          }))
+    const result = await db.query<NoteListItem>(dataSql, searchResults)
 
-          const paginatedItems = items.slice(offset, offset + pageSize)
-          const hasMore = offset + paginatedItems.length < items.length
+    const items = result.rows.map((row) => ({
+      id: row.id,
+      title: row.title,
+      image: row.image,
+      summary: row.summary,
+      tags: row.tags,
+      version: row.version,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+      word_count: row.word_count || 0
+    }))
 
-          resolve({ items: paginatedItems, hasMore, total: items.length })
-        }
-      })
-    })
+    const paginatedItems = items.slice(offset, offset + pageSize)
+    const hasMore = offset + paginatedItems.length < items.length
+
+    return { items: paginatedItems, hasMore, total: items.length }
   } catch (error) {
-    logger.error('Failed to get database instance for search query:', error)
+    logger.error('Failed to search notes:', error)
     throw error
   }
 }
@@ -203,53 +171,36 @@ async function addNote(
     content?: string | null
   }
 ): Promise<number> {
-  let db: sqlite3.Database | null = null
   try {
-    db = (await getDatabaseInstance()).getDatabase()
+    const db = (await getDatabaseInstance()).getDatabase()
     const { title, summary, tags, image, content } = note
 
-    return new Promise((resolve, reject) => {
-      db!.serialize(() => {
-        db!.run(
-          'INSERT INTO notes (title, summary, tags) VALUES (?, ?, ?)',
-          [title, summary || null, tags || null],
-          function (err) {
-            if (err) {
-              logger.error('Error inserting note:', err.message)
-              reject(err)
-              return
-            }
+    const insertResult = await db.query<{ id: number }>(
+      'INSERT INTO notes (title, summary, tags) VALUES ($1, $2, $3) RETURNING id',
+      [title, summary || null, tags || null]
+    )
 
-            const noteId = this.lastID
+    const noteId = insertResult.rows[0].id
 
-            db!.run(
-              'INSERT INTO notes_content (note_id, image, content) VALUES (?, ?, ?)',
-              [noteId, image || null, content || null],
-              async function (err) {
-                if (err) {
-                  logger.error('Error inserting note content:', err.message)
-                  reject(err)
-                } else {
-                  logger.info(`Inserted new note with ID: ${noteId}`)
+    await db.query('INSERT INTO notes_content (note_id, image, content) VALUES ($1, $2, $3)', [
+      noteId,
+      image || null,
+      content || null
+    ])
 
-                  try {
-                    const indexer = await getFlexSearchIndexer()
-                    await indexer.addDocument({ id: noteId, title, summary })
-                    await indexer.commit()
-                  } catch (indexError) {
-                    logger.error('Error adding note to search index:', indexError)
-                  }
+    logger.info(`Inserted new note with ID: ${noteId}`)
 
-                  resolve(noteId)
-                }
-              }
-            )
-          }
-        )
-      })
-    })
+    try {
+      const indexer = await getFlexSearchIndexer()
+      await indexer.addDocument({ id: noteId, title, summary })
+      await indexer.commit()
+    } catch (indexError) {
+      logger.error('Error adding note to search index:', indexError)
+    }
+
+    return noteId
   } catch (error) {
-    logger.error('Failed to get database instance for inserting note:', error)
+    logger.error('Failed to insert note:', error)
     throw error
   }
 }
@@ -263,33 +214,36 @@ async function updateNote(
     }
   >
 ): Promise<boolean> {
-  let db: sqlite3.Database | null = null
   try {
-    db = (await getDatabaseInstance()).getDatabase()
+    const db = (await getDatabaseInstance()).getDatabase()
 
     const noteUpdates: string[] = []
     const noteValues: (string | number | null)[] = []
-    const contentUpdates: string[] = []
-    const contentValues: (string | number | null)[] = []
+    let noteParamIndex = 1
 
     if (updates.title !== undefined) {
-      noteUpdates.push('title = ?')
+      noteUpdates.push(`title = $${noteParamIndex++}`)
       noteValues.push(updates.title)
     }
     if (updates.summary !== undefined) {
-      noteUpdates.push('summary = ?')
+      noteUpdates.push(`summary = $${noteParamIndex++}`)
       noteValues.push(updates.summary)
     }
     if (updates.tags !== undefined) {
-      noteUpdates.push('tags = ?')
+      noteUpdates.push(`tags = $${noteParamIndex++}`)
       noteValues.push(updates.tags)
     }
+
+    const contentUpdates: string[] = []
+    const contentValues: (string | number | null)[] = []
+    let contentParamIndex = 1
+
     if (updates.image !== undefined) {
-      contentUpdates.push('image = ?')
+      contentUpdates.push(`image = $${contentParamIndex++}`)
       contentValues.push(updates.image)
     }
     if (updates.content !== undefined) {
-      contentUpdates.push('content = ?')
+      contentUpdates.push(`content = $${contentParamIndex++}`)
       contentValues.push(updates.content)
     }
 
@@ -299,143 +253,99 @@ async function updateNote(
     }
 
     noteUpdates.push('version = version + 1')
-    noteUpdates.push('updated_at = datetime("now")')
-    contentUpdates.push('updated_at = datetime("now")')
+    noteUpdates.push('updated_at = NOW()')
 
-    return new Promise((resolve) => {
-      db!.serialize(async () => {
-        let hasChanges = false
+    let hasChanges = false
 
-        if (noteUpdates.length > 0) {
-          const noteSql = `UPDATE notes SET ${noteUpdates.join(', ')} WHERE id = ?`
-          noteValues.push(id)
+    if (noteUpdates.length > 0) {
+      const noteSql = `UPDATE notes SET ${noteUpdates.join(', ')} WHERE id = $${noteParamIndex++}`
+      noteValues.push(id)
 
-          await new Promise<void>((res, rej) => {
-            db!.run(noteSql, noteValues, function (err) {
-              if (err) {
-                logger.error('Error updating note:', err.message)
-                rej(err)
-              } else {
-                hasChanges = hasChanges || this.changes > 0
-                res()
-              }
-            })
+      const noteResult = await db.query(noteSql, noteValues)
+      hasChanges = hasChanges || (noteResult.affectedRows ?? 0) > 0
+    }
+
+    if (contentUpdates.length > 0) {
+      // Check if content row exists
+      const checkResult = await db.query<{ id: number }>(
+        'SELECT id FROM notes_content WHERE note_id = $1',
+        [id]
+      )
+
+      if (checkResult.rows.length > 0) {
+        contentUpdates.push('updated_at = NOW()')
+        const contentSql = `UPDATE notes_content SET ${contentUpdates.join(', ')} WHERE note_id = $${contentParamIndex++}`
+        contentValues.push(id)
+
+        const contentResult = await db.query(contentSql, contentValues)
+        hasChanges = hasChanges || (contentResult.affectedRows ?? 0) > 0
+      } else {
+        const image = updates.image || null
+        const content = updates.content || null
+
+        await db.query('INSERT INTO notes_content (note_id, image, content) VALUES ($1, $2, $3)', [
+          id,
+          image,
+          content
+        ])
+        hasChanges = true
+      }
+    }
+
+    if (hasChanges) {
+      logger.info(`Updated note with ID: ${id}`)
+
+      try {
+        const indexer = await getFlexSearchIndexer()
+        const note = await getNoteById(id)
+        if (note) {
+          await indexer.updateDocument({
+            id: note.id,
+            title: note.title,
+            summary: note.summary
           })
+          await indexer.commit()
         }
+      } catch (indexError) {
+        logger.error('Error updating note in search index:', indexError)
+      }
 
-        if (contentUpdates.length > 0) {
-          const checkSql = 'SELECT id FROM notes_content WHERE note_id = ?'
+      return true
+    }
 
-          const existingContent = await new Promise<{ id: number } | null>((res, rej) => {
-            db!.get(checkSql, [id], (err, row: { id: number }) => {
-              if (err) {
-                logger.error('Error checking note content:', err.message)
-                rej(err)
-              } else {
-                // 确保返回正确的类型
-                res(row ? { id: row.id } : null)
-              }
-            })
-          })
-
-          if (existingContent) {
-            const contentSql = `UPDATE notes_content SET ${contentUpdates.join(', ')} WHERE note_id = ?`
-            contentValues.push(id)
-
-            await new Promise<void>((res, rej) => {
-              db!.run(contentSql, contentValues, function (err) {
-                if (err) {
-                  logger.error('Error updating note content:', err.message)
-                  rej(err)
-                } else {
-                  hasChanges = hasChanges || this.changes > 0
-                  res()
-                }
-              })
-            })
-          } else {
-            const insertSql = 'INSERT INTO notes_content (note_id, image, content) VALUES (?, ?, ?)'
-            const image = updates.image || null
-            const content = updates.content || null
-
-            await new Promise<void>((res, rej) => {
-              db!.run(insertSql, [id, image, content], function (err) {
-                if (err) {
-                  logger.error('Error inserting note content:', err.message)
-                  rej(err)
-                } else {
-                  hasChanges = true
-                  res()
-                }
-              })
-            })
-          }
-        }
-
-        if (hasChanges) {
-          logger.info(`Updated note with ID: ${id}`)
-
-          try {
-            const indexer = await getFlexSearchIndexer()
-            const note = await getNoteById(id)
-            if (note) {
-              await indexer.updateDocument({
-                id: note.id,
-                title: note.title,
-                summary: note.summary
-              })
-              await indexer.commit()
-            }
-          } catch (indexError) {
-            logger.error('Error updating note in search index:', indexError)
-          }
-
-          resolve(true)
-        } else {
-          logger.warn(`No rows updated for note with ID: ${id}`)
-          resolve(false)
-        }
-      })
-    })
+    logger.warn(`No rows updated for note with ID: ${id}`)
+    return false
   } catch (error) {
-    logger.error('Failed to get database instance for updating note:', error)
+    logger.error('Failed to update note:', error)
     throw error
   }
 }
 
 async function deleteNote(id: number): Promise<boolean> {
-  let db: sqlite3.Database | null = null
   try {
-    db = (await getDatabaseInstance()).getDatabase()
-    const sql = 'DELETE FROM notes WHERE id = ?'
-    return new Promise((resolve, reject) => {
-      db!.run(sql, [id], async function (err) {
-        if (err) {
-          logger.error('Error deleting note:', err.message)
-          reject(err)
-        } else {
-          const changes = this.changes
-          if (changes > 0) {
-            logger.info(`Deleted note with ID: ${id}, ${changes} row(s) affected.`)
+    const db = (await getDatabaseInstance()).getDatabase()
+    const sql = 'DELETE FROM notes WHERE id = $1'
+    const result = await db.query(sql, [id])
+    const changes = result.affectedRows ?? 0
 
-            try {
-              const indexer = await getFlexSearchIndexer()
-              await indexer.removeDocument(id)
-              await indexer.commit()
-            } catch (indexError) {
-              logger.error('Error deleting note from search index:', indexError)
-            }
+    if (changes > 0) {
+      logger.info(`Deleted note with ID: ${id}, ${changes} row(s) affected.`)
 
-            resolve(true)
-          } else {
-            logger.warn(`No rows deleted for note with ID: ${id}`)
-            resolve(false)
-          }
-        }
-      })
-    })
+      try {
+        const indexer = await getFlexSearchIndexer()
+        await indexer.removeDocument(id)
+        await indexer.commit()
+      } catch (indexError) {
+        logger.error('Error deleting note from search index:', indexError)
+      }
+
+      return true
+    }
+
+    logger.warn(`No rows deleted for note with ID: ${id}`)
+    return false
   } catch (error) {
-    logger.error('Failed to get database instance for deleting note:', error)
+    logger.error('Failed to delete note:', error)
     throw error
   }
 }

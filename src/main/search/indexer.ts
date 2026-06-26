@@ -1,10 +1,7 @@
 import { Index } from 'flexsearch'
-import Database from 'flexsearch/db/sqlite'
-import * as sqlite3 from 'sqlite3'
-import { existsSync } from 'fs'
 import logger from 'electron-log'
 
-// 定义文档类型 (根据你的实际数据结构修改，例如笔记或待办事项)
+// 定义文档类型
 interface IndexableDocument {
   id: number | string
   title: string
@@ -12,29 +9,11 @@ interface IndexableDocument {
 }
 
 class FlexSearchIndexer {
-  private index: Index // FlexSearch Index 实例
-  private readonly db: Database // FlexSearch Database 实例
+  private index: Index
   private isInitialized = false
-  private readonly sqlitePath: string // 保存数据库文件路径
 
-  constructor(sqlitePath: string) {
-    this.sqlitePath = sqlitePath
-
-    // 检查文件是否存在
-    const dbExists = existsSync(this.sqlitePath)
-    if (dbExists) {
-      logger.info(`SQLite database file found at: ${this.sqlitePath}. Opening...`)
-    } else {
-      logger.info(
-        `SQLite database file does not exist at: ${this.sqlitePath}. Creating a new one...`
-      )
-    }
-
-    this.db = new Database('RytenBenchIndex', {
-      db: new sqlite3.Database(this.sqlitePath)
-    })
-
-    // 创建 FlexSearch Index 实例
+  constructor() {
+    // 创建 FlexSearch Index 实例（内存模式，无需 SQLite）
     this.index = new Index({
       tokenize: 'forward',
       context: true
@@ -42,7 +21,7 @@ class FlexSearchIndexer {
   }
 
   /**
-   * 挂载索引到 SQLite 数据库，加载现有索引或创建新索引
+   * 初始化索引（内存模式，启动时需重建索引）
    */
   async initializeIndex(): Promise<void> {
     if (this.isInitialized) {
@@ -50,15 +29,25 @@ class FlexSearchIndexer {
       return
     }
 
-    try {
-      logger.info(`Mounting FlexSearch index to SQLite: ${this.sqlitePath}`)
-      await this.index.mount(this.db)
-      this.isInitialized = true
-      logger.info('FlexSearch index mounted successfully.')
-    } catch (error) {
-      logger.error('Error mounting FlexSearch index:', error)
-      throw error
+    this.isInitialized = true
+    logger.info('FlexSearch index initialized (in-memory mode).')
+  }
+
+  /**
+   * 从数据库重建索引
+   */
+  async rebuildFromDocuments(docs: IndexableDocument[]): Promise<void> {
+    if (!this.isInitialized) {
+      throw new Error('FlexSearch index not initialized. Call initializeIndex first.')
     }
+
+    // 清空现有索引并重建
+    logger.info(`Rebuilding FlexSearch index from ${docs.length} documents...`)
+    for (const doc of docs) {
+      const contentToIndex = `${doc.title || ''} ${doc.summary || ''}`.trim()
+      this.index.add(doc.id, contentToIndex)
+    }
+    logger.info('FlexSearch index rebuild complete.')
   }
 
   /**
@@ -116,14 +105,10 @@ class FlexSearchIndexer {
   }
 
   /**
-   * 显式提交当前所有更改到数据库
+   * 显式提交（内存模式下为空操作，保留以保持 API 兼容）
    */
   async commit(): Promise<void> {
-    if (!this.isInitialized) {
-      throw new Error('FlexSearch index not initialized. Call initializeIndex first.')
-    }
-    await this.index.commit()
-    logger.info('FlexSearch index changes committed to database.')
+    // 内存模式下无需显式提交
   }
 
   /**

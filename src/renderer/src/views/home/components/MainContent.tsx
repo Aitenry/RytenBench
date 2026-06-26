@@ -114,9 +114,11 @@ const MainContent: React.FC = () => {
             padding: '0 6px'
           }}
         >
-          <Flex vertical gap={16}>
+          <Flex vertical gap={16} style={{ height: '100%' }}>
             {notes.length === 0 && !isLoading ? (
-              <Empty description="暂无笔记" />
+              <Flex flex={1} justify="center" align="center">
+                <Empty description="暂无笔记" />
+              </Flex>
             ) : (
               <>
                 <Masonry

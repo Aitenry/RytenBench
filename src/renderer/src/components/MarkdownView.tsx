@@ -7,6 +7,7 @@ import rehypeRaw from 'rehype-raw'
 import { RiCheckLine, RiFileCopyLine, RiArrowRightSLine, RiArrowDownSLine } from '@remixicon/react'
 import { extractTextFromChildren } from '@renderer/utils/markdown'
 import { useMessage } from '@renderer/hooks/useMessage'
+
 const CopyButton = ({
   text,
   isDarkMode
@@ -171,7 +172,7 @@ const TocItem = ({
         {!hasChildren && <span className="w-6" />}
         <span
           onClick={() => onNavigate(item.id)}
-          className={`text-sm truncate ${
+          className={`text-sm w-42.5 truncate ${
             isDarkMode ? 'text-gray-300 hover:text-white' : 'text-gray-600 hover:text-gray-900'
           }`}
         >

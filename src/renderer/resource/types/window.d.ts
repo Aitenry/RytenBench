@@ -1,6 +1,13 @@
 import { TodoItemRow } from '../../../main/database/mapper/todo'
 import { NoteRow, NoteListItem, NoteWithContent } from '../../../main/database/mapper/note'
 import { WikiRow, WikiDirectoryRow } from '../../../main/database/mapper/wiki'
+import { ChatTopicRow, ChatDialogueRow } from '../../../main/database/mapper/chat'
+import {
+  GraphEntity,
+  GraphRelation,
+  GraphBuildJob,
+  GraphData
+} from '../../../main/database/mapper/graph'
 import { Lock } from '@renderer/types/settings'
 
 export interface PaginatedResult<T> {
@@ -18,6 +25,14 @@ export interface ToolCallDetail {
 export interface StructuredMessage {
   tool?: ToolCallDetail
   content?: string
+}
+
+export interface ToolInfo {
+  name: string
+  label: string
+  description: string
+  icon: string
+  color: string
 }
 
 export interface Window {
@@ -111,11 +126,57 @@ export interface Window {
     setting: {
       getLockScreenCode: () => Promise<Lock>
       setLockScreenView: (open) => void
-    },
+    }
     chat: {
-      sendMessage: (message: string, options?: { deepThinking?: boolean; smartSearch?: boolean }) => Promise<StructuredMessage[]>
+      sendMessage: (
+        message: string,
+        options?: { deepThinking?: boolean; smartSearch?: boolean; tools?: string[] }
+      ) => Promise<StructuredMessage[]>
       onStreamChunk: (callback: (chunk: StructuredMessage) => void) => () => void
-      startMessageStream: (message: string, options?: { deepThinking?: boolean; smartSearch?: boolean }) => void
+      onStreamDone: (callback: (result: { topicId: number }) => void) => () => void
+      startMessageStream: (
+        message: string,
+        options?: {
+          deepThinking?: boolean
+          smartSearch?: boolean
+          tools?: string[]
+          topicId?: number
+        }
+      ) => void
+      getTools: () => Promise<ToolInfo[]>
+      getAllTopics: () => Promise<ChatTopicRow[]>
+      getTopicById: (id: number) => Promise<ChatTopicRow[]>
+      createTopic: (title: string, model?: string, selectedTools?: string) => Promise<number>
+      updateTopic: (
+        id: number,
+        updates: Partial<Pick<ChatTopicRow, 'title' | 'model' | 'selected_tools'>>
+      ) => Promise<boolean>
+      deleteTopic: (id: number) => Promise<boolean>
+      getDialoguesByTopic: (topicId: number) => Promise<ChatDialogueRow[]>
+      addDialogue: (dialogue: Omit<ChatDialogueRow, 'id' | 'created_at'>) => Promise<number>
+      deleteDialoguesByTopic: (topicId: number) => Promise<boolean>
+    }
+    graph: {
+      getData: (wikiId: number, typeFilter?: string) => Promise<GraphData>
+      getEntity: (entityId: number) => Promise<GraphEntity | null>
+      searchEntities: (wikiId: number, query: string) => Promise<GraphEntity[]>
+      updateEntity: (id: number, updates: Record<string, unknown>) => Promise<boolean>
+      deleteEntity: (id: number) => Promise<boolean>
+      deleteRelation: (id: number) => Promise<boolean>
+      getBuildStatus: (wikiId: number) => Promise<GraphBuildJob | null>
+      buildGraph: (wikiId: number, config?: Record<string, unknown>) => void
+      onBuildProgress: (
+        callback: (progress: {
+          phase: string
+          processedNotes: number
+          totalNotes: number
+          message: string
+        }) => void
+      ) => () => void
+      onBuildComplete: (
+        callback: (result: { wikiId: number; entityCount: number; relationCount: number }) => void
+      ) => () => void
+      onBuildError: (callback: (error: { wikiId: number; error: string }) => void) => () => void
     }
   }
 }

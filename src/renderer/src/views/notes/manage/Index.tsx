@@ -385,18 +385,20 @@ const Index: React.FC = () => {
               padding: '0 6px'
             }}
           >
-            <Flex vertical gap={16}>
+            <Flex vertical gap={16} style={{ height: '100%' }}>
               {filteredNotes.length === 0 && !isLoading ? (
-                <Empty
-                  description={searchText ? '没有找到匹配的笔记' : '暂无笔记，点击新建笔记开始'}
-                  image={Empty.PRESENTED_IMAGE_SIMPLE}
-                >
-                  {!searchText && (
-                    <Button type="primary" icon={<PlusOutlined />} onClick={handleCreateNote}>
-                      新建笔记
-                    </Button>
-                  )}
-                </Empty>
+                <Flex flex={1} justify="center" align="center">
+                  <Empty
+                    description={searchText ? '没有找到匹配的笔记' : '暂无笔记，点击新建笔记开始'}
+                    image={Empty.PRESENTED_IMAGE_SIMPLE}
+                  >
+                    {!searchText && (
+                      <Button type="primary" icon={<PlusOutlined />} onClick={handleCreateNote}>
+                        新建笔记
+                      </Button>
+                    )}
+                  </Empty>
+                </Flex>
               ) : (
                 <>
                   <Masonry

@@ -137,7 +137,14 @@ const WikiCard: React.FC<WikiCardProps> = ({ item, onSelect, onEdit, onDelete })
           </Text>
         )}
 
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 'auto', paddingTop: 4 }}>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            marginTop: 'auto',
+            paddingTop: 4
+          }}
+        >
           <Tag style={{ margin: 0, fontSize: token.fontSizeSM - 2 }}>
             {new Date(item.updated_at).toLocaleString()}
           </Tag>
