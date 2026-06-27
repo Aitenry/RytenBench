@@ -78,15 +78,17 @@ const api = {
   chat: {
     sendMessage: (
       message: string,
-      options?: { deepThinking?: boolean; smartSearch?: boolean; tools?: string[] }
+      options?: {
+        tools?: string[]
+        providerId?: number
+      }
     ) => ipcRenderer.invoke('chat-send-message', message, options),
     startMessageStream: (
       message: string,
       options?: {
-        deepThinking?: boolean
-        smartSearch?: boolean
         tools?: string[]
         topicId?: number
+        providerId?: number
       }
     ) => {
       ipcRenderer.send('chat-start-stream', message, options)

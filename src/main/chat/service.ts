@@ -1,30 +1,36 @@
 import type { StructuredToolInterface } from '@langchain/core/tools'
-import { ChatOpenAI } from '@langchain/openai'
+import { BaseChatModel } from '@langchain/core/language_models/chat_models'
 import { Runnable } from '@langchain/core/runnables'
 import { BaseMessage, HumanMessage, ToolMessage } from '@langchain/core/messages'
 import logger from 'electron-log'
 import { ChatOptions, StructuredMessage } from './types'
 
+/** 适配 DeepSeek-R1 等模型在 additional_kwargs 中返回的推理内容 */
+interface ReasoningMessage {
+  additional_kwargs?: {
+    reasoning_content?: string
+    reasoning?: string
+  }
+}
+
 class ChatService {
-  private model: ChatOpenAI
   private modelWithTools: Runnable
   private toolsMap: Map<string, StructuredToolInterface> = new Map()
-  private maxIterations: number
+  private readonly maxIterations: number
 
   /**
-   * @param model 已创建的 ChatOpenAI 实例（由外部 ProviderService 提供）
+   * @param model 已创建的 BaseChatModel 实例（由外部 ProviderService 提供）
    * @param tools 工具列表
    * @param maxIterations 工具调用最大轮次（默认5）
    */
-  constructor(model: ChatOpenAI, tools: StructuredToolInterface[] = [], maxIterations = 5) {
-    this.model = model
+  constructor(model: BaseChatModel, tools: StructuredToolInterface[] = [], maxIterations = 5) {
     this.maxIterations = maxIterations
 
     for (const tool of tools) {
       this.toolsMap.set(tool.name, tool)
     }
 
-    if (tools.length > 0) {
+    if (tools.length > 0 && typeof model.bindTools === 'function') {
       this.modelWithTools = model.bindTools(tools)
     } else {
       this.modelWithTools = model
@@ -134,15 +140,39 @@ class ChatService {
         const fullResponse = await this.modelWithTools.invoke(messages)
         messages.push(fullResponse)
 
-        // 如果有文本内容，使用 stream 来流式输出
+        // 如果有文本内容或推理内容，使用 stream 来流式输出
         const content = fullResponse.content as string
-        if (content) {
+        const fullReasoning = (fullResponse as unknown as ReasoningMessage).additional_kwargs
+          ?.reasoning_content
+        if (content || fullReasoning) {
           const stream = await this.modelWithTools.stream(messages.slice(0, -1))
+          let hasYieldedContent = false
           for await (const chunk of stream) {
+            // 处理思考/推理内容（DeepSeek-R1 等模型在 additional_kwargs 中返回）
+            const reasoningMsg = chunk as unknown as ReasoningMessage
+            const reasoningContent =
+              reasoningMsg.additional_kwargs?.reasoning_content ||
+              reasoningMsg.additional_kwargs?.reasoning
+            if (reasoningContent) {
+              yield {
+                reasoning_content: reasoningContent
+              }
+            }
+
+            // 处理正常文本内容
             if (chunk.content && typeof chunk.content === 'string') {
+              hasYieldedContent = true
               yield {
                 content: chunk.content
               }
+            }
+          }
+
+          // 如果 stream 产生的内容为空但 invoke 有内容（某些模型不返回流式 token），
+          // 回退为一次性输出全部 invoke 结果
+          if (!hasYieldedContent && content) {
+            yield {
+              content
             }
           }
         }

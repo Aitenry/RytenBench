@@ -27,6 +27,7 @@ export interface ToolCallDetail {
 export interface StructuredMessage {
   tool?: ToolCallDetail
   content?: string
+  reasoning_content?: string
 }
 
 export interface ToolInfo {
@@ -132,17 +133,19 @@ export interface Window {
     chat: {
       sendMessage: (
         message: string,
-        options?: { deepThinking?: boolean; smartSearch?: boolean; tools?: string[] }
+        options?: {
+          tools?: string[]
+          providerId?: number
+        }
       ) => Promise<StructuredMessage[]>
       onStreamChunk: (callback: (chunk: StructuredMessage) => void) => () => void
       onStreamDone: (callback: (result: { topicId: number }) => void) => () => void
       startMessageStream: (
         message: string,
         options?: {
-          deepThinking?: boolean
-          smartSearch?: boolean
           tools?: string[]
           topicId?: number
+          providerId?: number
         }
       ) => void
       getTools: () => Promise<ToolInfo[]>

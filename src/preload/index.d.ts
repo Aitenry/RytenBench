@@ -8,8 +8,6 @@ import type { SystemSettings } from '../main/types/settings'
 import type { StructuredMessage, ToolInfo } from '../renderer/resource/types/window'
 
 interface ChatOptions {
-  deepThinking?: boolean
-  smartSearch?: boolean
   tools?: string[]
 }
 
@@ -62,8 +60,8 @@ interface Api {
     setLockScreenView: (open: boolean) => Promise<void>
   }
   chat: {
-    sendMessage: (message: string, options?: ChatOptions) => Promise<StructuredMessage[]>
-    startMessageStream: (message: string, options?: ChatOptions & { topicId?: number }) => void
+    sendMessage: (message: string, options?: ChatOptions & { providerId?: number }) => Promise<StructuredMessage[]>
+    startMessageStream: (message: string, options?: ChatOptions & { topicId?: number; providerId?: number }) => void
     getTools: () => Promise<ToolInfo[]>
     onStreamChunk: (callback: (chunk: StructuredMessage) => void) => () => void
     onStreamDone: (callback: (result: { topicId: number }) => void) => () => void

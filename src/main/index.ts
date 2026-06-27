@@ -722,10 +722,14 @@ app.whenReady().then(async () => {
     async (
       _event,
       question: string,
-      options?: { deepThinking?: boolean; smartSearch?: boolean; tools?: string[] }
+      options?: {
+        tools?: string[]
+        providerId?: number
+      }
     ) => {
       const tools = buildTools(options?.tools || [])
-      const model = await getProviderService().createModel()
+      logger.info(`[Chat] Creating model with providerId: ${options?.providerId ?? 'default'}`)
+      const model = await getProviderService().createModel(options?.providerId)
       const chatSettings = settingsStore.get('chat') as ChatSettings | undefined
       const chatService = new ChatService(model, tools, chatSettings?.maxIterations ?? 5)
       return await chatService.sendMessage(question, options)
@@ -738,14 +742,14 @@ app.whenReady().then(async () => {
       event,
       question: string,
       options?: {
-        deepThinking?: boolean
-        smartSearch?: boolean
         tools?: string[]
         topicId?: number
+        providerId?: number
       }
     ) => {
       const tools = buildTools(options?.tools || [])
-      const model = await getProviderService().createModel()
+      logger.info(`[Chat] Creating model with providerId: ${options?.providerId ?? 'default'}`)
+      const model = await getProviderService().createModel(options?.providerId)
       const chatSettings = settingsStore.get('chat') as ChatSettings | undefined
 
       // 1. 确保话题存在
@@ -779,11 +783,20 @@ app.whenReady().then(async () => {
       // 3. 流式输出 + 累积完整内容
       const chatService = new ChatService(model, tools, chatSettings?.maxIterations ?? 5)
       const stream = chatService.sendMessageStream(question, options)
-      const accumulatedBlocks: { type: string; text?: string; tool?: ToolCallDetail }[] = []
+      const accumulatedBlocks: { type: string; text?: string; tool?: ToolCallDetail; reasoning?: string }[] = []
       let fullContent = ''
 
       try {
         for await (const chunk of stream) {
+          if (chunk.reasoning_content) {
+            // 合并连续 reasoning block
+            const lastBlock = accumulatedBlocks[accumulatedBlocks.length - 1]
+            if (lastBlock && lastBlock.type === 'reasoning') {
+              lastBlock.reasoning = (lastBlock.reasoning || '') + chunk.reasoning_content
+            } else {
+              accumulatedBlocks.push({ type: 'reasoning', reasoning: chunk.reasoning_content })
+            }
+          }
           if (chunk.content) {
             fullContent += chunk.content
             // 合并连续 text block，避免每个 chunk 独立成块导致渲染间距

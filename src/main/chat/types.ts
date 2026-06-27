@@ -1,6 +1,4 @@
 export interface ChatOptions {
-  deepThinking?: boolean
-  smartSearch?: boolean
   tools?: string[]
 }
 
@@ -18,6 +16,7 @@ export interface ToolCallDetail {
 export interface StructuredMessage {
   tool?: ToolCallDetail
   content?: string
+  reasoning_content?: string
 }
 
 /** Available tool definition for the frontend dropdown */

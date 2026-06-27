@@ -1,4 +1,4 @@
-import { ChatOpenAI } from '@langchain/openai'
+import { BaseChatModel } from '@langchain/core/language_models/chat_models'
 import logger from 'electron-log'
 import {
   batchUpsertEntities,
@@ -312,11 +312,11 @@ function filterEntitiesInText(entityNames: string[], text: string): string[] {
 }
 
 export class KnowledgeGraphService {
-  private model: ChatOpenAI
+  private model: BaseChatModel
   private llmCache: Map<string, string>
   private readonly CACHE_MAX_SIZE = 500
 
-  constructor(model: ChatOpenAI) {
+  constructor(model: BaseChatModel) {
     this.model = model
     this.llmCache = new Map()
   }

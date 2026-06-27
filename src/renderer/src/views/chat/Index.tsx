@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react'
+import React, { useState, useRef, useEffect, useMemo } from 'react'
 import { theme, Input, Button, Tooltip, Select, Tag } from 'antd'
 import type { TextAreaRef } from 'antd/es/input/TextArea'
 import {
@@ -18,6 +18,7 @@ import {
   RiSidebarUnfoldLine
 } from '@remixicon/react'
 import { ChatDialogueRow, ChatTopicRow } from '../../../../main/database/mapper/chat'
+import { LlmProviderConfig } from '../../../../main/database/mapper/provider'
 import MarkdownLoad from '@renderer/components/MarkdownLoad'
 import { Window, ToolInfo } from '../../../resource/types/window'
 import { Collapse } from 'antd'
@@ -34,9 +35,10 @@ interface ToolCall {
 }
 
 interface MessageBlock {
-  type: 'text' | 'tool'
+  type: 'text' | 'tool' | 'reasoning'
   text?: string
   tool?: ToolCall
+  reasoning?: string
 }
 
 interface Message {
@@ -47,6 +49,7 @@ interface Message {
   timestamp: number
   toolCalls?: ToolCall[]
   loading?: boolean
+  reasoning_content?: string
 }
 
 const Index: React.FC = () => {
@@ -67,6 +70,8 @@ const Index: React.FC = () => {
   const [currentTopicId, setCurrentTopicId] = useState<number | null>(null)
   const [topics, setTopics] = useState<ChatTopicRow[]>([])
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [providers, setProviders] = useState<LlmProviderConfig[]>([])
+  const [selectedProviderId, setSelectedProviderId] = useState<number | null>(null)
 
   const scrollToBottom = (): void => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -78,6 +83,23 @@ const Index: React.FC = () => {
 
   useEffect(() => {
     ;(window as unknown as Window).api.chat.getTools().then(setAvailableTools).catch(console.error)
+  }, [])
+
+  // 加载可用模型列表
+  useEffect(() => {
+    const loadProviders = async (): Promise<void> => {
+      try {
+        const list = await (window as unknown as Window).api.providers.getEnabled()
+        setProviders(list)
+        const defaultProvider = await (window as unknown as Window).api.providers.getDefault()
+        if (defaultProvider) {
+          setSelectedProviderId(defaultProvider.id)
+        }
+      } catch (err) {
+        console.error('Failed to load providers:', err)
+      }
+    }
+    loadProviders()
   }, [])
 
   // 加载话题列表
@@ -222,11 +244,26 @@ const Index: React.FC = () => {
           prev.map((msg) => {
             if (msg.id !== aiMessageId) return msg
 
+            const updatedReasoning = chunk.reasoning_content
+              ? (msg.reasoning_content || '') + chunk.reasoning_content
+              : msg.reasoning_content
             const updatedContent = chunk.content ? msg.content + chunk.content : msg.content
             const updatedToolCalls = chunk.tool
               ? [...(msg.toolCalls || []), chunk.tool]
               : msg.toolCalls || []
             const updatedBlocks = [...msg.blocks]
+
+            if (chunk.reasoning_content) {
+              const lastBlock = updatedBlocks[updatedBlocks.length - 1]
+              if (lastBlock && lastBlock.type === 'reasoning') {
+                updatedBlocks[updatedBlocks.length - 1] = {
+                  type: 'reasoning',
+                  reasoning: (lastBlock.reasoning || '') + chunk.reasoning_content
+                }
+              } else {
+                updatedBlocks.push({ type: 'reasoning', reasoning: chunk.reasoning_content })
+              }
+            }
 
             if (chunk.content) {
               const lastBlock = updatedBlocks[updatedBlocks.length - 1]
@@ -255,7 +292,8 @@ const Index: React.FC = () => {
               ...msg,
               content: updatedContent,
               blocks: updatedBlocks,
-              toolCalls: updatedToolCalls.length > 0 ? updatedToolCalls : undefined
+              toolCalls: updatedToolCalls.length > 0 ? updatedToolCalls : undefined,
+              reasoning_content: updatedReasoning
             }
           })
         )
@@ -278,9 +316,11 @@ const Index: React.FC = () => {
       })
 
       // 发起流式请求，传递当前话题 ID（主进程负责创建/复用话题 + 保存消息）
+      console.log('[Chat] Sending message with providerId:', selectedProviderId)
       ;(window as unknown as Window).api.chat.startMessageStream(userMessage.content, {
         tools: selectedTools,
-        topicId: currentTopicIdRef.current ?? undefined
+        topicId: currentTopicIdRef.current ?? undefined,
+        providerId: selectedProviderId ?? undefined
       })
 
       resetTimeout()
@@ -332,6 +372,7 @@ const Index: React.FC = () => {
     if (
       message.loading &&
       !message.content &&
+      !message.reasoning_content &&
       (!message.toolCalls || message.toolCalls.length === 0)
     ) {
       return <LoadingMessage />
@@ -352,6 +393,33 @@ const Index: React.FC = () => {
       }
 
       return message.blocks.map((block, index) => {
+        if (block.type === 'reasoning' && block.reasoning) {
+          // 如果后续有 text 块，说明思考已结束；否则正在思考中
+          const hasTextAfter = message.blocks.slice(index + 1).some(b => b.type === 'text')
+          const thinkingLabel = hasTextAfter ? '思考过程' : '思考中…'
+          return (
+            <Collapse
+              key={`${index}-${hasTextAfter ? 'done' : 'thinking'}`}
+              items={[
+                {
+                  key: index,
+                  label: (
+                    <span className="text-gray-400 text-xs">{thinkingLabel}</span>
+                  ),
+                  children: (
+                    <div className="text-gray-500 text-sm whitespace-pre-wrap border-l-2 border-gray-300 pl-3">
+                      {block.reasoning}
+                    </div>
+                  )
+                }
+              ]}
+              defaultActiveKey={hasTextAfter ? [] : [index]}
+              size="small"
+              style={{ marginBottom: '6px' }}
+              className="bg-gray-50 rounded-lg border-0"
+            />
+          )
+        }
         if (block.type === 'text' && block.text) {
           return (
             <div key={index} className="text-gray-800 mb-2">
@@ -436,6 +504,24 @@ const Index: React.FC = () => {
       </div>
     </div>
   )
+
+  const groupedProviderOptions = useMemo(() => {
+    const grouped = new Map<string, { value: number; name: string; model: string }[]>()
+    for (const p of providers) {
+      if (!grouped.has(p.provider)) {
+        grouped.set(p.provider, [])
+      }
+      grouped.get(p.provider)!.push({ value: p.id, name: p.name, model: p.model })
+    }
+    return Array.from(grouped.entries()).map(([provider, opts]) => ({
+      label: provider.charAt(0).toUpperCase() + provider.slice(1),
+      options: opts.map((o) => ({
+        value: o.value,
+        label: `${o.name} (${o.model})`,
+        providerType: provider
+      }))
+    }))
+  }, [providers])
 
   return (
     <div className="h-full flex-1 flex">
@@ -558,9 +644,18 @@ const Index: React.FC = () => {
               }
               onClick={() => setSidebarOpen(!sidebarOpen)}
             />
-            <span className="text-sm text-gray-500">
-              {currentTopicId ? `对话 #${currentTopicId}` : '新对话'}
-            </span>
+            <Select
+              size="small"
+              value={selectedProviderId}
+              onChange={(value) => setSelectedProviderId(value)}
+              style={{ minWidth: 200 }}
+              placeholder="选择模型"
+              showSearch
+              filterOption={(input, option) =>
+                (option?.label as string)?.toLowerCase().includes(input.toLowerCase()) ?? false
+              }
+              options={groupedProviderOptions}
+            />
           </div>
           <Button type="text" size="small" icon={<RiAddLine size={16} />} onClick={handleNewChat}>
             新对话
