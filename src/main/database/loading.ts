@@ -15,6 +15,7 @@ const sqlDir = path.join(app.getAppPath(), 'src', 'main', 'database', 'sql')
 const createTablesSqlPath = path.join(sqlDir, 'create_tables.sql')
 const graphTablesSqlPath = path.join(sqlDir, 'graph_tables.sql')
 const cityCodeSqlPath = path.join(sqlDir, 'urban_resource.sql')
+const llmProvidersSqlPath = path.join(sqlDir, 'llm_providers.sql')
 
 export class Database {
   private db: PGlite | null = null
@@ -40,6 +41,7 @@ export class Database {
   private async initializeTables(): Promise<void> {
     await this.executeSQLFile(createTablesSqlPath, 'create_tables.sql')
     await this.executeSQLFile(graphTablesSqlPath, 'graph_tables.sql')
+    await this.executeSQLFile(llmProvidersSqlPath, 'llm_providers.sql')
     await this.executeSQLFileIfNotDone(cityCodeSqlPath, 'urban_resource.sql')
     logger.info('Initialization and SQL file execution complete.')
   }

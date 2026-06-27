@@ -6,44 +6,31 @@ import logger from 'electron-log'
 import { ChatOptions, StructuredMessage } from './types'
 
 class ChatService {
-  private model: ChatOpenAI | null = null
-  private modelWithTools: Runnable | null = null
+  private model: ChatOpenAI
+  private modelWithTools: Runnable
   private toolsMap: Map<string, StructuredToolInterface> = new Map()
+  private maxIterations: number
 
-  constructor(tools: StructuredToolInterface[] = [], modelConfig?: Partial<ChatOpenAI['fields']>) {
-    this.initializeModel(tools, modelConfig)
-  }
+  /**
+   * @param model 已创建的 ChatOpenAI 实例（由外部 ProviderService 提供）
+   * @param tools 工具列表
+   * @param maxIterations 工具调用最大轮次（默认5）
+   */
+  constructor(model: ChatOpenAI, tools: StructuredToolInterface[] = [], maxIterations = 5) {
+    this.model = model
+    this.maxIterations = maxIterations
 
-  private initializeModel(
-    tools: StructuredToolInterface[],
-    modelConfig?: Partial<ChatOpenAI['fields']>
-  ): void {
-    try {
-      for (const tool of tools) {
-        this.toolsMap.set(tool.name, tool)
-      }
-
-      this.model = new ChatOpenAI({
-        model: 'deepseek-v4-flash',
-        configuration: {
-          baseURL: 'https://api.deepseek.com/v1'
-        },
-        apiKey: 'sk-528729a68e224c06848e7971fba9ddba',
-        temperature: 0.7,
-        ...modelConfig
-      })
-
-      if (tools.length > 0) {
-        this.modelWithTools = this.model.bindTools(tools)
-      } else {
-        this.modelWithTools = this.model
-      }
-
-      logger.info('Chat model initialized successfully')
-    } catch (error) {
-      logger.error('Failed to initialize chat model:', error)
-      throw new Error('Chat model initialization failed')
+    for (const tool of tools) {
+      this.toolsMap.set(tool.name, tool)
     }
+
+    if (tools.length > 0) {
+      this.modelWithTools = model.bindTools(tools)
+    } else {
+      this.modelWithTools = model
+    }
+
+    logger.info(`ChatService initialized (maxIterations=${maxIterations})`)
   }
 
   /**
@@ -53,18 +40,14 @@ class ChatService {
    * @returns 结构化消息数组，每个元素包含工具调用信息或文本内容
    */
   async sendMessage(message: string, options?: ChatOptions): Promise<StructuredMessage[]> {
-    if (!this.modelWithTools) {
-      throw new Error('Chat model is not initialized')
-    }
-
     logger.info(`options: ${JSON.stringify(options)}`)
     const structuredMessages: StructuredMessage[] = []
 
     try {
       const messages: BaseMessage[] = [new HumanMessage(message)]
-      let maxIterations = 5
+      let remaining = this.maxIterations
 
-      while (maxIterations-- > 0) {
+      while (remaining-- > 0) {
         const response = await this.modelWithTools.invoke(messages)
         messages.push(response)
 
@@ -140,17 +123,13 @@ class ChatService {
     message: string,
     options?: ChatOptions
   ): AsyncGenerator<StructuredMessage> {
-    if (!this.modelWithTools) {
-      throw new Error('Chat model is not initialized')
-    }
-
     logger.info(`options: ${JSON.stringify(options)}`)
 
     try {
       const messages: BaseMessage[] = [new HumanMessage(message)]
-      let maxIterations = 5
+      let remaining = this.maxIterations
 
-      while (maxIterations-- > 0) {
+      while (remaining-- > 0) {
         // 首先用 invoke 获取完整响应以检查工具调用
         const fullResponse = await this.modelWithTools.invoke(messages)
         messages.push(fullResponse)

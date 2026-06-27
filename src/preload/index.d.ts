@@ -3,6 +3,8 @@ import { TodoItemRow } from '../main/database/mapper/todo'
 import { NoteRow, NoteListItem, NoteWithContent, PaginatedResult } from '../main/database/mapper/note'
 import { WikiRow, WikiDirectoryRow } from '../main/database/mapper/wiki'
 import { ChatTopicRow, ChatDialogueRow } from '../main/database/mapper/chat'
+import type { LlmProviderInput, LlmProviderConfig } from '../main/database/mapper/provider'
+import type { SystemSettings } from '../main/types/settings'
 import type { StructuredMessage, ToolInfo } from '../renderer/resource/types/window'
 
 interface ChatOptions {
@@ -78,6 +80,20 @@ interface Api {
     getDialoguesByTopic: (topicId: number) => Promise<ChatDialogueRow[]>
     addDialogue: (dialogue: Omit<ChatDialogueRow, 'id' | 'created_at'>) => Promise<number>
     deleteDialoguesByTopic: (topicId: number) => Promise<boolean>
+  }
+  providers: {
+    getAll: () => Promise<LlmProviderConfig[]>
+    getById: (id: number) => Promise<LlmProviderConfig | null>
+    getDefault: () => Promise<LlmProviderConfig | null>
+    getEnabled: () => Promise<LlmProviderConfig[]>
+    create: (input: LlmProviderInput) => Promise<number>
+    update: (id: number, updates: Partial<LlmProviderInput>) => Promise<boolean>
+    delete: (id: number) => Promise<boolean>
+    setDefault: (id: number) => Promise<boolean>
+  }
+  systemSettings: {
+    getAll: () => Promise<SystemSettings>
+    update: (updates: Partial<SystemSettings>) => Promise<boolean>
   }
 }
 

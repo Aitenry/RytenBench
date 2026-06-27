@@ -9,6 +9,8 @@ import {
   GraphData
 } from '../../../main/database/mapper/graph'
 import { Lock } from '@renderer/types/settings'
+import { LlmProviderInput, LlmProviderConfig } from '../../../../main/database/mapper/provider'
+import { SystemSettings } from '@renderer/types/settings'
 
 export interface PaginatedResult<T> {
   items: T[]
@@ -177,6 +179,20 @@ export interface Window {
         callback: (result: { wikiId: number; entityCount: number; relationCount: number }) => void
       ) => () => void
       onBuildError: (callback: (error: { wikiId: number; error: string }) => void) => () => void
+    }
+    providers: {
+      getAll: () => Promise<LlmProviderConfig[]>
+      getById: (id: number) => Promise<LlmProviderConfig | null>
+      getDefault: () => Promise<LlmProviderConfig | null>
+      getEnabled: () => Promise<LlmProviderConfig[]>
+      create: (input: LlmProviderInput) => Promise<number>
+      update: (id: number, updates: Partial<LlmProviderInput>) => Promise<boolean>
+      delete: (id: number) => Promise<boolean>
+      setDefault: (id: number) => Promise<boolean>
+    }
+    systemSettings: {
+      getAll: () => Promise<SystemSettings>
+      update: (updates: Partial<SystemSettings>) => Promise<boolean>
     }
   }
 }

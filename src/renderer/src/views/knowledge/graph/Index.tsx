@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { Button, Empty, Flex, Select, theme, Typography } from 'antd'
+import { Button, Empty, Flex, Modal, Select, theme, Typography } from 'antd'
 import { PlayCircleOutlined } from '@ant-design/icons'
 import { Window } from '../../../../resource/types/window'
 import { useMessage } from '@renderer/hooks/useMessage'
@@ -194,24 +194,33 @@ const Index: React.FC = () => {
   const handleBuildGraph = async (): Promise<void> => {
     if (!selectedWiki) return
 
-    const messageKey = 'graph-build-trigger'
-    viewMessage(messageKey, 'loading', '正在启动图谱构建...')
+    Modal.confirm({
+      title: '确认构建图谱',
+      content: `将为知识库「${selectedWiki.title}」重新构建知识图谱，已有图谱数据将被清除。确定继续吗？`,
+      okText: '确定构建',
+      cancelText: '取消',
+      okButtonProps: { danger: true },
+      onOk: () => {
+        const messageKey = 'graph-build-trigger'
+        viewMessage(messageKey, 'loading', '正在启动图谱构建...')
 
-    setIsBuilding(true)
-    setShowBuildProgress(true)
-    setBuildPhase('collect')
-    setBuildProcessed(0)
-    setBuildTotal(0)
-    setBuildMessage('初始化...')
+        setIsBuilding(true)
+        setShowBuildProgress(true)
+        setBuildPhase('collect')
+        setBuildProcessed(0)
+        setBuildTotal(0)
+        setBuildMessage('初始化...')
 
-    try {
-      ;(window as unknown as Window).api.graph.buildGraph(selectedWiki.id, { force: true })
-      viewMessage(messageKey, 'success', '图谱构建已启动', 2)
-    } catch (error) {
-      setIsBuilding(false)
-      setShowBuildProgress(false)
-      viewMessage(messageKey, 'error', `启动构建失败: ${error}`)
-    }
+        try {
+          ;(window as unknown as Window).api.graph.buildGraph(selectedWiki.id, { force: true })
+          viewMessage(messageKey, 'success', '图谱构建已启动', 2)
+        } catch (error) {
+          setIsBuilding(false)
+          setShowBuildProgress(false)
+          viewMessage(messageKey, 'error', `启动构建失败: ${error}`)
+        }
+      }
+    })
   }
 
   // Handle back to wiki list

@@ -11,6 +11,8 @@ import APITool from '../views/tools/api/Index'
 import Weather from '../views/weather/Index'
 import Music from '../views/music/Index'
 import Chat from '../views/chat/Index'
+import ProviderConfig from '../views/settings/provider/Index'
+import SystemSettings from '../views/settings/system/Index'
 
 interface MainRoutesProps {
   defaultRoute?: string // 默认路由参数
@@ -32,6 +34,8 @@ const MainRoutes: React.FC<MainRoutesProps> = ({ defaultRoute = '/home' }) => {
       <Route path="/weather" element={<Weather />} />
       <Route path="/music" element={<Music />} />
       <Route path="/chat" element={<Chat />} />
+      <Route path="/settings/provider" element={<ProviderConfig />} />
+      <Route path="/settings/system" element={<SystemSettings />} />
       <Route path="*" element={<Navigate to={defaultRoute} replace />} />
     </Routes>
   )

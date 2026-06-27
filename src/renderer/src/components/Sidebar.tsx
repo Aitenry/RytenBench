@@ -21,7 +21,9 @@ import {
   RiAiGenerate3dLine,
   RiTodoLine,
   RiCalendarTodoLine,
-  RiChatAiLine
+  RiChatAiLine,
+  RiSettings3Line,
+  RiComputerLine
 } from '@remixicon/react'
 import Logo from '../assets/logo.png'
 
@@ -73,6 +75,15 @@ const Sidebar: React.FC<SidebarProps> = ({ currentKey, setCurrentKey }) => {
       children: [
         { key: 'tools/mcp', label: 'MCP 仓库', icon: <RiAiGenerate3dLine size={18} /> },
         { key: 'tools/api', label: 'API 调用', icon: <RiCodeSSlashLine size={18} /> }
+      ]
+    },
+    {
+      key: 'settings',
+      label: '设置',
+      icon: <RiSettings3Line size={18} />,
+      children: [
+        { key: 'settings/provider', label: '模型配置', icon: <RiAiGenerate3dLine size={18} /> },
+        { key: 'settings/system', label: '系统设置', icon: <RiComputerLine size={18} /> }
       ]
     },
     { key: 'chat', label: '助手', icon: <RiChatAiLine size={18} /> },

@@ -316,15 +316,8 @@ export class KnowledgeGraphService {
   private llmCache: Map<string, string>
   private readonly CACHE_MAX_SIZE = 500
 
-  constructor() {
-    this.model = new ChatOpenAI({
-      model: 'deepseek-v4-flash',
-      configuration: {
-        baseURL: 'https://api.deepseek.com/v1'
-      },
-      apiKey: 'sk-528729a68e224c06848e7971fba9ddba',
-      temperature: 0.3
-    })
+  constructor(model: ChatOpenAI) {
+    this.model = model
     this.llmCache = new Map()
   }
 

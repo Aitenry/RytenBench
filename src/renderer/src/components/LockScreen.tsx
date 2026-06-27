@@ -44,8 +44,10 @@ const LockScreen: React.FC<LockScreenProps> = ({ onUnlock }) => {
           length={6}
           value={inputValue}
           onChange={handlePasswordChange}
-          formatter={(str) => str.toUpperCase()}
+          formatter={(str) => str.replace(/\D/g, '')}
+          mask
           autoFocus
+          inputMode="numeric"
           style={{ width: '100%', marginBottom: '16px' }}
           onKeyUp={handleKeyPress}
         />

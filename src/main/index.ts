@@ -50,6 +50,20 @@ import { ChatService } from './chat/service'
 import { buildTools, availableTools } from './chat/tools'
 import type { ToolCallDetail } from './chat/types'
 import { KnowledgeGraphService, BuildConfig } from './graph'
+import { getProviderService } from './provider/service'
+import {
+  getAllProviders,
+  getProviderById,
+  getDefaultProvider,
+  getEnabledProviders,
+  createProvider,
+  updateProvider,
+  deleteProvider,
+  setDefaultProvider,
+  LlmProviderInput
+} from './database/mapper/provider'
+import { initKeystore } from './crypto/provider-key'
+import { SystemSettings, GraphSettings, ChatSettings } from './types/settings'
 import {
   getEntityById,
   searchEntities,
@@ -125,6 +139,12 @@ export async function getFlexSearchIndexer(): Promise<FlexSearchIndexer> {
 async function performInitializationTasks(): Promise<void> {
   const tasks = [
     { name: '加载配置', execute: async () => await loadConfig() },
+    {
+      name: '初始化密钥库',
+      execute: async () => {
+        initKeystore()
+      }
+    },
     { name: '初始化数据库', execute: async () => (database = await createDatabase()) },
     {
       name: '初始化索引',
@@ -177,6 +197,8 @@ async function performInitializationTasks(): Promise<void> {
 async function loadConfig(): Promise<void> {
   const ipConfig = settingsStore.get('ip')
   const lockPermission = settingsStore.get('lock')
+  const graphConfig = settingsStore.get('graph')
+  const chatConfig = settingsStore.get('chat')
   const configPromises: Promise<void>[] = []
 
   if (!ipConfig) {
@@ -190,6 +212,25 @@ async function loadConfig(): Promise<void> {
     configPromises.push(
       Promise.resolve().then(() => {
         settingsStore.set('lock', { code: 'e10adc3949ba59abbe56e057f20f883e', view: false })
+      })
+    )
+  }
+  if (!graphConfig) {
+    configPromises.push(
+      Promise.resolve().then(() => {
+        settingsStore.set('graph', {
+          maxConcurrency: 8,
+          enableGleaning: true,
+          gleaningThreshold: 50,
+          maxChunkSize: 2000
+        } as GraphSettings)
+      })
+    )
+  }
+  if (!chatConfig) {
+    configPromises.push(
+      Promise.resolve().then(() => {
+        settingsStore.set('chat', { maxIterations: 5 } as ChatSettings)
       })
     )
   }
@@ -403,6 +444,40 @@ app.whenReady().then(async () => {
       settingsStore.set('lock', lock)
     } catch (error) {
       console.error('Error in todo-items-get-by-id:', error)
+      throw error
+    }
+  })
+
+  // --- System Settings IPC handlers ---
+
+  ipcMain.handle('system-settings-get-all', async () => {
+    try {
+      const all = settingsStore.store
+      // 不暴露 provider-keystore 内部数据给前端
+      return {
+        ip: all.ip,
+        lock: all.lock,
+        graph: all.graph,
+        chat: all.chat,
+        defaultModelId: all.defaultModelId
+      } as SystemSettings
+    } catch (error) {
+      logger.error('Error in system-settings-get-all:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('system-settings-update', async (_event, updates: Partial<SystemSettings>) => {
+    try {
+      for (const [key, value] of Object.entries(updates)) {
+        if (value !== undefined) {
+          settingsStore.set(key as keyof SystemSettings, value)
+        }
+      }
+      logger.info('System settings updated:', Object.keys(updates).join(', '))
+      return true
+    } catch (error) {
+      logger.error('Error in system-settings-update:', error)
       throw error
     }
   })
@@ -650,7 +725,9 @@ app.whenReady().then(async () => {
       options?: { deepThinking?: boolean; smartSearch?: boolean; tools?: string[] }
     ) => {
       const tools = buildTools(options?.tools || [])
-      const chatService = new ChatService(tools)
+      const model = await getProviderService().createModel()
+      const chatSettings = settingsStore.get('chat') as ChatSettings | undefined
+      const chatService = new ChatService(model, tools, chatSettings?.maxIterations ?? 5)
       return await chatService.sendMessage(question, options)
     }
   )
@@ -668,6 +745,8 @@ app.whenReady().then(async () => {
       }
     ) => {
       const tools = buildTools(options?.tools || [])
+      const model = await getProviderService().createModel()
+      const chatSettings = settingsStore.get('chat') as ChatSettings | undefined
 
       // 1. 确保话题存在
       let topicId = options?.topicId
@@ -698,7 +777,7 @@ app.whenReady().then(async () => {
       }
 
       // 3. 流式输出 + 累积完整内容
-      const chatService = new ChatService(tools)
+      const chatService = new ChatService(model, tools, chatSettings?.maxIterations ?? 5)
       const stream = chatService.sendMessageStream(question, options)
       const accumulatedBlocks: { type: string; text?: string; tool?: ToolCallDetail }[] = []
       let fullContent = ''
@@ -908,14 +987,24 @@ app.whenReady().then(async () => {
   ipcMain.on(
     'graph-build-start',
     async (event, wikiId: number, config?: Record<string, unknown>) => {
-      const graphService = new KnowledgeGraphService()
+      const defaultModelId = settingsStore.get('defaultModelId') as number | undefined
+      const model = await getProviderService().createModel(defaultModelId)
+      const graphService = new KnowledgeGraphService(model)
+      // 从系统设置读取图谱构建默认值，用户传入的config可覆盖
+      const graphSettings = settingsStore.get('graph') as GraphSettings | undefined
+      const mergedConfig: BuildConfig = {
+        maxConcurrency: (config?.maxConcurrency as number) ?? graphSettings?.maxConcurrency ?? 8,
+        enableGleaning:
+          (config?.enableGleaning as boolean) ?? graphSettings?.enableGleaning ?? true,
+        force: config?.force as boolean | undefined
+      }
       try {
         const result = await graphService.buildGraph(
           wikiId,
           (progress) => {
             event.sender.send('graph-build-progress', progress)
           },
-          config as BuildConfig | undefined
+          mergedConfig
         )
         event.sender.send('graph-build-complete', {
           wikiId,
@@ -931,6 +1020,91 @@ app.whenReady().then(async () => {
       }
     }
   )
+
+  // --- Provider IPC handlers ---
+
+  ipcMain.handle('provider-get-all', async () => {
+    try {
+      return await getAllProviders()
+    } catch (error) {
+      logger.error('Error in provider-get-all:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('provider-get-by-id', async (_event, id: number) => {
+    try {
+      return await getProviderById(id)
+    } catch (error) {
+      logger.error('Error in provider-get-by-id:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('provider-get-default', async () => {
+    try {
+      return await getDefaultProvider()
+    } catch (error) {
+      logger.error('Error in provider-get-default:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('provider-get-enabled', async () => {
+    try {
+      return await getEnabledProviders()
+    } catch (error) {
+      logger.error('Error in provider-get-enabled:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('provider-create', async (_event, input: LlmProviderInput) => {
+    try {
+      const id = await createProvider(input)
+      getProviderService().clearCache()
+      return id
+    } catch (error) {
+      logger.error('Error in provider-create:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle(
+    'provider-update',
+    async (_event, id: number, updates: Partial<LlmProviderInput>) => {
+      try {
+        const result = await updateProvider(id, updates)
+        getProviderService().clearCache()
+        return result
+      } catch (error) {
+        logger.error('Error in provider-update:', error)
+        throw error
+      }
+    }
+  )
+
+  ipcMain.handle('provider-delete', async (_event, id: number) => {
+    try {
+      const result = await deleteProvider(id)
+      getProviderService().clearCache()
+      return result
+    } catch (error) {
+      logger.error('Error in provider-delete:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('provider-set-default', async (_event, id: number) => {
+    try {
+      const result = await setDefaultProvider(id)
+      getProviderService().clearCache()
+      return result
+    } catch (error) {
+      logger.error('Error in provider-set-default:', error)
+      throw error
+    }
+  })
 
   await createLoadingWindow()
 

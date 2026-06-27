@@ -4,6 +4,8 @@ import { TodoItemRow } from '../main/database/mapper/todo'
 import { NoteRow } from '../main/database/mapper/note'
 import { WikiRow, WikiDirectoryRow } from '../main/database/mapper/wiki'
 import { ChatTopicRow, ChatDialogueRow } from '../main/database/mapper/chat'
+import type { LlmProviderInput, LlmProviderConfig } from '../main/database/mapper/provider'
+import type { SystemSettings } from '../main/types/settings'
 
 // Custom APIs for renderer
 const api = {
@@ -166,6 +168,25 @@ const api = {
         ipcRenderer.removeAllListeners('graph-build-error')
       }
     }
+  },
+  providers: {
+    getAll: () => ipcRenderer.invoke('provider-get-all') as Promise<LlmProviderConfig[]>,
+    getById: (id: number) =>
+      ipcRenderer.invoke('provider-get-by-id', id) as Promise<LlmProviderConfig | null>,
+    getDefault: () =>
+      ipcRenderer.invoke('provider-get-default') as Promise<LlmProviderConfig | null>,
+    getEnabled: () => ipcRenderer.invoke('provider-get-enabled') as Promise<LlmProviderConfig[]>,
+    create: (input: LlmProviderInput) =>
+      ipcRenderer.invoke('provider-create', input) as Promise<number>,
+    update: (id: number, updates: Partial<LlmProviderInput>) =>
+      ipcRenderer.invoke('provider-update', id, updates) as Promise<boolean>,
+    delete: (id: number) => ipcRenderer.invoke('provider-delete', id) as Promise<boolean>,
+    setDefault: (id: number) => ipcRenderer.invoke('provider-set-default', id) as Promise<boolean>
+  },
+  systemSettings: {
+    getAll: () => ipcRenderer.invoke('system-settings-get-all') as Promise<SystemSettings>,
+    update: (updates: Partial<SystemSettings>) =>
+      ipcRenderer.invoke('system-settings-update', updates) as Promise<boolean>
   }
 }
 

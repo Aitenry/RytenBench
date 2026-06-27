@@ -100,7 +100,7 @@ const EntityDetail: React.FC<EntityDetailProps> = ({
         setNoteTitles(titles)
       }
     }
-    fetchTitles()
+    fetchTitles().then()
     return () => {
       cancelled = true
     }

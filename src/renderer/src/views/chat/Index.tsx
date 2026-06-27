@@ -66,7 +66,7 @@ const Index: React.FC = () => {
   const currentTopicIdRef = useRef<number | null>(null)
   const [currentTopicId, setCurrentTopicId] = useState<number | null>(null)
   const [topics, setTopics] = useState<ChatTopicRow[]>([])
-  const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [sidebarOpen, setSidebarOpen] = useState(false)
 
   const scrollToBottom = (): void => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })

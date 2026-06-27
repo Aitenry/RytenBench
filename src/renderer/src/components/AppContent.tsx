@@ -14,6 +14,7 @@ const AppContent: React.FC = () => {
   const [current, setCurrent] = useState('home')
   const [isLocked, setIsLocked] = useState(false)
   const [lockCode, setLockCode] = useState<string | null>(null)
+  const [lockEnabled, setLockEnabled] = useState(true)
 
   // Initialize lock screen settings
   useEffect(() => {
@@ -21,10 +22,7 @@ const AppContent: React.FC = () => {
       try {
         const result = await (window as unknown as Window).api.setting.getLockScreenCode()
         setLockCode(result.code)
-
-        if (result.view) {
-          setIsLocked(true)
-        }
+        setLockEnabled(result.view)
       } catch (error) {
         console.error('Failed to initialize lock screen:', error)
         setIsLocked(false)
@@ -34,19 +32,16 @@ const AppContent: React.FC = () => {
     initializeLockScreen().then()
   }, [])
 
-  // Update lock screen status in both local storage and backend
+  // Update lock screen status locally (runtime state only)
   const updateLockStatus = useCallback((locked: boolean): void => {
-    // Update backend setting
-    ;(window as unknown as Window).api.setting.setLockScreenView(locked)
-
-    // Update local state
     setIsLocked(locked)
   }, [])
 
   // Handle lock screen action
   const handleLockScreen = useCallback((): void => {
+    if (!lockEnabled) return
     updateLockStatus(true)
-  }, [updateLockStatus])
+  }, [updateLockStatus, lockEnabled])
 
   // Verify password against stored hash
   const verifyPassword = async (inputPassword: string): Promise<boolean> => {

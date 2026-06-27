@@ -1,4 +1,1 @@
-export interface Lock {
-  code: string
-  view: boolean
-}
+export type { Lock, SystemSettings, GraphSettings, ChatSettings } from '../../main/types/settings'
