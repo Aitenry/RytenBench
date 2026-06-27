@@ -1,5 +1,7 @@
 export interface ChatOptions {
   tools?: string[]
+  images?: string[]
+  documents?: { fileName: string; filePath: string }[]
 }
 
 export interface ChatMessage {

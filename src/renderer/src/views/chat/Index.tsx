@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react'
-import { theme, Input, Button, Tooltip, Select, Tag } from 'antd'
+import { theme, Input, Button, Tooltip, Select, Tag, Dropdown } from 'antd'
 import type { TextAreaRef } from 'antd/es/input/TextArea'
 import {
   RiArrowUpLine,
@@ -15,7 +15,10 @@ import {
   RiHistoryLine,
   RiDeleteBin6Line,
   RiSidebarFoldLine,
-  RiSidebarUnfoldLine
+  RiSidebarUnfoldLine,
+  RiAttachment2,
+  RiCloseLine,
+  RiMoreLine
 } from '@remixicon/react'
 import { ChatDialogueRow, ChatTopicRow } from '../../../../main/database/mapper/chat'
 import { LlmProviderConfig } from '../../../../main/database/mapper/provider'
@@ -35,10 +38,12 @@ interface ToolCall {
 }
 
 interface MessageBlock {
-  type: 'text' | 'tool' | 'reasoning'
+  type: 'text' | 'tool' | 'reasoning' | 'image' | 'document'
   text?: string
   tool?: ToolCall
   reasoning?: string
+  image_url?: string
+  fileName?: string
 }
 
 interface Message {
@@ -50,6 +55,12 @@ interface Message {
   toolCalls?: ToolCall[]
   loading?: boolean
   reasoning_content?: string
+}
+
+interface Attachment {
+  dataUrl: string // base64 图片或文件路径
+  fileName: string
+  isImage: boolean
 }
 
 const Index: React.FC = () => {
@@ -72,6 +83,15 @@ const Index: React.FC = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [providers, setProviders] = useState<LlmProviderConfig[]>([])
   const [selectedProviderId, setSelectedProviderId] = useState<number | null>(null)
+  const [attachments, setAttachments] = useState<Attachment[]>([])
+
+  // 当前选中模型的能力标签
+  const selectedProvider = useMemo(
+    () => providers.find((p) => p.id === selectedProviderId) ?? null,
+    [providers, selectedProviderId]
+  )
+  const modelSupportsTools = selectedProvider?.tags?.includes('tools') ?? false
+  const modelSupportsVision = selectedProvider?.tags?.includes('vision') ?? false
 
   const scrollToBottom = (): void => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -85,21 +105,26 @@ const Index: React.FC = () => {
     ;(window as unknown as Window).api.chat.getTools().then(setAvailableTools).catch(console.error)
   }, [])
 
-  // 加载可用模型列表
+  // 加载可用模型列表（排除 Embedding 模型）
   useEffect(() => {
     const loadProviders = async (): Promise<void> => {
       try {
         const list = await (window as unknown as Window).api.providers.getEnabled()
-        setProviders(list)
+        // 过滤掉 Embedding 模型，问答页面不加载
+        const chatModels = list.filter((p) => !p.tags?.includes('embedding'))
+        setProviders(chatModels)
         const defaultProvider = await (window as unknown as Window).api.providers.getDefault()
-        if (defaultProvider) {
+        if (defaultProvider && !defaultProvider.tags?.includes('embedding')) {
           setSelectedProviderId(defaultProvider.id)
+        } else if (chatModels.length > 0) {
+          // 如果默认模型是 Embedding 模型，选第一个非 Embedding 模型
+          setSelectedProviderId(chatModels[0].id)
         }
       } catch (err) {
         console.error('Failed to load providers:', err)
       }
     }
-    loadProviders()
+    loadProviders().then()
   }, [])
 
   // 加载话题列表
@@ -153,8 +178,8 @@ const Index: React.FC = () => {
   }
 
   // 删除话题
-  const handleDeleteTopic = async (topicId: number, e: React.MouseEvent): Promise<void> => {
-    e.stopPropagation()
+  const handleDeleteTopic = async (topicId: number, e?: React.MouseEvent): Promise<void> => {
+    e?.stopPropagation()
     try {
       await (window as unknown as Window).api.chat.deleteTopic(topicId)
       if (currentTopicIdRef.current === topicId) {
@@ -189,12 +214,25 @@ const Index: React.FC = () => {
     const hasLoadingMessage = messages.some((msg) => msg.loading)
     if (!inputValue.trim() || hasLoadingMessage) return
 
+    const currentAttachments = [...attachments]
+    setAttachments([])
+
+    // 分离图片和文档
+    const currentImages = currentAttachments.filter((a) => a.isImage).map((a) => a.dataUrl)
+    const currentDocuments = currentAttachments
+      .filter((a) => !a.isImage)
+      .map((a) => ({ fileName: a.fileName, filePath: a.dataUrl }))
+
     // 用户消息（仅 UI，持久化由主进程处理）
     const userMessage: Message = {
       id: Date.now().toString(),
       role: 'user',
       content: inputValue.trim(),
-      blocks: [],
+      blocks: currentAttachments.map((a) =>
+        a.isImage
+          ? { type: 'image' as const, image_url: a.dataUrl }
+          : { type: 'document' as const, fileName: a.fileName }
+      ),
       timestamp: Date.now()
     }
 
@@ -319,6 +357,8 @@ const Index: React.FC = () => {
       console.log('[Chat] Sending message with providerId:', selectedProviderId)
       ;(window as unknown as Window).api.chat.startMessageStream(userMessage.content, {
         tools: selectedTools,
+        images: currentImages.length > 0 ? currentImages : undefined,
+        documents: currentDocuments.length > 0 ? currentDocuments : undefined,
         topicId: currentTopicIdRef.current ?? undefined,
         providerId: selectedProviderId ?? undefined
       })
@@ -347,6 +387,7 @@ const Index: React.FC = () => {
     currentTopicIdRef.current = null
     setInputValue('')
     setSelectedTools([])
+    setAttachments([])
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
@@ -356,15 +397,45 @@ const Index: React.FC = () => {
     }
   }
 
-  const UserMessage = ({ message }: { message: Message }): React.ReactNode => (
-    <div className="flex justify-end mb-6">
-      <div className="max-w-[80%]">
-        <div className="bg-[#edf3fe] text-gray-800 px-5 py-3 rounded-2xl rounded-br-sm">
-          <p className="whitespace-pre-wrap">{message.content}</p>
+  const UserMessage = ({ message }: { message: Message }): React.ReactNode => {
+    const imageBlocks = message.blocks.filter((b) => b.type === 'image' && b.image_url)
+    const documentBlocks = message.blocks.filter((b) => b.type === 'document' && b.fileName)
+
+    return (
+      <div className="flex justify-end mb-6">
+        <div className="max-w-[80%]">
+          <div className="bg-[#edf3fe] text-gray-800 px-5 py-3 rounded-2xl rounded-br-sm">
+            <p className="whitespace-pre-wrap">{message.content}</p>
+          </div>
+          {/* 图片 */}
+          {imageBlocks.length > 0 && (
+            <div className="flex gap-2 mt-2 justify-end flex-wrap">
+              {imageBlocks.map((b, idx) => (
+                <img
+                  key={idx}
+                  src={b.image_url}
+                  alt={`user-img-${idx}`}
+                  className="max-w-[200px] max-h-[200px] object-cover rounded-lg border border-gray-200"
+                />
+              ))}
+            </div>
+          )}
+          {/* 文档 */}
+          {documentBlocks.length > 0 && (
+            <div className="flex gap-2 mt-2 justify-end flex-wrap">
+              {documentBlocks.map((b, idx) => (
+                <Tag key={idx} color="blue" className="px-3 py-1 text-sm rounded-lg">
+                  <div className="inline-flex items-center py-1 gap-1">
+                    <RiAttachment2 size={14} /> <span>{b.fileName}</span>
+                  </div>
+                </Tag>
+              ))}
+            </div>
+          )}
         </div>
       </div>
-    </div>
-  )
+    )
+  }
 
   const AssistantMessage = ({ message }: { message: Message }): React.ReactNode => {
     const isCopied = copiedId === message.id
@@ -395,7 +466,7 @@ const Index: React.FC = () => {
       return message.blocks.map((block, index) => {
         if (block.type === 'reasoning' && block.reasoning) {
           // 如果后续有 text 块，说明思考已结束；否则正在思考中
-          const hasTextAfter = message.blocks.slice(index + 1).some(b => b.type === 'text')
+          const hasTextAfter = message.blocks.slice(index + 1).some((b) => b.type === 'text')
           const thinkingLabel = hasTextAfter ? '思考过程' : '思考中…'
           return (
             <Collapse
@@ -403,9 +474,7 @@ const Index: React.FC = () => {
               items={[
                 {
                   key: index,
-                  label: (
-                    <span className="text-gray-400 text-xs">{thinkingLabel}</span>
-                  ),
+                  label: <span className="text-gray-400 text-xs">{thinkingLabel}</span>,
                   children: (
                     <div className="text-gray-500 text-sm whitespace-pre-wrap border-l-2 border-gray-300 pl-3">
                       {block.reasoning}
@@ -517,7 +586,7 @@ const Index: React.FC = () => {
       label: provider.charAt(0).toUpperCase() + provider.slice(1),
       options: opts.map((o) => ({
         value: o.value,
-        label: `${o.name} (${o.model})`,
+        label: `${o.name} : ${o.model}`,
         providerType: provider
       }))
     }))
@@ -614,12 +683,28 @@ const Index: React.FC = () => {
               >
                 <RiHistoryLine size={16} className="shrink-0 text-gray-400" />
                 <span className="flex-1 text-sm truncate">{topic.title}</span>
-                <button
-                  onClick={(e) => handleDeleteTopic(topic.id, e)}
-                  className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-red-50 rounded transition-all"
+                <Dropdown
+                  menu={{
+                    items: [
+                      {
+                        key: 'delete',
+                        label: '删除对话',
+                        danger: true,
+                        icon: <RiDeleteBin6Line size={14} />,
+                        onClick: () => handleDeleteTopic(topic.id)
+                      }
+                    ]
+                  }}
+                  trigger={['click']}
+                  placement="bottomRight"
                 >
-                  <RiDeleteBin6Line size={14} className="text-gray-400 hover:text-red-500" />
-                </button>
+                  <button
+                    onClick={(e) => e.stopPropagation()}
+                    className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-gray-100 rounded transition-all"
+                  >
+                    <RiMoreLine size={16} className="text-gray-400" />
+                  </button>
+                </Dropdown>
               </div>
             ))
           )}
@@ -648,7 +733,7 @@ const Index: React.FC = () => {
               size="small"
               value={selectedProviderId}
               onChange={(value) => setSelectedProviderId(value)}
-              style={{ minWidth: 200 }}
+              style={{ minWidth: 100 }}
               placeholder="选择模型"
               showSearch
               filterOption={(input, option) =>
@@ -657,9 +742,7 @@ const Index: React.FC = () => {
               options={groupedProviderOptions}
             />
           </div>
-          <Button type="text" size="small" icon={<RiAddLine size={16} />} onClick={handleNewChat}>
-            新对话
-          </Button>
+          <Button type="text" size="small" icon={<RiAddLine size={16} />} onClick={handleNewChat} />
         </div>
         <div className="flex-1 overflow-y-scroll my-1 mr-1 ml-3 px-16 py-8 chat-scrollbar">
           {messages.length === 0 ? (
@@ -708,73 +791,140 @@ const Index: React.FC = () => {
                   }}
                 />
               </div>
+              {/* 已选附件预览 */}
+              {attachments.length > 0 && (
+                <div className="flex gap-2 px-4 pb-3 flex-wrap">
+                  {attachments.map((att, idx) =>
+                    att.isImage ? (
+                      <div key={idx} className="relative group">
+                        <img
+                          src={att.dataUrl}
+                          alt={`upload-${idx}`}
+                          className="w-16 h-16 object-cover rounded-lg border border-gray-200"
+                        />
+                        <button
+                          onClick={() => setAttachments((prev) => prev.filter((_, i) => i !== idx))}
+                          className="absolute -top-2 -right-2 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                        >
+                          <RiCloseLine size={12} />
+                        </button>
+                      </div>
+                    ) : (
+                      <div
+                        key={idx}
+                        className="relative group flex items-center gap-1.5 bg-blue-50 text-blue-700 text-xs px-2.5 py-1.5 rounded-lg border border-blue-200"
+                      >
+                        <span className="max-w-[120px] truncate">{att.fileName}</span>
+                        <button
+                          onClick={() => setAttachments((prev) => prev.filter((_, i) => i !== idx))}
+                          className="ml-1 text-blue-400 hover:text-red-500"
+                        >
+                          <RiCloseLine size={14} />
+                        </button>
+                      </div>
+                    )
+                  )}
+                </div>
+              )}
               <div className="flex items-center justify-between px-4 pb-4">
                 <div className="flex items-center gap-2">
-                  <Select
-                    mode="multiple"
-                    placeholder="选择工具"
-                    value={selectedTools}
-                    onChange={setSelectedTools}
-                    style={{ minWidth: 140, padding: '6px', borderRadius: '10px' }}
-                    size="small"
-                    allowClear
-                    maxTagCount={1}
-                    maxTagPlaceholder={(omitted) => <span>+{omitted.length}</span>}
-                    optionRender={(option) => {
-                      const tool = availableTools.find((t) => t.name === option.value)
-                      if (!tool) return option.label as React.ReactNode
-                      return (
-                        <div className="flex items-center gap-2">
-                          <span
+                  <Tooltip
+                    title={modelSupportsVision ? '上传附件（含图片）' : '上传附件（不含图片）'}
+                  >
+                    <Button
+                      type="dashed"
+                      shape="circle"
+                      icon={<RiAttachment2 size={16} />}
+                      onClick={async () => {
+                        const result = await (window as unknown as Window).api.file.selectImageFile(
+                          modelSupportsVision
+                        )
+                        if (result) {
+                          setAttachments((prev) => [
+                            ...prev,
+                            {
+                              dataUrl: result.dataUrl,
+                              fileName: result.fileName,
+                              isImage: result.isImage
+                            }
+                          ])
+                        }
+                      }}
+                    />
+                  </Tooltip>
+                  <Tooltip
+                    title={
+                      modelSupportsTools
+                        ? '选择工具'
+                        : '当前模型不支持工具调用，请切换至支持 Tools 标签的模型'
+                    }
+                  >
+                    <Select
+                      mode="multiple"
+                      placeholder="选择工具"
+                      value={selectedTools}
+                      onChange={setSelectedTools}
+                      style={{ minWidth: 140, padding: '6px', borderRadius: '10px' }}
+                      size="small"
+                      allowClear
+                      disabled={!modelSupportsTools}
+                      maxTagCount={1}
+                      maxTagPlaceholder={(omitted) => <span>+{omitted.length}</span>}
+                      optionRender={(option) => {
+                        const tool = availableTools.find((t) => t.name === option.value)
+                        if (!tool) return option.label as React.ReactNode
+                        return (
+                          <div className="flex items-center gap-2">
+                            <span
+                              style={{
+                                color: tool.color
+                              }}
+                            >
+                              {toolIconMap[tool.icon]}
+                            </span>
+                            <span>{tool.label}</span>
+                          </div>
+                        )
+                      }}
+                      tagRender={(props) => {
+                        const tool = availableTools.find((t) => t.name === props.value)
+                        const { label, closable, onClose } = props
+                        return (
+                          <Tag
+                            closable={closable}
+                            onClose={onClose}
                             style={{
-                              color: tool.color
+                              marginInlineEnd: 4,
+                              background: tool ? `${tool.color}12` : undefined,
+                              border: tool ? `1px solid ${tool.color}30` : undefined,
+                              color: tool?.color,
+                              borderRadius: 12,
+                              paddingInline: 8,
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between'
                             }}
                           >
-                            {toolIconMap[tool.icon]}
-                          </span>
-                          <span>{tool.label}</span>
-                        </div>
-                      )
-                    }}
-                    tagRender={(props) => {
-                      const tool = availableTools.find((t) => t.name === props.value)
-                      const { label, closable, onClose } = props
-                      return (
-                        <Tag
-                          closable={closable}
-                          onClose={onClose}
-                          style={{
-                            marginInlineEnd: 4,
-                            background: tool ? `${tool.color}12` : undefined,
-                            border: tool ? `1px solid ${tool.color}30` : undefined,
-                            color: tool?.color,
-                            borderRadius: 12,
-                            paddingInline: 8,
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'space-between'
-                          }}
-                        >
-                          <span style={{ marginRight: 4 }}>
-                            {tool ? toolIconMap[tool.icon] : null}
-                          </span>
-                          {label}
-                        </Tag>
-                      )
-                    }}
-                    options={availableTools.map((t) => ({
-                      value: t.name,
-                      label: t.label,
-                      icon: t.icon,
-                      color: t.color
-                    }))}
-                  />
+                            <span style={{ marginRight: 4 }}>
+                              {tool ? toolIconMap[tool.icon] : null}
+                            </span>
+                            {label}
+                          </Tag>
+                        )
+                      }}
+                      options={availableTools.map((t) => ({
+                        value: t.name,
+                        label: t.label,
+                        icon: t.icon,
+                        color: t.color
+                      }))}
+                    />
+                  </Tooltip>
                 </div>
                 <div className="flex items-center gap-2">
                   <Button
                     type="primary"
                     shape="circle"
-                    size="small"
                     icon={<RiArrowUpLine size={16} />}
                     onClick={handleSend}
                     disabled={!inputValue.trim() || messages.some((msg) => msg.loading)}

@@ -20,4 +20,5 @@ export interface SystemSettings {
   graph: GraphSettings
   chat: ChatSettings
   defaultModelId?: number
+  defaultEmbeddingModelId?: number
 }

@@ -9,6 +9,8 @@ import type { StructuredMessage, ToolInfo } from '../renderer/resource/types/win
 
 interface ChatOptions {
   tools?: string[]
+  images?: string[]
+  documents?: { fileName: string; filePath: string }[]
 }
 
 interface Api {
@@ -53,7 +55,7 @@ interface Api {
     getDirectoriesByNote: (noteId: number) => Promise<WikiDirectoryRow[]>
   }
   file: {
-    selectImageFile: () => Promise<string | null>
+    selectImageFile: (allowImages?: boolean) => Promise<{ dataUrl: string; fileName: string; isImage: boolean } | null>
   }
   setting: {
     getLockScreenCode: () => Promise<string>

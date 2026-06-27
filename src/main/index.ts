@@ -413,7 +413,8 @@ app.whenReady().then(async () => {
         lock: all.lock,
         graph: all.graph,
         chat: all.chat,
-        defaultModelId: all.defaultModelId
+        defaultModelId: all.defaultModelId,
+        defaultEmbeddingModelId: all.defaultEmbeddingModelId
       } as SystemSettings
     } catch (error) {
       logger.error('Error in system-settings-get-all:', error)
@@ -647,11 +648,19 @@ app.whenReady().then(async () => {
     }
   })
 
-  ipcMain.handle('select-image-file', async () => {
+  ipcMain.handle('select-image-file', async (_event, allowImages?: boolean) => {
     try {
+      const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp']
+      const docExts = ['pdf', 'txt', 'md', 'csv', 'json', 'xml', 'doc', 'docx', 'xls', 'xlsx']
+
+      const extensions = allowImages !== false ? [...imageExts, ...docExts] : docExts
+
       const result = await dialog.showOpenDialog({
         properties: ['openFile'],
-        filters: [{ name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'] }]
+        filters: [
+          { name: 'Supported Files', extensions },
+          { name: 'All Files', extensions: ['*'] }
+        ]
       })
 
       if (result.canceled || result.filePaths.length === 0) {
@@ -659,14 +668,29 @@ app.whenReady().then(async () => {
       }
 
       const filePath = result.filePaths[0]
-      const fileBuffer = fs.readFileSync(filePath)
-      const base64 = fileBuffer.toString('base64')
-      const ext = filePath.split('.').pop()?.toLowerCase() || 'png'
-      const mimeType = `image/${ext === 'jpg' ? 'jpeg' : ext}`
+      const fileName = filePath.split(/[\\/]/).pop() || 'file'
+      const ext = filePath.split('.').pop()?.toLowerCase() || 'bin'
+      const isImage = imageExts.includes(ext)
 
-      return `data:${mimeType};base64,${base64}`
+      // 非视觉模型时禁止选择图片
+      if (allowImages === false && isImage) {
+        await dialog.showErrorBox(
+          '不支持的文件类型',
+          '当前模型不支持视觉识别，请选择文档类附件（pdf、txt、md 等）'
+        )
+        return null
+      }
+
+      if (isImage) {
+        const fileBuffer = fs.readFileSync(filePath)
+        const base64 = fileBuffer.toString('base64')
+        const mimeType = `image/${ext === 'jpg' ? 'jpeg' : ext}`
+        return { dataUrl: `data:${mimeType};base64,${base64}`, fileName, isImage: true }
+      }
+
+      return { dataUrl: filePath, fileName, isImage: false }
     } catch (error) {
-      console.error('Error selecting image file:', error)
+      console.error('Error selecting file:', error)
       throw error
     }
   })
@@ -679,6 +703,8 @@ app.whenReady().then(async () => {
       options?: {
         tools?: string[]
         providerId?: number
+        images?: string[]
+        documents?: { fileName: string; filePath: string }[]
       }
     ) => {
       const tools = buildTools(options?.tools || [])
@@ -699,6 +725,8 @@ app.whenReady().then(async () => {
         tools?: string[]
         topicId?: number
         providerId?: number
+        images?: string[]
+        documents?: { fileName: string; filePath: string }[]
       }
     ) => {
       const tools = buildTools(options?.tools || [])
@@ -722,13 +750,24 @@ app.whenReady().then(async () => {
         }
       }
 
-      // 2. 保存用户消息
+      // 2. 保存用户消息（含图片和文档）
       try {
+        const userBlocks: { type: string; image_url?: string; fileName?: string }[] = []
+        if (options?.images?.length) {
+          for (const img of options.images) {
+            userBlocks.push({ type: 'image', image_url: img })
+          }
+        }
+        if (options?.documents?.length) {
+          for (const doc of options.documents) {
+            userBlocks.push({ type: 'document', fileName: doc.fileName })
+          }
+        }
         await addDialogue({
           topic_id: topicId,
           role: 'user',
           content: question,
-          blocks: JSON.stringify([])
+          blocks: JSON.stringify(userBlocks)
         })
       } catch (err) {
         logger.error('Failed to save user message:', err)
@@ -737,7 +776,12 @@ app.whenReady().then(async () => {
       // 3. 流式输出 + 累积完整内容
       const chatService = new ChatService(model, tools, chatSettings?.maxIterations ?? 5)
       const stream = chatService.sendMessageStream(question, options)
-      const accumulatedBlocks: { type: string; text?: string; tool?: ToolCallDetail; reasoning?: string }[] = []
+      const accumulatedBlocks: {
+        type: string
+        text?: string
+        tool?: ToolCallDetail
+        reasoning?: string
+      }[] = []
       let fullContent = ''
 
       try {

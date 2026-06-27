@@ -434,9 +434,9 @@ const Index: React.FC = () => {
 
   const handleSelectImage = async (): Promise<void> => {
     try {
-      const base64Image = await (window as unknown as Window).api.file.selectImageFile()
-      if (base64Image) {
-        setEditImage(base64Image)
+      const result = await (window as unknown as Window).api.file.selectImageFile(true)
+      if (result?.isImage) {
+        setEditImage(result.dataUrl)
       }
     } catch (error) {
       console.error('Failed to select image:', error)

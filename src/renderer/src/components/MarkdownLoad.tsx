@@ -6,6 +6,7 @@ import rehypeSanitize from 'rehype-sanitize'
 import rehypeRaw from 'rehype-raw'
 import { RiCheckLine, RiFileCopyLine } from '@remixicon/react'
 import { extractTextFromChildren } from '@renderer/utils/markdown'
+import { InlineCodeCopy } from '@renderer/components/MarkdownView'
 
 // 复制按钮组件
 const CopyButton = ({
@@ -99,6 +100,24 @@ const MarkdownLoad = ({ content, isDarkMode = false }: MarkdownViewProps): JSX.E
           components={{
             // 链接在新窗口打开
             a: (props) => <a {...props} target="_blank" rel="noopener noreferrer" />,
+            code: ({ children, className, ...props }) => {
+              const text = extractTextFromChildren(children)
+              const isInline = !className?.includes('language-')
+              if (isInline) {
+                return (
+                  <InlineCodeCopy text={text}>
+                    <code className={className} {...props}>
+                      {children}
+                    </code>
+                  </InlineCodeCopy>
+                )
+              }
+              return (
+                <code className={className} {...props}>
+                  {children}
+                </code>
+              )
+            },
             // 代码块添加复制按钮
             pre: ({ children, ...props }) => {
               const codeText = extractTextFromChildren(children)

@@ -29,7 +29,7 @@ import { Window } from '../../../../resource/types/window'
 const PROVIDER_TYPES = [
   { value: 'openai', label: 'OpenAI', baseURL: 'https://api.openai.com/v1' },
   { value: 'deepseek', label: 'DeepSeek', baseURL: 'https://api.deepseek.com/v1' },
-  { value: 'ollama', label: 'Ollama', baseURL: 'http://localhost:11434/v1' },
+  { value: 'ollama', label: 'Ollama', baseURL: 'http://localhost:11434' },
   { value: 'openrouter', label: 'OpenRouter', baseURL: 'https://openrouter.ai/api/v1' },
   { value: 'mistral', label: 'Mistral AI', baseURL: 'https://api.mistral.ai/v1' },
   { value: 'xai', label: 'xAI (Grok)', baseURL: 'https://api.x.ai/v1' },
@@ -45,6 +45,18 @@ const PROVIDER_TYPES = [
   { value: 'custom', label: '自定义', baseURL: '' }
 ]
 
+// 模型标签定义
+const MODEL_TAGS = [
+  { value: 'embedding', label: 'Embedding', color: 'purple' },
+  { value: 'vision', label: 'Vision', color: 'cyan' },
+  { value: 'tools', label: 'Tools', color: 'green' },
+  { value: 'thinking', label: 'Thinking', color: 'orange' }
+]
+
+const TAG_COLOR_MAP: Record<string, string> = Object.fromEntries(
+  MODEL_TAGS.map((t) => [t.value, t.color])
+)
+
 interface LlmProviderConfig {
   id: number
   name: string
@@ -55,6 +67,7 @@ interface LlmProviderConfig {
   temperature: number
   max_tokens: number | null
   extra_config: Record<string, unknown> | null
+  tags: string[] | null
   is_default: boolean
   is_enabled: boolean
   sort_order: number
@@ -69,6 +82,7 @@ interface LlmProviderInput {
   temperature?: number
   max_tokens?: number | null
   extra_config?: Record<string, unknown> | null
+  tags?: string[] | null
   is_default?: boolean
   is_enabled?: boolean
   sort_order?: number
@@ -86,6 +100,9 @@ const Index: React.FC = () => {
   const [modalOpen, setModalOpen] = useState(false)
   const [editingProvider, setEditingProvider] = useState<LlmProviderConfig | null>(null)
   const [form] = Form.useForm()
+
+  // 监听 tags 字段变化，用于动态禁用选项
+  const watchedTags: string[] = (Form.useWatch('tags', form) as string[]) || []
 
   // --- 数据加载 ---
 
@@ -114,6 +131,7 @@ const Index: React.FC = () => {
     form.setFieldsValue({
       provider: 'deepseek',
       temperature: 0.7,
+      tags: [],
       is_enabled: true,
       is_default: false,
       sort_order: 0
@@ -131,6 +149,7 @@ const Index: React.FC = () => {
       model: record.model,
       temperature: record.temperature,
       max_tokens: record.max_tokens,
+      tags: record.tags || [],
       is_enabled: record.is_enabled,
       is_default: record.is_default,
       sort_order: record.sort_order
@@ -157,6 +176,7 @@ const Index: React.FC = () => {
         model: values.model as string,
         temperature: values.temperature as number | undefined,
         max_tokens: values.max_tokens as number | null | undefined,
+        tags: (values.tags as string[]) ?? [],
         is_enabled: values.is_enabled as boolean | undefined,
         is_default: values.is_default as boolean | undefined,
         sort_order: values.sort_order as number | undefined
@@ -250,6 +270,24 @@ const Index: React.FC = () => {
       key: 'model',
       width: 180,
       ellipsis: true
+    },
+    {
+      title: '标签',
+      dataIndex: 'tags',
+      key: 'tags',
+      width: 160,
+      render: (tags: string[] | null) =>
+        tags && tags.length > 0 ? (
+          <Space size={4} wrap>
+            {tags.map((tag) => (
+              <Tag key={tag} color={TAG_COLOR_MAP[tag] || 'default'}>
+                {tag}
+              </Tag>
+            ))}
+          </Space>
+        ) : (
+          <span className="text-gray-400">—</span>
+        )
     },
     {
       title: 'API 地址',
@@ -401,6 +439,7 @@ const Index: React.FC = () => {
             initialValues={{
               provider: 'deepseek',
               temperature: 0.7,
+              tags: [],
               is_enabled: true,
               is_default: false,
               sort_order: 0
@@ -436,6 +475,28 @@ const Index: React.FC = () => {
               rules={[{ required: true, message: '请输入模型名' }]}
             >
               <Input placeholder="例如：gpt-4o、deepseek-v4-flash、llama3.1" />
+            </Form.Item>
+
+            <Form.Item
+              name="tags"
+              label="模型标签"
+              tooltip="Embedding 模型只能选择 Embedding 标签，其他标签互不影响"
+            >
+              <Select
+                mode="multiple"
+                placeholder="选择模型能力标签"
+                options={MODEL_TAGS.map((t) => {
+                  const hasEmbedding = watchedTags.includes('embedding')
+                  const hasOther = watchedTags.some((tag) => tag !== 'embedding')
+                  return {
+                    value: t.value,
+                    label: t.label,
+                    disabled:
+                      (t.value === 'embedding' && hasOther) ||
+                      (t.value !== 'embedding' && hasEmbedding)
+                  }
+                })}
+              />
             </Form.Item>
 
             <Form.Item

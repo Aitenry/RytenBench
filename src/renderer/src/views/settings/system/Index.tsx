@@ -13,7 +13,7 @@ import {
   Select,
   message as antMessage
 } from 'antd'
-import { LockOutlined, LoadingOutlined } from '@ant-design/icons'
+import { LockOutlined, LoadingOutlined, ApiOutlined } from '@ant-design/icons'
 import CryptoJS from 'crypto-js'
 import { useMessage } from '@renderer/hooks/useMessage'
 import { Window } from '../../../../resource/types/window'
@@ -23,6 +23,7 @@ interface ProviderOption {
   id: number
   name: string
   model: string
+  tags: string[] | null
 }
 
 const Index: React.FC = () => {
@@ -33,6 +34,7 @@ const Index: React.FC = () => {
   const { viewMessage } = useMessage()
   const [settings, setSettings] = useState<SystemSettings | null>(null)
   const [providers, setProviders] = useState<ProviderOption[]>([])
+  const [embeddingProviders, setEmbeddingProviders] = useState<ProviderOption[]>([])
 
   // 锁屏密码修改相关
   const [passwordModalOpen, setPasswordModalOpen] = useState(false)
@@ -48,7 +50,11 @@ const Index: React.FC = () => {
         (window as unknown as Window).api.providers.getEnabled()
       ])
       setSettings(result)
-      setProviders(providerList)
+      const allProviders = providerList as ProviderOption[]
+      // 图谱构建和对话不需要 Embedding 模型
+      setProviders(allProviders.filter((p) => !p.tags?.includes('embedding')))
+      // Embedding 模型独立列表
+      setEmbeddingProviders(allProviders.filter((p) => p.tags?.includes('embedding')))
     } catch (error) {
       viewMessage(msgKey, 'error', `加载失败: ${error}`)
     }
@@ -104,6 +110,12 @@ const Index: React.FC = () => {
 
   const handleDefaultModelChange = (value: number): void => {
     updateSettings({ defaultModelId: value }).then()
+  }
+
+  // --- 默认 Embedding 模型 ---
+
+  const handleEmbeddingModelChange = (value: number): void => {
+    updateSettings({ defaultEmbeddingModelId: value }).then()
   }
 
   // --- 图谱构建 ---
@@ -180,6 +192,43 @@ const Index: React.FC = () => {
                   </Button>
                 </div>
               </div>
+            </Card>
+
+            {/* ======== 默认 Embedding 模型 ======== */}
+            <Card
+              title={
+                <Space>
+                  <ApiOutlined />
+                  默认 Embedding 模型
+                </Space>
+              }
+              size="small"
+              variant="borderless"
+              style={{ background: '#fafafa' }}
+            >
+              <Form layout="vertical" size="small">
+                <Form.Item
+                  label="Embedding 模型"
+                  tooltip="用于文本向量化嵌入的模型，仅显示标记为 Embedding 标签的供应商"
+                >
+                  <Select
+                    placeholder="未设置 Embedding 模型"
+                    allowClear
+                    value={settings.defaultEmbeddingModelId}
+                    onChange={handleEmbeddingModelChange}
+                    options={embeddingProviders.map((p) => ({
+                      value: p.id,
+                      label: `${p.name}: ${p.model}`
+                    }))}
+                    notFoundContent={
+                      <span className="text-gray-400">
+                        暂无 Embedding 模型，请先在供应商设置中添加
+                      </span>
+                    }
+                    style={{ width: '100%' }}
+                  />
+                </Form.Item>
+              </Form>
             </Card>
 
             {/* ======== 系统信息 ======== */}
@@ -296,7 +345,7 @@ const Index: React.FC = () => {
                     onChange={handleDefaultModelChange}
                     options={providers.map((p) => ({
                       value: p.id,
-                      label: `${p.name} (${p.model})`
+                      label: `${p.name}: ${p.model}`
                     }))}
                     style={{ width: '100%' }}
                   />

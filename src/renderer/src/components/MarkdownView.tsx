@@ -42,7 +42,7 @@ const CopyButton = ({
   )
 }
 
-const InlineCodeCopy = ({
+export const InlineCodeCopy = ({
   text,
   children
 }: {

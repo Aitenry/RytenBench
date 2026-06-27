@@ -69,7 +69,7 @@ const api = {
       ipcRenderer.invoke('wiki-note-directories-get', noteId)
   },
   file: {
-    selectImageFile: () => ipcRenderer.invoke('select-image-file')
+    selectImageFile: (allowImages?: boolean) => ipcRenderer.invoke('select-image-file', allowImages)
   },
   setting: {
     getLockScreenCode: () => ipcRenderer.invoke('lock-screen-code'),

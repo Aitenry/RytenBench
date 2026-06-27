@@ -96,7 +96,11 @@ export interface Window {
       delete: (id: number) => Promise<boolean>
     }
     file: {
-      selectImageFile: () => Promise<string | null>
+      selectImageFile: (allowImages?: boolean) => Promise<{
+        dataUrl: string
+        fileName: string
+        isImage: boolean
+      } | null>
     }
     wikis: {
       getById: (id: number) => Promise<WikiRow | null>
@@ -135,6 +139,8 @@ export interface Window {
         message: string,
         options?: {
           tools?: string[]
+          images?: string[]
+          documents?: { fileName: string; filePath: string }[]
           providerId?: number
         }
       ) => Promise<StructuredMessage[]>
@@ -144,6 +150,8 @@ export interface Window {
         message: string,
         options?: {
           tools?: string[]
+          images?: string[]
+          documents?: { fileName: string; filePath: string }[]
           topicId?: number
           providerId?: number
         }

@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS llm_providers
   temperature REAL             DEFAULT 0.7,
   max_tokens  INTEGER,
   extra_config TEXT,
+  tags        TEXT,
   is_default  BOOLEAN          DEFAULT FALSE,
   is_enabled  BOOLEAN          DEFAULT TRUE,
   sort_order  INTEGER          DEFAULT 0,
@@ -26,3 +27,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_llm_providers_default ON llm_providers (is
 
 CREATE INDEX IF NOT EXISTS idx_llm_providers_enabled ON llm_providers (is_enabled);
 CREATE INDEX IF NOT EXISTS idx_llm_providers_sort ON llm_providers (sort_order);
+
+-- 迁移：为已有表添加 tags 列
+ALTER TABLE llm_providers ADD COLUMN IF NOT EXISTS tags TEXT;
