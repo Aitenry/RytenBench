@@ -159,7 +159,7 @@ const Index: React.FC = () => {
         </div>
 
         <div className="grid grid-cols-2 gap-4">
-          {/* 左列：锁屏设置 + 系统信息 */}
+          {/* 左列 */}
           <div className="flex flex-col gap-4">
             {/* ======== 锁屏设置 ======== */}
             <Card
@@ -213,7 +213,6 @@ const Index: React.FC = () => {
                 >
                   <Select
                     placeholder="未设置 Embedding 模型"
-                    allowClear
                     value={settings.defaultEmbeddingModelId}
                     onChange={handleEmbeddingModelChange}
                     options={embeddingProviders.map((p) => ({
@@ -230,7 +229,28 @@ const Index: React.FC = () => {
                 </Form.Item>
               </Form>
             </Card>
-
+            {/* ======== 对话设置 ======== */}
+            <Card
+              title="对话设置"
+              size="small"
+              variant="borderless"
+              style={{ background: '#fafafa' }}
+            >
+              <Form layout="vertical" size="small">
+                <Form.Item
+                  label="工具调用最大轮次"
+                  tooltip="AI 对话中模型调用工具的最大次数，防止无限循环"
+                >
+                  <InputNumber
+                    min={1}
+                    max={20}
+                    value={settings.chat.maxIterations}
+                    onChange={(v) => v !== null && handleChatChange('maxIterations', v)}
+                    style={{ width: 120 }}
+                  />
+                </Form.Item>
+              </Form>
+            </Card>
             {/* ======== 系统信息 ======== */}
             <Card
               title="系统信息"
@@ -258,7 +278,7 @@ const Index: React.FC = () => {
               </Descriptions>
             </Card>
           </div>
-          {/* 右列：图谱构建 + 对话设置 */}
+          {/* 右列  */}
           <div className="flex flex-col gap-4">
             {/* ======== 图谱构建设置 ======== */}
             <Card
@@ -324,15 +344,6 @@ const Index: React.FC = () => {
                   />
                 </Form.Item>
               </Form>
-            </Card>
-
-            {/* ======== 默认模型设置 ======== */}
-            <Card
-              title="默认模型"
-              size="small"
-              variant="borderless"
-              style={{ background: '#fafafa' }}
-            >
               <Form layout="vertical" size="small">
                 <Form.Item
                   label="图谱构建使用模型"
@@ -340,7 +351,6 @@ const Index: React.FC = () => {
                 >
                   <Select
                     placeholder="使用供应商默认设置"
-                    allowClear
                     value={settings.defaultModelId}
                     onChange={handleDefaultModelChange}
                     options={providers.map((p) => ({
@@ -348,29 +358,6 @@ const Index: React.FC = () => {
                       label: `${p.name}: ${p.model}`
                     }))}
                     style={{ width: '100%' }}
-                  />
-                </Form.Item>
-              </Form>
-            </Card>
-
-            {/* ======== 对话设置 ======== */}
-            <Card
-              title="对话设置"
-              size="small"
-              variant="borderless"
-              style={{ background: '#fafafa' }}
-            >
-              <Form layout="vertical" size="small">
-                <Form.Item
-                  label="工具调用最大轮次"
-                  tooltip="AI 对话中模型调用工具的最大次数，防止无限循环"
-                >
-                  <InputNumber
-                    min={1}
-                    max={20}
-                    value={settings.chat.maxIterations}
-                    onChange={(v) => v !== null && handleChatChange('maxIterations', v)}
-                    style={{ width: 120 }}
                   />
                 </Form.Item>
               </Form>

@@ -736,6 +736,8 @@ const Index: React.FC = () => {
               style={{ minWidth: 100 }}
               placeholder="选择模型"
               showSearch
+              popupMatchSelectWidth={false}
+              popupStyle={{ minWidth: 260 }}
               filterOption={(input, option) =>
                 (option?.label as string)?.toLowerCase().includes(input.toLowerCase()) ?? false
               }

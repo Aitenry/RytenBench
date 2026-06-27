@@ -429,8 +429,10 @@ const Index: React.FC = () => {
           onOk={handleSubmit}
           okText="保存"
           cancelText="取消"
-          width={560}
+          width={520}
           destroyOnClose
+          styles={{ body: { maxHeight: 420, padding: 12, overflowY: 'auto' } }}
+          classNames={{ body: 'custom-scrollbar' }}
         >
           <Form
             form={form}
