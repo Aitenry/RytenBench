@@ -81,9 +81,6 @@ const Index: React.FC = () => {
       const messageKey = 'notes-search'
       try {
         setIsLoading(true)
-        if (!isAppend) {
-          viewMessage(messageKey, 'loading', '正在搜索笔记...')
-        }
         const result = await (window as unknown as Window).api.notes.getPage(searchStr, pageNum, 20)
         if (isAppend) {
           setFilteredNotes((prev) => [...prev, ...result.items])
@@ -94,10 +91,6 @@ const Index: React.FC = () => {
 
         setHasMore(result.hasMore)
         setPage(pageNum)
-
-        if (!isAppend) {
-          viewMessage(messageKey, 'success', '搜索完成！', 2)
-        }
       } catch (error) {
         console.error('Failed to search notes:', error)
         if (!isAppend) {
@@ -115,14 +108,14 @@ const Index: React.FC = () => {
       if (text.trim()) {
         setPage(1)
         setHasMore(true)
-        searchNotes(text, 1, false)
+        searchNotes(text, 1, false).then()
       } else {
         setPage(1)
         setHasMore(true)
         setFilteredNotes([])
         setMasonryKey((prev) => prev + 1)
         setTimeout(() => {
-          loadNotes(1, false)
+          loadNotes(1, false).then()
         }, 0)
       }
     },
@@ -418,7 +411,7 @@ const Index: React.FC = () => {
                             key="edit"
                             onClick={(e) => {
                               e.stopPropagation()
-                              handleEditNote(record.data)
+                              handleEditNote(record.data).then()
                             }}
                           />,
                           <DeleteOutlined

@@ -45,7 +45,6 @@ import {
   WikiRow,
   WikiDirectoryRow
 } from './database/mapper/wiki'
-import { FlexSearchIndexer } from './search/indexer'
 import { ChatService } from './chat/service'
 import { buildTools, availableTools } from './chat/tools'
 import type { ToolCallDetail } from './chat/types'
@@ -93,11 +92,9 @@ const Store = _Store['default'] || _Store
 const settingsStore = new Store({ name: 'settings' })
 let loadingWindow: BrowserWindow | null = null
 let database: Database | null = null // 保持模块级变量
-let flexSearchIndexer: FlexSearchIndexer | null = null
 
 // --- 获取数据库实例的函数 ---
 let initializationPromise: Promise<void> | null = null // 用于追踪初始化过程
-const flexSearchInitializationPromise: Promise<void> | null = null
 
 /**
  * 获取已初始化的数据库实例。
@@ -121,21 +118,6 @@ export async function getDatabaseInstance(): Promise<Database> {
   throw new Error('Database has not been initialized yet.')
 }
 
-export async function getFlexSearchIndexer(): Promise<FlexSearchIndexer> {
-  if (flexSearchIndexer && flexSearchIndexer.initialized) {
-    return flexSearchIndexer
-  }
-
-  if (flexSearchInitializationPromise) {
-    await flexSearchInitializationPromise
-    if (flexSearchIndexer && flexSearchIndexer.initialized) {
-      return flexSearchIndexer
-    }
-  }
-
-  throw new Error('FlexSearch indexer has not been initialized yet.')
-}
-
 async function performInitializationTasks(): Promise<void> {
   const tasks = [
     { name: '加载配置', execute: async () => await loadConfig() },
@@ -145,35 +127,7 @@ async function performInitializationTasks(): Promise<void> {
         initKeystore()
       }
     },
-    { name: '初始化数据库', execute: async () => (database = await createDatabase()) },
-    {
-      name: '初始化索引',
-      execute: async () => {
-        if (database) {
-          flexSearchIndexer = new FlexSearchIndexer()
-          await flexSearchIndexer.initializeIndex()
-
-          // 从数据库重建搜索索引
-          try {
-            const db = database.getDatabase()
-            const result = await db.query<{ id: number; title: string; summary: string | null }>(
-              'SELECT id, title, summary FROM notes'
-            )
-            await flexSearchIndexer.rebuildFromDocuments(
-              result.rows.map((row) => ({
-                id: row.id,
-                title: row.title,
-                summary: row.summary
-              }))
-            )
-          } catch (rebuildError) {
-            logger.warn('Failed to rebuild FlexSearch index:', rebuildError)
-          }
-        } else {
-          logger.warn('Database not available, skipping FlexSearch initialization.')
-        }
-      }
-    }
+    { name: '初始化数据库', execute: async () => (database = await createDatabase()) }
   ]
 
   for (let i = 0; i < tasks.length; i++) {

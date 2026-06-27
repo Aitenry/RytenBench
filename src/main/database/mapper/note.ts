@@ -1,4 +1,4 @@
-import { getDatabaseInstance, getFlexSearchIndexer } from '../../index'
+import { getDatabaseInstance } from '../../index'
 import logger from 'electron-log'
 
 export interface NoteRow {
@@ -121,15 +121,27 @@ async function getNotePage(
     const db = (await getDatabaseInstance()).getDatabase()
     const offset = (page - 1) * pageSize
 
-    const indexer = await getFlexSearchIndexer()
-    const searchResults = await indexer.search(query)
+    // Use ILIKE-based search across title, summary, tags, and note content.
+    // PGLite (PostgreSQL WASM) does not include tsvector/tsquery in its minimal build,
+    // so we use the universally supported ILIKE operator for substring matching.
+    const searchPattern = `%${query}%`
 
-    if (searchResults.length === 0) {
+    const countSql = `
+      SELECT COUNT(*) as total
+      FROM notes n
+      LEFT JOIN notes_content nc ON n.id = nc.note_id
+      WHERE n.title ILIKE $1
+         OR n.summary ILIKE $1
+         OR n.tags ILIKE $1
+         OR nc.content ILIKE $1
+    `
+    const countResult = await db.query<{ total: number }>(countSql, [searchPattern])
+    const total = Number(countResult.rows[0]?.total) || 0
+
+    if (total === 0) {
       return { items: [], hasMore: false, total: 0 }
     }
 
-    // Build parameterized IN clause
-    const placeholders = searchResults.map((_, i) => `$${i + 1}`).join(',')
     const dataSql = `
       SELECT
         n.id, n.title, n.summary, n.tags, n.version, n.created_at, n.updated_at,
@@ -137,11 +149,15 @@ async function getNotePage(
         LENGTH(nc.content) as word_count
       FROM notes n
       LEFT JOIN notes_content nc ON n.id = nc.note_id
-      WHERE n.id IN (${placeholders})
+      WHERE n.title ILIKE $1
+         OR n.summary ILIKE $1
+         OR n.tags ILIKE $1
+         OR nc.content ILIKE $1
       ORDER BY n.updated_at DESC
+      LIMIT $2 OFFSET $3
     `
 
-    const result = await db.query<NoteListItem>(dataSql, searchResults)
+    const result = await db.query<NoteListItem>(dataSql, [searchPattern, pageSize, offset])
 
     const items = result.rows.map((row) => ({
       id: row.id,
@@ -155,10 +171,8 @@ async function getNotePage(
       word_count: row.word_count || 0
     }))
 
-    const paginatedItems = items.slice(offset, offset + pageSize)
-    const hasMore = offset + paginatedItems.length < items.length
-
-    return { items: paginatedItems, hasMore, total: items.length }
+    const hasMore = offset + items.length < total
+    return { items, hasMore, total }
   } catch (error) {
     logger.error('Failed to search notes:', error)
     throw error
@@ -189,15 +203,6 @@ async function addNote(
     ])
 
     logger.info(`Inserted new note with ID: ${noteId}`)
-
-    try {
-      const indexer = await getFlexSearchIndexer()
-      await indexer.addDocument({ id: noteId, title, summary })
-      await indexer.commit()
-    } catch (indexError) {
-      logger.error('Error adding note to search index:', indexError)
-    }
-
     return noteId
   } catch (error) {
     logger.error('Failed to insert note:', error)
@@ -294,22 +299,6 @@ async function updateNote(
 
     if (hasChanges) {
       logger.info(`Updated note with ID: ${id}`)
-
-      try {
-        const indexer = await getFlexSearchIndexer()
-        const note = await getNoteById(id)
-        if (note) {
-          await indexer.updateDocument({
-            id: note.id,
-            title: note.title,
-            summary: note.summary
-          })
-          await indexer.commit()
-        }
-      } catch (indexError) {
-        logger.error('Error updating note in search index:', indexError)
-      }
-
       return true
     }
 
@@ -330,15 +319,6 @@ async function deleteNote(id: number): Promise<boolean> {
 
     if (changes > 0) {
       logger.info(`Deleted note with ID: ${id}, ${changes} row(s) affected.`)
-
-      try {
-        const indexer = await getFlexSearchIndexer()
-        await indexer.removeDocument(id)
-        await indexer.commit()
-      } catch (indexError) {
-        logger.error('Error deleting note from search index:', indexError)
-      }
-
       return true
     }
 
