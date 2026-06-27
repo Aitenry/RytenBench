@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./resources/icon.png" alt="RytenBench Logo" width="120" />
+  <img src="./resources/logo.png" alt="RytenBench Logo" width="120" />
 </p>
 
 <h1 align="center">RytenBench</h1>
