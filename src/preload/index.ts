@@ -25,8 +25,8 @@ const api = {
   },
   notes: {
     getById: (id: number) => ipcRenderer.invoke('note-get-by-id', id),
-    getAll: (page?: number, pageSize?: number) =>
-      ipcRenderer.invoke('note-get-all', page, pageSize),
+    getAll: (page?: number, pageSize?: number, excludeWikiId?: number) =>
+      ipcRenderer.invoke('note-get-all', page, pageSize, excludeWikiId),
     getPage: (query: string, page?: number, pageSize?: number) =>
       ipcRenderer.invoke('note-page-get', query, page, pageSize),
     add: (
@@ -137,6 +137,10 @@ const api = {
     deleteEntity: (id: number) => ipcRenderer.invoke('graph-entity-delete', id),
     deleteRelation: (id: number) => ipcRenderer.invoke('graph-relation-delete', id),
     getBuildStatus: (wikiId: number) => ipcRenderer.invoke('graph-build-status', wikiId),
+    appendNotes: (wikiId: number, noteIds: number[]) =>
+      ipcRenderer.invoke('graph-notes-append', wikiId, noteIds),
+    getProcessedNoteIds: (wikiId: number) =>
+      ipcRenderer.invoke('graph-processed-notes-get', wikiId) as Promise<number[]>,
     buildGraph: (wikiId: number, config?: Record<string, unknown>) => {
       ipcRenderer.send('graph-build-start', wikiId, config)
     },

@@ -70,15 +70,30 @@ async function getNoteById(id: number): Promise<NoteWithContent | null> {
 
 async function getAllNotes(
   page: number = 1,
-  pageSize: number = 10
+  pageSize: number = 10,
+  excludeWikiId?: number
 ): Promise<PaginatedResult<NoteListItem>> {
   try {
     const db = (await getDatabaseInstance()).getDatabase()
     const offset = (page - 1) * pageSize
 
-    const countResult = await db.query<{ total: number }>('SELECT COUNT(*) as total FROM notes')
+    const excludeWhere = excludeWikiId ? 'AND dn.note_id IS NULL' : ''
+
+    const countJoin = excludeWikiId
+      ? 'LEFT JOIN directory_notes dn ON n.id = dn.note_id LEFT JOIN wiki_directories wd ON dn.directory_id = wd.id AND wd.wiki_id = $1'
+      : ''
+    const countSql = `
+      SELECT COUNT(*) as total FROM notes n
+      ${countJoin}
+      WHERE 1=1 ${excludeWhere}
+    `
+    const countParams = excludeWikiId ? [excludeWikiId] : []
+    const countResult = await db.query<{ total: number }>(countSql, countParams)
     const total = Number(countResult.rows[0]?.total) || 0
 
+    const dataJoin = excludeWikiId
+      ? 'LEFT JOIN directory_notes dn ON n.id = dn.note_id LEFT JOIN wiki_directories wd ON dn.directory_id = wd.id AND wd.wiki_id = $3'
+      : ''
     const dataSql = `
       SELECT
         n.id, n.title, n.summary, n.tags, n.version, n.created_at, n.updated_at,
@@ -86,11 +101,16 @@ async function getAllNotes(
         LENGTH(nc.content) as word_count
       FROM notes n
       LEFT JOIN notes_content nc ON n.id = nc.note_id
+      ${dataJoin}
+      WHERE 1=1 ${excludeWhere}
       ORDER BY n.updated_at DESC
       LIMIT $1 OFFSET $2
     `
 
-    const result = await db.query<NoteListItem>(dataSql, [pageSize, offset])
+    const dataParams = excludeWikiId
+      ? [pageSize, offset, excludeWikiId]
+      : [pageSize, offset]
+    const result = await db.query<NoteListItem>(dataSql, dataParams)
 
     const items = result.rows.map((row) => ({
       id: row.id,

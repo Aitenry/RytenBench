@@ -2,12 +2,7 @@ import { TodoItemRow } from '../../../main/database/mapper/todo'
 import { NoteRow, NoteListItem, NoteWithContent } from '../../../main/database/mapper/note'
 import { WikiRow, WikiDirectoryRow } from '../../../main/database/mapper/wiki'
 import { ChatTopicRow, ChatDialogueRow } from '../../../main/database/mapper/chat'
-import {
-  GraphEntity,
-  GraphRelation,
-  GraphBuildJob,
-  GraphData
-} from '../../../main/database/mapper/graph'
+import { GraphEntity, GraphBuildJob, GraphData } from '../../../main/database/mapper/graph'
 import { Lock } from '@renderer/types/settings'
 import { LlmProviderInput, LlmProviderConfig } from '../../../../main/database/mapper/provider'
 import { SystemSettings } from '@renderer/types/settings'
@@ -74,7 +69,11 @@ export interface Window {
     }
     notes: {
       getById: (id: number) => Promise<NoteWithContent | null>
-      getAll: (page?: number, pageSize?: number) => Promise<PaginatedResult<NoteListItem>>
+      getAll: (
+        page?: number,
+        pageSize?: number,
+        excludeWikiId?: number
+      ) => Promise<PaginatedResult<NoteListItem>>
       getPage: (
         query: string,
         page?: number,
@@ -177,6 +176,14 @@ export interface Window {
       deleteEntity: (id: number) => Promise<boolean>
       deleteRelation: (id: number) => Promise<boolean>
       getBuildStatus: (wikiId: number) => Promise<GraphBuildJob | null>
+      appendNotes: (
+        wikiId: number,
+        noteIds: number[]
+      ) => Promise<{
+        entitiesAdded: number
+        relationsAdded: number
+      }>
+      getProcessedNoteIds: (wikiId: number) => Promise<number[]>
       buildGraph: (wikiId: number, config?: Record<string, unknown>) => void
       onBuildProgress: (
         callback: (progress: {

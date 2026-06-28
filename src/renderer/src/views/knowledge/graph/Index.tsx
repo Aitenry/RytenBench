@@ -44,6 +44,11 @@ const Index: React.FC = () => {
   const [buildMessage, setBuildMessage] = useState('')
   const [showBuildProgress, setShowBuildProgress] = useState(false)
 
+  // Append note state
+  const [notes, setNotes] = useState<{ id: number; title: string }[]>([])
+  const [addedNoteIds, setAddedNoteIds] = useState<Set<number>>(new Set())
+  const [isAppending, setIsAppending] = useState(false)
+
   // Note preview state
   const [previewNote, setPreviewNote] = useState<{
     id: number
@@ -79,6 +84,42 @@ const Index: React.FC = () => {
       }
     } catch (error) {
       console.error('Failed to load graph data:', error)
+    }
+  }, [])
+
+  // Load notes list for the selected wiki
+  const loadNotes = useCallback(async (wikiId: number) => {
+    try {
+      const directories = await (window as unknown as Window).api.wikis.getDirectories(wikiId)
+      const noteIds = new Set<number>()
+      const noteList: { id: number; title: string }[] = []
+
+      for (const dir of directories) {
+        const refs = await (window as unknown as Window).api.wikis.getNotesByDirectory(dir.id)
+        for (const ref of refs) {
+          if (!noteIds.has(ref.note_id)) {
+            noteIds.add(ref.note_id)
+            const note = await (window as unknown as Window).api.notes.getById(ref.note_id)
+            if (note) {
+              noteList.push({ id: note.id, title: note.title })
+            }
+          }
+        }
+      }
+
+      setNotes(noteList)
+    } catch (error) {
+      console.error('Failed to load notes:', error)
+    }
+  }, [])
+
+  // Load processed note IDs (already in graph)
+  const loadProcessedNoteIds = useCallback(async (wikiId: number) => {
+    try {
+      const ids = await (window as unknown as Window).api.graph.getProcessedNoteIds(wikiId)
+      setAddedNoteIds(new Set(ids))
+    } catch (error) {
+      console.error('Failed to load processed note ids:', error)
     }
   }, [])
 
@@ -138,8 +179,10 @@ const Index: React.FC = () => {
   useEffect(() => {
     if (selectedWiki) {
       loadGraphData(selectedWiki.id).then()
+      loadNotes(selectedWiki.id).then()
+      loadProcessedNoteIds(selectedWiki.id).then()
     }
-  }, [selectedWiki, loadGraphData])
+  }, [selectedWiki, loadGraphData, loadNotes, loadProcessedNoteIds])
 
   // Listen for build progress
   useEffect(() => {
@@ -155,6 +198,7 @@ const Index: React.FC = () => {
   useEffect(() => {
     return (window as unknown as Window).api.graph.onBuildComplete((result) => {
       setIsBuilding(false)
+      setIsAppending(false)
       setShowBuildProgress(false)
       viewMessage(
         'graph-build',
@@ -164,14 +208,16 @@ const Index: React.FC = () => {
       )
       if (selectedWiki) {
         loadGraphData(selectedWiki.id).then()
+        loadProcessedNoteIds(selectedWiki.id).then()
       }
     })
-  }, [selectedWiki, loadGraphData, viewMessage])
+  }, [selectedWiki, loadGraphData, loadProcessedNoteIds, viewMessage])
 
   // Listen for build error
   useEffect(() => {
     return (window as unknown as Window).api.graph.onBuildError((error) => {
       setIsBuilding(false)
+      setIsAppending(false)
       setShowBuildProgress(false)
       viewMessage('graph-build-error', 'error', `图谱构建失败: ${error.error}`)
     })
@@ -230,6 +276,25 @@ const Index: React.FC = () => {
     setSelectedEntity(null)
     setSearchQuery('')
     setTypeFilter(undefined)
+  }
+
+  // Handle append notes to graph
+  const handleAppendNotes = async (noteIds: number[]): Promise<void> => {
+    if (!selectedWiki || noteIds.length === 0) return
+
+    setIsAppending(true)
+    setShowBuildProgress(true)
+    setBuildPhase('collect')
+    setBuildProcessed(0)
+    setBuildTotal(noteIds.length)
+    setBuildMessage('初始化...')
+
+    try {
+      await (window as unknown as Window).api.graph.appendNotes(selectedWiki.id, noteIds)
+    } catch {
+      setIsAppending(false)
+      setShowBuildProgress(false)
+    }
   }
 
   // Handle type filter change
@@ -319,8 +384,12 @@ const Index: React.FC = () => {
           typeFilter={typeFilter}
           entityCount={graphData?.entities.length || 0}
           relationCount={graphData?.relations.length || 0}
+          notes={notes}
+          addedNoteIds={addedNoteIds}
+          isAppending={isAppending}
           onSearchChange={setSearchQuery}
           onTypeFilterChange={handleTypeFilterChange}
+          onAppendNotes={handleAppendNotes}
           onBuildGraph={handleBuildGraph}
           onBackToWikiList={handleBackToWikiList}
         />

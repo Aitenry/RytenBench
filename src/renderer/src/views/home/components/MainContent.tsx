@@ -137,11 +137,6 @@ const MainContent: React.FC = () => {
                   {isLoading && (
                     <div style={{ textAlign: 'center', padding: '16px' }}>加载中...</div>
                   )}
-                  {!hasMore && notes.length > 0 && (
-                    <div style={{ textAlign: 'center', padding: '16px', color: '#999' }}>
-                      没有更多了
-                    </div>
-                  )}
                 </div>
               </>
             )}

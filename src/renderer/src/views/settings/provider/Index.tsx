@@ -19,8 +19,7 @@ import {
   EditOutlined,
   DeleteOutlined,
   StarOutlined,
-  StarFilled,
-  KeyOutlined
+  StarFilled
 } from '@ant-design/icons'
 import { useMessage } from '@renderer/hooks/useMessage'
 import { Window } from '../../../../resource/types/window'
@@ -296,28 +295,6 @@ const Index: React.FC = () => {
       width: 240,
       ellipsis: true,
       render: (url: string | null) => url || <span className="text-gray-400">—</span>
-    },
-    {
-      title: '温度',
-      dataIndex: 'temperature',
-      key: 'temperature',
-      width: 70,
-      align: 'center' as const
-    },
-    {
-      title: 'API Key',
-      dataIndex: 'api_key',
-      key: 'api_key',
-      width: 100,
-      align: 'center' as const,
-      render: (key: string | null) =>
-        key ? (
-          <Tooltip title="密钥已加密存储">
-            <KeyOutlined className="text-green-500" />
-          </Tooltip>
-        ) : (
-          <span className="text-gray-400">—</span>
-        )
     },
     {
       title: '启用',

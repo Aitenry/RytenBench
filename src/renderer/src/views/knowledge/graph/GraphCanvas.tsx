@@ -1,7 +1,8 @@
-import React, { useEffect, useRef } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import * as echarts from 'echarts'
 import type { EChartsOption } from 'echarts'
-import { theme } from 'antd'
+import { Button, theme } from 'antd'
+import { RiEyeLine, RiEyeOffLine } from '@remixicon/react'
 import { GraphEntity } from './types'
 
 /** ECharts graph node (built in Index.tsx useMemo) */
@@ -53,31 +54,55 @@ function getOrCreateChart(container: HTMLDivElement): echarts.ECharts {
 
 const GraphCanvas: React.FC<GraphCanvasProps> = ({ data, onEntityClick, onEntityDblClick }) => {
   const containerRef = useRef<HTMLDivElement>(null)
+  const [hideIsolated, setHideIsolated] = useState(true)
   const {
     token: { colorBgContainer }
   } = theme.useToken()
+
+  // Count isolated nodes (no connections) — used by both chart and hint overlay
+  const connectedNodeIds = new Set<string>()
+  for (const link of data.links) {
+    connectedNodeIds.add(String(link.source))
+    connectedNodeIds.add(String(link.target))
+  }
+  const connectedNodes = data.nodes.filter((n) => connectedNodeIds.has(n.id))
+  const isolatedCount = data.nodes.length - connectedNodes.length
 
   useEffect(() => {
     if (!containerRef.current || !data) return
 
     const chart = getOrCreateChart(containerRef.current)
-    const count = data.nodes.length
     const cw = containerRef.current.clientWidth || 800
     const ch = containerRef.current.clientHeight || 600
     const cx = cw / 2
     const cy = ch / 2
-    const padding = 60
+    const padding = 40
     const maxR = Math.min(cx, cy) - padding
 
-    // Node size scales down as count grows — sqrt phyllotaxis needs breathing room
-    const symbolSize = count <= 10 ? 28 : count <= 30 ? 20 : count <= 80 ? 14 : 10
+    // If all nodes are isolated, show all to avoid blank canvas
+    const nodesToRender = hideIsolated && connectedNodes.length > 0 ? connectedNodes : data.nodes
+    const effectiveCount = nodesToRender.length
+
+    // Node size: aggressively shrink for large graphs
+    const symbolSize =
+      effectiveCount <= 10
+        ? 28
+        : effectiveCount <= 30
+          ? 22
+          : effectiveCount <= 80
+            ? 16
+            : effectiveCount <= 200
+              ? 12
+              : effectiveCount <= 500
+                ? 8
+                : 5
 
     // Sunflower phyllotaxis: optimal disk packing. sqrt(r) ∝ i for constant area density
     const phi = (1 + Math.sqrt(5)) / 2
     const goldenAngle = (2 * Math.PI) / (phi * phi)
 
-    const positionedNodes = data.nodes.map((node, i) => {
-      const r = maxR * Math.sqrt((i + 0.5) / count)
+    const positionedNodes = nodesToRender.map((node, i) => {
+      const r = maxR * Math.sqrt((i + 0.5) / effectiveCount)
       const angle = i * goldenAngle
       return {
         ...node,
@@ -87,6 +112,12 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({ data, onEntityClick, onEntity
         fixed: true
       }
     })
+
+    // Dynamic visual scaling based on graph size
+    const labelFontSize =
+      effectiveCount <= 50 ? 11 : effectiveCount <= 200 ? 9 : effectiveCount <= 500 ? 8 : 7
+    const lineOpacity = 0.35
+    const lineWidth = 1
 
     const option: EChartsOption = {
       backgroundColor: colorBgContainer,
@@ -110,7 +141,7 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({ data, onEntityClick, onEntity
                 orient: 'vertical',
                 left: 8,
                 top: 8,
-                textStyle: { fontSize: 11 }
+                textStyle: { fontSize: effectiveCount > 300 ? 10 : 11 }
               }
             ]
           : undefined,
@@ -130,26 +161,31 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({ data, onEntityClick, onEntity
             show: true,
             position: 'right',
             formatter: '{b}',
-            fontSize: 10,
+            fontSize: labelFontSize,
             color: '#333'
           },
           labelLayout: {
             hideOverlap: true
           },
           scaleLimit: {
-            min: 0.3,
-            max: 4
+            min: 0.2,
+            max: 6
           },
           lineStyle: {
             color: 'source',
             curveness: 0.15,
-            opacity: 0.35
+            width: lineWidth,
+            opacity: lineOpacity
           },
           emphasis: {
             focus: 'adjacency',
             lineStyle: {
-              width: 2.5,
-              opacity: 0.9
+              width: 3,
+              opacity: 0.95
+            },
+            label: {
+              show: true,
+              fontSize: Math.max(labelFontSize, 10)
             }
           }
         }
@@ -179,7 +215,7 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({ data, onEntityClick, onEntity
       chart.off('dblclick')
       chart.on('dblclick', handleDblClick)
     }
-  }, [data, onEntityClick, onEntityDblClick, colorBgContainer])
+  }, [data, onEntityClick, onEntityDblClick, colorBgContainer, hideIsolated])
 
   // Handle resize
   useEffect(() => {
@@ -197,10 +233,48 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({ data, onEntityClick, onEntity
   }, [])
 
   return (
-    <div
-      ref={containerRef}
-      style={{ width: '100%', height: '100%', background: colorBgContainer }}
-    />
+    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+      <div
+        ref={containerRef}
+        style={{ width: '100%', height: '100%', background: colorBgContainer }}
+      />
+      {isolatedCount > 0 && (
+        <>
+          <Button
+            type="dashed"
+            shape="circle"
+            size="small"
+            icon={hideIsolated ? <RiEyeOffLine size={14} /> : <RiEyeLine size={14} />}
+            title={hideIsolated ? `显示 ${isolatedCount} 个孤点` : `隐藏 ${isolatedCount} 个孤点`}
+            onClick={() => setHideIsolated(!hideIsolated)}
+            style={{
+              position: 'absolute',
+              top: 8,
+              right: 8,
+              zIndex: 10
+            }}
+          />
+          {hideIsolated && (
+            <div
+              style={{
+                position: 'absolute',
+                bottom: 8,
+                left: 8,
+                padding: '4px 10px',
+                background: 'rgba(0,0,0,0.6)',
+                color: '#fff',
+                borderRadius: 4,
+                fontSize: 11,
+                pointerEvents: 'none',
+                zIndex: 10
+              }}
+            >
+              已隐藏 {isolatedCount} 个孤点
+            </div>
+          )}
+        </>
+      )}
+    </div>
   )
 }
 

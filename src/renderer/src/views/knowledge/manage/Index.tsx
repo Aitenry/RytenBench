@@ -177,9 +177,13 @@ const Index: React.FC = () => {
     }
   }, [])
 
-  const loadAllNotes = useCallback(async () => {
+  const loadAllNotes = useCallback(async (excludeWikiId?: number) => {
     try {
-      const result = await (window as unknown as Window).api.notes.getAll(1, 100)
+      const result = await (window as unknown as Window).api.notes.getAll(
+        1,
+        100,
+        excludeWikiId
+      )
       setAllNotes(result.items)
     } catch (error) {
       console.error('Failed to load all notes:', error)
@@ -390,7 +394,7 @@ const Index: React.FC = () => {
 
   const handleOpenArchiveModal = (): void => {
     setSelectedNoteIds([])
-    loadAllNotes().then(() => {
+    loadAllNotes(selectedWiki?.id).then(() => {
       setIsNoteArchiveModalOpen(true)
     })
   }
@@ -518,11 +522,6 @@ const Index: React.FC = () => {
                     <div ref={loadMoreRef} style={{ height: 20, marginTop: 16 }}>
                       {isLoading && (
                         <div style={{ textAlign: 'center', padding: '16px' }}>加载中...</div>
-                      )}
-                      {!hasMore && wikis.length > 0 && (
-                        <div style={{ textAlign: 'center', padding: '16px', color: '#999' }}>
-                          没有更多了
-                        </div>
                       )}
                     </div>
                   </>

@@ -70,6 +70,7 @@ import {
   deleteEntity,
   deleteRelation,
   getFullGraphData,
+  getBuildJobByWikiId,
   getLatestBuildJob
 } from './database/mapper/graph'
 import {
@@ -446,14 +447,17 @@ app.whenReady().then(async () => {
     }
   })
 
-  ipcMain.handle('note-get-all', async (_event, page?: number, pageSize?: number) => {
-    try {
-      return await getAllNotes(page, pageSize)
-    } catch (error) {
-      console.error('Error in note-get-all:', error)
-      throw error
+  ipcMain.handle(
+    'note-get-all',
+    async (_event, page?: number, pageSize?: number, excludeWikiId?: number) => {
+      try {
+        return await getAllNotes(page, pageSize, excludeWikiId)
+      } catch (error) {
+        console.error('Error in note-get-all:', error)
+        throw error
+      }
     }
-  })
+  )
 
   ipcMain.handle(
     'note-page-get',
@@ -1007,6 +1011,9 @@ app.whenReady().then(async () => {
         maxConcurrency: (config?.maxConcurrency as number) ?? graphSettings?.maxConcurrency ?? 8,
         enableGleaning:
           (config?.enableGleaning as boolean) ?? graphSettings?.enableGleaning ?? true,
+        gleaningThreshold:
+          (config?.gleaningThreshold as number) ?? graphSettings?.gleaningThreshold ?? 50,
+        maxChunkSize: (config?.maxChunkSize as number) ?? graphSettings?.maxChunkSize ?? 2000,
         force: config?.force as boolean | undefined
       }
       try {
@@ -1031,6 +1038,43 @@ app.whenReady().then(async () => {
       }
     }
   )
+
+  ipcMain.handle('graph-processed-notes-get', async (_event, wikiId: number) => {
+    try {
+      const job = await getBuildJobByWikiId(wikiId)
+      if (job?.processed_note_ids) {
+        return JSON.parse(job.processed_note_ids) as number[]
+      }
+      return []
+    } catch (error) {
+      logger.error('Error in graph-processed-notes-get:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('graph-notes-append', async (event, wikiId: number, noteIds: number[]) => {
+    const defaultModelId = settingsStore.get('defaultModelId') as number | undefined
+    const model = await getProviderService().createModel(defaultModelId)
+    const graphService = new KnowledgeGraphService(model)
+    try {
+      const result = await graphService.appendNotes(wikiId, noteIds, (progress) => {
+        event.sender.send('graph-build-progress', progress)
+      })
+      event.sender.send('graph-build-complete', {
+        wikiId,
+        entityCount: result.entitiesAdded,
+        relationCount: result.relationsAdded
+      })
+      return result
+    } catch (error) {
+      logger.error('Error in graph-notes-append:', error)
+      event.sender.send('graph-build-error', {
+        wikiId,
+        error: error instanceof Error ? error.message : String(error)
+      })
+      throw error
+    }
+  })
 
   // --- Provider IPC handlers ---
 

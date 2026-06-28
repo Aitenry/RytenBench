@@ -38,6 +38,7 @@ export interface GraphBuildJob {
   relation_count: number
   error_message: string | null
   config: string | null
+  processed_note_ids: string | null
   started_at: string | null
   completed_at: string | null
   created_at: string
@@ -317,17 +318,33 @@ async function deleteRelationsByWikiId(wikiId: number): Promise<number> {
 
 // ==================== Build Job CRUD ====================
 
-async function createBuildJob(wikiId: number, config?: Record<string, unknown>): Promise<number> {
+/**
+ * Upsert 构建任务（每个 wiki 仅一条记录）
+ * 如果该 wiki 已有任务则重置为 pending 状态，否则新建
+ */
+async function upsertBuildJob(wikiId: number, config?: Record<string, unknown>): Promise<number> {
   try {
     const db = (await getDatabaseInstance()).getDatabase()
     const result = await db.query<{ id: number }>(
       `INSERT INTO graph_build_jobs (wiki_id, status, config)
-       VALUES ($1, 'pending', $2) RETURNING id`,
+       VALUES ($1, 'pending', $2)
+       ON CONFLICT (wiki_id) DO UPDATE SET
+         status = 'pending',
+         config = $2,
+         total_notes = 0,
+         processed_notes = 0,
+         entity_count = 0,
+         relation_count = 0,
+         error_message = NULL,
+         started_at = NULL,
+         completed_at = NULL,
+         created_at = NOW()
+       RETURNING id`,
       [wikiId, config ? JSON.stringify(config) : null]
     )
     return result.rows[0].id
   } catch (error) {
-    logger.error('Failed to create build job:', error)
+    logger.error('Failed to upsert build job:', error)
     throw error
   }
 }
@@ -343,6 +360,7 @@ async function updateBuildJob(
       | 'entity_count'
       | 'relation_count'
       | 'error_message'
+      | 'processed_note_ids'
       | 'started_at'
       | 'completed_at'
     >
@@ -378,6 +396,10 @@ async function updateBuildJob(
       fields.push(`error_message = $${idx++}`)
       values.push(updates.error_message)
     }
+    if (updates.processed_note_ids !== undefined) {
+      fields.push(`processed_note_ids = $${idx++}`)
+      values.push(updates.processed_note_ids)
+    }
 
     if (updates.status === 'running' && !updates.started_at) {
       fields.push('started_at = NOW()')
@@ -396,6 +418,20 @@ async function updateBuildJob(
     return (result.affectedRows ?? 0) > 0
   } catch (error) {
     logger.error('Failed to update build job:', error)
+    throw error
+  }
+}
+
+async function getBuildJobByWikiId(wikiId: number): Promise<GraphBuildJob | null> {
+  try {
+    const db = (await getDatabaseInstance()).getDatabase()
+    const result = await db.query<GraphBuildJob>(
+      'SELECT * FROM graph_build_jobs WHERE wiki_id = $1',
+      [wikiId]
+    )
+    return result.rows.length > 0 ? result.rows[0] : null
+  } catch (error) {
+    logger.error('Failed to get build job by wiki id:', error)
     throw error
   }
 }
@@ -575,8 +611,9 @@ export {
   deleteRelation,
   deleteRelationsByWikiId,
   getFullGraphData,
-  createBuildJob,
+  upsertBuildJob,
   updateBuildJob,
+  getBuildJobByWikiId,
   getLatestBuildJob,
   batchUpsertEntities,
   batchUpsertRelations

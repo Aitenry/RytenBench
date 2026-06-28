@@ -1,12 +1,16 @@
 import { BaseChatModel } from '@langchain/core/language_models/chat_models'
+import { StructuredOutputParser } from '@langchain/core/output_parsers'
 import logger from 'electron-log'
+import { parseFromLLM } from 'json-llm-repair'
+import type { z } from 'zod/v3'
 import {
   batchUpsertEntities,
   batchUpsertRelations,
-  createBuildJob,
+  upsertBuildJob,
   deleteEntitiesByWikiId,
   deleteRelationsByWikiId,
   getFullGraphData,
+  getBuildJobByWikiId,
   GraphData,
   updateBuildJob
 } from '../database/mapper/graph'
@@ -18,6 +22,14 @@ import {
   ENTITY_MERGING_PROMPT,
   RELATION_EXTRACTION_PROMPT
 } from './prompts'
+import {
+  EntitiesArraySchema,
+  EntityMergingResultSchema,
+  RelationsArraySchema,
+  type EntitiesArrayOutput,
+  type EntityMergingResultOutput,
+  type RelationsArrayOutput
+} from './schemas'
 
 export interface BuildConfig {
   /** 最大并发 LLM 调用数（默认 8） */
@@ -26,6 +38,10 @@ export interface BuildConfig {
   force?: boolean
   /** 是否启用 gleaning（二次抽取遗漏实体，默认 true） */
   enableGleaning?: boolean
+  /** Gleaning 触发阈值：仅当笔记总数不超过此值时才执行 gleaning（默认 50） */
+  gleaningThreshold?: number
+  /** Markdown 分块最大字符数（默认 2000） */
+  maxChunkSize?: number
   /** 单次 LLM 调用处理的笔记数量（批量模式，默认 1） */
   batchSize?: number
 }
@@ -248,61 +264,6 @@ function fallbackParagraphChunk(text: string, maxSize: number): string[] {
 }
 
 /**
- * 健壮的 JSON 解析：尝试多种策略从 LLM 输出中提取 JSON
- */
-function parseJsonFromLLMResponse(content: string): unknown | null {
-  if (!content) return null
-
-  // 策略1: 直接解析
-  try {
-    return JSON.parse(content.trim())
-  } catch {
-    // 继续
-  }
-
-  // 策略2: 提取 ```json ... ``` 代码块
-  const codeBlockMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/)
-  if (codeBlockMatch) {
-    try {
-      return JSON.parse(codeBlockMatch[1].trim())
-    } catch {
-      // 继续
-    }
-  }
-
-  // 策略3: 提取第一个完整的 JSON 数组
-  const arrayMatch = content.match(/\[[\s\S]*]/)
-  if (arrayMatch) {
-    try {
-      return JSON.parse(arrayMatch[0])
-    } catch {
-      // 继续
-    }
-  }
-
-  // 策略4: 提取第一个完整的 JSON 对象
-  const objMatch = content.match(/\{[\s\S]*}/)
-  if (objMatch) {
-    try {
-      return JSON.parse(objMatch[0])
-    } catch {
-      // 失败
-    }
-  }
-
-  // 策略5: 尝试修复常见的 JSON 问题（尾部逗号等）
-  try {
-    const cleaned = content.replace(/,\s*}/g, '}').replace(/,\s*]/g, ']')
-    const arrayMatch2 = cleaned.match(/\[[\s\S]*]/)
-    if (arrayMatch2) return JSON.parse(arrayMatch2[0])
-  } catch {
-    // 最终失败
-  }
-
-  return null
-}
-
-/**
  * 预计算：批量检查哪些实体出现在文本中（不区分大小写）
  * 一次性 lowerCase 文本，避免 O(n*m) 次重复转换
  */
@@ -311,10 +272,17 @@ function filterEntitiesInText(entityNames: string[], text: string): string[] {
   return entityNames.filter((name) => lowerText.includes(name.toLowerCase()))
 }
 
+// ==================== KnowledgeGraphService ====================
+
 export class KnowledgeGraphService {
   private model: BaseChatModel
   private llmCache: Map<string, string>
   private readonly CACHE_MAX_SIZE = 500
+
+  // StructuredOutputParser 实例（每个 schema 一个，仅用于 parse 校验）
+  private readonly entityParser = StructuredOutputParser.fromZodSchema(EntitiesArraySchema)
+  private readonly mergeParser = StructuredOutputParser.fromZodSchema(EntityMergingResultSchema)
+  private readonly relationParser = StructuredOutputParser.fromZodSchema(RelationsArraySchema)
 
   constructor(model: BaseChatModel) {
     this.model = model
@@ -322,26 +290,46 @@ export class KnowledgeGraphService {
   }
 
   /**
-   * 带缓存的 LLM 调用
+   * 带缓存的 LLM 结构化调用
+   * 1. 缓存原始 LLM 响应
+   * 2. 尝试 Zod 严格校验
+   * 3. 失败则回退到 json-llm-repair（提取 + 修复 + 解析）
    */
-  private async cachedInvoke(prompt: string): Promise<string> {
-    // 用 prompt 前 200 字符 + 后 200 字符做简易缓存 key
+  private async cachedStructuredInvoke<T>(
+    prompt: string,
+    parser: StructuredOutputParser<z.ZodTypeAny>
+  ): Promise<T | null> {
+    // 缓存 key 基于 prompt 内容
     const cacheKey = prompt.slice(0, 200) + '|||' + prompt.slice(-200)
-
     const cached = this.llmCache.get(cacheKey)
-    if (cached !== undefined) return cached
 
-    const response = await this.model.invoke(prompt)
-    const content = typeof response.content === 'string' ? response.content : ''
+    let rawContent: string
+    if (cached !== undefined) {
+      rawContent = cached
+    } else {
+      const response = await this.model.invoke(prompt)
+      rawContent = typeof response.content === 'string' ? response.content : ''
 
-    // LRU 淘汰
-    if (this.llmCache.size >= this.CACHE_MAX_SIZE) {
-      const firstKey = this.llmCache.keys().next().value
-      if (firstKey) this.llmCache.delete(firstKey)
+      // LRU 淘汰
+      if (this.llmCache.size >= this.CACHE_MAX_SIZE) {
+        const firstKey = this.llmCache.keys().next().value
+        if (firstKey) this.llmCache.delete(firstKey)
+      }
+      this.llmCache.set(cacheKey, rawContent)
     }
-    this.llmCache.set(cacheKey, content)
 
-    return content
+    const attempt = <T>(fn: () => T | Promise<T>): Promise<T | null> =>
+      Promise.resolve(fn()).catch(() => null)
+
+    const parsed =
+      (await attempt(() => parser.parse(rawContent) as T)) ??
+      (await attempt(() => parseFromLLM(rawContent, { mode: 'repair' }) as T))
+
+    if (parsed == null) {
+      logger.warn('All parsing strategies failed for prompt')
+    }
+
+    return parsed as T
   }
 
   /**
@@ -355,8 +343,8 @@ export class KnowledgeGraphService {
     const maxConcurrency = config?.maxConcurrency ?? 8
     const startTime = Date.now()
 
-    // 1. 创建构建任务
-    const jobId = await createBuildJob(wikiId, config as Record<string, unknown>)
+    // 1. 创建/重置构建任务
+    const jobId = await upsertBuildJob(wikiId, config as Record<string, unknown>)
 
     try {
       // 2. 如果是强制重建，清空已有图谱数据
@@ -404,7 +392,7 @@ export class KnowledgeGraphService {
       // 将笔记按 Markdown 标题层级分块
       const allChunks: TextChunk[] = []
       for (const entry of noteEntries) {
-        const chunks = splitByMarkdownHeaders(entry.content)
+        const chunks = splitByMarkdownHeaders(entry.content, config?.maxChunkSize)
         chunks.forEach((chunk, idx) => {
           allChunks.push({ noteId: entry.noteId, chunkIndex: idx, content: chunk })
         })
@@ -447,7 +435,7 @@ export class KnowledgeGraphService {
 
       // ========== Phase 2: Gleaning 二次抽取（可选） ==========
       const enableGleaning = config?.enableGleaning !== false
-      if (enableGleaning && totalNotes <= 50) {
+      if (enableGleaning && totalNotes <= (config?.gleaningThreshold ?? 50)) {
         onProgress?.({
           phase: 'extract_entities',
           processedNotes: totalNotes,
@@ -551,7 +539,7 @@ export class KnowledgeGraphService {
         }))
 
         const batchResults = await Promise.all(
-          batchRelevant.map(({ entry, relevantEntities }) => {
+          batchRelevant.map(async ({ entry, relevantEntities }) => {
             if (relevantEntities.length < 2) {
               processedRelationNotes++
               onProgress?.({
@@ -562,18 +550,19 @@ export class KnowledgeGraphService {
               })
               return Promise.resolve([])
             }
-            return this.extractRelations(entry.content, relevantEntities, entry.noteId).then(
-              (rels) => {
-                processedRelationNotes++
-                onProgress?.({
-                  phase: 'extract_relations',
-                  processedNotes: processedRelationNotes,
-                  totalNotes,
-                  message: `关系抽取中... ${processedRelationNotes}/${totalNotes}`
-                })
-                return rels
-              }
+            const relations = await this.extractRelations(
+              entry.content,
+              relevantEntities,
+              entry.noteId
             )
+            processedRelationNotes++
+            onProgress?.({
+              phase: 'extract_relations',
+              processedNotes: processedRelationNotes,
+              totalNotes,
+              message: `关系抽取中... ${processedRelationNotes}/${totalNotes}`
+            })
+            return relations
           })
         )
 
@@ -623,11 +612,13 @@ export class KnowledgeGraphService {
       )
 
       // ========== 完成 ==========
+      const allNoteIds = noteEntries.map((e) => e.noteId)
       await updateBuildJob(jobId, {
         status: 'completed',
         processed_notes: totalNotes,
         entity_count: mergedEntities.length,
-        relation_count: savedRelationCount
+        relation_count: savedRelationCount,
+        processed_note_ids: JSON.stringify(allNoteIds)
       })
 
       logger.info(
@@ -642,6 +633,284 @@ export class KnowledgeGraphService {
         error_message: error instanceof Error ? error.message : String(error)
       })
       throw error
+    }
+  }
+
+  /**
+   * 将多篇笔记增量追加到已有知识图谱
+   * 不会清空已有数据，只提取这些笔记的实体和关系并合并到图谱中
+   */
+  async appendNotes(
+    wikiId: number,
+    noteIds: number[],
+    onProgress?: ProgressCallback,
+    config?: BuildConfig
+  ): Promise<{ entitiesAdded: number; relationsAdded: number }> {
+    const maxConcurrency = config?.maxConcurrency ?? 8
+    const maxChunkSize = config?.maxChunkSize
+    const startTime = Date.now()
+    const totalNotes = noteIds.length
+
+    if (totalNotes === 0) {
+      return { entitiesAdded: 0, relationsAdded: 0 }
+    }
+
+    // 1. 并行读取所有笔记内容
+    onProgress?.({
+      phase: 'collect',
+      processedNotes: 0,
+      totalNotes,
+      message: '读取笔记内容...'
+    })
+
+    const noteEntries: { noteId: number; content: string }[] = []
+    for (let i = 0; i < noteIds.length; i++) {
+      const note = await getNoteById(noteIds[i])
+      if (!note || !note.content) {
+        logger.warn(`Note ${noteIds[i]} not found or empty, skipping`)
+        continue
+      }
+      noteEntries.push({
+        noteId: note.id,
+        content: `${note.title}\n${note.content}`
+      })
+    }
+
+    if (noteEntries.length === 0) {
+      throw new Error('所选笔记均不存在或内容为空')
+    }
+
+    // 2. 获取已有图谱实体
+    onProgress?.({
+      phase: 'extract_entities',
+      processedNotes: 0,
+      totalNotes,
+      message: '加载已有图谱实体...'
+    })
+    const { entities: existingEntities } = await getFullGraphData(wikiId)
+
+    // 3. 分块 + 实体抽取（并行批处理）
+    const allChunks: TextChunk[] = []
+    for (const entry of noteEntries) {
+      const chunks = splitByMarkdownHeaders(entry.content, maxChunkSize)
+      chunks.forEach((chunk, idx) => {
+        allChunks.push({ noteId: entry.noteId, chunkIndex: idx, content: chunk })
+      })
+    }
+
+    const totalChunks = allChunks.length
+    onProgress?.({
+      phase: 'extract_entities',
+      processedNotes: 0,
+      totalNotes,
+      message: `开始实体抽取... ${totalChunks} 个文本块`
+    })
+
+    const chunkEntities: Map<number, Omit<ExtractedEntity, 'source_note_ids'>[]> = new Map()
+
+    for (let i = 0; i < allChunks.length; i += maxConcurrency) {
+      const batch = allChunks.slice(i, i + maxConcurrency)
+      const batchResults = await Promise.all(
+        batch.map((chunk) => this.extractEntitiesFromChunk(chunk.content))
+      )
+
+      for (let j = 0; j < batch.length; j++) {
+        const noteId = batch[j].noteId
+        const existing = chunkEntities.get(noteId) || []
+        chunkEntities.set(noteId, [...existing, ...batchResults[j]])
+      }
+
+      const processedChunks = Math.min(i + maxConcurrency, totalChunks)
+      const processedNotes = new Set(allChunks.slice(0, i + maxConcurrency).map((c) => c.noteId))
+        .size
+      onProgress?.({
+        phase: 'extract_entities',
+        processedNotes: Math.min(processedNotes, totalNotes),
+        totalNotes,
+        message: `实体抽取中... ${processedChunks}/${totalChunks} 块`
+      })
+    }
+
+    // Gleaning 二次抽取（可选）
+    const enableGleaning = config?.enableGleaning !== false
+    if (enableGleaning && totalNotes <= (config?.gleaningThreshold ?? 50)) {
+      onProgress?.({
+        phase: 'extract_entities',
+        processedNotes: totalNotes,
+        totalNotes,
+        message: '二次扫描遗漏实体...'
+      })
+
+      const gleaningBatchSize = maxConcurrency
+      for (let i = 0; i < noteEntries.length; i += gleaningBatchSize) {
+        const batch = noteEntries.slice(i, i + gleaningBatchSize)
+        const batchResults = await Promise.all(
+          batch.map(async (entry) => {
+            const existingEntities = chunkEntities.get(entry.noteId) || []
+            const existingNames = existingEntities.map((e) => e.name)
+            if (existingNames.length === 0) return []
+            return this.gleanEntities(entry.content, existingNames)
+          })
+        )
+
+        for (let j = 0; j < batch.length; j++) {
+          if (batchResults[j].length > 0) {
+            const existing = chunkEntities.get(batch[j].noteId) || []
+            chunkEntities.set(batch[j].noteId, [...existing, ...batchResults[j]])
+          }
+        }
+      }
+    }
+
+    const noteToEntities = chunkEntities
+
+    // 4. 去重合并同笔记内的同名实体，附加 source_note_ids
+    const allNewEntities: ExtractedEntity[] = []
+    for (const [noteId, entities] of noteToEntities) {
+      const seen = new Map<string, ExtractedEntity>()
+      for (const e of entities) {
+        const existing = seen.get(e.name)
+        if (existing) {
+          existing.aliases = [...new Set([...existing.aliases, ...e.aliases])]
+          existing.confidence = Math.max(existing.confidence, e.confidence)
+          if (e.description.length > existing.description.length) {
+            existing.description = e.description
+          }
+        } else {
+          seen.set(e.name, { ...e, source_note_ids: [noteId] })
+        }
+      }
+      for (const entity of seen.values()) {
+        allNewEntities.push(entity)
+      }
+    }
+
+    if (allNewEntities.length === 0) {
+      logger.info('No entities extracted from selected notes')
+      return { entitiesAdded: 0, relationsAdded: 0 }
+    }
+
+    // 5. 将已有实体转为 ExtractedEntity 格式，与新实体一起合并
+    const existingAsExtracted: ExtractedEntity[] = existingEntities.map((e) => ({
+      name: e.name,
+      type: e.type,
+      description: e.description || '',
+      aliases: e.aliases ? JSON.parse(e.aliases) : [],
+      confidence: e.confidence,
+      source_note_ids: e.source_note_ids ? JSON.parse(e.source_note_ids) : []
+    }))
+
+    const allEntitiesForMerge = [...existingAsExtracted, ...allNewEntities]
+
+    onProgress?.({
+      phase: 'merge_entities',
+      processedNotes: totalNotes,
+      totalNotes,
+      message: '实体消歧合并中...'
+    })
+    const mergedEntities = await this.mergeEntities(allEntitiesForMerge)
+
+    // 6. 批量保存实体
+    onProgress?.({
+      phase: 'save_entities',
+      processedNotes: totalNotes,
+      totalNotes,
+      message: `保存 ${mergedEntities.length} 个实体...`
+    })
+
+    const entityNameToId = await batchUpsertEntities(
+      mergedEntities.map((e) => ({
+        wiki_id: wikiId,
+        name: e.name,
+        type: e.type,
+        description: e.description,
+        aliases: JSON.stringify(e.aliases),
+        properties: null,
+        confidence: e.confidence,
+        source_note_ids: JSON.stringify(e.source_note_ids)
+      }))
+    )
+
+    // 7. 关系抽取（每篇笔记用其内容与所有实体名称匹配）
+    onProgress?.({
+      phase: 'extract_relations',
+      processedNotes: 0,
+      totalNotes,
+      message: '开始关系抽取...'
+    })
+
+    const allEntityNames = mergedEntities.map((e) => e.name)
+    const allRelations: (ExtractedRelation & { source_note_id: number })[] = []
+    let relationProcessedCount = 0
+
+    for (const entry of noteEntries) {
+      const relevantEntities = filterEntitiesInText(allEntityNames, entry.content)
+      if (relevantEntities.length >= 2) {
+        const relations = await this.extractRelations(entry.content, relevantEntities, entry.noteId)
+        allRelations.push(...relations)
+      }
+      relationProcessedCount++
+      onProgress?.({
+        phase: 'extract_relations',
+        processedNotes: relationProcessedCount,
+        totalNotes,
+        message: `关系抽取中... ${relationProcessedCount}/${noteEntries.length}`
+      })
+    }
+
+    // 8. 去重并批量保存关系
+    onProgress?.({
+      phase: 'save_relations',
+      processedNotes: totalNotes,
+      totalNotes,
+      message: '保存关系...'
+    })
+
+    const relationSet = new Map<string, (typeof allRelations)[0]>()
+    for (const rel of allRelations) {
+      const sourceId = entityNameToId.get(rel.source)
+      const targetId = entityNameToId.get(rel.target)
+      if (!sourceId || !targetId || sourceId === targetId) continue
+
+      const key = `${sourceId}:${targetId}:${rel.relation_type}`
+      if (!relationSet.has(key)) {
+        relationSet.set(key, rel)
+      }
+    }
+
+    const relationsToSave = Array.from(relationSet.values())
+    const savedRelationCount = await batchUpsertRelations(
+      relationsToSave.map((rel) => ({
+        wiki_id: wikiId,
+        source_id: entityNameToId.get(rel.source)!,
+        target_id: entityNameToId.get(rel.target)!,
+        relation_type: rel.relation_type,
+        description: rel.description,
+        properties: null,
+        confidence: 1.0,
+        source_note_ids: JSON.stringify([rel.source_note_id])
+      }))
+    )
+
+    logger.info(
+      `Notes append completed: ${mergedEntities.length - existingEntities.length} entities, ${savedRelationCount} relations in ${Date.now() - startTime}ms`
+    )
+
+    // 更新 build job 的 processed_note_ids（与已有笔记 ID 合并去重）
+    const existingJob = await getBuildJobByWikiId(wikiId)
+    const existingNoteIds: number[] = existingJob?.processed_note_ids
+      ? JSON.parse(existingJob.processed_note_ids)
+      : []
+    const mergedNoteIds = [...new Set([...existingNoteIds, ...noteIds])]
+    if (existingJob) {
+      await updateBuildJob(existingJob.id, {
+        processed_note_ids: JSON.stringify(mergedNoteIds)
+      })
+    }
+
+    return {
+      entitiesAdded: mergedEntities.length - existingEntities.length,
+      relationsAdded: savedRelationCount
     }
   }
 
@@ -694,24 +963,24 @@ export class KnowledgeGraphService {
   }
 
   /**
-   * 从文本块中抽取实体
+   * 从文本块中抽取实体（使用 StructuredOutputParser + Zod 校验）
    */
   private async extractEntitiesFromChunk(
     text: string
   ): Promise<Omit<ExtractedEntity, 'source_note_ids'>[]> {
-    const prompt = ENTITY_EXTRACTION_PROMPT.replace('{text}', text)
-
     try {
-      const content = await this.cachedInvoke(prompt)
-      const parsed = parseJsonFromLLMResponse(content)
+      const parsed = await this.cachedStructuredInvoke<EntitiesArrayOutput>(
+        ENTITY_EXTRACTION_PROMPT.replace('{text}', text),
+        this.entityParser
+      )
 
-      if (Array.isArray(parsed)) {
+      if (parsed && Array.isArray(parsed)) {
         return parsed
-          .map((e: Record<string, unknown>) => ({
-            name: String(e.name || '').trim(),
-            type: String(e.type || 'other'),
-            description: String(e.description || ''),
-            aliases: Array.isArray(e.aliases) ? e.aliases.map(String) : [],
+          .map((e) => ({
+            name: (e.name || '').trim(),
+            type: e.type || 'other',
+            description: e.description || '',
+            aliases: [] as string[],
             confidence: 0.9
           }))
           .filter((e) => e.name.length > 0)
@@ -724,28 +993,28 @@ export class KnowledgeGraphService {
   }
 
   /**
-   * Gleaning：二次扫描遗漏实体
+   * Gleaning：二次扫描遗漏实体（使用 StructuredOutputParser + Zod 校验）
    */
   private async gleanEntities(
     text: string,
     existingNames: string[]
   ): Promise<Omit<ExtractedEntity, 'source_note_ids'>[]> {
-    const prompt = ENTITY_GLEANING_PROMPT.replace(
-      '{existing_entities}',
-      existingNames.join('、')
-    ).replace('{text}', text)
-
     try {
-      const content = await this.cachedInvoke(prompt)
-      const parsed = parseJsonFromLLMResponse(content)
+      const parsed = await this.cachedStructuredInvoke<EntitiesArrayOutput>(
+        ENTITY_GLEANING_PROMPT.replace('{existing_entities}', existingNames.join('、')).replace(
+          '{text}',
+          text
+        ),
+        this.entityParser
+      )
 
-      if (Array.isArray(parsed)) {
+      if (parsed && Array.isArray(parsed)) {
         return parsed
-          .map((e: Record<string, unknown>) => ({
-            name: String(e.name || '').trim(),
-            type: String(e.type || 'other'),
-            description: String(e.description || ''),
-            aliases: [],
+          .map((e) => ({
+            name: (e.name || '').trim(),
+            type: e.type || 'other',
+            description: e.description || '',
+            aliases: [] as string[],
             confidence: 0.85
           }))
           .filter((e) => e.name.length > 0 && !existingNames.includes(e.name))
@@ -759,6 +1028,7 @@ export class KnowledgeGraphService {
 
   /**
    * 实体消歧合并（优化：先程序化去重，再 LLM 合并）
+   * Stage 2 LLM 合并使用 StructuredOutputParser + Zod 校验
    */
   private async mergeEntities(entities: ExtractedEntity[]): Promise<ExtractedEntity[]> {
     if (entities.length <= 1) return entities
@@ -786,32 +1056,26 @@ export class KnowledgeGraphService {
 
     const stage1Entities = Array.from(nameMap.values())
 
-    // Stage 2: LLM 合并（只在实体数量适中时使用）
+    // Stage 2: LLM 合并（只在实体数量适中时使用，含 Zod 校验）
     if (stage1Entities.length > 10 && stage1Entities.length <= 200) {
       try {
-        const prompt = ENTITY_MERGING_PROMPT.replace(
-          '{entities}',
-          JSON.stringify(stage1Entities, null, 2)
+        const parsed = await this.cachedStructuredInvoke<EntityMergingResultOutput>(
+          ENTITY_MERGING_PROMPT.replace('{entities}', JSON.stringify(stage1Entities, null, 2)),
+          this.mergeParser
         )
 
-        const content = await this.cachedInvoke(prompt)
-        const parsed = parseJsonFromLLMResponse(content)
-
-        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-          const result = parsed as Record<string, unknown>
-          if (result.merged && Array.isArray(result.merged)) {
-            return result.merged.map(
-              (e: Record<string, unknown>) =>
-                ({
-                  name: e.name as string,
-                  type: (e.type as string) || 'other',
-                  description: (e.description as string) || '',
-                  aliases: (e.aliases as string[]) || [],
-                  confidence: (e.confidence as number) || 0.9,
-                  source_note_ids: (e.source_note_ids as number[]) || []
-                }) as ExtractedEntity
-            )
-          }
+        if (parsed?.merged && Array.isArray(parsed.merged)) {
+          return parsed.merged.map(
+            (e) =>
+              ({
+                name: e.name,
+                type: e.type || 'other',
+                description: e.description || '',
+                aliases: e.aliases || [],
+                confidence: e.confidence ?? 0.9,
+                source_note_ids: e.source_note_ids || []
+              }) as ExtractedEntity
+          )
         }
       } catch (error) {
         logger.warn('Entity merging with LLM failed, using simple dedup:', error)
@@ -822,7 +1086,7 @@ export class KnowledgeGraphService {
   }
 
   /**
-   * 从文本中抽取实体间关系（使用过滤后的实体列表）
+   * 从文本中抽取实体间关系（使用 StructuredOutputParser + Zod 校验）
    */
   private async extractRelations(
     text: string,
@@ -831,30 +1095,30 @@ export class KnowledgeGraphService {
   ): Promise<(ExtractedRelation & { source_note_id: number })[]> {
     if (entityNames.length < 2) return []
 
-    const prompt = RELATION_EXTRACTION_PROMPT.replace(
-      '{entities}',
-      JSON.stringify(entityNames)
-    ).replace('{text}', text)
-
     try {
-      const content = await this.cachedInvoke(prompt)
-      const parsed = parseJsonFromLLMResponse(content)
+      const parsed = await this.cachedStructuredInvoke<RelationsArrayOutput>(
+        RELATION_EXTRACTION_PROMPT.replace('{entities}', JSON.stringify(entityNames)).replace(
+          '{text}',
+          text
+        ),
+        this.relationParser
+      )
 
-      if (Array.isArray(parsed)) {
+      if (parsed && Array.isArray(parsed)) {
         return parsed
           .filter(
-            (r: Record<string, unknown>) =>
+            (r) =>
               r.source &&
               r.target &&
               r.relation_type &&
-              entityNames.includes(String(r.source)) &&
-              entityNames.includes(String(r.target))
+              entityNames.includes(r.source) &&
+              entityNames.includes(r.target)
           )
-          .map((r: Record<string, unknown>) => ({
-            source: String(r.source),
-            target: String(r.target),
-            relation_type: String(r.relation_type),
-            description: String(r.description || ''),
+          .map((r) => ({
+            source: r.source,
+            target: r.target,
+            relation_type: r.relation_type,
+            description: r.description || '',
             source_note_id: noteId
           }))
       }

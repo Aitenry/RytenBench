@@ -27,7 +27,7 @@ interface Api {
   }
   notes: {
     getById: (id: number) => Promise<NoteWithContent | null>
-    getAll: (page?: number, pageSize?: number) => Promise<PaginatedResult<NoteListItem>>
+    getAll: (page?: number, pageSize?: number, excludeWikiId?: number) => Promise<PaginatedResult<NoteListItem>>
     getPage: (query: string, page?: number, pageSize?: number) => Promise<PaginatedResult<NoteListItem>>
     add: (note: Omit<NoteRow, 'id' | 'created_at' | 'updated_at' | 'version'> & {
       image?: string | null

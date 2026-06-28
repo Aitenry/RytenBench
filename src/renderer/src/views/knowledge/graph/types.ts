@@ -62,7 +62,7 @@ export const ENTITY_TYPE_COLORS: Record<string, string> = {
   organization: '#4ECDC4',
   technology: '#45B7D1',
   concept: '#96CEB4',
-  event: '#FFEAA7',
+  event: '#D4A017',
   location: '#DDA0DD',
   product: '#98D8C8',
   other: '#BDC3C7'

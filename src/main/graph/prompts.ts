@@ -1,6 +1,6 @@
 /**
- * 知识图谱 LLM Prompt 模板集中管理
- * 优化：添加 few-shot 示例，使用结构化输出指令，减少 token 消耗
+ * 知识图谱 LLM Prompt 模板集中管理（含 few-shot 示例确保输出格式稳定）
+ * 输出校验由 Zod + StructuredOutputParser 在 parse 阶段完成
  */
 
 /** 实体抽取 Prompt（含 few-shot 示例） */
@@ -18,10 +18,9 @@ export const ENTITY_EXTRACTION_PROMPT = `你是一个知识图谱实体抽取助
 
 要求：
 1. 只抽取明确出现在文本中的实体，不要凭空猜测
-2. 每个实体返回 name（规范化全称）、type（类型）、description（15字以内的简洁描述）
-3. 不要抽取过于宽泛或通用的词（如"系统"、"数据"、"功能"等常见术语）
-4. 如果实体类型不确定，设为 "other"
-5. 请以严格的 JSON 数组格式返回，不要包含任何其他内容
+2. 不要抽取过于宽泛或通用的词（如"系统"、"数据"、"功能"等常见术语）
+3. 如果实体类型不确定，设为 "other"
+4. 每个实体返回 name（规范化全称）、type（类型）、description（15字以内的简洁描述）
 
 示例输入：
 "React 是由 Facebook 开发的前端框架，使用 JSX 语法。它在 2013 年开源，目前版本为 18.2。React 的核心是虚拟 DOM 和组件化思想。"
@@ -59,19 +58,19 @@ export const ENTITY_MERGING_PROMPT = `你是一个知识图谱实体消歧助手
 {entities}
 
 请返回合并后的 JSON 对象，格式如下：
-{
+{{
   "merged": [
-    {
+    {{
       "name": "规范化名称",
       "type": "类型",
       "description": "综合描述",
       "aliases": ["别名1"],
       "confidence": 0.95,
       "source_note_ids": [1, 2]
-    }
+    }}
   ],
   "removed_names": ["被合并掉的名称"]
-}
+}}
 
 请仅返回 JSON 对象（直接输出对象，不要包裹在代码块中）：`
 
@@ -122,4 +121,4 @@ export const ENTITY_GLEANING_PROMPT = `你之前从以下文本中抽取了一�
 文本内容：
 {text}
 
-请仅返回 JSON 数组，格式与之前相同：`
+请仅返回 JSON 数组，每个实体包含 name、type、description 字段，格式与第一次抽取相同：`
