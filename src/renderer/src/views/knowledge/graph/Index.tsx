@@ -74,10 +74,13 @@ const Index: React.FC = () => {
     }
   }, [])
 
+  // Note filter state (empty = show all)
+  const [noteFilter, setNoteFilter] = useState<number[]>([])
+
   // Load all graph data for selected wiki (entities + relations at once)
-  const loadGraphData = useCallback(async (wikiId: number) => {
+  const loadGraphData = useCallback(async (wikiId: number, noteIds?: number[]) => {
     try {
-      const data = await (window as unknown as Window).api.graph.getData(wikiId)
+      const data = await (window as unknown as Window).api.graph.getData(wikiId, undefined, noteIds)
       setGraphData(data)
       if (data.entities.length === 0) {
         setSelectedEntity(null)
@@ -175,14 +178,20 @@ const Index: React.FC = () => {
     loadWikis().then()
   }, [loadWikis])
 
-  // Load graph when wiki or filter changes
+  // Load notes and processed IDs only when wiki changes
   useEffect(() => {
     if (selectedWiki) {
-      loadGraphData(selectedWiki.id).then()
       loadNotes(selectedWiki.id).then()
       loadProcessedNoteIds(selectedWiki.id).then()
     }
-  }, [selectedWiki, loadGraphData, loadNotes, loadProcessedNoteIds])
+  }, [selectedWiki, loadNotes, loadProcessedNoteIds])
+
+  // Load graph when wiki or noteFilter changes
+  useEffect(() => {
+    if (selectedWiki) {
+      loadGraphData(selectedWiki.id, noteFilter.length > 0 ? noteFilter : undefined).then()
+    }
+  }, [selectedWiki, noteFilter, loadGraphData])
 
   // Listen for build progress
   useEffect(() => {
@@ -232,9 +241,9 @@ const Index: React.FC = () => {
   }
 
   // Handle entity click
-  const handleEntityClick = (entity: GraphEntity): void => {
+  const handleEntityClick = useCallback((entity: GraphEntity): void => {
     setSelectedEntity(entity)
-  }
+  }, [])
 
   // Handle build graph
   const handleBuildGraph = async (): Promise<void> => {
@@ -276,6 +285,7 @@ const Index: React.FC = () => {
     setSelectedEntity(null)
     setSearchQuery('')
     setTypeFilter(undefined)
+    setNoteFilter([])
   }
 
   // Handle append notes to graph
@@ -387,9 +397,11 @@ const Index: React.FC = () => {
           notes={notes}
           addedNoteIds={addedNoteIds}
           isAppending={isAppending}
+          noteFilter={noteFilter}
           onSearchChange={setSearchQuery}
           onTypeFilterChange={handleTypeFilterChange}
           onAppendNotes={handleAppendNotes}
+          onNoteFilterChange={setNoteFilter}
           onBuildGraph={handleBuildGraph}
           onBackToWikiList={handleBackToWikiList}
         />

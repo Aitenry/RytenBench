@@ -107,9 +107,7 @@ async function getAllNotes(
       LIMIT $1 OFFSET $2
     `
 
-    const dataParams = excludeWikiId
-      ? [pageSize, offset, excludeWikiId]
-      : [pageSize, offset]
+    const dataParams = excludeWikiId ? [pageSize, offset, excludeWikiId] : [pageSize, offset]
     const result = await db.query<NoteListItem>(dataSql, dataParams)
 
     const items = result.rows.map((row) => ({

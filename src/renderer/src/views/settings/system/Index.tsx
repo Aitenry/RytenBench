@@ -377,7 +377,7 @@ const Index: React.FC = () => {
           okText="确定"
           cancelText="取消"
           width={360}
-          destroyOnClose
+          destroyOnHidden
         >
           <Form form={passwordForm} layout="vertical" className="mt-4">
             <Form.Item

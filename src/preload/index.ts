@@ -127,8 +127,8 @@ const api = {
       ipcRenderer.invoke('chat-dialogue-delete-by-topic', topicId)
   },
   graph: {
-    getData: (wikiId: number, typeFilter?: string) =>
-      ipcRenderer.invoke('graph-data-get', wikiId, typeFilter),
+    getData: (wikiId: number, typeFilter?: string, noteIds?: number[]) =>
+      ipcRenderer.invoke('graph-data-get', wikiId, typeFilter, noteIds),
     getEntity: (entityId: number) => ipcRenderer.invoke('graph-entity-get', entityId),
     searchEntities: (wikiId: number, query: string) =>
       ipcRenderer.invoke('graph-entity-search', wikiId, query),

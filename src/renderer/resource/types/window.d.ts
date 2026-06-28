@@ -169,7 +169,7 @@ export interface Window {
       deleteDialoguesByTopic: (topicId: number) => Promise<boolean>
     }
     graph: {
-      getData: (wikiId: number, typeFilter?: string) => Promise<GraphData>
+      getData: (wikiId: number, typeFilter?: string, noteIds?: number[]) => Promise<GraphData>
       getEntity: (entityId: number) => Promise<GraphEntity | null>
       searchEntities: (wikiId: number, query: string) => Promise<GraphEntity[]>
       updateEntity: (id: number, updates: Record<string, unknown>) => Promise<boolean>

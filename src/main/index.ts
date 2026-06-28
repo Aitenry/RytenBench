@@ -933,14 +933,17 @@ app.whenReady().then(async () => {
 
   // --- Graph IPC handlers ---
 
-  ipcMain.handle('graph-data-get', async (_event, wikiId: number, typeFilter?: string) => {
-    try {
-      return await getFullGraphData(wikiId, typeFilter)
-    } catch (error) {
-      logger.error('Error in graph-data-get:', error)
-      throw error
+  ipcMain.handle(
+    'graph-data-get',
+    async (_event, wikiId: number, typeFilter?: string, noteIds?: number[]) => {
+      try {
+        return await getFullGraphData(wikiId, typeFilter, noteIds)
+      } catch (error) {
+        logger.error('Error in graph-data-get:', error)
+        throw error
+      }
     }
-  })
+  )
 
   ipcMain.handle('graph-entity-get', async (_event, entityId: number) => {
     try {

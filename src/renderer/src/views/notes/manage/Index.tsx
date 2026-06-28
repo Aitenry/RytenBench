@@ -447,7 +447,7 @@ const Index: React.FC = () => {
         onCancel={() => setIsEditModalOpen(false)}
         width="calc(100vw - 137px)"
         centered={true}
-        maskClosable={false}
+        mask={{ closable: false }}
         styles={{
           body: { height: 'calc(100vh - 205px)', display: 'flex', flexDirection: 'row', gap: 16 }
         }}

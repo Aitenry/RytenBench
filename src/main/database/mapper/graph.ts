@@ -51,20 +51,29 @@ export interface GraphData {
 
 // ==================== Entity CRUD ====================
 
-async function getEntitiesByWikiId(wikiId: number, typeFilter?: string): Promise<GraphEntity[]> {
+async function getEntitiesByWikiId(
+  wikiId: number,
+  typeFilter?: string,
+  noteIds?: number[]
+): Promise<GraphEntity[]> {
   try {
     const db = (await getDatabaseInstance()).getDatabase()
+    let query = 'SELECT * FROM graph_entities WHERE wiki_id = $1'
+    const params: unknown[] = [wikiId]
+    let idx = 2
+
     if (typeFilter) {
-      const result = await db.query<GraphEntity>(
-        'SELECT * FROM graph_entities WHERE wiki_id = $1 AND type = $2 ORDER BY name',
-        [wikiId, typeFilter]
-      )
-      return result.rows
+      query += ` AND type = $${idx++}`
+      params.push(typeFilter)
     }
-    const result = await db.query<GraphEntity>(
-      'SELECT * FROM graph_entities WHERE wiki_id = $1 ORDER BY name',
-      [wikiId]
-    )
+
+    if (noteIds && noteIds.length > 0) {
+      query += ` AND EXISTS (SELECT 1 FROM jsonb_array_elements(source_note_ids::jsonb) a CROSS JOIN jsonb_array_elements($${idx++}::jsonb) b WHERE a = b)`
+      params.push(JSON.stringify(noteIds))
+    }
+
+    query += ' ORDER BY name'
+    const result = await db.query<GraphEntity>(query, params)
     return result.rows
   } catch (error) {
     logger.error('Failed to get entities by wiki id:', error)
@@ -232,13 +241,19 @@ async function deleteEntitiesByWikiId(wikiId: number): Promise<number> {
 
 // ==================== Relation CRUD ====================
 
-async function getRelationsByWikiId(wikiId: number): Promise<GraphRelation[]> {
+async function getRelationsByWikiId(wikiId: number, noteIds?: number[]): Promise<GraphRelation[]> {
   try {
     const db = (await getDatabaseInstance()).getDatabase()
-    const result = await db.query<GraphRelation>(
-      'SELECT * FROM graph_relations WHERE wiki_id = $1',
-      [wikiId]
-    )
+    let query = 'SELECT * FROM graph_relations WHERE wiki_id = $1'
+    const params: unknown[] = [wikiId]
+
+    if (noteIds && noteIds.length > 0) {
+      query +=
+        ' AND EXISTS (SELECT 1 FROM jsonb_array_elements(source_note_ids::jsonb) a CROSS JOIN jsonb_array_elements($2::jsonb) b WHERE a = b)'
+      params.push(JSON.stringify(noteIds))
+    }
+
+    const result = await db.query<GraphRelation>(query, params)
     return result.rows
   } catch (error) {
     logger.error('Failed to get relations by wiki id:', error)
@@ -590,10 +605,14 @@ async function batchUpsertRelations(
 
 // ==================== Aggregate ====================
 
-async function getFullGraphData(wikiId: number, typeFilter?: string): Promise<GraphData> {
+async function getFullGraphData(
+  wikiId: number,
+  typeFilter?: string,
+  noteIds?: number[]
+): Promise<GraphData> {
   const [entities, relations] = await Promise.all([
-    getEntitiesByWikiId(wikiId, typeFilter),
-    getRelationsByWikiId(wikiId)
+    getEntitiesByWikiId(wikiId, typeFilter, noteIds),
+    getRelationsByWikiId(wikiId, noteIds)
   ])
   return { entities, relations }
 }

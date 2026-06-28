@@ -31,7 +31,7 @@ const LockScreen: React.FC<LockScreenProps> = ({ onUnlock }) => {
       onCancel={() => {}}
       footer={null}
       closable={false}
-      maskClosable={false}
+      mask={{ closable: false }}
       width={400}
       centered
       rootClassName="lock-screen-modal"

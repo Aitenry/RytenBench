@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useMemo, useState } from 'react'
 import { Button, Space, Input, Flex, Typography, Select, Modal, Tag } from 'antd'
 import { SyncOutlined, SearchOutlined } from '@ant-design/icons'
 import { RiApps2AddLine, RiArrowLeftLine } from '@remixicon/react'
@@ -20,9 +20,11 @@ interface GraphToolbarProps {
   notes: NoteOption[]
   addedNoteIds: Set<number>
   isAppending: boolean
+  noteFilter: number[]
   onSearchChange: (value: string) => void
   onTypeFilterChange: (value: string | undefined) => void
   onAppendNotes: (noteIds: number[]) => void
+  onNoteFilterChange: (noteIds: number[]) => void
   onBuildGraph: () => void
   onBackToWikiList: () => void
 }
@@ -36,8 +38,10 @@ const GraphToolbar: React.FC<GraphToolbarProps> = ({
   notes,
   addedNoteIds,
   isAppending,
+  noteFilter,
   onSearchChange,
   onAppendNotes,
+  onNoteFilterChange,
   onBuildGraph,
   onBackToWikiList
 }) => {
@@ -45,7 +49,19 @@ const GraphToolbar: React.FC<GraphToolbarProps> = ({
   const [selectedNoteIds, setSelectedNoteIds] = useState<number[]>([])
 
   // 过滤掉已在图谱中的笔记
-  const availableNotes = notes.filter((n) => !addedNoteIds.has(n.id))
+  const availableNotes = useMemo(
+    () => notes.filter((n) => !addedNoteIds.has(n.id)),
+    [notes, addedNoteIds]
+  )
+
+  // 笔记过滤下拉选项（稳定引用，避免 Select 反复重建）
+  const noteOptions = useMemo(() => notes.map((n) => ({ value: n.id, label: n.title })), [notes])
+
+  // Modal 内追加笔记的选项
+  const appendOptions = useMemo(
+    () => availableNotes.map((n) => ({ value: n.id, label: n.title })),
+    [availableNotes]
+  )
 
   const handleOpenModal = (): void => {
     setSelectedNoteIds([])
@@ -95,6 +111,48 @@ const GraphToolbar: React.FC<GraphToolbarProps> = ({
             onChange={(e) => onSearchChange(e.target.value)}
             allowClear
           />
+          <Select
+            mode="multiple"
+            size="small"
+            placeholder="全部笔记"
+            style={{ minWidth: 130, maxWidth: 200 }}
+            popupStyle={{ minWidth: 270 }}
+            value={noteFilter}
+            onChange={onNoteFilterChange}
+            options={noteOptions}
+            showSearch
+            maxTagCount={1}
+            allowClear
+            notFoundContent="暂无笔记"
+            maxTagPlaceholder={(omitted) => <span>+{omitted.length}</span>}
+            tagRender={(props) => {
+              const { label, closable, onClose } = props
+              return (
+                <Tag
+                  closable={closable}
+                  onClose={onClose}
+                  style={{
+                    marginInlineEnd: 4,
+                    background: '#1677ff12',
+                    border: '1px solid #1677ff30',
+                    color: '#1677ff',
+                    borderRadius: 12,
+                    paddingInline: 8,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    maxWidth: 120
+                  }}
+                >
+                  <span
+                    style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                  >
+                    {label}
+                  </span>
+                </Tag>
+              )
+            }}
+          />
           <Button
             size="small"
             icon={<RiApps2AddLine size={14} />}
@@ -120,7 +178,7 @@ const GraphToolbar: React.FC<GraphToolbarProps> = ({
         okText="确认追加"
         cancelText="取消"
         okButtonProps={{ disabled: selectedNoteIds.length === 0 }}
-        destroyOnClose
+        destroyOnHidden
       >
         <div style={{ marginBottom: 12 }}>
           <Text type="secondary">
@@ -133,7 +191,7 @@ const GraphToolbar: React.FC<GraphToolbarProps> = ({
           placeholder="搜索并选择笔记..."
           value={selectedNoteIds}
           onChange={setSelectedNoteIds}
-          options={availableNotes.map((n) => ({ value: n.id, label: n.title }))}
+          options={appendOptions}
           showSearch
           optionFilterProp="label"
           notFoundContent={notes.length === 0 ? '暂无笔记' : '所有笔记均已加入图谱'}

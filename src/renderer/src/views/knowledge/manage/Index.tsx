@@ -179,11 +179,7 @@ const Index: React.FC = () => {
 
   const loadAllNotes = useCallback(async (excludeWikiId?: number) => {
     try {
-      const result = await (window as unknown as Window).api.notes.getAll(
-        1,
-        100,
-        excludeWikiId
-      )
+      const result = await (window as unknown as Window).api.notes.getAll(1, 100, excludeWikiId)
       setAllNotes(result.items)
     } catch (error) {
       console.error('Failed to load all notes:', error)

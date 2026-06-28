@@ -46,7 +46,7 @@ const BuildProgress: React.FC<BuildProgressProps> = ({
       footer={null}
       closable={!!onCancel}
       onCancel={onCancel}
-      maskClosable={false}
+      mask={{ closable: false }}
       width={420}
     >
       <div style={{ padding: '16px 0' }}>

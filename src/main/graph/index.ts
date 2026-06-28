@@ -20,7 +20,8 @@ import {
   ENTITY_EXTRACTION_PROMPT,
   ENTITY_GLEANING_PROMPT,
   ENTITY_MERGING_PROMPT,
-  RELATION_EXTRACTION_PROMPT
+  RELATION_EXTRACTION_PROMPT,
+  CROSS_CHUNK_RELATION_PROMPT
 } from './prompts'
 import {
   EntitiesArraySchema,
@@ -518,56 +519,130 @@ export class KnowledgeGraphService {
         }))
       )
 
-      // ========== Phase 5: 关系抽取 ==========
+      // ========== Phase 5: 关系抽取（按块处理，避免全文过长导致 LLM 上下文溢出） ==========
+      const allEntityNames = mergedEntities.map((e) => e.name)
+
+      // 按 Markdown 标题层级重新分块，与实体抽取保持相同粒度
+      const relationChunks: TextChunk[] = []
+      for (const entry of noteEntries) {
+        const chunks = splitByMarkdownHeaders(entry.content, config?.maxChunkSize)
+        chunks.forEach((chunk, idx) => {
+          relationChunks.push({ noteId: entry.noteId, chunkIndex: idx, content: chunk })
+        })
+      }
+
+      const totalRelationChunks = relationChunks.length
+      const allRelations: (ExtractedRelation & { source_note_id: number })[] = []
+
       onProgress?.({
         phase: 'extract_relations',
         processedNotes: 0,
         totalNotes,
-        message: '开始关系抽取...'
+        message: `开始关系抽取... ${totalRelationChunks} 个文本块`
       })
 
-      const allEntityNames = mergedEntities.map((e) => e.name)
-      const allRelations: (ExtractedRelation & { source_note_id: number })[] = []
-      let processedRelationNotes = 0
+      for (let i = 0; i < relationChunks.length; i += maxConcurrency) {
+        const batch = relationChunks.slice(i, i + maxConcurrency)
 
-      for (let i = 0; i < noteEntries.length; i += maxConcurrency) {
-        const batch = noteEntries.slice(i, i + maxConcurrency)
-        // 先批量预计算每篇笔记中出现的实体（避免 O(n*m) 次 toLowerCase）
-        const batchRelevant = batch.map((entry) => ({
-          entry,
-          relevantEntities: filterEntitiesInText(allEntityNames, entry.content)
+        // 预计算每块中出现的实体（只送该块相关的实体，减少 LLM 输入噪声）
+        const batchRelevant = batch.map((chunk) => ({
+          chunk,
+          relevantEntities: filterEntitiesInText(allEntityNames, chunk.content)
         }))
 
         const batchResults = await Promise.all(
-          batchRelevant.map(async ({ entry, relevantEntities }) => {
-            if (relevantEntities.length < 2) {
-              processedRelationNotes++
-              onProgress?.({
-                phase: 'extract_relations',
-                processedNotes: processedRelationNotes,
-                totalNotes,
-                message: `关系抽取中... ${processedRelationNotes}/${totalNotes}`
-              })
-              return Promise.resolve([])
-            }
-            const relations = await this.extractRelations(
-              entry.content,
-              relevantEntities,
-              entry.noteId
-            )
-            processedRelationNotes++
-            onProgress?.({
-              phase: 'extract_relations',
-              processedNotes: processedRelationNotes,
-              totalNotes,
-              message: `关系抽取中... ${processedRelationNotes}/${totalNotes}`
-            })
-            return relations
+          batchRelevant.map(async ({ chunk, relevantEntities }) => {
+            if (relevantEntities.length < 2) return []
+            return this.extractRelations(chunk.content, relevantEntities, chunk.noteId)
           })
         )
 
         for (const relations of batchResults) {
           allRelations.push(...relations)
+        }
+
+        const processedChunks = Math.min(i + maxConcurrency, totalRelationChunks)
+        const processedNoteIds = new Set(
+          relationChunks.slice(0, i + maxConcurrency).map((c) => c.noteId)
+        )
+        onProgress?.({
+          phase: 'extract_relations',
+          processedNotes: processedNoteIds.size,
+          totalNotes,
+          message: `关系抽取中... ${processedChunks}/${totalRelationChunks} 块`
+        })
+      }
+
+      // ========== Phase 5b: 跨块关系补全（轻量级：多块笔记逐篇补全跨章节关系） ==========
+      // 将 relationChunks 按 noteId 分组，找出多块笔记中跨块分布但尚未连接的实体
+      const noteChunksMap = new Map<number, TextChunk[]>()
+      for (const chunk of relationChunks) {
+        if (!noteChunksMap.has(chunk.noteId)) noteChunksMap.set(chunk.noteId, [])
+        noteChunksMap.get(chunk.noteId)!.push(chunk)
+      }
+
+      const entityDescMap = new Map(
+        mergedEntities.map((e) => [
+          e.name,
+          { name: e.name, type: e.type, description: e.description }
+        ])
+      )
+
+      const crossChunkTasks: Array<{
+        noteId: number
+        noteTitle: string
+        entities: { name: string; type: string; description: string }[]
+        existingPairs: { source: string; target: string }[]
+      }> = []
+
+      for (const [noteId, chunks] of noteChunksMap) {
+        if (chunks.length < 2) continue
+
+        // 收集该笔记所有块中出现的实体
+        const noteEntitySet = new Set<string>()
+        for (const chunk of chunks) {
+          filterEntitiesInText(allEntityNames, chunk.content).forEach((e) => noteEntitySet.add(e))
+        }
+        if (noteEntitySet.size < 2) continue
+
+        // 该笔记已有的 per-chunk 关系
+        const existingPairs = allRelations
+          .filter((r) => r.source_note_id === noteId)
+          .map((r) => ({ source: r.source, target: r.target }))
+
+        const entityList = [...noteEntitySet]
+          .map((name) => entityDescMap.get(name)!)
+          .filter(Boolean)
+
+        if (entityList.length < 2) continue
+
+        const noteEntry = noteEntries.find((e) => e.noteId === noteId)
+        crossChunkTasks.push({
+          noteId,
+          noteTitle: noteEntry?.title || `笔记 #${noteId}`,
+          entities: entityList,
+          existingPairs
+        })
+      }
+
+      if (crossChunkTasks.length > 0) {
+        onProgress?.({
+          phase: 'extract_relations',
+          processedNotes: totalNotes,
+          totalNotes,
+          message: `跨块关系补全中... ${crossChunkTasks.length} 篇笔记`
+        })
+
+        for (let i = 0; i < crossChunkTasks.length; i += maxConcurrency) {
+          const batch = crossChunkTasks.slice(i, i + maxConcurrency)
+          const batchResults = await Promise.all(
+            batch.map(({ noteId, noteTitle, entities, existingPairs }) =>
+              this.extractCrossChunkRelations(noteTitle, entities, existingPairs, noteId)
+            )
+          )
+          for (const relations of batchResults) {
+            allRelations.push(...relations)
+          }
         }
       }
 
@@ -663,7 +738,7 @@ export class KnowledgeGraphService {
       message: '读取笔记内容...'
     })
 
-    const noteEntries: { noteId: number; content: string }[] = []
+    const noteEntries: { noteId: number; content: string; title: string }[] = []
     for (let i = 0; i < noteIds.length; i++) {
       const note = await getNoteById(noteIds[i])
       if (!note || !note.content) {
@@ -672,6 +747,7 @@ export class KnowledgeGraphService {
       }
       noteEntries.push({
         noteId: note.id,
+        title: note.title,
         content: `${note.title}\n${note.content}`
       })
     }
@@ -831,31 +907,126 @@ export class KnowledgeGraphService {
       }))
     )
 
-    // 7. 关系抽取（每篇笔记用其内容与所有实体名称匹配）
+    // 7. 关系抽取（按块处理，避免全文过长导致 LLM 上下文溢出）
+    const allEntityNames = mergedEntities.map((e) => e.name)
+
+    // 按 Markdown 标题层级重新分块，与实体抽取保持相同粒度
+    const relationChunks: TextChunk[] = []
+    for (const entry of noteEntries) {
+      const chunks = splitByMarkdownHeaders(entry.content, maxChunkSize)
+      chunks.forEach((chunk, idx) => {
+        relationChunks.push({ noteId: entry.noteId, chunkIndex: idx, content: chunk })
+      })
+    }
+
+    const totalRelationChunks = relationChunks.length
+    const allRelations: (ExtractedRelation & { source_note_id: number })[] = []
+
     onProgress?.({
       phase: 'extract_relations',
       processedNotes: 0,
       totalNotes,
-      message: '开始关系抽取...'
+      message: `开始关系抽取... ${totalRelationChunks} 个文本块`
     })
 
-    const allEntityNames = mergedEntities.map((e) => e.name)
-    const allRelations: (ExtractedRelation & { source_note_id: number })[] = []
-    let relationProcessedCount = 0
+    for (let i = 0; i < relationChunks.length; i += maxConcurrency) {
+      const batch = relationChunks.slice(i, i + maxConcurrency)
 
-    for (const entry of noteEntries) {
-      const relevantEntities = filterEntitiesInText(allEntityNames, entry.content)
-      if (relevantEntities.length >= 2) {
-        const relations = await this.extractRelations(entry.content, relevantEntities, entry.noteId)
+      // 预计算每块中出现的实体（只送该块相关的实体，减少 LLM 输入噪声）
+      const batchRelevant = batch.map((chunk) => ({
+        chunk,
+        relevantEntities: filterEntitiesInText(allEntityNames, chunk.content)
+      }))
+
+      const batchResults = await Promise.all(
+        batchRelevant.map(async ({ chunk, relevantEntities }) => {
+          if (relevantEntities.length < 2) return []
+          return this.extractRelations(chunk.content, relevantEntities, chunk.noteId)
+        })
+      )
+
+      for (const relations of batchResults) {
         allRelations.push(...relations)
       }
-      relationProcessedCount++
+
+      const processedChunks = Math.min(i + maxConcurrency, totalRelationChunks)
+      const processedNoteIds = new Set(
+        relationChunks.slice(0, i + maxConcurrency).map((c) => c.noteId)
+      )
       onProgress?.({
         phase: 'extract_relations',
-        processedNotes: relationProcessedCount,
+        processedNotes: processedNoteIds.size,
         totalNotes,
-        message: `关系抽取中... ${relationProcessedCount}/${noteEntries.length}`
+        message: `关系抽取中... ${processedChunks}/${totalRelationChunks} 块`
       })
+    }
+
+    // ========== Phase 7b: 跨块关系补全（轻量级：多块笔记逐篇补全跨章节关系） ==========
+    const noteChunksMap = new Map<number, TextChunk[]>()
+    for (const chunk of relationChunks) {
+      if (!noteChunksMap.has(chunk.noteId)) noteChunksMap.set(chunk.noteId, [])
+      noteChunksMap.get(chunk.noteId)!.push(chunk)
+    }
+
+    const entityDescMap = new Map(
+      mergedEntities.map((e) => [
+        e.name,
+        { name: e.name, type: e.type, description: e.description }
+      ])
+    )
+
+    const crossChunkTasks: Array<{
+      noteId: number
+      noteTitle: string
+      entities: { name: string; type: string; description: string }[]
+      existingPairs: { source: string; target: string }[]
+    }> = []
+
+    for (const [noteId, chunks] of noteChunksMap) {
+      if (chunks.length < 2) continue
+
+      const noteEntitySet = new Set<string>()
+      for (const chunk of chunks) {
+        filterEntitiesInText(allEntityNames, chunk.content).forEach((e) => noteEntitySet.add(e))
+      }
+      if (noteEntitySet.size < 2) continue
+
+      const existingPairs = allRelations
+        .filter((r) => r.source_note_id === noteId)
+        .map((r) => ({ source: r.source, target: r.target }))
+
+      const entityList = [...noteEntitySet].map((name) => entityDescMap.get(name)!).filter(Boolean)
+
+      if (entityList.length < 2) continue
+
+      const noteEntry = noteEntries.find((e) => e.noteId === noteId)
+      crossChunkTasks.push({
+        noteId,
+        noteTitle: noteEntry?.title || `笔记 #${noteId}`,
+        entities: entityList,
+        existingPairs
+      })
+    }
+
+    if (crossChunkTasks.length > 0) {
+      onProgress?.({
+        phase: 'extract_relations',
+        processedNotes: totalNotes,
+        totalNotes,
+        message: `跨块关系补全中... ${crossChunkTasks.length} 篇笔记`
+      })
+
+      for (let i = 0; i < crossChunkTasks.length; i += maxConcurrency) {
+        const batch = crossChunkTasks.slice(i, i + maxConcurrency)
+        const batchResults = await Promise.all(
+          batch.map(({ noteId, noteTitle, entities, existingPairs }) =>
+            this.extractCrossChunkRelations(noteTitle, entities, existingPairs, noteId)
+          )
+        )
+        for (const relations of batchResults) {
+          allRelations.push(...relations)
+        }
+      }
     }
 
     // 8. 去重并批量保存关系
@@ -1124,6 +1295,58 @@ export class KnowledgeGraphService {
       }
     } catch (error) {
       logger.warn('Relation extraction failed:', error)
+    }
+
+    return []
+  }
+
+  /**
+   * 跨块关系补全（轻量级：仅送实体描述 + 笔记标题，不送全文）
+   * 用于发现同一篇笔记中分散在不同块之间的实体间关系
+   */
+  private async extractCrossChunkRelations(
+    noteTitle: string,
+    allEntitiesInNote: { name: string; type: string; description: string }[],
+    existingRelations: { source: string; target: string }[],
+    noteId: number
+  ): Promise<(ExtractedRelation & { source_note_id: number })[]> {
+    const entityNames = allEntitiesInNote.map((e) => e.name)
+    if (entityNames.length < 2) return []
+
+    try {
+      const parsed = await this.cachedStructuredInvoke<RelationsArrayOutput>(
+        CROSS_CHUNK_RELATION_PROMPT.replace('{noteTitle}', noteTitle)
+          .replace('{entities}', JSON.stringify(allEntitiesInNote))
+          .replace(
+            '{existingRelations}',
+            existingRelations.length > 0 ? JSON.stringify(existingRelations) : '[]'
+          ),
+        this.relationParser
+      )
+
+      if (parsed && Array.isArray(parsed)) {
+        // 过滤掉已有关系中的重复
+        const existingSet = new Set(existingRelations.map((r) => `${r.source}:${r.target}`))
+        return parsed
+          .filter(
+            (r) =>
+              r.source &&
+              r.target &&
+              r.relation_type &&
+              entityNames.includes(r.source) &&
+              entityNames.includes(r.target) &&
+              !existingSet.has(`${r.source}:${r.target}`)
+          )
+          .map((r) => ({
+            source: r.source,
+            target: r.target,
+            relation_type: r.relation_type,
+            description: r.description || '',
+            source_note_id: noteId
+          }))
+      }
+    } catch (error) {
+      logger.warn('Cross-chunk relation extraction failed:', error)
     }
 
     return []

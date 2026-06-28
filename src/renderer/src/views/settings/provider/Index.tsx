@@ -407,7 +407,7 @@ const Index: React.FC = () => {
           okText="保存"
           cancelText="取消"
           width={520}
-          destroyOnClose
+          destroyOnHidden
           styles={{ body: { maxHeight: 420, padding: 12, overflowY: 'auto' } }}
           classNames={{ body: 'custom-scrollbar' }}
         >
