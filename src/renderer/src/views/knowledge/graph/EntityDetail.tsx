@@ -231,7 +231,13 @@ const EntityDetail: React.FC<EntityDetailProps> = ({
               <Tag
                 key={id}
                 color="blue"
-                style={{ cursor: onNoteClick ? 'pointer' : 'default' }}
+                style={{
+                  cursor: onNoteClick ? 'pointer' : 'default',
+                  maxWidth: '100%',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap'
+                }}
                 onClick={() => onNoteClick?.(id)}
               >
                 {noteTitles.get(id) || `笔记 #${id}`}

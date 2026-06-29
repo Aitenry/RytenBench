@@ -65,6 +65,10 @@ export const ENTITY_TYPE_COLORS: Record<string, string> = {
   event: '#D4A017',
   location: '#DDA0DD',
   product: '#98D8C8',
+  artifact: '#FFD700',
+  skill: '#FF8C42',
+  creature: '#8E44AD',
+  realm: '#17A589',
   other: '#BDC3C7'
 }
 
@@ -77,6 +81,10 @@ export const ENTITY_TYPE_LABELS: Record<string, string> = {
   event: '事件',
   location: '地点',
   product: '产品',
+  artifact: '物品',
+  skill: '技能',
+  creature: '生物',
+  realm: '等级',
   other: '其他'
 }
 
@@ -91,5 +99,15 @@ export const RELATION_TYPE_LABELS: Record<string, string> = {
   is_a: '是一种',
   opposes: '对立',
   leads_to: '导致',
-  example_of: '示例'
+  example_of: '示例',
+  friend_of: '朋友',
+  enemy_of: '敌人',
+  loves: '爱慕',
+  family_of: '亲属',
+  mentors: '指导',
+  belongs_to: '归属于',
+  fights: '战斗',
+  kills: '击杀',
+  acquires: '获得',
+  located_in: '位于'
 }

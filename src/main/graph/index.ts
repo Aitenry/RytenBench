@@ -39,8 +39,8 @@ export interface BuildConfig {
   force?: boolean
   /** 是否启用 gleaning（二次抽取遗漏实体，默认 true） */
   enableGleaning?: boolean
-  /** Gleaning 触发阈值：仅当笔记总数不超过此值时才执行 gleaning（默认 50） */
-  gleaningThreshold?: number
+  /** Gleaning 最大处理笔记数：当库中笔记很多时限制 gleaning 总成本（默认 100，设为 0 不限） */
+  gleaningMaxNotes?: number
   /** Markdown 分块最大字符数（默认 2000） */
   maxChunkSize?: number
   /** 单次 LLM 调用处理的笔记数量（批量模式，默认 1） */
@@ -80,10 +80,50 @@ interface TextChunk {
 // ==================== 工具函数 ====================
 
 /**
+ * 检测场景分隔符（小说等叙事文本常用）
+ * 支持：--- / *** / * * * / ___ / 空行 + 短居中标题 + 空行 等模式
+ * 返回分隔符的位置列表（文本中的字符索引）
+ */
+function findSceneBreaks(text: string): number[] {
+  const positions: number[] = []
+
+  // 1. Markdown 水平分隔线：^---+$ | ^\*{3,}$ | ^_{3,}$ | ^\* \* \*$
+  const hrPattern = /^(?:---+|\*{3,}|_{3,}|(?:\* ){2,}\*|(?:- ){2,}-)$/gm
+  let hrMatch: RegExpExecArray | null
+  while ((hrMatch = hrPattern.exec(text)) !== null) {
+    positions.push(hrMatch.index)
+  }
+
+  // 2. 空行包围的短标题行（可能是场景标题，如 "※※※"、"◇◇◇"、"同日夜"）
+  const sceneTitlePattern = /(?:^|\n)\s*\n(?!\s*#)(\S[^\n]{0,30}\S)\s*\n\s*\n/gm
+  let stMatch: RegExpExecArray | null
+  while ((stMatch = sceneTitlePattern.exec(text)) !== null) {
+    const titleText = stMatch[1].trim()
+    // 排除看起来像正常段落的行（至少包含一些非字母数字/中文的特殊字符，或非常短）
+    const hasSpecial = /[※◇◆☆★○●◎□■△▲▽▼→←↑↓★☆]/.test(titleText)
+    const isVeryShort = titleText.length <= 6 && !/[，。！？；：""''（）]/.test(titleText)
+    if (hasSpecial || isVeryShort) {
+      positions.push(stMatch.index + stMatch[0].indexOf(titleText))
+    }
+  }
+
+  // 排序并去重（相邻 50 字符内合并）
+  positions.sort((a, b) => a - b)
+  const merged: number[] = []
+  for (const pos of positions) {
+    if (merged.length === 0 || pos - merged[merged.length - 1] > 50) {
+      merged.push(pos)
+    }
+  }
+  return merged
+}
+
+/**
  * 按 Markdown 标题层级切分文本（参考 LightRAG / GraphRAG 的分块策略）
  * - 保持标题层级上下文（如 "# A > ## B > ### C"），提升实体抽取的语义准确性
  * - 跳过代码块内的标题行（避免将 ```java # Title``` 误识别为标题）
  * - 单段过长时回退到段落分块
+ * - 标题稀疏时自动检测场景分隔符作为补充分块点（适配小说等叙事文本）
  */
 function splitByMarkdownHeaders(text: string, maxChunkSize = 2000): string[] {
   // 1. 定位所有代码块的范围，标题检测时跳过这些区域
@@ -123,6 +163,26 @@ function splitByMarkdownHeaders(text: string, maxChunkSize = 2000): string[] {
   // 无标题时回退到段落分块
   if (headers.length === 0) {
     return fallbackParagraphChunk(text, maxChunkSize)
+  }
+
+  // 标题稀疏检测：文本很长但标题很少（如小说一章仅一个 # 标题）→ 注入场景分隔符作为虚拟二级标题
+  if (headers.length === 1 && text.length > maxChunkSize * 1.5) {
+    const sceneBreaks = findSceneBreaks(text)
+    if (sceneBreaks.length > 0) {
+      // 将场景分隔符注入为虚拟 ## 标题
+      for (const pos of sceneBreaks) {
+        // 提取分隔符后的前 15 个字符作为场景标签
+        const afterBreak = text.slice(pos).split('\n').slice(0, 3).join(' ').slice(0, 30).trim()
+        headers.push({
+          index: pos,
+          endIndex: pos,
+          level: 2,
+          text: `[场景] ${afterBreak || '...'}`
+        })
+      }
+      // 重新按位置排序
+      headers.sort((a, b) => a.index - b.index)
+    }
   }
 
   // 3. 按标题切分，每段携带完整层级上下文
@@ -273,7 +333,28 @@ function filterEntitiesInText(entityNames: string[], text: string): string[] {
   return entityNames.filter((name) => lowerText.includes(name.toLowerCase()))
 }
 
-// ==================== KnowledgeGraphService ====================
+/**
+ * 组装笔记内容：避免 title 与 content 首行标题重复
+ * 例如 note.title="第四章" 且 content="# 第四章\n..." 时，不再重复拼接
+ */
+function assembleNoteContent(title: string, content: string): string {
+  const trimmedContent = content.trimStart()
+  // 判断 content 首行是否是 Markdown 标题且与 title 相同或高度相似
+  const firstLine = trimmedContent.split('\n')[0] || ''
+  const headingMatch = firstLine.match(/^#+\s+(.*)/)
+  if (headingMatch) {
+    const headingText = headingMatch[1].trim()
+    // 标题文本包含关系（任一包含另一即可）
+    if (
+      headingText === title ||
+      headingText.includes(title) ||
+      title.includes(headingText)
+    ) {
+      return trimmedContent
+    }
+  }
+  return `${title}\n${trimmedContent}`
+}
 
 export class KnowledgeGraphService {
   private model: BaseChatModel
@@ -434,32 +515,40 @@ export class KnowledgeGraphService {
         await updateBuildJob(jobId, { processed_notes: processedNotes })
       }
 
-      // ========== Phase 2: Gleaning 二次抽取（可选） ==========
+      // ========== Phase 2: Gleaning 二次抽取（可选，由 gleaningMaxNotes 控制成本上限） ==========
       const enableGleaning = config?.enableGleaning !== false
-      if (enableGleaning && totalNotes <= (config?.gleaningThreshold ?? 50)) {
-        onProgress?.({
-          phase: 'extract_entities',
-          processedNotes: totalNotes,
-          totalNotes,
-          message: '二次扫描遗漏实体...'
-        })
+      if (enableGleaning) {
+        const maxGleaningNotes = config?.gleaningMaxNotes ?? 100
+        const gleaningEntries =
+          maxGleaningNotes > 0 && noteEntries.length > maxGleaningNotes
+            ? noteEntries.slice(0, maxGleaningNotes)
+            : noteEntries
 
-        const gleaningBatchSize = maxConcurrency
-        for (let i = 0; i < noteEntries.length; i += gleaningBatchSize) {
-          const batch = noteEntries.slice(i, i + gleaningBatchSize)
-          const batchResults = await Promise.all(
-            batch.map(async (entry) => {
-              const existingEntities = chunkEntities.get(entry.noteId) || []
-              const existingNames = existingEntities.map((e) => e.name)
-              if (existingNames.length === 0) return []
-              return this.gleanEntities(entry.content, existingNames)
-            })
-          )
+        if (gleaningEntries.length > 0) {
+          onProgress?.({
+            phase: 'extract_entities',
+            processedNotes: totalNotes,
+            totalNotes,
+            message: `二次扫描遗漏实体... (${gleaningEntries.length} 篇笔记)`
+          })
 
-          for (let j = 0; j < batch.length; j++) {
-            if (batchResults[j].length > 0) {
-              const existing = chunkEntities.get(batch[j].noteId) || []
-              chunkEntities.set(batch[j].noteId, [...existing, ...batchResults[j]])
+          const gleaningBatchSize = maxConcurrency
+          for (let i = 0; i < gleaningEntries.length; i += gleaningBatchSize) {
+            const batch = gleaningEntries.slice(i, i + gleaningBatchSize)
+            const batchResults = await Promise.all(
+              batch.map(async (entry) => {
+                const existingEntities = chunkEntities.get(entry.noteId) || []
+                const existingNames = existingEntities.map((e) => e.name)
+                if (existingNames.length === 0) return []
+                return this.gleanEntities(entry.content, existingNames)
+              })
+            )
+
+            for (let j = 0; j < batch.length; j++) {
+              if (batchResults[j].length > 0) {
+                const existing = chunkEntities.get(batch[j].noteId) || []
+                chunkEntities.set(batch[j].noteId, [...existing, ...batchResults[j]])
+              }
             }
           }
         }
@@ -748,7 +837,7 @@ export class KnowledgeGraphService {
       noteEntries.push({
         noteId: note.id,
         title: note.title,
-        content: `${note.title}\n${note.content}`
+        content: assembleNoteContent(note.title, note.content)
       })
     }
 
@@ -807,32 +896,40 @@ export class KnowledgeGraphService {
       })
     }
 
-    // Gleaning 二次抽取（可选）
+    // Gleaning 二次抽取（可选，由 gleaningMaxNotes 控制成本上限）
     const enableGleaning = config?.enableGleaning !== false
-    if (enableGleaning && totalNotes <= (config?.gleaningThreshold ?? 50)) {
-      onProgress?.({
-        phase: 'extract_entities',
-        processedNotes: totalNotes,
-        totalNotes,
-        message: '二次扫描遗漏实体...'
-      })
+    if (enableGleaning) {
+      const maxGleaningNotes = config?.gleaningMaxNotes ?? 100
+      const gleaningEntries =
+        maxGleaningNotes > 0 && noteEntries.length > maxGleaningNotes
+          ? noteEntries.slice(0, maxGleaningNotes)
+          : noteEntries
 
-      const gleaningBatchSize = maxConcurrency
-      for (let i = 0; i < noteEntries.length; i += gleaningBatchSize) {
-        const batch = noteEntries.slice(i, i + gleaningBatchSize)
-        const batchResults = await Promise.all(
-          batch.map(async (entry) => {
-            const existingEntities = chunkEntities.get(entry.noteId) || []
-            const existingNames = existingEntities.map((e) => e.name)
-            if (existingNames.length === 0) return []
-            return this.gleanEntities(entry.content, existingNames)
-          })
-        )
+      if (gleaningEntries.length > 0) {
+        onProgress?.({
+          phase: 'extract_entities',
+          processedNotes: totalNotes,
+          totalNotes,
+          message: `二次扫描遗漏实体... (${gleaningEntries.length} 篇笔记)`
+        })
 
-        for (let j = 0; j < batch.length; j++) {
-          if (batchResults[j].length > 0) {
-            const existing = chunkEntities.get(batch[j].noteId) || []
-            chunkEntities.set(batch[j].noteId, [...existing, ...batchResults[j]])
+        const gleaningBatchSize = maxConcurrency
+        for (let i = 0; i < gleaningEntries.length; i += gleaningBatchSize) {
+          const batch = gleaningEntries.slice(i, i + gleaningBatchSize)
+          const batchResults = await Promise.all(
+            batch.map(async (entry) => {
+              const existingEntities = chunkEntities.get(entry.noteId) || []
+              const existingNames = existingEntities.map((e) => e.name)
+              if (existingNames.length === 0) return []
+              return this.gleanEntities(entry.content, existingNames)
+            })
+          )
+
+          for (let j = 0; j < batch.length; j++) {
+            if (batchResults[j].length > 0) {
+              const existing = chunkEntities.get(batch[j].noteId) || []
+              chunkEntities.set(batch[j].noteId, [...existing, ...batchResults[j]])
+            }
           }
         }
       }
@@ -1118,7 +1215,7 @@ export class KnowledgeGraphService {
           if (note && note.content) {
             return {
               noteId: note.id,
-              content: `${note.title}\n${note.content}`,
+              content: assembleNoteContent(note.title, note.content),
               title: note.title
             }
           }

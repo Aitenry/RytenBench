@@ -7,13 +7,17 @@
 export const ENTITY_EXTRACTION_PROMPT = `你是一个知识图谱实体抽取助手。请从以下文本中抽取出所有有意义的命名实体和关键概念。
 
 实体类型定义：
-- person: 人物（个人、角色）
-- organization: 组织（公司、团队、机构、项目组）
+- person: 人物（个人、角色、虚构角色）
+- organization: 组织（公司、团队、机构、帮派、宗族、团体）
 - technology: 技术/工具（编程语言、框架、库、软件、硬件、协议）
-- concept: 概念/理论（抽象概念、方法论、设计模式、算法）
-- event: 事件（会议、发布、里程碑）
-- location: 地点（地理区域、数据中心）
-- product: 产品/项目（具体产品、开源项目、应用）
+- concept: 概念/理论（抽象概念、方法论、设计模式、算法、世界观）
+- event: 事件（会议、发布、里程碑、剧情转折、战役）
+- location: 地点（地理区域、城镇、星球、虚构世界、秘境）
+- product: 产品/项目（具体产品、开源项目、应用、作品）
+- artifact: 物品/装备（武器、防具、工具、信物、魔法物品、重要物件）
+- skill: 技能/能力（特殊技艺、法术、天赋、专业技能、战斗技巧）
+- creature: 生物/物种（非人类智慧生物、神话生物、异族、妖兽、怪物）
+- realm: 等级/位阶（品级、段位、修炼境界、军衔、称号等层级）
 - other: 其他重要实体
 
 要求：
@@ -86,6 +90,16 @@ export const RELATION_EXTRACTION_PROMPT = `你是一个知识图谱关系抽取�
 - uses: A 使用/采用了 B
 - is_a: A 是 B 的一种（继承/实例）
 - leads_to: A 导致/产生 B
+- friend_of: A 与 B 是朋友/盟友
+- enemy_of: A 与 B 是敌人/对手
+- loves: A 爱慕/倾心于 B
+- family_of: A 与 B 是亲属/血缘关系
+- mentors: A 指导/教导/传授 B
+- belongs_to: A 属于/归属于 B（势力、组织、宗门）
+- fights: A 与 B 交战/战斗/对抗
+- kills: A 杀死/击败 B
+- acquires: A 获得/得到/拾取 B（物品、技能）
+- located_in: A 位于 B（地点、区域）
 
 要求：
 1. 只返回有明确文本证据支持的关系
@@ -144,6 +158,16 @@ export const CROSS_CHUNK_RELATION_PROMPT = `你是一个知识图谱关系补全
 - uses: A 使用/采用了 B
 - is_a: A 是 B 的一种
 - leads_to: A 导致/产生 B
+- friend_of: A 与 B 是朋友/盟友
+- enemy_of: A 与 B 是敌人/对手
+- loves: A 爱慕 B
+- family_of: A 与 B 是亲属
+- mentors: A 指导/教导 B
+- belongs_to: A 归属于 B（势力、宗门）
+- fights: A 与 B 战斗/对抗
+- kills: A 杀死 B
+- acquires: A 获得 B（物品、技能）
+- located_in: A 位于 B
 
 要求：
 1. 只返回有合理推断依据的跨章节关系（实体虽分散在不同章节，但在同一篇笔记的上下文中有关联）

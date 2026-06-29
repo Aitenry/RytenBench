@@ -13,6 +13,10 @@ const EntityTypeSchema = z.enum([
   'event',
   'location',
   'product',
+  'artifact',
+  'skill',
+  'creature',
+  'realm',
   'other'
 ])
 
@@ -51,7 +55,17 @@ const RelationTypeSchema = z.enum([
   'creates',
   'uses',
   'is_a',
-  'leads_to'
+  'leads_to',
+  'friend_of',
+  'enemy_of',
+  'loves',
+  'family_of',
+  'mentors',
+  'belongs_to',
+  'fights',
+  'kills',
+  'acquires',
+  'located_in'
 ])
 
 /** 单个关系 */
