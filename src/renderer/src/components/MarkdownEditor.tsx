@@ -50,7 +50,7 @@ const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialValue = '', onSa
         gridTemplateRows: '1fr',
         // 自定义滚动条样式
         scrollbarWidth: 'thin',
-        scrollbarColor: '#c1c1c1 transparent'
+        scrollbarColor: 'rgba(128,128,128,0.3) transparent'
       }}
     >
       <TextArea

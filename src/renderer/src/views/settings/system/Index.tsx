@@ -11,13 +11,26 @@ import {
   Space,
   Descriptions,
   Select,
+  Segmented,
   message as antMessage
 } from 'antd'
-import { LockOutlined, LoadingOutlined, ApiOutlined } from '@ant-design/icons'
+import {
+  LockOutlined,
+  LoadingOutlined,
+  ApiOutlined,
+  FolderOutlined,
+  BgColorsOutlined
+} from '@ant-design/icons'
 import CryptoJS from 'crypto-js'
 import { useMessage } from '@renderer/hooks/useMessage'
+import { useTheme } from '@renderer/contexts/ThemeContext'
 import { Window } from '../../../../resource/types/window'
-import type { SystemSettings, GraphSettings, ChatSettings } from '@renderer/types/settings'
+import type {
+  SystemSettings,
+  GraphSettings,
+  ChatSettings,
+  ThemeMode
+} from '@renderer/types/settings'
 
 interface ProviderOption {
   id: number
@@ -28,10 +41,18 @@ interface ProviderOption {
 
 const Index: React.FC = () => {
   const {
-    token: { colorBgContainer, borderRadiusLG }
+    token: {
+      colorBgContainer,
+      borderRadiusLG,
+      colorFillAlter,
+      colorText,
+      colorTextSecondary,
+      colorTextTertiary
+    }
   } = theme.useToken()
 
   const { viewMessage } = useMessage()
+  const { themeMode, setThemeMode } = useTheme()
   const [settings, setSettings] = useState<SystemSettings | null>(null)
   const [providers, setProviders] = useState<ProviderOption[]>([])
   const [embeddingProviders, setEmbeddingProviders] = useState<ProviderOption[]>([])
@@ -76,6 +97,12 @@ const Index: React.FC = () => {
     } catch (error) {
       viewMessage(msgKey, 'error', `保存失败: ${error}`)
     }
+  }
+
+  // --- 主题 ---
+
+  const handleThemeChange = (value: string | number): void => {
+    setThemeMode(value as ThemeMode).then()
   }
 
   // --- 锁屏 ---
@@ -132,6 +159,9 @@ const Index: React.FC = () => {
     updateSettings({ chat: { ...settings.chat, [field]: value } }).then()
   }
 
+  // tooltip 文字颜色
+  const descStyle: React.CSSProperties = { color: colorTextSecondary }
+
   if (!settings) {
     return (
       <div className="h-full flex-1 flex flex-row gap-2.5">
@@ -139,7 +169,7 @@ const Index: React.FC = () => {
           className="w-full flex items-center justify-center"
           style={{ background: colorBgContainer, borderRadius: borderRadiusLG }}
         >
-          <LoadingOutlined spin className="text-2xl text-gray-400" />
+          <LoadingOutlined spin className="text-2xl" style={{ color: colorTextTertiary }} />
         </main>
       </div>
     )
@@ -152,8 +182,8 @@ const Index: React.FC = () => {
         style={{ background: colorBgContainer, borderRadius: borderRadiusLG }}
       >
         <div className="mb-4">
-          <h2 className="text-lg font-semibold m-0">系统设置</h2>
-          <p className="text-sm text-gray-500 mt-1">
+          <h2 className="text-lg font-semibold m-0" style={{ color: colorText }}>系统设置</h2>
+          <p className="text-sm mt-1" style={{ color: colorTextSecondary }}>
             管理应用的全局配置，设置项保存在本地且跨会话持久化
           </p>
         </div>
@@ -161,6 +191,35 @@ const Index: React.FC = () => {
         <div className="grid grid-cols-2 gap-4">
           {/* 左列 */}
           <div className="flex flex-col gap-4">
+            {/* ======== 主题设置 ======== */}
+            <Card
+              title={
+                <Space>
+                  <BgColorsOutlined />
+                  主题设置
+                </Space>
+              }
+              size="small"
+              variant="borderless"
+              style={{ background: colorFillAlter }}
+            >
+              <div>
+                <div className="font-medium mb-2">主题模式</div>
+                <div className="text-xs mb-3" style={descStyle}>
+                  自动模式下，6:00 ~ 18:00 为亮色主题，其余时间为暗色主题
+                </div>
+                <Segmented
+                  value={themeMode}
+                  onChange={handleThemeChange}
+                  options={[
+                    { label: '亮色', value: 'light' },
+                    { label: '暗色', value: 'dark' },
+                    { label: '自动', value: 'auto' }
+                  ]}
+                />
+              </div>
+            </Card>
+
             {/* ======== 锁屏设置 ======== */}
             <Card
               title={
@@ -171,13 +230,15 @@ const Index: React.FC = () => {
               }
               size="small"
               variant="borderless"
-              style={{ background: '#fafafa' }}
+              style={{ background: colorFillAlter }}
             >
               <div>
                 <div className="flex items-center justify-between mb-4">
                   <div>
                     <div className="font-medium">启用锁屏</div>
-                    <div className="text-xs text-gray-500">关闭后锁屏功能将失效</div>
+                    <div className="text-xs" style={descStyle}>
+                      关闭后锁屏功能将失效
+                    </div>
                   </div>
                   <Switch checked={settings.lock.view} onChange={handleLockViewChange} />
                 </div>
@@ -185,7 +246,9 @@ const Index: React.FC = () => {
                 <div className="flex items-center justify-between">
                   <div>
                     <div className="font-medium">锁屏密码</div>
-                    <div className="text-xs text-gray-500">6位纯数字密码，修改后旧密码将失效</div>
+                    <div className="text-xs" style={descStyle}>
+                      6位纯数字密码，修改后旧密码将失效
+                    </div>
                   </div>
                   <Button size="small" onClick={() => setPasswordModalOpen(true)}>
                     修改密码
@@ -204,7 +267,7 @@ const Index: React.FC = () => {
               }
               size="small"
               variant="borderless"
-              style={{ background: '#fafafa' }}
+              style={{ background: colorFillAlter }}
             >
               <Form layout="vertical" size="small">
                 <Form.Item
@@ -220,7 +283,7 @@ const Index: React.FC = () => {
                       label: `${p.name}: ${p.model}`
                     }))}
                     notFoundContent={
-                      <span className="text-gray-400">
+                      <span style={{ color: colorTextTertiary }}>
                         暂无 Embedding 模型，请先在供应商设置中添加
                       </span>
                     }
@@ -234,7 +297,7 @@ const Index: React.FC = () => {
               title="对话设置"
               size="small"
               variant="borderless"
-              style={{ background: '#fafafa' }}
+              style={{ background: colorFillAlter }}
             >
               <Form layout="vertical" size="small">
                 <Form.Item
@@ -251,26 +314,70 @@ const Index: React.FC = () => {
                 </Form.Item>
               </Form>
             </Card>
+            {/* ======== 音乐设置 ======== */}
+            <Card
+              title={
+                <Space>
+                  <FolderOutlined />
+                  音乐设置
+                </Space>
+              }
+              size="small"
+              variant="borderless"
+              style={{ background: colorFillAlter }}
+            >
+              <div>
+                <div className="font-medium mb-1">音乐存储目录</div>
+                <div className="text-xs mb-2" style={descStyle}>
+                  设置音乐文件根目录，子文件夹将作为歌单加载
+                </div>
+                <div className="flex items-center gap-2">
+                  <Input
+                    value={settings.musicDirectory || ''}
+                    placeholder="未设置"
+                    readOnly
+                    size="small"
+                    style={{ flex: 1 }}
+                  />
+                  <Button
+                    size="small"
+                    onClick={async () => {
+                      const dir = await (window as unknown as Window).api.music.selectDirectory()
+                      if (dir) {
+                        await updateSettings({ musicDirectory: dir })
+                      }
+                    }}
+                  >
+                    选择目录
+                  </Button>
+                </div>
+              </div>
+            </Card>
+
             {/* ======== 系统信息 ======== */}
             <Card
               title="系统信息"
               size="small"
               variant="borderless"
-              style={{ background: '#fafafa' }}
+              style={{ background: colorFillAlter }}
             >
               <Descriptions column={1} size="small">
                 <Descriptions.Item label="本机 IP">
-                  {(settings.ip?.query as string) || <span className="text-gray-400">未获取</span>}
+                  {(settings.ip?.query as string) || (
+                    <span style={{ color: colorTextTertiary }}>未获取</span>
+                  )}
                 </Descriptions.Item>
                 <Descriptions.Item label="本机位置">
                   {settings.ip?.city ? (
                     `${settings.ip.country as string} ${settings.ip.regionName as string} ${settings.ip.city as string}`
                   ) : (
-                    <span className="text-gray-400">未获取</span>
+                    <span style={{ color: colorTextTertiary }}>未获取</span>
                   )}
                 </Descriptions.Item>
                 <Descriptions.Item label="运营商">
-                  {(settings.ip?.isp as string) || <span className="text-gray-400">未获取</span>}
+                  {(settings.ip?.isp as string) || (
+                    <span style={{ color: colorTextTertiary }}>未获取</span>
+                  )}
                 </Descriptions.Item>
                 <Descriptions.Item label="API Key 加密">
                   <span className="text-green-600">AES-256-GCM（机器唯一密钥）</span>
@@ -285,7 +392,7 @@ const Index: React.FC = () => {
               title="图谱构建设置"
               size="small"
               variant="borderless"
-              style={{ background: '#fafafa' }}
+              style={{ background: colorFillAlter }}
             >
               <Form layout="vertical" size="small">
                 <Form.Item
@@ -310,7 +417,7 @@ const Index: React.FC = () => {
                       checked={settings.graph.enableGleaning}
                       onChange={(v) => handleGraphChange('enableGleaning', v)}
                     />
-                    <span className="text-xs text-gray-500">
+                    <span className="text-xs" style={descStyle}>
                       {settings.graph.enableGleaning ? '已启用' : '已禁用'}
                     </span>
                   </Space>

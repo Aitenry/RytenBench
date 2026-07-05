@@ -26,6 +26,13 @@ export default defineConfig(
     rules: {
       ...eslintPluginReactHooks.configs.recommended.rules,
       ...eslintPluginReactRefresh.configs.vite.rules,
+      'react-refresh/only-export-components': [
+        'error',
+        {
+          allowConstantExport: true,
+          allowExportNames: ['useAudioState', 'useAudioProgress', 'useAudio']
+        }
+      ],
       'react/prop-types': 'off'
     }
   },

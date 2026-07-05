@@ -27,7 +27,7 @@ interface Api {
   }
   notes: {
     getById: (id: number) => Promise<NoteWithContent | null>
-    getAll: (page?: number, pageSize?: number, excludeWikiId?: number) => Promise<PaginatedResult<NoteListItem>>
+    getAll: (page?: number, pageSize?: number, excludeWikiId?: number, search?: string) => Promise<PaginatedResult<NoteListItem>>
     getPage: (query: string, page?: number, pageSize?: number) => Promise<PaginatedResult<NoteListItem>>
     add: (note: Omit<NoteRow, 'id' | 'created_at' | 'updated_at' | 'version'> & {
       image?: string | null
@@ -38,6 +38,7 @@ interface Api {
       content?: string | null
     }) => Promise<boolean>
     delete: (id: number) => Promise<boolean>
+    deleteByTimeRange: (startTime: string, endTime: string) => Promise<number>
   }
   wikis: {
     getById: (id: number) => Promise<WikiRow | null>
@@ -56,6 +57,13 @@ interface Api {
   }
   file: {
     selectImageFile: (allowImages?: boolean) => Promise<{ dataUrl: string; fileName: string; isImage: boolean } | null>
+    selectTextFile: () => Promise<{ fileName: string; filePath: string } | null>
+    importNovel: (options: { filePath: string; coverDataUrl?: string | null }) => Promise<{ chapterCount: number }>
+    onImportNovelProgress: (callback: (progress: {
+      processedNotes: number
+      totalNotes: number
+      message: string
+    }) => void) => () => void
   }
   setting: {
     getLockScreenCode: () => Promise<string>
@@ -94,6 +102,90 @@ interface Api {
   systemSettings: {
     getAll: () => Promise<SystemSettings>
     update: (updates: Partial<SystemSettings>) => Promise<boolean>
+  }
+  music: {
+    selectDirectory: () => Promise<string | null>
+    getFolders: () => Promise<
+      {
+        id: string
+        path: string
+        name: string
+        description: string
+        track_count: number
+        coverDataUrl: string | null
+        created_at: string
+        updated_at: string
+      }[]
+    >
+    getTracks: (folderId: string) => Promise<
+      {
+        id: string
+        filePath: string
+        title: string
+        artist: string
+        album: string
+        duration: number
+        liked: boolean
+        coverDataUrl: string | null
+      }[]
+    >
+    deleteFolder: (folderId: string) => Promise<void>
+    createFolder: (name: string, description?: string) => Promise<{
+      id: string
+      path: string
+      name: string
+      description: string
+      track_count: number
+      coverDataUrl: string | null
+      created_at: string
+      updated_at: string
+    }>
+    updateFolderDescription: (folderId: string, description: string | null) => Promise<void>
+    updateFolderCover: (folderId: string) => Promise<string | null>
+    saveFolderCover: (folderId: string, coverDataUrl: string | null) => Promise<void>
+    selectImage: () => Promise<string | null>
+    updateFolder: (folderId: string, fields: { name?: string; description?: string | null }) => Promise<void>
+    addTracks: (folderId: string) => Promise<{
+      added: {
+        filePath: string
+        title: string
+        artist: string
+        album: string
+        duration: number
+        coverDataUrl: string | null
+      }[]
+      skipped: string[]
+    } | null>
+    updateTrack: (trackId: number, fields: { title?: string; artist?: string; album?: string }) => Promise<void>
+    updateTrackCover: (trackId: number) => Promise<string | null>
+    deleteTrack: (trackId: number) => Promise<void>
+    readFile: (filePath: string) => Promise<ArrayBuffer>
+    toggleLike: (trackId: number) => Promise<boolean>
+    updateLastPlayed: (trackId: number) => Promise<void>
+    getLikedTracks: () => Promise<
+      {
+        id: string
+        filePath: string
+        title: string
+        artist: string
+        album: string
+        duration: number
+        liked: boolean
+        coverDataUrl: string | null
+      }[]
+    >
+    getRecentlyPlayed: () => Promise<
+      {
+        id: string
+        filePath: string
+        title: string
+        artist: string
+        album: string
+        duration: number
+        liked: boolean
+        coverDataUrl: string | null
+      }[]
+    >
   }
 }
 

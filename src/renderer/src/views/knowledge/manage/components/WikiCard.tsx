@@ -38,8 +38,8 @@ const getTagsArray = (tagsStr: string | null): string[] => {
 interface WikiCardProps {
   item: WikiRow
   onSelect: () => void
-  onEdit: () => void
-  onDelete: () => void
+  onEdit?: () => void
+  onDelete?: () => void
 }
 
 const WikiCard: React.FC<WikiCardProps> = ({ item, onSelect, onEdit, onDelete }) => {
@@ -70,16 +70,22 @@ const WikiCard: React.FC<WikiCardProps> = ({ item, onSelect, onEdit, onDelete })
         flexDirection: 'column',
         cursor: 'pointer'
       }}
-      actions={[
-        <EditOutlined
-          key="edit"
-          onClick={(e) => {
-            e.stopPropagation()
-            onEdit()
-          }}
-        />,
-        <DeleteOutlined key="delete" onClick={handleDeleteClick} />
-      ]}
+      actions={
+        onEdit || onDelete
+          ? [
+              onEdit && (
+                <EditOutlined
+                  key="edit"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onEdit()
+                  }}
+                />
+              ),
+              onDelete && <DeleteOutlined key="delete" onClick={handleDeleteClick} />
+            ].filter(Boolean)
+          : undefined
+      }
     >
       {item.image && (
         <div

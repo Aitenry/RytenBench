@@ -1,6 +1,6 @@
-import React, { useState } from 'react'
+import React, { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { theme, Menu, Card, Button, Space, Slider, Select } from 'antd'
+import { theme, Menu, Card, Select } from 'antd'
 import type { MenuProps } from 'antd'
 import {
   RiDashboardLine,
@@ -10,10 +10,6 @@ import {
   RiMusicLine,
   RiBook2Line,
   RiToolsLine,
-  RiPlayLine,
-  RiPauseLine,
-  RiSkipLeftLine,
-  RiSkipRightLine,
   RiFileListLine,
   RiDatabase2Line,
   RiBubbleChartLine,
@@ -25,7 +21,10 @@ import {
   RiSettings3Line,
   RiComputerLine
 } from '@remixicon/react'
-import Logo from '../assets/logo.png'
+import LogoLight from '../assets/logo-light.png'
+import LogoNight from '../assets/logo-night.png'
+import MusicMiniPlayer from './MusicMiniPlayer'
+import { useTheme } from '@renderer/contexts/ThemeContext'
 
 interface SidebarProps {
   currentKey: string
@@ -35,11 +34,15 @@ interface SidebarProps {
 
 const Sidebar: React.FC<SidebarProps> = ({ currentKey, setCurrentKey }) => {
   const navigate = useNavigate()
-  const { token } = theme.useToken()
+  const {
+    token: { colorBgContainer, borderRadiusLG, colorFillAlter, colorTextSecondary }
+  } = theme.useToken()
+  const { effectiveTheme } = useTheme()
+  const isDark = effectiveTheme === 'dark'
 
   const [cardType, setCardType] = useState<'music' | 'weather'>('music')
-  const [isPlaying, setIsPlaying] = useState(false)
-  const [progress, setProgress] = useState(30)
+
+  const currentLogo = useMemo(() => (isDark ? LogoNight : LogoLight), [isDark])
 
   // 主菜单项
   const mainMenuItems: MenuProps['items'] = [
@@ -96,41 +99,13 @@ const Sidebar: React.FC<SidebarProps> = ({ currentKey, setCurrentKey }) => {
     setCurrentKey(e.key)
   }
 
-  const togglePlayPause = (): void => setIsPlaying(!isPlaying)
-
-  const MusicMiniPlayer = (): React.JSX.Element => (
-    <div className="flex flex-col items-center">
-      <div className="text-sm1">Lemon Tree</div>
-      <div className="text-xs text-gray-500 mb-2">Garden</div>
-      <div className="w-full mb-2">
-        <Slider
-          value={progress}
-          onChange={(value) => setProgress(value)}
-          tooltip={{ open: false }}
-        />
-        <div className="flex justify-between text-xs text-gray-500 mt-1">
-          <span>0:30</span>
-          <span>3:47</span>
-        </div>
-      </div>
-      <Space size={4}>
-        <Button type="text" icon={<RiSkipLeftLine size={16} />} size="small" />
-        <Button
-          type="text"
-          icon={isPlaying ? <RiPauseLine size={16} /> : <RiPlayLine size={16} />}
-          size="small"
-          onClick={togglePlayPause}
-        />
-        <Button type="text" icon={<RiSkipRightLine size={16} />} size="small" />
-      </Space>
-    </div>
-  )
-
   const WeatherMiniCard = (): React.JSX.Element => (
     <div className="flex items-center justify-between">
       <div>
         <div className="text-sm font-medium">上海</div>
-        <div className="text-xs text-gray-500">多云</div>
+        <div className="text-xs" style={{ color: colorTextSecondary }}>
+          多云
+        </div>
       </div>
       <div className="text-2xl font-light">18°</div>
     </div>
@@ -143,6 +118,10 @@ const Sidebar: React.FC<SidebarProps> = ({ currentKey, setCurrentKey }) => {
         .ant-menu-submenu-title {
           padding-left: 16px !important;
         }
+        .sidebar-menu-container {
+          scrollbar-width: none;
+          scrollbar-color: rgba(128, 128, 128, 0.2) transparent;
+        }
         .sidebar-menu-container::-webkit-scrollbar {
           width: 6px;
           height: 6px;
@@ -151,27 +130,22 @@ const Sidebar: React.FC<SidebarProps> = ({ currentKey, setCurrentKey }) => {
           background: transparent;
         }
         .sidebar-menu-container::-webkit-scrollbar-thumb {
-          background: rgba(0, 0, 0, 0.15);
+          background: rgba(128, 128, 128, 0.25);
           border-radius: 4px;
           transition: background 0.2s;
         }
         .sidebar-menu-container::-webkit-scrollbar-thumb:hover {
-          background: rgba(0, 0, 0, 0.3);
-        }
-        /* Firefox 兼容 */
-        .sidebar-menu-container {
-          scrollbar-width: none;
-          scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
+          background: rgba(128, 128, 128, 0.45);
         }
       `}</style>
 
       <div
         style={{
           width: 240,
-          background: token.colorBgContainer,
+          background: colorBgContainer,
           height: 'calc(100vh - 16px)',
           margin: '8px',
-          borderRadius: token.borderRadiusLG,
+          borderRadius: borderRadiusLG,
           boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
           display: 'flex',
           flexDirection: 'column',
@@ -180,7 +154,11 @@ const Sidebar: React.FC<SidebarProps> = ({ currentKey, setCurrentKey }) => {
       >
         {/* Logo */}
         <div className="flex items-center justify-center py-3">
-          <img alt="logo" style={{ height: '40px', imageRendering: 'crisp-edges' }} src={Logo} />
+          <img
+            alt="logo"
+            style={{ height: '43px', width: '215px', borderRadius: 8 }}
+            src={currentLogo}
+          />
         </div>
 
         {/* 主菜单区域 - 可滚动，添加自定义滚动条类名 */}
@@ -204,14 +182,14 @@ const Sidebar: React.FC<SidebarProps> = ({ currentKey, setCurrentKey }) => {
             size="small"
             variant="borderless"
             style={{
-              background: '#f8f9fa',
+              background: colorFillAlter,
               borderRadius: 16,
               boxShadow: '0 2px 6px rgba(0,0,0,0.03)'
             }}
             styles={{ body: { padding: '12px' } }}
             title={
               <div className="flex items-center justify-between">
-                <span className="text-xs font-medium text-gray-500">
+                <span className="text-xs font-medium" style={{ color: colorTextSecondary }}>
                   {cardType === 'music' ? '当前播放' : '本地天气'}
                 </span>
                 <Select

@@ -64,6 +64,9 @@ const Index: React.FC = () => {
   const [selectedDirectory, setSelectedDirectory] = useState<WikiDirectoryRow | null>(null)
   const [directoryNotes, setDirectoryNotes] = useState<DirectoryNoteWithDetail[]>([])
   const [allNotes, setAllNotes] = useState<NoteListItem[]>([])
+  const [allNotesPage, setAllNotesPage] = useState(1)
+  const [allNotesHasMore, setAllNotesHasMore] = useState(true)
+  const [allNotesLoading, setAllNotesLoading] = useState(false)
 
   const [isWikiModalOpen, setIsWikiModalOpen] = useState(false)
   const [isDirectoryModalOpen, setIsDirectoryModalOpen] = useState(false)
@@ -177,14 +180,51 @@ const Index: React.FC = () => {
     }
   }, [])
 
-  const loadAllNotes = useCallback(async (excludeWikiId?: number) => {
-    try {
-      const result = await (window as unknown as Window).api.notes.getAll(1, 100, excludeWikiId)
-      setAllNotes(result.items)
-    } catch (error) {
-      console.error('Failed to load all notes:', error)
-    }
-  }, [])
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const searchRef = useRef<string>('')
+
+  const loadAllNotes = useCallback(
+    async (
+      pageNum: number = 1,
+      excludeWikiId?: number,
+      isAppend: boolean = false,
+      search?: string
+    ) => {
+      if (allNotesLoading) return
+      setAllNotesLoading(true)
+      try {
+        const result = await (window as unknown as Window).api.notes.getAll(
+          pageNum,
+          20,
+          excludeWikiId,
+          search
+        )
+        if (isAppend) {
+          setAllNotes((prev) => [...prev, ...result.items])
+        } else {
+          setAllNotes(result.items)
+        }
+        setAllNotesHasMore(result.hasMore)
+        setAllNotesPage(pageNum)
+      } catch (error) {
+        console.error('Failed to load all notes:', error)
+      } finally {
+        setAllNotesLoading(false)
+      }
+    },
+    [allNotesLoading]
+  )
+
+  const handleSearchNotes = useCallback(
+    (value: string) => {
+      searchRef.current = value
+      if (searchTimerRef.current) clearTimeout(searchTimerRef.current)
+      searchTimerRef.current = setTimeout(() => {
+        loadAllNotes(1, selectedWiki?.id, false, value || undefined)
+      }, 300)
+    },
+    [loadAllNotes, selectedWiki?.id]
+  )
 
   useEffect(() => {
     loadWikis(1, false).then()
@@ -390,7 +430,7 @@ const Index: React.FC = () => {
 
   const handleOpenArchiveModal = (): void => {
     setSelectedNoteIds([])
-    loadAllNotes(selectedWiki?.id).then(() => {
+    loadAllNotes(1, selectedWiki?.id, false).then(() => {
       setIsNoteArchiveModalOpen(true)
     })
   }
@@ -733,10 +773,24 @@ const Index: React.FC = () => {
         <Select
           mode="multiple"
           style={{ width: '100%' }}
-          placeholder="选择要归档的笔记"
+          placeholder="搜索并选择要归档的笔记"
           value={selectedNoteIds}
           onChange={setSelectedNoteIds}
           optionLabelProp="label"
+          showSearch
+          onSearch={handleSearchNotes}
+          filterOption={false}
+          onPopupScroll={(e) => {
+            const target = e.target as HTMLElement
+            if (
+              target.scrollTop + target.offsetHeight >= target.scrollHeight - 10 &&
+              allNotesHasMore &&
+              !allNotesLoading
+            ) {
+              loadAllNotes(allNotesPage + 1, selectedWiki?.id, true, searchRef.current || undefined)
+            }
+          }}
+          notFoundContent={allNotesLoading ? '加载中...' : null}
         >
           {allNotes.map((note) => (
             <Option key={note.id} value={note.id} label={note.title}>

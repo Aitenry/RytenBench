@@ -14,6 +14,8 @@ export interface ChatSettings {
   maxIterations: number
 }
 
+export type ThemeMode = 'light' | 'dark' | 'auto'
+
 export interface SystemSettings {
   ip?: Record<string, unknown>
   lock: Lock
@@ -21,4 +23,6 @@ export interface SystemSettings {
   chat: ChatSettings
   defaultModelId?: number
   defaultEmbeddingModelId?: number
+  musicDirectory?: string
+  theme?: ThemeMode
 }

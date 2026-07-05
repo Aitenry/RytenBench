@@ -336,7 +336,7 @@ const TodoList: React.FC<TodoListProps> = ({ initialTodos = [] }) => {
     if (priority === 1) return 'border-l-orange-500 bg-orange-50' // P1: 高优先级
     if (priority === 2) return 'border-l-yellow-500 bg-yellow-50' // P2: 中优先级
     if (priority === 3) return 'border-l-green-500 bg-green-50' // P3-P5: 低优先级
-    return 'border-l-gray-500 bg-gray-50' // P6+: 最低优先级
+    return 'border-l-gray-500 bg-gray-50 dark:bg-gray-800 dark:border-l-gray-600' // P6+: 最低优先级
   }
 
   const getPriorityBadgeColor = (priority: number): string => {
@@ -344,7 +344,7 @@ const TodoList: React.FC<TodoListProps> = ({ initialTodos = [] }) => {
     if (priority === 1) return 'bg-orange-200 text-orange-800' // P1: 高优先级
     if (priority === 2) return 'bg-yellow-200 text-yellow-800' // P2: 中优先级
     if (priority === 3) return 'bg-green-200 text-green-800' // P3-P5: 低优先级
-    return 'bg-gray-200 text-gray-800' // P6+: 最低优先级
+    return 'bg-gray-200 text-gray-800 dark:bg-gray-700 dark:text-gray-200' // P6+: 最低优先级
   }
 
   const getPriorityText = (priority: number): string => {
@@ -362,11 +362,11 @@ const TodoList: React.FC<TodoListProps> = ({ initialTodos = [] }) => {
     if (status === 0) return 'bg-blue-200 text-blue-800' // 原版样式
     if (status === 1) return 'bg-yellow-200 text-yellow-800' // 原版样式
     if (status === 2) return 'bg-green-200 text-green-800' // 原版样式
-    return 'bg-gray-200 text-gray-800'
+    return 'bg-gray-200 text-gray-800 dark:bg-gray-700 dark:text-gray-200'
   }
 
   const getDaysUntilDue = (due_date: string | null): { text: string; color: string } => {
-    if (!due_date) return { text: '无截止日期', color: 'text-gray-500' }
+    if (!due_date) return { text: '无截止日期', color: 'text-gray-500 dark:text-gray-400' }
 
     const today = new Date()
     const due = new Date(due_date)
@@ -376,7 +376,7 @@ const TodoList: React.FC<TodoListProps> = ({ initialTodos = [] }) => {
     if (diffDays < 0) return { text: '已过期', color: 'text-red-500' }
     if (diffDays === 0) return { text: '今天到期', color: 'text-orange-500' }
     if (diffDays <= 3) return { text: `${diffDays}天后到期`, color: 'text-yellow-500' }
-    return { text: `${diffDays}天后到期`, color: 'text-gray-500' }
+    return { text: `${diffDays}天后到期`, color: 'text-gray-500 dark:text-gray-400' }
   }
 
   // 根据当前状态决定可用的状态选项
@@ -405,7 +405,7 @@ const TodoList: React.FC<TodoListProps> = ({ initialTodos = [] }) => {
   return (
     <div className="p-3 space-y-4 h-full flex flex-col">
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-semibold text-gray-800">待办事项</h2>
+        <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-200">待办事项</h2>
         <div className="flex items-center space-x-2">
           <span className="bg-blue-100 text-blue-800 text-sm px-2 py-1 rounded-full">
             {activeTodos.length} 项
@@ -453,7 +453,9 @@ const TodoList: React.FC<TodoListProps> = ({ initialTodos = [] }) => {
             >
               <div className="p-3 relative z-20">
                 <div className="flex items-start justify-between mb-1">
-                  <h3 className="font-medium text-gray-800 truncate max-w-[70%]">{todo.title}</h3>
+                  <h3 className="font-medium text-gray-800 dark:text-gray-200 truncate max-w-[70%]">
+                    {todo.title}
+                  </h3>
                   <div className="flex space-x-1">
                     {/* 进行中按钮 */}
                     {todo.status !== 1 && (
@@ -471,7 +473,7 @@ const TodoList: React.FC<TodoListProps> = ({ initialTodos = [] }) => {
                             }
                           })
                         }}
-                        className="ml-1 p-1 rounded-full transition-all duration-200 bg-gray-200 text-gray-400 hover:bg-blue-300 hover:text-white"
+                        className="ml-1 p-1 rounded-full transition-all duration-200 bg-gray-200 text-gray-400 dark:bg-gray-700 dark:text-gray-500 hover:bg-blue-300 hover:text-white"
                       >
                         <RiPlayFill size={14} />
                       </button>
@@ -493,7 +495,7 @@ const TodoList: React.FC<TodoListProps> = ({ initialTodos = [] }) => {
                             }
                           })
                         }}
-                        className="ml-1 p-1 rounded-full transition-all duration-200 bg-gray-200 text-gray-400 hover:bg-green-200 hover:text-green-500"
+                        className="ml-1 p-1 rounded-full transition-all duration-200 bg-gray-200 text-gray-400 dark:bg-gray-700 dark:text-gray-500 hover:bg-green-200 hover:text-green-500"
                       >
                         <RiCheckFill size={14} />
                       </button>
@@ -517,7 +519,7 @@ const TodoList: React.FC<TodoListProps> = ({ initialTodos = [] }) => {
                       }}
                       className={`
                           ml-1 p-1 rounded-full transition-all duration-200
-                          bg-gray-200 text-gray-400 hover:bg-red-200 hover:text-red-500
+                          bg-gray-200 text-gray-400 dark:bg-gray-700 dark:text-gray-500 hover:bg-red-200 hover:text-red-500
                         `}
                     >
                       <RiCloseFill size={14} />
@@ -525,7 +527,9 @@ const TodoList: React.FC<TodoListProps> = ({ initialTodos = [] }) => {
                   </div>
                 </div>
 
-                <p className="text-xs text-gray-600 mb-2 line-clamp-2">{todo.description}</p>
+                <p className="text-xs text-gray-600 dark:text-gray-400 mb-2 line-clamp-2">
+                  {todo.description}
+                </p>
 
                 <div className="flex items-center justify-between">
                   <div className="flex items-center space-x-2">
@@ -557,9 +561,13 @@ const TodoList: React.FC<TodoListProps> = ({ initialTodos = [] }) => {
       </div>
 
       {/* 已完成事项计数 */}
-      <div className="pt-2 text-center border-t border-gray-100">
-        <span className="text-sm text-gray-500">
-          已完成: <span className="font-medium text-gray-700">{completedTodos.length}</span> 项
+      <div className="pt-2 text-center border-t border-gray-100 dark:border-gray-700">
+        <span className="text-sm text-gray-500 dark:text-gray-400">
+          已完成:{' '}
+          <span className="font-medium text-gray-700 dark:text-gray-300">
+            {completedTodos.length}
+          </span>{' '}
+          项
         </span>
       </div>
 
@@ -635,8 +643,8 @@ const TodoList: React.FC<TodoListProps> = ({ initialTodos = [] }) => {
               </Form.Item>
             </div>
 
-            <div className="mb-4 p-3 bg-gray-50 rounded-lg mt-4">
-              <h4 className="font-medium text-gray-700 mb-2">当前状态</h4>
+            <div className="mb-4 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg mt-4">
+              <h4 className="font-medium text-gray-700 dark:text-gray-300 mb-2">当前状态</h4>
               <div className="flex flex-wrap items-center gap-2">
                 <span
                   className={`text-xs px-2 py-0.5 rounded-full ${getPriorityBadgeColor(currentTodo.priority)}`}
@@ -653,11 +661,11 @@ const TodoList: React.FC<TodoListProps> = ({ initialTodos = [] }) => {
                     {currentTodo.category}
                   </span>
                 )}
-                <span className="text-sm text-gray-600">
+                <span className="text-sm text-gray-600 dark:text-gray-400">
                   截止日期: {formatDate(currentTodo.due_date)}
                 </span>
                 {currentTodo.started_at && (
-                  <span className="text-sm text-gray-600">
+                  <span className="text-sm text-gray-600 dark:text-gray-400">
                     开始时间: {new Date(currentTodo.started_at).toLocaleString('zh-CN')}
                   </span>
                 )}

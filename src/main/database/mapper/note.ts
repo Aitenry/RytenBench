@@ -1,5 +1,6 @@
 import { getDatabaseInstance } from '../../index'
 import logger from 'electron-log'
+import { saveImage } from './image'
 
 export interface NoteRow {
   id: number
@@ -39,10 +40,11 @@ async function getNoteById(id: number): Promise<NoteWithContent | null> {
     const sql = `
       SELECT
         n.id, n.title, n.summary, n.tags, n.version, n.created_at, n.updated_at,
-        nc.image, nc.content,
+        img.data as image, nc.content,
         LENGTH(nc.content) as word_count
       FROM notes n
       LEFT JOIN notes_content nc ON n.id = nc.note_id
+      LEFT JOIN images img ON nc.image_id = img.id
       WHERE n.id = $1
     `
     const result = await db.query<NoteWithContent>(sql, [id])
@@ -71,13 +73,32 @@ async function getNoteById(id: number): Promise<NoteWithContent | null> {
 async function getAllNotes(
   page: number = 1,
   pageSize: number = 10,
-  excludeWikiId?: number
+  excludeWikiId?: number,
+  search?: string
 ): Promise<PaginatedResult<NoteListItem>> {
   try {
     const db = (await getDatabaseInstance()).getDatabase()
     const offset = (page - 1) * pageSize
 
     const excludeWhere = excludeWikiId ? 'AND dn.note_id IS NULL' : ''
+    const searchWhereCount = search
+      ? 'AND (n.title ILIKE $' +
+        (excludeWikiId ? 2 : 1) +
+        ' OR n.summary ILIKE $' +
+        (excludeWikiId ? 2 : 1) +
+        ' OR n.tags ILIKE $' +
+        (excludeWikiId ? 2 : 1) +
+        ')'
+      : ''
+    const searchWhereData = search
+      ? 'AND (n.title ILIKE $' +
+        (excludeWikiId ? 4 : 3) +
+        ' OR n.summary ILIKE $' +
+        (excludeWikiId ? 4 : 3) +
+        ' OR n.tags ILIKE $' +
+        (excludeWikiId ? 4 : 3) +
+        ')'
+      : ''
 
     const countJoin = excludeWikiId
       ? 'LEFT JOIN directory_notes dn ON n.id = dn.note_id LEFT JOIN wiki_directories wd ON dn.directory_id = wd.id AND wd.wiki_id = $1'
@@ -85,9 +106,10 @@ async function getAllNotes(
     const countSql = `
       SELECT COUNT(*) as total FROM notes n
       ${countJoin}
-      WHERE 1=1 ${excludeWhere}
+      WHERE 1=1 ${excludeWhere} ${searchWhereCount}
     `
-    const countParams = excludeWikiId ? [excludeWikiId] : []
+    const countParams: (string | number)[] = excludeWikiId ? [excludeWikiId] : []
+    if (search) countParams.push(`%${search}%`)
     const countResult = await db.query<{ total: number }>(countSql, countParams)
     const total = Number(countResult.rows[0]?.total) || 0
 
@@ -97,17 +119,20 @@ async function getAllNotes(
     const dataSql = `
       SELECT
         n.id, n.title, n.summary, n.tags, n.version, n.created_at, n.updated_at,
-        nc.image,
+        img.data as image,
         LENGTH(nc.content) as word_count
       FROM notes n
       LEFT JOIN notes_content nc ON n.id = nc.note_id
+      LEFT JOIN images img ON nc.image_id = img.id
       ${dataJoin}
-      WHERE 1=1 ${excludeWhere}
+      WHERE 1=1 ${excludeWhere} ${searchWhereData}
       ORDER BY n.updated_at DESC
       LIMIT $1 OFFSET $2
     `
 
-    const dataParams = excludeWikiId ? [pageSize, offset, excludeWikiId] : [pageSize, offset]
+    const dataParams: (string | number)[] = [pageSize, offset]
+    if (excludeWikiId) dataParams.push(excludeWikiId)
+    if (search) dataParams.push(`%${search}%`)
     const result = await db.query<NoteListItem>(dataSql, dataParams)
 
     const items = result.rows.map((row) => ({
@@ -163,10 +188,11 @@ async function getNotePage(
     const dataSql = `
       SELECT
         n.id, n.title, n.summary, n.tags, n.version, n.created_at, n.updated_at,
-        nc.image,
+        img.data as image,
         LENGTH(nc.content) as word_count
       FROM notes n
       LEFT JOIN notes_content nc ON n.id = nc.note_id
+      LEFT JOIN images img ON nc.image_id = img.id
       WHERE n.title ILIKE $1
          OR n.summary ILIKE $1
          OR n.tags ILIKE $1
@@ -207,6 +233,8 @@ async function addNote(
     const db = (await getDatabaseInstance()).getDatabase()
     const { title, summary, tags, image, content } = note
 
+    const imageId = await saveImage(image ?? null)
+
     const insertResult = await db.query<{ id: number }>(
       'INSERT INTO notes (title, summary, tags) VALUES ($1, $2, $3) RETURNING id',
       [title, summary || null, tags || null]
@@ -214,9 +242,9 @@ async function addNote(
 
     const noteId = insertResult.rows[0].id
 
-    await db.query('INSERT INTO notes_content (note_id, image, content) VALUES ($1, $2, $3)', [
+    await db.query('INSERT INTO notes_content (note_id, image_id, content) VALUES ($1, $2, $3)', [
       noteId,
-      image || null,
+      imageId,
       content || null
     ])
 
@@ -262,8 +290,9 @@ async function updateNote(
     let contentParamIndex = 1
 
     if (updates.image !== undefined) {
-      contentUpdates.push(`image = $${contentParamIndex++}`)
-      contentValues.push(updates.image)
+      const imageId = await saveImage(updates.image ?? null)
+      contentUpdates.push(`image_id = $${contentParamIndex++}`)
+      contentValues.push(imageId)
     }
     if (updates.content !== undefined) {
       contentUpdates.push(`content = $${contentParamIndex++}`)
@@ -303,14 +332,13 @@ async function updateNote(
         const contentResult = await db.query(contentSql, contentValues)
         hasChanges = hasChanges || (contentResult.affectedRows ?? 0) > 0
       } else {
-        const image = updates.image || null
+        const imageId = await saveImage(updates.image ?? null)
         const content = updates.content || null
 
-        await db.query('INSERT INTO notes_content (note_id, image, content) VALUES ($1, $2, $3)', [
-          id,
-          image,
-          content
-        ])
+        await db.query(
+          'INSERT INTO notes_content (note_id, image_id, content) VALUES ($1, $2, $3)',
+          [id, imageId, content]
+        )
         hasChanges = true
       }
     }
@@ -331,8 +359,10 @@ async function updateNote(
 async function deleteNote(id: number): Promise<boolean> {
   try {
     const db = (await getDatabaseInstance()).getDatabase()
-    const sql = 'DELETE FROM notes WHERE id = $1'
-    const result = await db.query(sql, [id])
+
+    await db.query('DELETE FROM notes_content WHERE note_id = $1', [id])
+
+    const result = await db.query('DELETE FROM notes WHERE id = $1', [id])
     const changes = result.affectedRows ?? 0
 
     if (changes > 0) {
@@ -348,4 +378,95 @@ async function deleteNote(id: number): Promise<boolean> {
   }
 }
 
-export { getNoteById, getAllNotes, getNotePage, addNote, updateNote, deleteNote }
+async function batchAddNotes(
+  notes: Array<
+    Omit<NoteRow, 'id' | 'created_at' | 'updated_at' | 'version'> & {
+      image?: string | null
+      content?: string | null
+    }
+  >
+): Promise<number[]> {
+  try {
+    const db = (await getDatabaseInstance()).getDatabase()
+
+    if (notes.length === 0) return []
+
+    await db.query('BEGIN')
+
+    // Batch insert notes
+    const notePlaceholders: string[] = []
+    const noteParams: (string | null)[] = []
+    let noteIdx = 1
+
+    for (const note of notes) {
+      notePlaceholders.push(`($${noteIdx}, $${noteIdx + 1}, $${noteIdx + 2})`)
+      noteParams.push(note.title, note.summary || null, note.tags || null)
+      noteIdx += 3
+    }
+
+    const noteSql = `INSERT INTO notes (title, summary, tags) VALUES ${notePlaceholders.join(', ')} RETURNING id`
+    const noteResult = await db.query<{ id: number }>(noteSql, noteParams)
+    const ids = noteResult.rows.map((row) => row.id)
+
+    // Batch insert notes_content
+    const contentPlaceholders: string[] = []
+    const contentParams: (number | string | null)[] = []
+    let contentIdx = 1
+
+    for (let i = 0; i < notes.length; i++) {
+      const note = notes[i]
+      const imageId = await saveImage(note.image ?? null)
+      contentPlaceholders.push(`($${contentIdx}, $${contentIdx + 1}, $${contentIdx + 2})`)
+      contentParams.push(ids[i], imageId, note.content || null)
+      contentIdx += 3
+    }
+
+    const contentSql = `INSERT INTO notes_content (note_id, image_id, content) VALUES ${contentPlaceholders.join(', ')}`
+    await db.query(contentSql, contentParams)
+
+    await db.query('COMMIT')
+    logger.info(`Batch inserted ${notes.length} notes`)
+    return ids
+  } catch (error) {
+    try {
+      await (await getDatabaseInstance()).getDatabase().query('ROLLBACK')
+    } catch {
+      // ignore rollback errors
+    }
+    logger.error('Failed to batch insert notes:', error)
+    throw error
+  }
+}
+
+async function deleteNotesByTimeRange(startTime: string, endTime: string): Promise<number> {
+  try {
+    const db = (await getDatabaseInstance()).getDatabase()
+
+    await db.query(
+      'DELETE FROM notes_content WHERE note_id IN (SELECT id FROM notes WHERE created_at >= $1 AND created_at <= $2)',
+      [startTime, endTime]
+    )
+
+    const result = await db.query('DELETE FROM notes WHERE created_at >= $1 AND created_at <= $2', [
+      startTime,
+      endTime
+    ])
+    const deleted = result.affectedRows ?? 0
+    logger.info(`Deleted ${deleted} notes in time range [${startTime}, ${endTime}]`)
+    return deleted
+  } catch (error) {
+    logger.error('Failed to delete notes by time range:', error)
+    throw error
+  }
+}
+
+export {
+  getNoteById,
+  getAllNotes,
+  getNotePage,
+  addNote,
+  updateNote,
+  deleteNote,
+  batchAddNotes,
+  deleteNotesByTimeRange
+}

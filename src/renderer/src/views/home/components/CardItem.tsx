@@ -1,15 +1,7 @@
-import React, { useState } from 'react'
-import { Card, Flex, Typography, Space, Button, Slider } from 'antd'
-import {
-  RiMapPin2Line,
-  RiSunLine,
-  RiPlayCircleFill,
-  RiPauseCircleFill,
-  RiSkipBackFill,
-  RiSkipForwardFill,
-  RiUser3Line
-} from '@remixicon/react'
-import { theme } from 'antd'
+import React from 'react'
+import { Card, Flex, Typography, Space, theme } from 'antd'
+import { RiMapPin2Line, RiSunLine, RiUser3Line } from '@remixicon/react'
+import MusicMiniCard from './MusicMiniCard'
 
 const { Title, Text } = Typography
 
@@ -29,26 +21,12 @@ interface SidebarProps {
     thisWeek: string
     todayWorked: string
   }
-  musicData: {
-    title: string
-    artist: string
-    duration: string
-    current: string
-    cover: string
-    isPlaying: boolean
-  }
 }
 
-const CardItem: React.FC<SidebarProps> = ({ weatherData, workTimeData, musicData }) => {
+const CardItem: React.FC<SidebarProps> = ({ weatherData, workTimeData }) => {
   const {
-    token: { borderRadiusLG }
+    token: { borderRadiusLG, colorFillAlter }
   } = theme.useToken()
-  const [isPlaying, setIsPlaying] = useState(musicData.isPlaying)
-
-  // 模拟音乐播放控制
-  const togglePlay = (): void => {
-    setIsPlaying(!isPlaying)
-  }
 
   return (
     <div className="h-full flex flex-col gap-2.5">
@@ -56,17 +34,17 @@ const CardItem: React.FC<SidebarProps> = ({ weatherData, workTimeData, musicData
       <Card
         className="flex-1"
         style={{
-          background: 'rgba(255, 255, 255, 0.8)',
+          background: colorFillAlter,
           borderRadius: borderRadiusLG,
-          boxShadow: '0 2px 8px rgba(0,0,0,0.05)',
+          boxShadow: 'none',
           display: 'flex',
           flexDirection: 'column',
-          justifyContent: 'center' // 垂直居中内容
+          justifyContent: 'center'
         }}
       >
         <Flex justify="space-between" align="center">
           <Space>
-            <RiMapPin2Line size={20} /> {/* 地点图标 */}
+            <RiMapPin2Line size={20} />
             <div>
               <Title level={5} style={{ margin: 0 }}>
                 {weatherData.city}
@@ -77,9 +55,7 @@ const CardItem: React.FC<SidebarProps> = ({ weatherData, workTimeData, musicData
         </Flex>
         <Flex justify="space-between" align="center" style={{ marginTop: '16px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            {/* <span style={{ fontSize: '32px' }}>{weatherData.icon}</span> */}
-            {/* 你可以在这里使用更精确的天气图标，例如 RiSunLine, RiCloudyLine 等 */}
-            <RiSunLine size={32} /> {/* 示例：晴天图标 */}
+            <RiSunLine size={32} />
             <Title level={3} style={{ margin: 0 }}>
               {weatherData.temperature}
             </Title>
@@ -100,17 +76,17 @@ const CardItem: React.FC<SidebarProps> = ({ weatherData, workTimeData, musicData
       <Card
         className="flex-1"
         style={{
-          background: 'rgba(255, 255, 255, 0.8)',
+          background: colorFillAlter,
           borderRadius: borderRadiusLG,
-          boxShadow: '0 2px 8px rgba(0,0,0,0.05)',
+          boxShadow: 'none',
           display: 'flex',
           flexDirection: 'column',
-          justifyContent: 'center', // 垂直居中内容
-          minHeight: '0' // 允许卡片在flex容器中收缩
+          justifyContent: 'center',
+          minHeight: '0'
         }}
       >
         <Flex justify="center" align="center" style={{ marginBottom: '12px' }}>
-          <RiUser3Line size={28} style={{ marginRight: '8px' }} /> {/* 用户图标 */}
+          <RiUser3Line size={28} style={{ marginRight: '8px' }} />
           <Title level={4} style={{ margin: 0 }}>
             0 小时 0 分钟
           </Title>
@@ -134,56 +110,7 @@ const CardItem: React.FC<SidebarProps> = ({ weatherData, workTimeData, musicData
         </div>
       </Card>
 
-      {/* 音乐播放器卡片 */}
-      <Card
-        className="flex-1"
-        style={{
-          background: 'rgba(255, 255, 255, 0.8)',
-          borderRadius: borderRadiusLG,
-          boxShadow: '0 2px 8px rgba(0,0,0,0.05)',
-          display: 'flex',
-          flexDirection: 'column',
-          justifyContent: 'center', // 垂直居中内容
-          minHeight: '0' // 允许卡片在flex容器中收缩
-        }}
-      >
-        <Flex align="center" gap="middle" style={{ marginBottom: '12px' }}>
-          <img
-            src={musicData.cover}
-            alt="Album Cover"
-            style={{
-              width: '60px',
-              height: '60px',
-              borderRadius: '8px',
-              objectFit: 'cover'
-            }}
-          />
-          <div>
-            <Title level={5} style={{ margin: 0 }}>
-              {musicData.title}
-            </Title>
-            <Text type="secondary" style={{ fontSize: '12px' }}>
-              {musicData.artist}
-            </Text>
-          </div>
-        </Flex>
-        <Flex justify="space-between" align="center" style={{ marginBottom: '8px' }}>
-          <Text style={{ fontSize: '12px' }}>{musicData.current}</Text>
-          <Text style={{ fontSize: '12px' }}>{musicData.duration}</Text>
-        </Flex>
-        <Slider defaultValue={0} tooltip={{ formatter: null }} style={{ marginBottom: '12px' }} />
-        <Flex justify="center" gap="large">
-          <Button shape="circle" icon={<RiSkipBackFill size={15} />} size="small" type="text" />
-          <Button
-            shape="circle"
-            onClick={togglePlay}
-            icon={isPlaying ? <RiPauseCircleFill size={15} /> : <RiPlayCircleFill size={15} />}
-            size="small"
-            type="text"
-          />
-          <Button shape="circle" icon={<RiSkipForwardFill size={15} />} size="small" type="text" />
-        </Flex>
-      </Card>
+      <MusicMiniCard />
     </div>
   )
 }

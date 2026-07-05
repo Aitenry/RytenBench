@@ -1,6 +1,7 @@
 import React from 'react'
 import { Modal, Empty } from 'antd'
 import MarkdownView from './MarkdownView'
+import { useTheme } from '@renderer/contexts/ThemeContext'
 
 interface NoteItem {
   id: number
@@ -22,6 +23,7 @@ interface NotePreviewModalProps {
 }
 
 const NotePreviewModal: React.FC<NotePreviewModalProps> = ({ open, onCancel, currentNote }) => {
+  const { effectiveTheme } = useTheme()
   return (
     <Modal
       title={currentNote?.title || '笔记预览'}
@@ -37,7 +39,7 @@ const NotePreviewModal: React.FC<NotePreviewModalProps> = ({ open, onCancel, cur
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
         <div style={{ flex: 1, overflow: 'auto' }}>
           {currentNote?.content ? (
-            <MarkdownView content={currentNote.content} />
+            <MarkdownView content={currentNote.content} isDarkMode={effectiveTheme === 'dark'} />
           ) : (
             <Empty description="暂无内容" />
           )}

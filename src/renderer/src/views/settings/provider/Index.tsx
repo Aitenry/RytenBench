@@ -89,7 +89,7 @@ interface LlmProviderInput {
 
 const Index: React.FC = () => {
   const {
-    token: { colorBgContainer, borderRadiusLG }
+    token: { colorBgContainer, borderRadiusLG, colorText, colorTextSecondary, colorTextTertiary }
   } = theme.useToken()
 
   const { viewMessage } = useMessage()
@@ -285,7 +285,7 @@ const Index: React.FC = () => {
             ))}
           </Space>
         ) : (
-          <span className="text-gray-400">—</span>
+          <span style={{ color: colorTextTertiary }}>—</span>
         )
     },
     {
@@ -294,7 +294,7 @@ const Index: React.FC = () => {
       key: 'base_url',
       width: 240,
       ellipsis: true,
-      render: (url: string | null) => url || <span className="text-gray-400">—</span>
+      render: (url: string | null) => url || <span style={{ color: colorTextTertiary }}>—</span>
     },
     {
       title: '启用',
@@ -371,8 +371,8 @@ const Index: React.FC = () => {
         {/* 标题栏 */}
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h2 className="text-lg font-semibold m-0">大模型供应商</h2>
-            <p className="text-sm text-gray-500 mt-1">
+            <h2 className="text-lg font-semibold m-0" style={{ color: colorText }}>大模型供应商</h2>
+            <p className="text-sm mt-1" style={{ color: colorTextSecondary }}>
               管理 AI 聊天和知识图谱使用的模型供应商配置，API Key 使用机器唯一密钥加密存储
             </p>
           </div>

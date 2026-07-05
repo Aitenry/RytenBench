@@ -107,4 +107,4 @@ const AppContent: React.FC = () => {
   )
 }
 
-export default AppContent
+export default React.memo(AppContent)

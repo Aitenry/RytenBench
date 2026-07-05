@@ -3,6 +3,7 @@ import * as echarts from 'echarts'
 import type { EChartsOption } from 'echarts'
 import { Button, theme } from 'antd'
 import { RiEyeLine, RiEyeOffLine } from '@remixicon/react'
+import { useTheme } from '@renderer/contexts/ThemeContext'
 import { GraphEntity } from './types'
 
 /** ECharts graph node (built in Index.tsx useMemo) */
@@ -58,6 +59,8 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({ data, onEntityClick, onEntity
   const {
     token: { colorBgContainer }
   } = theme.useToken()
+  const { effectiveTheme } = useTheme()
+  const isDarkMode = effectiveTheme === 'dark'
 
   // Count isolated nodes (no connections) — used by both chart and hint overlay
   const connectedNodeIds = new Set<string>()
@@ -162,7 +165,7 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({ data, onEntityClick, onEntity
             position: 'right',
             formatter: '{b}',
             fontSize: labelFontSize,
-            color: '#333'
+            color: isDarkMode ? 'rgba(255,255,255,0.75)' : '#333'
           },
           labelLayout: {
             hideOverlap: true

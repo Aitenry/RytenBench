@@ -25,6 +25,7 @@ import { LlmProviderConfig } from '../../../../main/database/mapper/provider'
 import MarkdownLoad from '@renderer/components/MarkdownLoad'
 import { Window, ToolInfo } from '../../../resource/types/window'
 import { Collapse } from 'antd'
+import { useTheme } from '@renderer/contexts/ThemeContext'
 
 const toolIconMap: Record<string, React.ReactNode> = {
   RiSunCloudyLine: <RiSunCloudyLine size={16} />,
@@ -58,15 +59,27 @@ interface Message {
 }
 
 interface Attachment {
-  dataUrl: string // base64 图片或文件路径
+  dataUrl: string
   fileName: string
   isImage: boolean
 }
 
 const Index: React.FC = () => {
   const {
-    token: { colorBgContainer, borderRadiusLG }
+    token: {
+      colorBgContainer,
+      borderRadiusLG,
+      colorBgLayout,
+      colorFillAlter,
+      colorText,
+      colorTextSecondary,
+      colorTextTertiary,
+      colorBorder,
+      colorBorderSecondary
+    }
   } = theme.useToken()
+  const { effectiveTheme } = useTheme()
+  const isDarkMode = effectiveTheme === 'dark'
 
   const [messages, setMessages] = useState<Message[]>([])
   const [inputValue, setInputValue] = useState('')
@@ -85,7 +98,6 @@ const Index: React.FC = () => {
   const [selectedProviderId, setSelectedProviderId] = useState<number | null>(null)
   const [attachments, setAttachments] = useState<Attachment[]>([])
 
-  // 当前选中模型的能力标签
   const selectedProvider = useMemo(
     () => providers.find((p) => p.id === selectedProviderId) ?? null,
     [providers, selectedProviderId]
@@ -105,19 +117,16 @@ const Index: React.FC = () => {
     ;(window as unknown as Window).api.chat.getTools().then(setAvailableTools).catch(console.error)
   }, [])
 
-  // 加载可用模型列表（排除 Embedding 模型）
   useEffect(() => {
     const loadProviders = async (): Promise<void> => {
       try {
         const list = await (window as unknown as Window).api.providers.getEnabled()
-        // 过滤掉 Embedding 模型，问答页面不加载
         const chatModels = list.filter((p) => !p.tags?.includes('embedding'))
         setProviders(chatModels)
         const defaultProvider = await (window as unknown as Window).api.providers.getDefault()
         if (defaultProvider && !defaultProvider.tags?.includes('embedding')) {
           setSelectedProviderId(defaultProvider.id)
         } else if (chatModels.length > 0) {
-          // 如果默认模型是 Embedding 模型，选第一个非 Embedding 模型
           setSelectedProviderId(chatModels[0].id)
         }
       } catch (err) {
@@ -127,7 +136,6 @@ const Index: React.FC = () => {
     loadProviders().then()
   }, [])
 
-  // 加载话题列表
   const refreshTopics = async (): Promise<void> => {
     try {
       const list = await (window as unknown as Window).api.chat.getAllTopics()
@@ -141,14 +149,12 @@ const Index: React.FC = () => {
     refreshTopics().then()
   }, [])
 
-  // 选择话题并加载历史消息
   const handleSelectTopic = async (topic: ChatTopicRow): Promise<void> => {
-    if (messages.some((msg) => msg.loading)) return // 正在生成中不允许切换
+    if (messages.some((msg) => msg.loading)) return
 
     currentTopicIdRef.current = topic.id
     setCurrentTopicId(topic.id)
 
-    // 恢复工具选择
     if (topic.selected_tools) {
       try {
         setSelectedTools(JSON.parse(topic.selected_tools))
@@ -177,7 +183,6 @@ const Index: React.FC = () => {
     }
   }
 
-  // 删除话题
   const handleDeleteTopic = async (topicId: number, e?: React.MouseEvent): Promise<void> => {
     e?.stopPropagation()
     try {
@@ -217,13 +222,11 @@ const Index: React.FC = () => {
     const currentAttachments = [...attachments]
     setAttachments([])
 
-    // 分离图片和文档
     const currentImages = currentAttachments.filter((a) => a.isImage).map((a) => a.dataUrl)
     const currentDocuments = currentAttachments
       .filter((a) => !a.isImage)
       .map((a) => ({ fileName: a.fileName, filePath: a.dataUrl }))
 
-    // 用户消息（仅 UI，持久化由主进程处理）
     const userMessage: Message = {
       id: Date.now().toString(),
       role: 'user',
@@ -257,7 +260,6 @@ const Index: React.FC = () => {
       clearTimeout(streamTimeoutRef.current)
     }
 
-    // 安全兜底超时（仅设 loading=false，主进程已负责持久化）
     const resetTimeout = (): void => {
       if (streamTimeoutRef.current) {
         clearTimeout(streamTimeoutRef.current)
@@ -270,7 +272,6 @@ const Index: React.FC = () => {
     }
 
     try {
-      // 清理旧监听器，注册 chunk 回调
       ;(window as unknown as Window).api.chat.onStreamChunk(() => {})
       ;(window as unknown as Window).api.chat.onStreamChunk((chunk) => {
         if (currentSessionIdRef.current !== aiMessageId) {
@@ -336,24 +337,19 @@ const Index: React.FC = () => {
           })
         )
       })
-
-      // 注册流结束回调（主进程持久化完成后通知）
       ;(window as unknown as Window).api.chat.onStreamDone(({ topicId }) => {
         if (currentSessionIdRef.current !== aiMessageId) return
         if (streamTimeoutRef.current) {
           clearTimeout(streamTimeoutRef.current)
         }
-        // 更新话题 ID
         currentTopicIdRef.current = topicId
         setCurrentTopicId(topicId)
         refreshTopics()
-        // 设置 loading 为 false
         setMessages((prev) =>
           prev.map((msg) => (msg.id === aiMessageId ? { ...msg, loading: false } : msg))
         )
       })
 
-      // 发起流式请求，传递当前话题 ID（主进程负责创建/复用话题 + 保存消息）
       console.log('[Chat] Sending message with providerId:', selectedProviderId)
       ;(window as unknown as Window).api.chat.startMessageStream(userMessage.content, {
         tools: selectedTools,
@@ -404,10 +400,15 @@ const Index: React.FC = () => {
     return (
       <div className="flex justify-end mb-6">
         <div className="max-w-[80%]">
-          <div className="bg-[#edf3fe] text-gray-800 px-5 py-3 rounded-2xl rounded-br-sm">
+          <div
+            style={{
+              background: isDarkMode ? '#1a3a5c' : '#edf3fe',
+              color: colorText
+            }}
+            className="px-5 py-3 rounded-2xl rounded-br-sm"
+          >
             <p className="whitespace-pre-wrap">{message.content}</p>
           </div>
-          {/* 图片 */}
           {imageBlocks.length > 0 && (
             <div className="flex gap-2 mt-2 justify-end flex-wrap">
               {imageBlocks.map((b, idx) => (
@@ -415,12 +416,12 @@ const Index: React.FC = () => {
                   key={idx}
                   src={b.image_url}
                   alt={`user-img-${idx}`}
-                  className="max-w-[200px] max-h-[200px] object-cover rounded-lg border border-gray-200"
+                  className="max-w-[200px] max-h-[200px] object-cover rounded-lg"
+                  style={{ border: `1px solid ${colorBorderSecondary}` }}
                 />
               ))}
             </div>
           )}
-          {/* 文档 */}
           {documentBlocks.length > 0 && (
             <div className="flex gap-2 mt-2 justify-end flex-wrap">
               {documentBlocks.map((b, idx) => (
@@ -449,14 +450,15 @@ const Index: React.FC = () => {
       return <LoadingMessage />
     }
 
-    // 按时间顺序渲染 blocks（text / tool 交替）
+    const codeBg = isDarkMode ? 'rgba(255,255,255,0.06)' : '#f3f4f6'
+    const collapseBg = isDarkMode ? 'rgba(255,255,255,0.04)' : '#f9fafb'
+
     const renderBlocks = (): React.ReactNode => {
       if (message.blocks.length === 0) {
-        // fallback: 无 blocks 时使用 content
         if (message.content) {
           return (
-            <div className="text-gray-800 mb-2">
-              <MarkdownLoad content={message.content} isDarkMode={false} />
+            <div style={{ color: colorText }} className="mb-2">
+              <MarkdownLoad content={message.content} isDarkMode={isDarkMode} />
             </div>
           )
         }
@@ -465,7 +467,6 @@ const Index: React.FC = () => {
 
       return message.blocks.map((block, index) => {
         if (block.type === 'reasoning' && block.reasoning) {
-          // 如果后续有 text 块，说明思考已结束；否则正在思考中
           const hasTextAfter = message.blocks.slice(index + 1).some((b) => b.type === 'text')
           const thinkingLabel = hasTextAfter ? '思考过程' : '思考中…'
           return (
@@ -474,9 +475,16 @@ const Index: React.FC = () => {
               items={[
                 {
                   key: index,
-                  label: <span className="text-gray-400 text-xs">{thinkingLabel}</span>,
+                  label: (
+                    <span style={{ color: colorTextTertiary }} className="text-xs">
+                      {thinkingLabel}
+                    </span>
+                  ),
                   children: (
-                    <div className="text-gray-500 text-sm whitespace-pre-wrap border-l-2 border-gray-300 pl-3">
+                    <div
+                      style={{ color: colorTextSecondary, borderColor: colorBorderSecondary }}
+                      className="text-sm whitespace-pre-wrap border-l-2 pl-3"
+                    >
                       {block.reasoning}
                     </div>
                   )
@@ -484,15 +492,15 @@ const Index: React.FC = () => {
               ]}
               defaultActiveKey={hasTextAfter ? [] : [index]}
               size="small"
-              style={{ marginBottom: '6px' }}
-              className="bg-gray-50 rounded-lg border-0"
+              style={{ marginBottom: '6px', background: collapseBg }}
+              className="rounded-lg border-0"
             />
           )
         }
         if (block.type === 'text' && block.text) {
           return (
-            <div key={index} className="text-gray-800 mb-2">
-              <MarkdownLoad content={block.text} isDarkMode={false} />
+            <div key={index} style={{ color: colorText }} className="mb-2">
+              <MarkdownLoad content={block.text} isDarkMode={isDarkMode} />
             </div>
           )
         }
@@ -506,12 +514,22 @@ const Index: React.FC = () => {
                   label: `${block.tool.name}`,
                   children: (
                     <div>
-                      <div className="font-medium text-gray-700 mb-1">输入：</div>
-                      <pre className="bg-gray-100 p-2 rounded text-sm overflow-x-auto">
+                      <div style={{ color: colorTextSecondary }} className="font-medium mb-1">
+                        输入：
+                      </div>
+                      <pre
+                        style={{ background: codeBg }}
+                        className="p-2 rounded text-sm overflow-x-auto"
+                      >
                         {JSON.stringify(block.tool.input, null, 2)}
                       </pre>
-                      <div className="font-medium text-gray-700 mt-2 mb-1">输出：</div>
-                      <pre className="bg-gray-100 p-2 rounded text-sm overflow-x-auto whitespace-pre-wrap">
+                      <div style={{ color: colorTextSecondary }} className="font-medium mt-2 mb-1">
+                        输出：
+                      </div>
+                      <pre
+                        style={{ background: codeBg }}
+                        className="p-2 rounded text-sm overflow-x-auto whitespace-pre-wrap"
+                      >
                         {block.tool.output}
                       </pre>
                     </div>
@@ -520,8 +538,8 @@ const Index: React.FC = () => {
               ]}
               defaultActiveKey={[]}
               size="small"
-              style={{ marginBottom: '6px' }}
-              className="bg-gray-50 rounded-lg border-0"
+              style={{ marginBottom: '6px', background: collapseBg }}
+              className="rounded-lg border-0"
             />
           )
         }
@@ -537,23 +555,68 @@ const Index: React.FC = () => {
             <Tooltip title={isCopied ? '已复制' : '复制'}>
               <button
                 onClick={() => handleCopy(message.content, message.id)}
-                className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors text-gray-500 hover:text-gray-700"
+                className="p-1.5 rounded-lg transition-colors"
+                style={{
+                  color: colorTextTertiary,
+                  background: 'transparent'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = colorFillAlter
+                  e.currentTarget.style.color = colorTextSecondary
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'transparent'
+                  e.currentTarget.style.color = colorTextTertiary
+                }}
               >
                 {isCopied ? <RiCheckLine size={16} /> : <RiFileCopyLine size={16} />}
               </button>
             </Tooltip>
             <Tooltip title="点赞">
-              <button className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors text-gray-500 hover:text-gray-700">
+              <button
+                className="p-1.5 rounded-lg transition-colors"
+                style={{ color: colorTextTertiary, background: 'transparent' }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = colorFillAlter
+                  e.currentTarget.style.color = colorTextSecondary
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'transparent'
+                  e.currentTarget.style.color = colorTextTertiary
+                }}
+              >
                 <RiThumbUpLine size={16} />
               </button>
             </Tooltip>
             <Tooltip title="不喜欢">
-              <button className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors text-gray-500 hover:text-gray-700">
+              <button
+                className="p-1.5 rounded-lg transition-colors"
+                style={{ color: colorTextTertiary, background: 'transparent' }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = colorFillAlter
+                  e.currentTarget.style.color = colorTextSecondary
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'transparent'
+                  e.currentTarget.style.color = colorTextTertiary
+                }}
+              >
                 <RiThumbDownLine size={16} />
               </button>
             </Tooltip>
             <Tooltip title="重新生成">
-              <button className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors text-gray-500 hover:text-gray-700">
+              <button
+                className="p-1.5 rounded-lg transition-colors"
+                style={{ color: colorTextTertiary, background: 'transparent' }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = colorFillAlter
+                  e.currentTarget.style.color = colorTextSecondary
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'transparent'
+                  e.currentTarget.style.color = colorTextTertiary
+                }}
+              >
                 <RiRefreshLine size={16} />
               </button>
             </Tooltip>
@@ -566,7 +629,7 @@ const Index: React.FC = () => {
   const LoadingMessage = (): React.ReactNode => (
     <div className="flex mb-6">
       <div className="max-w-[85%]">
-        <div className="flex items-center gap-2 text-gray-500">
+        <div className="flex items-center gap-2" style={{ color: colorTextSecondary }}>
           <RiLoader4Line size={16} className="animate-spin" />
           <span>正在生成...</span>
         </div>
@@ -592,96 +655,103 @@ const Index: React.FC = () => {
     }))
   }, [providers])
 
+  // 主题自适应滚动条颜色
+  const scrollbarThumbColor = isDarkMode ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.15)'
+  const scrollbarThumbHoverColor = isDarkMode ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.3)'
+  const inputScrollbarThumbColor = isDarkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'
+  const inputScrollbarThumbHoverColor = isDarkMode ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.2)'
+
   return (
     <div className="h-full flex-1 flex">
       <style>{`
-        .chat-scrollbar::-webkit-scrollbar {
-          width: 6px;
-          height: 6px;
-        }
-        .chat-scrollbar::-webkit-scrollbar-track {
-          background: transparent;
-        }
+        .chat-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+        .chat-scrollbar::-webkit-scrollbar-track { background: transparent; }
         .chat-scrollbar::-webkit-scrollbar-thumb {
-          background: rgba(0, 0, 0, 0.15);
+          background: ${scrollbarThumbColor};
           border-radius: 4px;
           transition: background 0.2s;
         }
-        .chat-scrollbar::-webkit-scrollbar-thumb:hover {
-          background: rgba(0, 0, 0, 0.3);
-        }
+        .chat-scrollbar::-webkit-scrollbar-thumb:hover { background: ${scrollbarThumbHoverColor}; }
         .chat-scrollbar {
           scrollbar-width: thin;
-          scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
+          scrollbar-color: ${scrollbarThumbColor} transparent;
         }
-        .input-scrollbar textarea::-webkit-scrollbar {
-          width: 4px;
-        }
-        .input-scrollbar textarea::-webkit-scrollbar-track {
-          background: transparent;
-        }
+        .input-scrollbar textarea::-webkit-scrollbar { width: 4px; }
+        .input-scrollbar textarea::-webkit-scrollbar-track { background: transparent; }
         .input-scrollbar textarea::-webkit-scrollbar-thumb {
-          background: rgba(0, 0, 0, 0.1);
+          background: ${inputScrollbarThumbColor};
           border-radius: 2px;
           transition: background 0.2s;
         }
-        .input-scrollbar textarea::-webkit-scrollbar-thumb:hover {
-          background: rgba(0, 0, 0, 0.2);
-        }
+        .input-scrollbar textarea::-webkit-scrollbar-thumb:hover { background: ${inputScrollbarThumbHoverColor}; }
         .input-scrollbar textarea {
           scrollbar-width: thin;
-          scrollbar-color: rgba(0, 0, 0, 0.1) transparent;
+          scrollbar-color: ${inputScrollbarThumbColor} transparent;
         }
-        .history-scrollbar::-webkit-scrollbar {
-          width: 4px;
-        }
-        .history-scrollbar::-webkit-scrollbar-track {
-          background: transparent;
-        }
+        .history-scrollbar::-webkit-scrollbar { width: 4px; }
+        .history-scrollbar::-webkit-scrollbar-track { background: transparent; }
         .history-scrollbar::-webkit-scrollbar-thumb {
-          background: rgba(0, 0, 0, 0.1);
+          background: ${inputScrollbarThumbColor};
           border-radius: 2px;
         }
-        .history-scrollbar::-webkit-scrollbar-thumb:hover {
-          background: rgba(0, 0, 0, 0.2);
-        }
+        .history-scrollbar::-webkit-scrollbar-thumb:hover { background: ${inputScrollbarThumbHoverColor}; }
       `}</style>
 
       {/* 历史记录侧边栏 */}
       <div
-        className="flex flex-col border-r border-gray-100 transition-all duration-200 overflow-hidden"
+        className="flex flex-col transition-all duration-200 overflow-hidden"
         style={{
           width: sidebarOpen ? 260 : 0,
           minWidth: sidebarOpen ? 260 : 0,
           background: colorBgContainer,
           borderRadius: borderRadiusLG,
-          marginRight: `${sidebarOpen ? '6px' : '0'}`
+          marginRight: sidebarOpen ? '6px' : '0',
+          borderRight: `1px solid ${colorBorderSecondary}`
         }}
       >
         <div
-          style={{ display: `${sidebarOpen ? 'flex' : 'none'}` }}
-          className="items-center justify-between px-4 py-3 border-b border-gray-100"
+          style={{ display: sidebarOpen ? 'flex' : 'none' }}
+          className="items-center justify-between px-4 py-3"
         >
-          <span className="text-sm font-medium text-gray-700">历史记录</span>
+          <span className="text-sm font-medium" style={{ color: colorTextSecondary }}>
+            历史记录
+          </span>
         </div>
         <div
-          style={{ display: `${sidebarOpen ? 'block' : 'none'}` }}
+          style={{ display: sidebarOpen ? 'block' : 'none' }}
           className="flex-1 overflow-y-auto py-2 history-scrollbar"
         >
           {topics.length === 0 ? (
-            <p className="text-xs text-gray-400 text-center py-8">暂无历史记录</p>
+            <p className="text-xs text-center py-8" style={{ color: colorTextTertiary }}>
+              暂无历史记录
+            </p>
           ) : (
             topics.map((topic) => (
               <div
                 key={topic.id}
                 onClick={() => handleSelectTopic(topic)}
-                className={`group flex items-center gap-2 px-4 py-2.5 mb-1 mx-2 rounded-lg cursor-pointer transition-colors ${
-                  currentTopicId === topic.id
-                    ? 'bg-blue-50 text-blue-700'
-                    : 'hover:bg-gray-50 text-gray-700'
-                }`}
+                className="group flex items-center gap-2 px-4 py-2.5 mb-1 mx-2 rounded-lg cursor-pointer transition-colors"
+                style={{
+                  color: colorText,
+                  background:
+                    currentTopicId === topic.id
+                      ? isDarkMode
+                        ? '#1a2744'
+                        : '#eff6ff'
+                      : 'transparent'
+                }}
+                onMouseEnter={(e) => {
+                  if (currentTopicId !== topic.id) e.currentTarget.style.background = colorFillAlter
+                }}
+                onMouseLeave={(e) => {
+                  if (currentTopicId !== topic.id) e.currentTarget.style.background = 'transparent'
+                }}
               >
-                <RiHistoryLine size={16} className="shrink-0 text-gray-400" />
+                <RiHistoryLine
+                  size={16}
+                  className="shrink-0"
+                  style={{ color: colorTextTertiary }}
+                />
                 <span className="flex-1 text-sm truncate">{topic.title}</span>
                 <Dropdown
                   menu={{
@@ -700,9 +770,11 @@ const Index: React.FC = () => {
                 >
                   <button
                     onClick={(e) => e.stopPropagation()}
-                    className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-gray-100 rounded transition-all"
+                    className="opacity-0 group-hover:opacity-100 p-0.5 rounded transition-all"
+                    onMouseEnter={(e) => (e.currentTarget.style.background = colorFillAlter)}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
                   >
-                    <RiMoreLine size={16} className="text-gray-400" />
+                    <RiMoreLine size={16} style={{ color: colorTextTertiary }} />
                   </button>
                 </Dropdown>
               </div>
@@ -719,7 +791,10 @@ const Index: React.FC = () => {
           borderRadius: borderRadiusLG
         }}
       >
-        <div className="flex items-center justify-between px-4 py-2 border-b border-gray-100">
+        <div
+          className="flex items-center justify-between px-4 py-2"
+          style={{ borderBottom: `1px solid ${colorBorderSecondary}` }}
+        >
           <div className="flex items-center gap-2">
             <Button
               type="text"
@@ -749,8 +824,10 @@ const Index: React.FC = () => {
         <div className="flex-1 overflow-y-scroll my-1 mr-1 ml-3 px-16 py-8 chat-scrollbar">
           {messages.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center">
-              <h1 className="text-2xl font-semibold text-gray-900 mb-2">你好！</h1>
-              <p className="text-gray-500 text-center max-w-md">
+              <h1 className="text-2xl font-semibold mb-2" style={{ color: colorText }}>
+                你好！
+              </h1>
+              <p className="text-center max-w-md" style={{ color: colorTextSecondary }}>
                 我是 RytenBench AI 助手，有什么我可以帮你的吗？
               </p>
             </div>
@@ -770,7 +847,13 @@ const Index: React.FC = () => {
 
         <div className="px-16 pb-8">
           <div className="max-w-4xl mx-auto">
-            <div className="bg-gray-50 rounded-2xl border border-gray-200 input-scrollbar">
+            <div
+              className="rounded-2xl input-scrollbar"
+              style={{
+                background: colorBgLayout,
+                border: `1px solid ${colorBorder}`
+              }}
+            >
               <div className="p-4">
                 <Input.TextArea
                   ref={textareaRef}
@@ -780,7 +863,7 @@ const Index: React.FC = () => {
                   placeholder="给 RytenBench 发送消息"
                   autoSize={{ minRows: 1, maxRows: 8 }}
                   disabled={messages.some((msg) => msg.loading)}
-                  className="bg-transparent border-none focus:shadow-none resize-none text-gray-800"
+                  style={{ color: colorText }}
                   styles={{
                     textarea: {
                       backgroundColor: 'transparent',
@@ -793,7 +876,6 @@ const Index: React.FC = () => {
                   }}
                 />
               </div>
-              {/* 已选附件预览 */}
               {attachments.length > 0 && (
                 <div className="flex gap-2 px-4 pb-3 flex-wrap">
                   {attachments.map((att, idx) =>
@@ -802,7 +884,8 @@ const Index: React.FC = () => {
                         <img
                           src={att.dataUrl}
                           alt={`upload-${idx}`}
-                          className="w-16 h-16 object-cover rounded-lg border border-gray-200"
+                          className="w-16 h-16 object-cover rounded-lg"
+                          style={{ border: `1px solid ${colorBorderSecondary}` }}
                         />
                         <button
                           onClick={() => setAttachments((prev) => prev.filter((_, i) => i !== idx))}
@@ -814,12 +897,18 @@ const Index: React.FC = () => {
                     ) : (
                       <div
                         key={idx}
-                        className="relative group flex items-center gap-1.5 bg-blue-50 text-blue-700 text-xs px-2.5 py-1.5 rounded-lg border border-blue-200"
+                        className="relative group flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg"
+                        style={{
+                          background: isDarkMode ? '#1a2744' : '#eff6ff',
+                          color: isDarkMode ? '#93c5fd' : '#1d4ed8',
+                          border: isDarkMode ? '1px solid #1e3a5f' : '1px solid #bfdbfe'
+                        }}
                       >
                         <span className="max-w-[120px] truncate">{att.fileName}</span>
                         <button
                           onClick={() => setAttachments((prev) => prev.filter((_, i) => i !== idx))}
-                          className="ml-1 text-blue-400 hover:text-red-500"
+                          className="ml-1 hover:text-red-500"
+                          style={{ color: isDarkMode ? '#60a5fa' : '#60a5fa' }}
                         >
                           <RiCloseLine size={14} />
                         </button>
@@ -877,13 +966,7 @@ const Index: React.FC = () => {
                         if (!tool) return option.label as React.ReactNode
                         return (
                           <div className="flex items-center gap-2">
-                            <span
-                              style={{
-                                color: tool.color
-                              }}
-                            >
-                              {toolIconMap[tool.icon]}
-                            </span>
+                            <span style={{ color: tool.color }}>{toolIconMap[tool.icon]}</span>
                             <span>{tool.label}</span>
                           </div>
                         )
@@ -930,7 +1013,6 @@ const Index: React.FC = () => {
                     icon={<RiArrowUpLine size={16} />}
                     onClick={handleSend}
                     disabled={!inputValue.trim() || messages.some((msg) => msg.loading)}
-                    className={`w-8 h-8 ${inputValue.trim() && !messages.some((msg) => msg.loading) ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-300'}`}
                   />
                 </div>
               </div>

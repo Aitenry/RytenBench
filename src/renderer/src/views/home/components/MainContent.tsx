@@ -1,12 +1,35 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
-import { Empty } from 'antd'
-import { Masonry, Flex } from 'antd'
-import { useMessage } from '@renderer/hooks/useMessage'
+import { theme, Empty, Modal, Flex, Typography, Masonry, Tree, List, Spin } from 'antd'
+import { FolderOutlined, FileTextOutlined, ArrowLeftOutlined } from '@ant-design/icons'
+import { RiBook2Line } from '@remixicon/react'
 import { Window } from '../../../../resource/types/window'
-import NoteCard from '@renderer/components/NoteCard'
-import NotePreviewModal from '@renderer/components/NotePreviewModal'
+import WikiCard from '@renderer/views/knowledge/manage/components/WikiCard'
+import MarkdownView from '@renderer/components/MarkdownView'
+import { useTheme } from '@renderer/contexts/ThemeContext'
 
-interface NoteItem {
+interface WikiRow {
+  id: number
+  title: string
+  summary: string | null
+  image: string | null
+  created_at: string
+  updated_at: string
+  note_count: number
+  tags: string | null
+}
+
+interface WikiDirectoryRow {
+  id: number
+  wiki_id: number
+  parent_id: number | null
+  name: string
+  sort_order: number
+  level: number
+  created_at: string
+  updated_at: string
+}
+
+interface NoteListItem {
   id: number
   title: string
   image: string | null
@@ -16,140 +39,377 @@ interface NoteItem {
   created_at: string
   updated_at: string
   word_count: number
-  content?: string | null
-  isPinned?: boolean
 }
 
+interface DirectoryNoteWithDetail extends NoteListItem {
+  directory_id: number
+  content?: string | null
+}
+
+interface TreeNode {
+  key: number
+  title: string
+  children: TreeNode[]
+}
+
+const { Title, Text } = Typography
+
 const MainContent: React.FC = () => {
-  const [isModalOpen, setIsModalOpen] = useState(false)
-  const [currentItem, setCurrentItem] = useState<NoteItem | null>(null)
-  const [notes, setNotes] = useState<NoteItem[]>([])
-  const [page, setPage] = useState(1)
-  const [hasMore, setHasMore] = useState(true)
+  const {
+    token: { colorBgContainer, borderRadiusLG, colorBorderSecondary }
+  } = theme.useToken()
+  const { effectiveTheme } = useTheme()
+
+  const [wikis, setWikis] = useState<WikiRow[]>([])
   const [isLoading, setIsLoading] = useState(false)
-  const [masonryKey, setMasonryKey] = useState(0)
+  const [wikiMasonryKey, setWikiMasonryKey] = useState(0)
   const loadMoreRef = useRef<HTMLDivElement>(null)
-  const { viewMessage } = useMessage()
+  const isLoadingRef = useRef(false)
+  const hasMoreRef = useRef(true)
+  const pageRef = useRef(1)
 
-  const loadNotes = useCallback(
-    async (pageNum: number = 1, isAppend: boolean = false) => {
-      if (isLoading || (!hasMore && isAppend)) return
+  // Preview modal state
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false)
+  const [selectedWiki, setSelectedWiki] = useState<WikiRow | null>(null)
+  const [directories, setDirectories] = useState<WikiDirectoryRow[]>([])
+  const [directoryTree, setDirectoryTree] = useState<TreeNode[]>([])
+  const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([])
+  const [selectedDirectory, setSelectedDirectory] = useState<WikiDirectoryRow | null>(null)
+  const [directoryNotes, setDirectoryNotes] = useState<DirectoryNoteWithDetail[]>([])
+  const [notesLoading, setNotesLoading] = useState(false)
+  const [previewNote, setPreviewNote] = useState<DirectoryNoteWithDetail | null>(null)
+  const [previewLoading, setPreviewLoading] = useState(false)
 
-      try {
-        setIsLoading(true)
-        const result = await (window as unknown as Window).api.notes.getAll(pageNum, 10)
+  const buildTree = useCallback((dirs: WikiDirectoryRow[]): TreeNode[] => {
+    const map = new Map<number, TreeNode>()
+    const roots: TreeNode[] = []
 
-        if (isAppend) {
-          setNotes((prev) => [...prev, ...result.items])
-        } else {
-          setNotes(result.items)
-          setMasonryKey((prev) => prev + 1)
+    dirs.forEach((dir) => {
+      map.set(dir.id, { key: dir.id, title: dir.name, children: [] })
+    })
+
+    dirs.forEach((dir) => {
+      const node = map.get(dir.id)!
+      if (dir.parent_id === null) {
+        roots.push(node)
+      } else {
+        const parent = map.get(dir.parent_id)
+        if (parent) {
+          parent.children.push(node)
         }
-
-        setHasMore(result.hasMore)
-        setPage(pageNum)
-      } catch (error) {
-        console.error('Failed to load notes:', error)
-        viewMessage('notes-load-error', 'error', '加载笔记失败')
-      } finally {
-        setIsLoading(false)
       }
-    },
-    [isLoading, hasMore, viewMessage]
-  )
+    })
 
-  useEffect(() => {
-    loadNotes(1, false).then()
+    return roots
+  }, [])
+
+  const getAllKeys = (nodes: TreeNode[]): React.Key[] => {
+    let keys: React.Key[] = []
+    nodes.forEach((node) => {
+      keys.push(node.key)
+      if (node.children.length > 0) {
+        keys = keys.concat(getAllKeys(node.children))
+      }
+    })
+    return keys
+  }
+
+  const loadWikis = useCallback(async (pageNum: number = 1, isAppend: boolean = false) => {
+    if (isLoadingRef.current || (!hasMoreRef.current && isAppend)) return
+
+    try {
+      isLoadingRef.current = true
+      setIsLoading(true)
+      const result = await (window as unknown as Window).api.wikis.getAll(pageNum, 10)
+
+      if (isAppend) {
+        setWikis((prev) => [...prev, ...result.items])
+      } else {
+        setWikis(result.items)
+        setWikiMasonryKey((prev) => prev + 1)
+      }
+
+      hasMoreRef.current = result.hasMore
+      pageRef.current = pageNum
+    } catch (error) {
+      console.error('Failed to load wikis:', error)
+    } finally {
+      isLoadingRef.current = false
+      setIsLoading(false)
+    }
   }, [])
 
   useEffect(() => {
+    loadWikis(1, false)
+  }, [])
+
+  useEffect(() => {
+    const currentRef = loadMoreRef.current
+    if (!currentRef) return
+
     const observer = new IntersectionObserver(
       (entries) => {
-        const entry = entries[0]
-        if (entry.isIntersecting && hasMore && !isLoading) {
-          loadNotes(page + 1, true).then()
+        if (entries[0].isIntersecting && hasMoreRef.current && !isLoadingRef.current) {
+          loadWikis(pageRef.current + 1, true)
         }
       },
       { threshold: 0.1 }
     )
 
-    const currentRef = loadMoreRef.current
-    if (currentRef) {
-      observer.observe(currentRef)
-    }
+    observer.observe(currentRef)
 
     return () => {
-      if (currentRef) {
-        observer.unobserve(currentRef)
-      }
+      observer.disconnect()
     }
-  }, [hasMore, isLoading, page, loadNotes])
+  }, [loadWikis])
 
-  const handleCardClick = async (item: NoteItem): Promise<void> => {
-    const messageKey = 'note-preview-load'
+  const handleOpenPreview = async (wiki: WikiRow): Promise<void> => {
+    setSelectedWiki(wiki)
+    setSelectedDirectory(null)
+    setDirectoryNotes([])
+    setPreviewNote(null)
+    setIsPreviewOpen(true)
+
     try {
-      viewMessage(messageKey, 'loading', '正在加载笔记内容...')
-      const fullNote = await (window as unknown as Window).api.notes.getById(item.id)
+      const dirs = await (window as unknown as Window).api.wikis.getDirectories(wiki.id)
+      const tree = buildTree(dirs)
+      setDirectories(dirs)
+      setDirectoryTree(tree)
+      setExpandedKeys(getAllKeys(tree))
+    } catch (error) {
+      console.error('Failed to load directories:', error)
+    }
+  }
+
+  const handleSelectDirectory = async (selectedKeys: React.Key[]): Promise<void> => {
+    if (selectedKeys.length === 0) return
+    const dirId = selectedKeys[0] as number
+    const dir = directories.find((d) => d.id === dirId)
+    if (!dir) return
+
+    setSelectedDirectory(dir)
+    setPreviewNote(null)
+    setNotesLoading(true)
+
+    try {
+      const noteIds = await (window as unknown as Window).api.wikis.getNotesByDirectory(dirId)
+      const notes: DirectoryNoteWithDetail[] = []
+      for (const { note_id } of noteIds) {
+        const note = await (window as unknown as Window).api.notes.getById(note_id)
+        if (note) {
+          notes.push({ ...note, directory_id: dirId })
+        }
+      }
+      setDirectoryNotes(notes)
+    } catch (error) {
+      console.error('Failed to load directory notes:', error)
+    } finally {
+      setNotesLoading(false)
+    }
+  }
+
+  const handleSelectNote = async (note: DirectoryNoteWithDetail): Promise<void> => {
+    setPreviewLoading(true)
+    try {
+      const fullNote = await (window as unknown as Window).api.notes.getById(note.id)
       if (fullNote) {
-        setCurrentItem({ ...item, content: fullNote.content })
-        setIsModalOpen(true)
-        viewMessage(messageKey, 'success', '笔记内容加载成功！', 2)
-      } else {
-        viewMessage(messageKey, 'error', '笔记不存在')
+        setPreviewNote({ ...note, content: fullNote.content })
       }
     } catch (error) {
       console.error('Failed to load note content:', error)
-      viewMessage(messageKey, 'error', '加载笔记内容失败')
+    } finally {
+      setPreviewLoading(false)
     }
   }
 
   return (
-    <>
-      <div style={{ padding: '12px 6px' }}>
+    <div className="h-full flex-1 flex flex-row gap-2.5">
+      <main
+        className="w-full flex flex-col"
+        style={{
+          background: colorBgContainer,
+          borderRadius: borderRadiusLG
+        }}
+      >
+        <div style={{ padding: '12px 6px', flex: 1, overflow: 'hidden' }}>
+          <div
+            className="overflow-x-hidden overflow-y-auto custom-scrollbar"
+            style={{
+              height: '100%',
+              padding: '0 6px'
+            }}
+          >
+            <Flex vertical gap={16} style={{ height: '100%' }}>
+              {wikis.length === 0 && !isLoading ? (
+                <Flex flex={1} justify="center" align="center">
+                  <Empty description="暂无知识库" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                </Flex>
+              ) : (
+                <>
+                  <Masonry
+                    key={wikiMasonryKey}
+                    columns={3}
+                    gutter={16}
+                    items={wikis.map((item) => ({
+                      key: item.id,
+                      data: item
+                    }))}
+                    itemRender={(record) => (
+                      <WikiCard
+                        item={record.data}
+                        onSelect={() => handleOpenPreview(record.data)}
+                      />
+                    )}
+                  />
+                  <div ref={loadMoreRef} style={{ height: 20, marginTop: 16 }}>
+                    {isLoading && (
+                      <div style={{ textAlign: 'center', padding: '16px' }}>加载中...</div>
+                    )}
+                  </div>
+                </>
+              )}
+            </Flex>
+          </div>
+        </div>
+      </main>
+
+      <Modal
+        title={
+          selectedWiki ? (
+            <Flex align="center" gap={8}>
+              <RiBook2Line />
+              <span>{selectedWiki.title}</span>
+            </Flex>
+          ) : (
+            '知识库预览'
+          )
+        }
+        open={isPreviewOpen}
+        onCancel={() => setIsPreviewOpen(false)}
+        width="100vw"
+        centered
+        footer={null}
+        styles={{
+          body: {
+            height: 'calc(100vh - 120px)',
+            display: 'flex',
+            flexDirection: 'row',
+            gap: 0,
+            padding: 0
+          }
+        }}
+      >
         <div
-          className="overflow-x-hidden overflow-y-auto custom-scrollbar"
           style={{
-            height: 'calc(100vh - 44px)',
-            maxHeight: 'calc(100vh - 44px)',
-            padding: '0 6px'
+            width: 320,
+            borderRight: '1px solid transparent',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden'
           }}
         >
-          <Flex vertical gap={16} style={{ height: '100%' }}>
-            {notes.length === 0 && !isLoading ? (
-              <Flex flex={1} justify="center" align="center">
-                <Empty description="暂无笔记" />
-              </Flex>
-            ) : (
+          <div
+            style={{
+              padding: '12px 16px',
+              borderBottom: `1px solid ${colorBorderSecondary}`,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8
+            }}
+          >
+            {selectedDirectory ? (
               <>
-                <Masonry
-                  key={masonryKey}
-                  columns={3}
-                  gutter={16}
-                  items={notes.map((item) => ({
-                    key: item.id,
-                    data: item
-                  }))}
-                  itemRender={(record) => (
-                    <NoteCard item={record.data} onClick={() => handleCardClick(record.data)} />
+                <ArrowLeftOutlined
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => {
+                    setSelectedDirectory(null)
+                    setDirectoryNotes([])
+                    setPreviewNote(null)
+                  }}
+                />
+                <Text strong>{selectedDirectory.name}</Text>
+              </>
+            ) : (
+              <Text strong>目录</Text>
+            )}
+          </div>
+          <div style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}>
+            {selectedDirectory ? (
+              notesLoading ? (
+                <div style={{ padding: '24px', textAlign: 'center' }}>
+                  <Spin />
+                </div>
+              ) : directoryNotes.length === 0 ? (
+                <div style={{ padding: '16px', textAlign: 'center' }}>
+                  <Text type="secondary">暂无笔记</Text>
+                </div>
+              ) : (
+                <List
+                  dataSource={directoryNotes}
+                  renderItem={(note) => (
+                    <List.Item
+                      onClick={() => handleSelectNote(note)}
+                      style={{
+                        cursor: 'pointer',
+                        padding: '8px 16px',
+                        background:
+                          previewNote?.id === note.id ? 'rgba(22, 119, 255, 0.08)' : undefined
+                      }}
+                    >
+                      <Flex align="center" gap={8} style={{ width: '100%' }}>
+                        <FileTextOutlined />
+                        <Text ellipsis style={{ flex: 1 }}>
+                          {note.title}
+                        </Text>
+                      </Flex>
+                    </List.Item>
                   )}
                 />
-                <div ref={loadMoreRef} style={{ height: 20, marginTop: 16 }}>
-                  {isLoading && (
-                    <div style={{ textAlign: 'center', padding: '16px' }}>加载中...</div>
-                  )}
-                </div>
-              </>
+              )
+            ) : directoryTree.length === 0 ? (
+              <div style={{ padding: '16px', textAlign: 'center' }}>
+                <Text type="secondary">暂无目录</Text>
+              </div>
+            ) : (
+              <Tree
+                showIcon
+                defaultExpandAll
+                expandedKeys={expandedKeys}
+                onExpand={setExpandedKeys}
+                onSelect={handleSelectDirectory}
+                selectedKeys={[]}
+                treeData={directoryTree}
+                icon={<FolderOutlined />}
+              />
             )}
-          </Flex>
+          </div>
         </div>
-      </div>
 
-      <NotePreviewModal
-        open={isModalOpen}
-        onCancel={() => setIsModalOpen(false)}
-        currentNote={currentItem}
-      />
-    </>
+        <div style={{ flex: 1, overflow: 'auto', padding: '16px' }}>
+          {previewLoading ? (
+            <div style={{ padding: '48px', textAlign: 'center' }}>
+              <Spin />
+            </div>
+          ) : previewNote ? (
+            <div>
+              <Title level={4}>{previewNote.title}</Title>
+              {previewNote.summary && (
+                <Text type="secondary" style={{ marginBottom: 16, display: 'block' }}>
+                  {previewNote.summary}
+                </Text>
+              )}
+              <div style={{ marginTop: 16 }}>
+                <MarkdownView content={previewNote.content || ''} isDarkMode={effectiveTheme === 'dark'} />
+              </div>
+            </div>
+          ) : (
+            <Flex flex={1} justify="center" align="center" style={{ height: '100%' }}>
+              <Text type="secondary">选择左侧笔记进行预览</Text>
+            </Flex>
+          )}
+        </div>
+      </Modal>
+    </div>
   )
 }
 

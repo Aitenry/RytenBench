@@ -56,6 +56,7 @@
     "electron-updater": "^6.3.9",
     "json-llm-repair": "^0.1.5",
     "langchain": "^1.2.30",
+    "music-metadata": "^11.13.0",
     "prop-types": "^15.8.1",
     "react-markdown": "^10.1.0",
     "react-router-dom": "^7.9.4",

@@ -1,5 +1,6 @@
 import { getDatabaseInstance } from '../../index'
 import logger from 'electron-log'
+import { saveImage } from './image'
 
 export interface WikiBaseRow {
   id: number
@@ -37,7 +38,7 @@ async function getWikiById(id: number): Promise<WikiRow | null> {
     const db = (await getDatabaseInstance()).getDatabase()
     const sql = `
       SELECT
-        w.*,
+        w.id, w.title, w.summary, img.data as image, w.created_at, w.updated_at,
         COUNT(DISTINCT dn.note_id) as note_count,
         (
           SELECT STRING_AGG(DISTINCT n.tags, ',')
@@ -47,10 +48,11 @@ async function getWikiById(id: number): Promise<WikiRow | null> {
           WHERE wd2.wiki_id = w.id AND n.tags IS NOT NULL AND n.tags != ''
         ) as tags
       FROM wiki w
+      LEFT JOIN images img ON w.image_id = img.id
       LEFT JOIN wiki_directories wd ON w.id = wd.wiki_id
       LEFT JOIN directory_notes dn ON wd.id = dn.directory_id
       WHERE w.id = $1
-      GROUP BY w.id
+      GROUP BY w.id, img.data
     `
     const result = await db.query<WikiRow>(sql, [id])
     if (result.rows.length > 0) {
@@ -80,7 +82,7 @@ async function getAllWikis(
 
     const dataSql = `
       SELECT
-        w.*,
+        w.id, w.title, w.summary, img.data as image, w.created_at, w.updated_at,
         COUNT(DISTINCT dn.note_id) as note_count,
         (
           SELECT STRING_AGG(DISTINCT n.tags, ',')
@@ -90,9 +92,10 @@ async function getAllWikis(
           WHERE wd2.wiki_id = w.id AND n.tags IS NOT NULL AND n.tags != ''
         ) as tags
       FROM wiki w
+      LEFT JOIN images img ON w.image_id = img.id
       LEFT JOIN wiki_directories wd ON w.id = wd.wiki_id
       LEFT JOIN directory_notes dn ON wd.id = dn.directory_id
-      GROUP BY w.id
+      GROUP BY w.id, img.data
       ORDER BY w.updated_at DESC
       LIMIT $1 OFFSET $2
     `
@@ -119,9 +122,11 @@ async function addWiki(
     const db = (await getDatabaseInstance()).getDatabase()
     const { title, summary, image } = wiki
 
+    const imageId = await saveImage(image ?? null)
+
     const result = await db.query<{ id: number }>(
-      'INSERT INTO wiki (title, summary, image) VALUES ($1, $2, $3) RETURNING id',
-      [title, summary || null, image || null]
+      'INSERT INTO wiki (title, summary, image_id) VALUES ($1, $2, $3) RETURNING id',
+      [title, summary || null, imageId]
     )
     logger.info(`Inserted new wiki with ID: ${result.rows[0].id}`)
     return result.rows[0].id
@@ -151,8 +156,9 @@ async function updateWiki(
       updateValues.push(updates.summary)
     }
     if (updates.image !== undefined) {
-      updateFields.push(`image = $${paramIndex++}`)
-      updateValues.push(updates.image)
+      const imageId = await saveImage(updates.image ?? null)
+      updateFields.push(`image_id = $${paramIndex++}`)
+      updateValues.push(imageId)
     }
 
     if (updateFields.length === 0) {

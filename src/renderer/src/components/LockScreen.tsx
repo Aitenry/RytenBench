@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { Modal, Input } from 'antd'
+import { Modal, Input, theme } from 'antd'
 
 interface LockScreenProps {
   onUnlock: (password: string) => void
@@ -8,6 +8,10 @@ interface LockScreenProps {
 const LockScreen: React.FC<LockScreenProps> = ({ onUnlock }) => {
   const [password, setPassword] = useState('')
   const [inputValue, setInputValue] = useState('')
+
+  const {
+    token: { colorText, colorTextSecondary }
+  } = theme.useToken()
 
   const handleOk = (): void => {
     onUnlock(password)
@@ -37,8 +41,10 @@ const LockScreen: React.FC<LockScreenProps> = ({ onUnlock }) => {
       rootClassName="lock-screen-modal"
     >
       <div className="text-center p-8">
-        <h2 className="text-xl font-semibold mb-4">系统已锁屏</h2>
-        <p className="text-gray-600 mb-6">请输入密码解锁</p>
+        <h2 className="text-xl font-semibold mb-4" style={{ color: colorText }}>系统已锁屏</h2>
+        <p className="mb-6" style={{ color: colorTextSecondary }}>
+          请输入密码解锁
+        </p>
 
         <Input.OTP
           length={6}
@@ -52,7 +58,9 @@ const LockScreen: React.FC<LockScreenProps> = ({ onUnlock }) => {
           onKeyUp={handleKeyPress}
         />
 
-        <div className="text-sm text-gray-500">输入6位数字解锁</div>
+        <div className="text-sm" style={{ color: colorTextSecondary }}>
+          输入6位数字解锁
+        </div>
       </div>
     </Modal>
   )

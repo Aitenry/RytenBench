@@ -25,8 +25,8 @@ const api = {
   },
   notes: {
     getById: (id: number) => ipcRenderer.invoke('note-get-by-id', id),
-    getAll: (page?: number, pageSize?: number, excludeWikiId?: number) =>
-      ipcRenderer.invoke('note-get-all', page, pageSize, excludeWikiId),
+    getAll: (page?: number, pageSize?: number, excludeWikiId?: number, search?: string) =>
+      ipcRenderer.invoke('note-get-all', page, pageSize, excludeWikiId, search),
     getPage: (query: string, page?: number, pageSize?: number) =>
       ipcRenderer.invoke('note-page-get', query, page, pageSize),
     add: (
@@ -42,7 +42,9 @@ const api = {
         content?: string | null
       }
     ) => ipcRenderer.invoke('note-update', id, updates),
-    delete: (id: number) => ipcRenderer.invoke('note-delete', id)
+    delete: (id: number) => ipcRenderer.invoke('note-delete', id),
+    deleteByTimeRange: (startTime: string, endTime: string) =>
+      ipcRenderer.invoke('note-delete-by-time-range', startTime, endTime)
   },
   wikis: {
     getById: (id: number) => ipcRenderer.invoke('wiki-get-by-id', id),
@@ -69,7 +71,24 @@ const api = {
       ipcRenderer.invoke('wiki-note-directories-get', noteId)
   },
   file: {
-    selectImageFile: (allowImages?: boolean) => ipcRenderer.invoke('select-image-file', allowImages)
+    selectImageFile: (allowImages?: boolean) =>
+      ipcRenderer.invoke('select-image-file', allowImages),
+    selectTextFile: () =>
+      ipcRenderer.invoke('select-text-file') as Promise<{
+        fileName: string
+        filePath: string
+      } | null>,
+    importNovel: (options: { filePath: string; coverDataUrl?: string | null }) =>
+      ipcRenderer.invoke('import-novel', options) as Promise<{ chapterCount: number }>,
+    onImportNovelProgress: (
+      callback: (progress: { processedNotes: number; totalNotes: number; message: string }) => void
+    ) => {
+      ipcRenderer.removeAllListeners('import-novel-progress')
+      ipcRenderer.on('import-novel-progress', (_event, progress) => callback(progress))
+      return () => {
+        ipcRenderer.removeAllListeners('import-novel-progress')
+      }
+    }
   },
   setting: {
     getLockScreenCode: () => ipcRenderer.invoke('lock-screen-code'),
@@ -193,6 +212,106 @@ const api = {
     getAll: () => ipcRenderer.invoke('system-settings-get-all') as Promise<SystemSettings>,
     update: (updates: Partial<SystemSettings>) =>
       ipcRenderer.invoke('system-settings-update', updates) as Promise<boolean>
+  },
+  music: {
+    selectDirectory: () => ipcRenderer.invoke('music-select-directory') as Promise<string | null>,
+    getFolders: () =>
+      ipcRenderer.invoke('music-get-folders') as Promise<
+        {
+          id: string
+          path: string
+          name: string
+          description: string
+          track_count: number
+          coverDataUrl: string | null
+          created_at: string
+          updated_at: string
+        }[]
+      >,
+    getTracks: (folderId: string) =>
+      ipcRenderer.invoke('music-get-tracks', folderId) as Promise<
+        {
+          id: string
+          filePath: string
+          title: string
+          artist: string
+          album: string
+          duration: number
+          liked: boolean
+          coverDataUrl: string | null
+        }[]
+      >,
+    deleteFolder: (folderId: string) => ipcRenderer.invoke('music-delete-folder', folderId),
+    createFolder: (name: string, description?: string) =>
+      ipcRenderer.invoke('music-create-folder', name, description) as Promise<{
+        id: string
+        path: string
+        name: string
+        description: string
+        track_count: number
+        coverDataUrl: string | null
+        created_at: string
+        updated_at: string
+      }>,
+    updateFolderDescription: (folderId: string, description: string | null) =>
+      ipcRenderer.invoke('music-update-folder-description', folderId, description) as Promise<void>,
+    updateFolderCover: (folderId: string) =>
+      ipcRenderer.invoke('music-update-folder-cover', folderId) as Promise<string | null>,
+    saveFolderCover: (folderId: string, coverDataUrl: string | null) =>
+      ipcRenderer.invoke('music-save-folder-cover', folderId, coverDataUrl) as Promise<void>,
+    selectImage: () => ipcRenderer.invoke('music-select-image') as Promise<string | null>,
+    updateFolder: (folderId: string, fields: { name?: string; description?: string | null }) =>
+      ipcRenderer.invoke('music-update-folder', folderId, fields) as Promise<void>,
+    addTracks: (folderId: string) =>
+      ipcRenderer.invoke('music-add-tracks', folderId) as Promise<{
+        added: {
+          filePath: string
+          title: string
+          artist: string
+          album: string
+          duration: number
+          coverDataUrl: string | null
+        }[]
+        skipped: string[]
+      } | null>,
+    updateTrack: (trackId: number, fields: { title?: string; artist?: string; album?: string }) =>
+      ipcRenderer.invoke('music-update-track', trackId, fields) as Promise<void>,
+    updateTrackCover: (trackId: number) =>
+      ipcRenderer.invoke('music-update-track-cover', trackId) as Promise<string | null>,
+    deleteTrack: (trackId: number) =>
+      ipcRenderer.invoke('music-delete-track', trackId) as Promise<void>,
+    readFile: (filePath: string) =>
+      ipcRenderer.invoke('music-read-file', filePath) as Promise<ArrayBuffer>,
+    toggleLike: (trackId: number) =>
+      ipcRenderer.invoke('music-toggle-like', trackId) as Promise<boolean>,
+    updateLastPlayed: (trackId: number) =>
+      ipcRenderer.invoke('music-update-last-played', trackId) as Promise<void>,
+    getLikedTracks: () =>
+      ipcRenderer.invoke('music-get-liked-tracks') as Promise<
+        {
+          id: string
+          filePath: string
+          title: string
+          artist: string
+          album: string
+          duration: number
+          liked: boolean
+          coverDataUrl: string | null
+        }[]
+      >,
+    getRecentlyPlayed: () =>
+      ipcRenderer.invoke('music-get-recently-played') as Promise<
+        {
+          id: string
+          filePath: string
+          title: string
+          artist: string
+          album: string
+          duration: number
+          liked: boolean
+          coverDataUrl: string | null
+        }[]
+      >
   }
 }
 

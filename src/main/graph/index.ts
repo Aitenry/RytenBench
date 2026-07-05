@@ -37,6 +37,7 @@ export interface BuildConfig {
   maxConcurrency?: number
   /** 是否强制重建 */
   force?: boolean
+  gleaningThreshold?: number
   /** 是否启用 gleaning（二次抽取遗漏实体，默认 true） */
   enableGleaning?: boolean
   /** Gleaning 最大处理笔记数：当库中笔记很多时限制 gleaning 总成本（默认 100，设为 0 不限） */
@@ -94,15 +95,13 @@ function findSceneBreaks(text: string): number[] {
     positions.push(hrMatch.index)
   }
 
-  // 2. 空行包围的短标题行（可能是场景标题，如 "※※※"、"◇◇◇"、"同日夜"）
+  // 2. 空行包围的短标题行
   const sceneTitlePattern = /(?:^|\n)\s*\n(?!\s*#)(\S[^\n]{0,30}\S)\s*\n\s*\n/gm
   let stMatch: RegExpExecArray | null
   while ((stMatch = sceneTitlePattern.exec(text)) !== null) {
     const titleText = stMatch[1].trim()
-    // 排除看起来像正常段落的行（至少包含一些非字母数字/中文的特殊字符，或非常短）
-    const hasSpecial = /[※◇◆☆★○●◎□■△▲▽▼→←↑↓★☆]/.test(titleText)
-    const isVeryShort = titleText.length <= 6 && !/[，。！？；：""''（）]/.test(titleText)
-    if (hasSpecial || isVeryShort) {
+    const isVeryShort = titleText.length <= 6
+    if (isVeryShort) {
       positions.push(stMatch.index + stMatch[0].indexOf(titleText))
     }
   }
@@ -345,11 +344,7 @@ function assembleNoteContent(title: string, content: string): string {
   if (headingMatch) {
     const headingText = headingMatch[1].trim()
     // 标题文本包含关系（任一包含另一即可）
-    if (
-      headingText === title ||
-      headingText.includes(title) ||
-      title.includes(headingText)
-    ) {
+    if (headingText === title || headingText.includes(title) || title.includes(headingText)) {
       return trimmedContent
     }
   }
