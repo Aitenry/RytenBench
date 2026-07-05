@@ -24,10 +24,11 @@
 - **Knowledge Graph** — Automatically build knowledge graphs from wiki notes using LLM-powered entity extraction, relation extraction, entity merging, and gleaning (second-pass scan for missed entities). Visualized with ECharts 6.
 - **AI Chat Assistant** — Conversational AI with streaming responses, deep thinking (reasoning) display, and tool calling (weather, time). Supports chat history persistence by topic.
 - **Multi-Provider LLM Support** — Configure and manage multiple LLM providers with AES-256-GCM encrypted API keys. Supports OpenAI, Anthropic, DeepSeek, Google Gemini, Google Vertex AI, Mistral, Ollama, OpenRouter, xAI, AWS Bedrock, Cloudflare Workers AI, and any OpenAI-compatible endpoint.
-- **Planner** — Schedule overview and todo management with priority, due-date, category, and completion status tracking.
+- **Planner** — Schedule overview and todo (matters) management with priority, due-date, category, and completion status tracking.
 - **Developer Tools** — MCP (Model Context Protocol) repository browser and HTTP API calling interface.
 - **Weather** — Local weather display with daily and hourly forecasts stored in PGLite.
-- **Music Player** — Built-in mini music player widget in the sidebar.
+- **Music Player** — Full-featured music player with playlist management, audio playback controls, now-playing display, and a mini player widget in the sidebar. Supports importing local audio files with automatic metadata extraction.
+- **Theme Switching** — Light/dark theme support with a dedicated `ThemeContext`, persisted preference, and optimized logo assets for each theme.
 - **Lock Screen** — Privacy protection with MD5-hashed password lock, triggered via Escape key or menu action.
 - **Full-Text Search** — Fast local search powered by PGLite's built-in PostgreSQL `tsvector`/`tsquery` full-text search with relevance ranking.
 - **Auto Update** — Built-in application update support via electron-updater.
@@ -52,6 +53,8 @@
 | Visualization       | [ECharts](https://echarts.apache.org/) 6                                                               |
 | Encryption          | AES-256-GCM (API key encryption) + MD5 (lock screen password)                                          |
 | Icons               | [Remix Icon](https://remixicon.com/)                                                                   |
+| Animation           | [animate.css](https://animate.style/) 4                                                                |
+| Audio Metadata      | [music-metadata](https://github.com/Borewit/music-metadata) 11                                         |
 | Logging             | [electron-log](https://github.com/megahertz/electron-log)                                              |
 | Config Persistence  | [electron-store](https://github.com/sindresorhus/electron-store)                                       |
 | Auto Update         | [electron-updater](https://www.electron.build/auto-update)                                             |
@@ -85,13 +88,16 @@ RytenBench/
 │   │   │       ├── chat.ts
 │   │   │       ├── city.ts
 │   │   │       ├── graph.ts
+│   │   │       ├── image.ts
+│   │   │       ├── music.ts
 │   │   │       ├── note.ts
 │   │   │       ├── provider.ts
 │   │   │       ├── todo.ts
 │   │   │       └── wiki.ts
 │   │   ├── graph/                   # Knowledge graph builder
 │   │   │   ├── index.ts             # GraphBuilder: entity extraction, relation extraction, gleaning
-│   │   │   └── prompts.ts           # LLM prompt templates for graph building
+│   │   │   ├── prompts.ts           # LLM prompt templates for graph building
+│   │   │   └── schemas.ts           # Zod schemas for graph entity & relation validation
 │   │   ├── provider/                # LLM provider service
 │   │   │   └── service.ts           # Multi-provider ChatModel factory
 │   │   ├── types/                   # Shared type definitions
@@ -106,24 +112,55 @@ RytenBench/
 │       │   └── loading.html
 │       └── src/
 │           ├── assets/              # Static assets & global CSS
-│           ├── components/          # Shared components (Sidebar, LockScreen, MarkdownEditor, etc.)
+│           │   ├── logo.png
+│           │   ├── logo-light.png
+│           │   ├── logo-night.png
+│           │   └── main.css
+│           ├── components/          # Shared components
+│           │   ├── AppContent.tsx    # App-level layout wrapper
+│           │   ├── ImportNovelModal.tsx
+│           │   ├── LockScreen.tsx
+│           │   ├── MarkdownEditor.tsx
+│           │   ├── MarkdownLoad.tsx  # Markdown loading/preview
+│           │   ├── MarkdownView.tsx
+│           │   ├── MusicMiniPlayer.tsx
+│           │   ├── NoteCard.tsx
+│           │   ├── NotePreviewModal.tsx
+│           │   └── Sidebar.tsx
 │           ├── contexts/            # React context definitions
+│           │   ├── AudioContext.tsx  # Audio playback state & controls
+│           │   ├── MessageContext.tsx
+│           │   ├── ThemeContext.tsx
+│           │   ├── ThemeContextCore.ts
+│           │   └── useTheme.ts      # useTheme custom hook
 │           ├── hooks/               # Custom React hooks
+│           │   └── useMessage.ts
 │           ├── providers/           # Context providers
+│           │   └── MessageProvider.tsx
 │           ├── route/               # Route configuration (React Router 7)
 │           ├── types/               # Frontend type definitions
+│           │   └── music.ts         # Music-related types
 │           ├── utils/               # Utility functions
+│           │   ├── formatTime.ts    # Time formatting helpers
+│           │   ├── markdown.ts      # Markdown processing utilities
+│           │   └── note.ts          # Note-related utilities
 │           ├── views/               # Page views
 │           │   ├── chat/            # AI Chat with streaming & tool call display
 │           │   ├── home/            # Dashboard with todo sidebar
+│           │   │   └── components/  # CardItem, MainContent, MusicMiniCard, TodoItem
 │           │   ├── knowledge/       # Knowledge base management & graph visualization
 │           │   │   ├── manage/      # Wiki & directory management
-│           │   │   └── graph/       # ECharts-powered knowledge graph viewer
+│           │   │   └── graph/       # ECharts-powered knowledge graph viewer (BuildProgress, EntityDetail, GraphCanvas, GraphToolbar)
 │           │   ├── music/           # Music player page
+│           │   │   └── components/  # CreatePlaylistModal, EditPlaylistModal, MusicSidebar, NowPlaying, PlayerControls, PlaylistTable
 │           │   ├── notes/           # Note CRUD management
-│           │   ├── planner/         # Schedule overview & todo items
+│           │   ├── planner/         # Schedule overview & matters management
+│           │   │   ├── schedule/    # Calendar schedule view
+│           │   │   └── matters/     # Todo items management
 │           │   ├── settings/        # Provider config & system settings
 │           │   ├── tools/           # MCP browser & API caller
+│           │   │   ├── mcp/
+│           │   │   └── api/
 │           │   └── weather/         # Weather display
 │           ├── App.tsx              # Root component
 │           ├── env.d.ts             # Environment type declarations
