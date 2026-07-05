@@ -23,7 +23,7 @@ import {
 } from '@ant-design/icons'
 import CryptoJS from 'crypto-js'
 import { useMessage } from '@renderer/hooks/useMessage'
-import { useTheme } from '@renderer/contexts/ThemeContext'
+import { useTheme } from '@renderer/contexts/useTheme'
 import { Window } from '../../../../resource/types/window'
 import type {
   SystemSettings,

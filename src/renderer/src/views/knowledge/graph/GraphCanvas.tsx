@@ -3,7 +3,7 @@ import * as echarts from 'echarts'
 import type { EChartsOption } from 'echarts'
 import { Button, theme } from 'antd'
 import { RiEyeLine, RiEyeOffLine } from '@remixicon/react'
-import { useTheme } from '@renderer/contexts/ThemeContext'
+import { useTheme } from '@renderer/contexts/useTheme'
 import { GraphEntity } from './types'
 
 /** ECharts graph node (built in Index.tsx useMemo) */

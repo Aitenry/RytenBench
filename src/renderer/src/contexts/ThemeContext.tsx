@@ -1,24 +1,11 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react'
+import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { ConfigProvider, theme } from 'antd'
 import zhCN from 'antd/locale/zh_CN'
 import type { ThemeMode } from '@renderer/types/settings'
 import { Window } from '../../resource/types/window'
+import { ThemeContext, type ThemeContextType } from './ThemeContextCore'
 
 const { defaultAlgorithm, darkAlgorithm } = theme
-
-interface ThemeContextType {
-  themeMode: ThemeMode
-  effectiveTheme: 'light' | 'dark'
-  setThemeMode: (mode: ThemeMode) => Promise<void>
-  loading: boolean
-}
-
-const ThemeContext = createContext<ThemeContextType>({
-  themeMode: 'auto',
-  effectiveTheme: 'light',
-  setThemeMode: async () => {},
-  loading: true
-})
 
 /**
  * 根据当前时间（小时）判断应该使用亮色还是暗色主题。
@@ -111,8 +98,4 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       </ConfigProvider>
     </ThemeContext.Provider>
   )
-}
-
-export const useTheme = (): ThemeContextType => {
-  return useContext(ThemeContext)
 }

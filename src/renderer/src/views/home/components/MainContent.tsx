@@ -5,7 +5,7 @@ import { RiBook2Line } from '@remixicon/react'
 import { Window } from '../../../../resource/types/window'
 import WikiCard from '@renderer/views/knowledge/manage/components/WikiCard'
 import MarkdownView from '@renderer/components/MarkdownView'
-import { useTheme } from '@renderer/contexts/ThemeContext'
+import { useTheme } from '@renderer/contexts/useTheme'
 
 interface WikiRow {
   id: number

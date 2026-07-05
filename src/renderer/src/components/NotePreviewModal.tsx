@@ -1,7 +1,7 @@
 import React from 'react'
 import { Modal, Empty } from 'antd'
 import MarkdownView from './MarkdownView'
-import { useTheme } from '@renderer/contexts/ThemeContext'
+import { useTheme } from '@renderer/contexts/useTheme'
 
 interface NoteItem {
   id: number

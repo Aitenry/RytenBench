@@ -24,7 +24,7 @@ import {
 import LogoLight from '../assets/logo-light.png'
 import LogoNight from '../assets/logo-night.png'
 import MusicMiniPlayer from './MusicMiniPlayer'
-import { useTheme } from '@renderer/contexts/ThemeContext'
+import { useTheme } from '@renderer/contexts/useTheme'
 
 interface SidebarProps {
   currentKey: string

@@ -25,7 +25,7 @@ import { LlmProviderConfig } from '../../../../main/database/mapper/provider'
 import MarkdownLoad from '@renderer/components/MarkdownLoad'
 import { Window, ToolInfo } from '../../../resource/types/window'
 import { Collapse } from 'antd'
-import { useTheme } from '@renderer/contexts/ThemeContext'
+import { useTheme } from '@renderer/contexts/useTheme'
 
 const toolIconMap: Record<string, React.ReactNode> = {
   RiSunCloudyLine: <RiSunCloudyLine size={16} />,
