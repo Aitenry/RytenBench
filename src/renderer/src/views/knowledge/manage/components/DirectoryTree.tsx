@@ -14,6 +14,12 @@ interface DirectoryTreeProps {
   onDeleteDirectory: (dir: DirectoryWithChildren) => void
 }
 
+interface TreeNodeData {
+  key: React.Key
+  title: React.ReactNode
+  children?: TreeNodeData[]
+}
+
 const DirectoryTree: React.FC<DirectoryTreeProps> = ({
   directoryTree,
   expandedKeys,
@@ -24,7 +30,7 @@ const DirectoryTree: React.FC<DirectoryTreeProps> = ({
   onEditDirectory,
   onDeleteDirectory
 }) => {
-  const handleDeleteClick = (e: React.MouseEvent, node: DirectoryWithChildren) => {
+  const handleDeleteClick = (e: React.MouseEvent, node: DirectoryWithChildren): void => {
     e.stopPropagation()
     Modal.confirm({
       title: '确定要删除这个目录吗？',
@@ -34,7 +40,7 @@ const DirectoryTree: React.FC<DirectoryTreeProps> = ({
     })
   }
 
-  const buildTreeData = (nodes: DirectoryWithChildren[]): any[] => {
+  const buildTreeData = (nodes: DirectoryWithChildren[]): TreeNodeData[] => {
     return nodes.map((node) => ({
       key: node.id,
       title: (

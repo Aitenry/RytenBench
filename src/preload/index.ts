@@ -67,8 +67,7 @@ const api = {
       ipcRenderer.invoke('wiki-directory-note-add', directoryId, noteId, sortOrder),
     removeNoteFromDirectory: (directoryId: number, noteId: number) =>
       ipcRenderer.invoke('wiki-directory-doc-remove', directoryId, noteId),
-    getDirectoriesByNote: (noteId: number) =>
-      ipcRenderer.invoke('wiki-doc-directories-get', noteId)
+    getDirectoriesByNote: (noteId: number) => ipcRenderer.invoke('wiki-doc-directories-get', noteId)
   },
   file: {
     selectImageFile: (allowImages?: boolean) =>

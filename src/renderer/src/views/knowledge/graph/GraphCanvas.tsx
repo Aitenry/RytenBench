@@ -218,7 +218,15 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({ data, onEntityClick, onEntity
       chart.off('dblclick')
       chart.on('dblclick', handleDblClick)
     }
-  }, [data, onEntityClick, onEntityDblClick, colorBgContainer, hideIsolated])
+  }, [
+    data,
+    onEntityClick,
+    onEntityDblClick,
+    colorBgContainer,
+    hideIsolated,
+    connectedNodes,
+    isDarkMode
+  ])
 
   // Handle resize
   useEffect(() => {

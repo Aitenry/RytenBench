@@ -25,12 +25,7 @@ interface DocCardProps {
   showContentPreview?: boolean
 }
 
-const DocCard: React.FC<DocCardProps> = ({
-  item,
-  onClick,
-  actions,
-  showContentPreview = true
-}) => {
+const DocCard: React.FC<DocCardProps> = ({ item, onClick, actions, showContentPreview = true }) => {
   const { token } = theme.useToken()
   const tags = getTagsArray(item.tags)
   const word_count = item.word_count || 0

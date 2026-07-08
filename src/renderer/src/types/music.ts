@@ -20,6 +20,7 @@ export const REPEAT_STRATEGIES = {
   one: {
     label: '单曲循环',
     getNext(currentIndex: number, _playlistLength: number): number {
+      void _playlistLength
       return currentIndex
     }
   },

@@ -334,7 +334,7 @@ function filterEntitiesInText(entityNames: string[], text: string): string[] {
 
 /**
  * 组装文档内容：避免 title 与 content 首行标题重复
-   * 例如 note.title="第四章" 且 content="# 第四章\n..." 时，不再重复拼接
+ * 例如 note.title="第四章" 且 content="# 第四章\n..." 时，不再重复拼接
  */
 function assembleDocContent(title: string, content: string): string {
   const trimmedContent = content.trimStart()
@@ -694,9 +694,7 @@ export class KnowledgeGraphService {
           .filter((r) => r.source_note_id === docId)
           .map((r) => ({ source: r.source, target: r.target }))
 
-        const entityList = [...docEntitySet]
-          .map((name) => entityDescMap.get(name)!)
-          .filter(Boolean)
+        const entityList = [...docEntitySet].map((name) => entityDescMap.get(name)!).filter(Boolean)
 
         if (entityList.length < 2) continue
 
@@ -881,8 +879,7 @@ export class KnowledgeGraphService {
       }
 
       const processedChunks = Math.min(i + maxConcurrency, totalChunks)
-      const processedDocs = new Set(allChunks.slice(0, i + maxConcurrency).map((c) => c.docId))
-        .size
+      const processedDocs = new Set(allChunks.slice(0, i + maxConcurrency).map((c) => c.docId)).size
       onProgress?.({
         phase: 'extract_entities',
         processedDocs: Math.min(processedDocs, totalDocs),

@@ -235,11 +235,10 @@ async function addDoc(
 
     const docId = insertResult.rows[0].id
 
-    await db.query('INSERT INTO documents_content (doc_id, image_id, content) VALUES ($1, $2, $3)', [
-      docId,
-      imageId,
-      content || null
-    ])
+    await db.query(
+      'INSERT INTO documents_content (doc_id, image_id, content) VALUES ($1, $2, $3)',
+      [docId, imageId, content || null]
+    )
 
     logger.info(`Inserted new doc with ID: ${docId}`)
     return docId
@@ -379,10 +378,10 @@ async function deleteDocsByTimeRange(startTime: string, endTime: string): Promis
       [startTime, endTime]
     )
 
-    const result = await db.query('DELETE FROM documents WHERE created_at >= $1 AND created_at <= $2', [
-      startTime,
-      endTime
-    ])
+    const result = await db.query(
+      'DELETE FROM documents WHERE created_at >= $1 AND created_at <= $2',
+      [startTime, endTime]
+    )
     const deleted = result.affectedRows ?? 0
     logger.info(`Deleted ${deleted} docs in time range [${startTime}, ${endTime}]`)
     return deleted
@@ -392,12 +391,4 @@ async function deleteDocsByTimeRange(startTime: string, endTime: string): Promis
   }
 }
 
-export {
-  getDocById,
-  getAllDocs,
-  getDocPage,
-  addDoc,
-  updateDoc,
-  deleteDoc,
-  deleteDocsByTimeRange
-}
+export { getDocById, getAllDocs, getDocPage, addDoc, updateDoc, deleteDoc, deleteDocsByTimeRange }

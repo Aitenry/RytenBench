@@ -879,17 +879,14 @@ app.whenReady().then(async () => {
     }
   })
 
-  ipcMain.handle(
-    'doc-delete-by-time-range',
-    async (_event, startTime: string, endTime: string) => {
-      try {
-        return await deleteDocsByTimeRange(startTime, endTime)
-      } catch (error) {
-        console.error('Error in doc-delete-by-time-range:', error)
-        throw error
-      }
+  ipcMain.handle('doc-delete-by-time-range', async (_event, startTime: string, endTime: string) => {
+    try {
+      return await deleteDocsByTimeRange(startTime, endTime)
+    } catch (error) {
+      console.error('Error in doc-delete-by-time-range:', error)
+      throw error
     }
-  )
+  })
 
   ipcMain.handle('wiki-get-by-id', async (_event, id: number) => {
     try {

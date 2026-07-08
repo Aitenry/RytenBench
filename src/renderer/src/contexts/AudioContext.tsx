@@ -132,7 +132,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }
 
   /** IPC 读取文件 → ArrayBuffer → Blob → blob:// URL */
-  const fileToBlobUrl = async (filePath: string): Promise<string | null> => {
+  const fileToBlobUrl = useCallback(async (filePath: string): Promise<string | null> => {
     try {
       const buf = await window.api.music.readFile(filePath)
       const blob = new Blob([buf], { type: getMimeType(filePath) })
@@ -141,7 +141,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       console.error('[AudioContext] Failed to load file:', err)
       return null
     }
-  }
+  }, [])
 
   const currentTrack =
     currentIndex >= 0 && currentIndex < playlist.length ? playlist[currentIndex] : null
@@ -376,7 +376,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         currentBlobUrlRef.current = null
       }
     }
-  }, [tryPlay])
+  }, [tryPlay, fileToBlobUrl])
 
   /**
    * loadAndPlay: 异步读取文件 → blob:// URL → 设置 audio.src。

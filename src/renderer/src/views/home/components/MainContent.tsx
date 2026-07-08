@@ -140,7 +140,7 @@ const MainContent: React.FC = () => {
 
   useEffect(() => {
     loadWikis(1, false)
-  }, [])
+  }, [loadWikis])
 
   useEffect(() => {
     const currentRef = loadMoreRef.current

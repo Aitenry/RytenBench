@@ -146,7 +146,7 @@ const Index: React.FC = () => {
 
   useEffect(() => {
     loadDocs(1)
-  }, [])
+  }, [loadDocs])
 
   useEffect(() => {
     return () => {

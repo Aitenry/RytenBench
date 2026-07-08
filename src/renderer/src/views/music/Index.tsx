@@ -91,7 +91,7 @@ const Index: React.FC = () => {
         message.error('加载曲目失败')
       }
     },
-    [selectedFolderId, updatePlaylist]
+    [selectedFolderId, updatePlaylist, setSelectedFolderId]
   )
 
   const handleDeleteFolder = useCallback(
@@ -119,7 +119,7 @@ const Index: React.FC = () => {
         }
       })
     },
-    [selectedFolderId, clearPlaylist]
+    [selectedFolderId, clearPlaylist, setSelectedFolderId]
   )
 
   /** 切换收藏状态 */
@@ -170,7 +170,7 @@ const Index: React.FC = () => {
         message.error(msg)
       }
     },
-    [updatePlaylist]
+    [updatePlaylist, setSelectedFolderId]
   )
 
   const handleCreateFolder = useCallback(

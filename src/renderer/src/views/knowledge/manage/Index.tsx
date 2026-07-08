@@ -87,6 +87,8 @@ const Index: React.FC = () => {
   const [wikiMasonryKey, setWikiMasonryKey] = useState(0)
   const [directoryDocsMasonryKey, setDirectoryDocsMasonryKey] = useState(0)
   const loadMoreRef = useRef<HTMLDivElement>(null)
+  const isLoadingRef = useRef(false)
+  const hasMoreRef = useRef(true)
 
   const { viewMessage } = useMessage()
 
@@ -113,30 +115,30 @@ const Index: React.FC = () => {
     return roots
   }, [])
 
-  const loadWikis = useCallback(
-    async (pageNum: number = 1, isAppend: boolean = false) => {
-      if (isLoading || (!hasMore && isAppend)) return
-      try {
-        setIsLoading(true)
-        const result = await (window as unknown as Window).api.wikis.getAll(pageNum, 10)
-        if (isAppend) {
-          setWikis((prev) => [...prev, ...result.items])
-        } else {
-          setWikis(result.items)
-          setWikiMasonryKey((prev) => prev + 1)
-        }
-        setHasMore(result.hasMore)
-        setPage(pageNum)
-      } catch (error) {
-        console.error('Failed to load wikis:', error)
-      } finally {
-        setIsLoading(false)
+  const loadWikis = useCallback(async (pageNum: number = 1, isAppend: boolean = false) => {
+    if (isLoadingRef.current || (!hasMoreRef.current && isAppend)) return
+    try {
+      isLoadingRef.current = true
+      setIsLoading(true)
+      const result = await (window as unknown as Window).api.wikis.getAll(pageNum, 10)
+      if (isAppend) {
+        setWikis((prev) => [...prev, ...result.items])
+      } else {
+        setWikis(result.items)
+        setWikiMasonryKey((prev) => prev + 1)
       }
-    },
-    [isLoading, hasMore]
-  )
+      setHasMore(result.hasMore)
+      hasMoreRef.current = result.hasMore
+      setPage(pageNum)
+    } catch (error) {
+      console.error('Failed to load wikis:', error)
+    } finally {
+      isLoadingRef.current = false
+      setIsLoading(false)
+    }
+  }, [])
 
-  const getAllDirectoryIds = (nodes: DirectoryWithChildren[]): React.Key[] => {
+  const getAllDirectoryIds = useCallback((nodes: DirectoryWithChildren[]): React.Key[] => {
     let ids: React.Key[] = []
     nodes.forEach((node) => {
       ids.push(node.id)
@@ -145,7 +147,7 @@ const Index: React.FC = () => {
       }
     })
     return ids
-  }
+  }, [])
 
   const loadDirectories = useCallback(
     async (wikiId: number) => {
@@ -159,7 +161,7 @@ const Index: React.FC = () => {
         console.error('Failed to load directories:', error)
       }
     },
-    [buildDirectoryTree]
+    [buildDirectoryTree, getAllDirectoryIds]
   )
 
   const loadDirectoryDocs = useCallback(async (directoryId: number) => {
@@ -227,13 +229,14 @@ const Index: React.FC = () => {
 
   useEffect(() => {
     loadWikis(1, false).then()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
     const observer = new IntersectionObserver(
       (entries) => {
         const entry = entries[0]
-        if (entry.isIntersecting && hasMore && !isLoading) {
+        if (entry.isIntersecting && hasMoreRef.current && !isLoadingRef.current) {
           loadWikis(page + 1, true).then()
         }
       },

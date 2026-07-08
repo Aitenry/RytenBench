@@ -1,6 +1,11 @@
 import { ElectronAPI } from '@electron-toolkit/preload'
 import { TodoItemRow } from '../main/database/mapper/todo'
-import { DocRow, DocListItem, DocWithContent, PaginatedResult } from '../main/database/mapper/document'
+import {
+  DocRow,
+  DocListItem,
+  DocWithContent,
+  PaginatedResult
+} from '../main/database/mapper/document'
 import { WikiRow, WikiDirectoryRow } from '../main/database/mapper/wiki'
 import { ChatTopicRow, ChatDialogueRow } from '../main/database/mapper/chat'
 import type { LlmProviderInput, LlmProviderConfig } from '../main/database/mapper/provider'
@@ -27,28 +32,49 @@ interface Api {
   }
   docs: {
     getById: (id: number) => Promise<DocWithContent | null>
-    getAll: (page?: number, pageSize?: number, excludeWikiId?: number, search?: string) => Promise<PaginatedResult<DocListItem>>
-    getPage: (query: string, page?: number, pageSize?: number) => Promise<PaginatedResult<DocListItem>>
-    add: (doc: Omit<DocRow, 'id' | 'created_at' | 'updated_at' | 'version'> & {
-      image?: string | null
-      content?: string | null
-    }) => Promise<number>
-    update: (id: number, updates: Partial<Omit<DocRow, 'id' | 'created_at'>> & {
-      image?: string | null
-      content?: string | null
-    }) => Promise<boolean>
+    getAll: (
+      page?: number,
+      pageSize?: number,
+      excludeWikiId?: number,
+      search?: string
+    ) => Promise<PaginatedResult<DocListItem>>
+    getPage: (
+      query: string,
+      page?: number,
+      pageSize?: number
+    ) => Promise<PaginatedResult<DocListItem>>
+    add: (
+      doc: Omit<DocRow, 'id' | 'created_at' | 'updated_at' | 'version'> & {
+        image?: string | null
+        content?: string | null
+      }
+    ) => Promise<number>
+    update: (
+      id: number,
+      updates: Partial<Omit<DocRow, 'id' | 'created_at'>> & {
+        image?: string | null
+        content?: string | null
+      }
+    ) => Promise<boolean>
     delete: (id: number) => Promise<boolean>
     deleteByTimeRange: (startTime: string, endTime: string) => Promise<number>
   }
   wikis: {
     getById: (id: number) => Promise<WikiRow | null>
     getAll: (page?: number, pageSize?: number) => Promise<PaginatedResult<WikiRow>>
-    add: (wiki: Omit<WikiRow, 'id' | 'doc_count' | 'tags' | 'created_at' | 'updated_at'>) => Promise<number>
+    add: (
+      wiki: Omit<WikiRow, 'id' | 'doc_count' | 'tags' | 'created_at' | 'updated_at'>
+    ) => Promise<number>
     update: (id: number, updates: Partial<Omit<WikiRow, 'id' | 'created_at'>>) => Promise<boolean>
     delete: (id: number) => Promise<boolean>
     getDirectories: (wikiId: number) => Promise<WikiDirectoryRow[]>
-    addDirectory: (directory: Omit<WikiDirectoryRow, 'id' | 'created_at' | 'updated_at'>) => Promise<number>
-    updateDirectory: (id: number, updates: Partial<Omit<WikiDirectoryRow, 'id' | 'created_at'>>) => Promise<boolean>
+    addDirectory: (
+      directory: Omit<WikiDirectoryRow, 'id' | 'created_at' | 'updated_at'>
+    ) => Promise<number>
+    updateDirectory: (
+      id: number,
+      updates: Partial<Omit<WikiDirectoryRow, 'id' | 'created_at'>>
+    ) => Promise<boolean>
     deleteDirectory: (id: number) => Promise<boolean>
     getNotesByDirectory: (directoryId: number) => Promise<{ doc_id: number; sort_order: number }[]>
     addNoteToDirectory: (directoryId: number, noteId: number, sortOrder?: number) => Promise<number>
@@ -56,7 +82,9 @@ interface Api {
     getDirectoriesByNote: (noteId: number) => Promise<WikiDirectoryRow[]>
   }
   file: {
-    selectImageFile: (allowImages?: boolean) => Promise<{ dataUrl: string; fileName: string; isImage: boolean } | null>
+    selectImageFile: (
+      allowImages?: boolean
+    ) => Promise<{ dataUrl: string; fileName: string; isImage: boolean } | null>
     selectTextFile: () => Promise<{ fileName: string; filePath: string } | null>
   }
   setting: {
@@ -64,8 +92,14 @@ interface Api {
     setLockScreenView: (open: boolean) => Promise<void>
   }
   chat: {
-    sendMessage: (message: string, options?: ChatOptions & { providerId?: number }) => Promise<StructuredMessage[]>
-    startMessageStream: (message: string, options?: ChatOptions & { topicId?: number; providerId?: number }) => void
+    sendMessage: (
+      message: string,
+      options?: ChatOptions & { providerId?: number }
+    ) => Promise<StructuredMessage[]>
+    startMessageStream: (
+      message: string,
+      options?: ChatOptions & { topicId?: number; providerId?: number }
+    ) => void
     getTools: () => Promise<ToolInfo[]>
     onStreamChunk: (callback: (chunk: StructuredMessage) => void) => () => void
     onStreamDone: (callback: (result: { topicId: number }) => void) => () => void
@@ -124,7 +158,10 @@ interface Api {
       }[]
     >
     deleteFolder: (folderId: string) => Promise<void>
-    createFolder: (name: string, description?: string) => Promise<{
+    createFolder: (
+      name: string,
+      description?: string
+    ) => Promise<{
       id: string
       path: string
       name: string
@@ -138,7 +175,10 @@ interface Api {
     updateFolderCover: (folderId: string) => Promise<string | null>
     saveFolderCover: (folderId: string, coverDataUrl: string | null) => Promise<void>
     selectImage: () => Promise<string | null>
-    updateFolder: (folderId: string, fields: { name?: string; description?: string | null }) => Promise<void>
+    updateFolder: (
+      folderId: string,
+      fields: { name?: string; description?: string | null }
+    ) => Promise<void>
     addTracks: (folderId: string) => Promise<{
       added: {
         filePath: string
@@ -150,7 +190,10 @@ interface Api {
       }[]
       skipped: string[]
     } | null>
-    updateTrack: (trackId: number, fields: { title?: string; artist?: string; album?: string }) => Promise<void>
+    updateTrack: (
+      trackId: number,
+      fields: { title?: string; artist?: string; album?: string }
+    ) => Promise<void>
     updateTrackCover: (trackId: number) => Promise<string | null>
     deleteTrack: (trackId: number) => Promise<void>
     readFile: (filePath: string) => Promise<ArrayBuffer>
