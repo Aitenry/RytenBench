@@ -14,8 +14,8 @@ import {
   GraphData,
   updateBuildJob
 } from '../database/mapper/graph'
-import { getNoteById } from '../database/mapper/note'
-import { getDirectoriesByWikiId, getNotesByDirectoryId } from '../database/mapper/wiki'
+import { getDocById } from '../database/mapper/document'
+import { getDirectoriesByWikiId, getDocsByDirectoryId } from '../database/mapper/wiki'
 import {
   ENTITY_EXTRACTION_PROMPT,
   ENTITY_GLEANING_PROMPT,
@@ -40,11 +40,11 @@ export interface BuildConfig {
   gleaningThreshold?: number
   /** 是否启用 gleaning（二次抽取遗漏实体，默认 true） */
   enableGleaning?: boolean
-  /** Gleaning 最大处理笔记数：当库中笔记很多时限制 gleaning 总成本（默认 100，设为 0 不限） */
-  gleaningMaxNotes?: number
+  /** Gleaning 最大处理文档数：当库中文档很多时限制 gleaning 总成本（默认 100，设为 0 不限） */
+  gleaningMaxDocs?: number
   /** Markdown 分块最大字符数（默认 2000） */
   maxChunkSize?: number
-  /** 单次 LLM 调用处理的笔记数量（批量模式，默认 1） */
+  /** 单次 LLM 调用处理的文档数量（批量模式，默认 1） */
   batchSize?: number
 }
 
@@ -54,7 +54,7 @@ interface ExtractedEntity {
   description: string
   aliases: string[]
   confidence: number
-  source_note_ids: number[]
+  source_doc_ids: number[]
 }
 
 interface ExtractedRelation {
@@ -66,14 +66,14 @@ interface ExtractedRelation {
 
 type ProgressCallback = (progress: {
   phase: string
-  processedNotes: number
-  totalNotes: number
+  processedDocs: number
+  totalDocs: number
   message: string
 }) => void
 
 /** 文本分块结果 */
 interface TextChunk {
-  noteId: number
+  docId: number
   chunkIndex: number
   content: string
 }
@@ -333,10 +333,10 @@ function filterEntitiesInText(entityNames: string[], text: string): string[] {
 }
 
 /**
- * 组装笔记内容：避免 title 与 content 首行标题重复
- * 例如 note.title="第四章" 且 content="# 第四章\n..." 时，不再重复拼接
+ * 组装文档内容：避免 title 与 content 首行标题重复
+   * 例如 note.title="第四章" 且 content="# 第四章\n..." 时，不再重复拼接
  */
-function assembleNoteContent(title: string, content: string): string {
+function assembleDocContent(title: string, content: string): string {
   const trimmedContent = content.trimStart()
   // 判断 content 首行是否是 Markdown 标题且与 title 相同或高度相似
   const firstLine = trimmedContent.split('\n')[0] || ''
@@ -428,25 +428,25 @@ export class KnowledgeGraphService {
       if (config?.force) {
         onProgress?.({
           phase: 'cleanup',
-          processedNotes: 0,
-          totalNotes: 0,
+          processedDocs: 0,
+          totalDocs: 0,
           message: '清理已有图谱数据...'
         })
         await deleteRelationsByWikiId(wikiId)
         await deleteEntitiesByWikiId(wikiId)
       }
 
-      // 3. 快速收集所有笔记
+      // 3. 快速收集所有文档
       onProgress?.({
         phase: 'collect',
-        processedNotes: 0,
-        totalNotes: 0,
-        message: '收集知识库笔记...'
+        processedDocs: 0,
+        totalDocs: 0,
+        message: '收集知识库文档...'
       })
-      const noteEntries = await this.collectWikiNotes(wikiId)
-      const totalNotes = noteEntries.length
+      const docEntries = await this.collectWikiDocs(wikiId)
+      const totalDocs = docEntries.length
 
-      if (totalNotes === 0) {
+      if (totalDocs === 0) {
         await updateBuildJob(jobId, {
           status: 'completed',
           total_notes: 0,
@@ -456,35 +456,35 @@ export class KnowledgeGraphService {
         return { entities: [], relations: [] }
       }
 
-      await updateBuildJob(jobId, { status: 'running', total_notes: totalNotes })
+      await updateBuildJob(jobId, { status: 'running', total_notes: totalDocs })
 
       // ========== Phase 1: 分块 + 实体抽取 ==========
       onProgress?.({
         phase: 'extract_entities',
-        processedNotes: 0,
-        totalNotes,
+        processedDocs: 0,
+        totalDocs,
         message: '准备文本分块...'
       })
 
-      // 将笔记按 Markdown 标题层级分块
+      // 将文档按 Markdown 标题层级分块
       const allChunks: TextChunk[] = []
-      for (const entry of noteEntries) {
+      for (const entry of docEntries) {
         const chunks = splitByMarkdownHeaders(entry.content, config?.maxChunkSize)
         chunks.forEach((chunk, idx) => {
-          allChunks.push({ noteId: entry.noteId, chunkIndex: idx, content: chunk })
+          allChunks.push({ docId: entry.docId, chunkIndex: idx, content: chunk })
         })
       }
 
       const totalChunks = allChunks.length
       onProgress?.({
         phase: 'extract_entities',
-        processedNotes: 0,
-        totalNotes,
+        processedDocs: 0,
+        totalDocs,
         message: `开始实体抽取... ${totalChunks} 个文本块`
       })
 
       // 并发抽取实体（分批控制并发数）
-      const chunkEntities: Map<number, Omit<ExtractedEntity, 'source_note_ids'>[]> = new Map()
+      const chunkEntities: Map<number, Omit<ExtractedEntity, 'source_doc_ids'>[]> = new Map()
 
       for (let i = 0; i < allChunks.length; i += maxConcurrency) {
         const batch = allChunks.slice(i, i + maxConcurrency)
@@ -493,38 +493,38 @@ export class KnowledgeGraphService {
         )
 
         for (let j = 0; j < batch.length; j++) {
-          const noteId = batch[j].noteId
-          const existing = chunkEntities.get(noteId) || []
-          chunkEntities.set(noteId, [...existing, ...batchResults[j]])
+          const docId = batch[j].docId
+          const existing = chunkEntities.get(docId) || []
+          chunkEntities.set(docId, [...existing, ...batchResults[j]])
         }
 
         const processedChunks = Math.min(i + maxConcurrency, totalChunks)
-        const processedNotes = new Set(allChunks.slice(0, i + maxConcurrency).map((c) => c.noteId))
+        const processedDocs = new Set(allChunks.slice(0, i + maxConcurrency).map((c) => c.docId))
           .size
         onProgress?.({
           phase: 'extract_entities',
-          processedNotes: Math.min(processedNotes, totalNotes),
-          totalNotes,
+          processedDocs: Math.min(processedDocs, totalDocs),
+          totalDocs,
           message: `实体抽取中... ${processedChunks}/${totalChunks} 块`
         })
-        await updateBuildJob(jobId, { processed_notes: processedNotes })
+        await updateBuildJob(jobId, { processed_notes: processedDocs })
       }
 
-      // ========== Phase 2: Gleaning 二次抽取（可选，由 gleaningMaxNotes 控制成本上限） ==========
+      // ========== Phase 2: Gleaning 二次抽取（可选，由 gleaningMaxDocs 控制成本上限） ==========
       const enableGleaning = config?.enableGleaning !== false
       if (enableGleaning) {
-        const maxGleaningNotes = config?.gleaningMaxNotes ?? 100
+        const maxGleaningDocs = config?.gleaningMaxDocs ?? 100
         const gleaningEntries =
-          maxGleaningNotes > 0 && noteEntries.length > maxGleaningNotes
-            ? noteEntries.slice(0, maxGleaningNotes)
-            : noteEntries
+          maxGleaningDocs > 0 && docEntries.length > maxGleaningDocs
+            ? docEntries.slice(0, maxGleaningDocs)
+            : docEntries
 
         if (gleaningEntries.length > 0) {
           onProgress?.({
             phase: 'extract_entities',
-            processedNotes: totalNotes,
-            totalNotes,
-            message: `二次扫描遗漏实体... (${gleaningEntries.length} 篇笔记)`
+            processedDocs: totalDocs,
+            totalDocs,
+            message: `二次扫描遗漏实体... (${gleaningEntries.length} 篇文档)`
           })
 
           const gleaningBatchSize = maxConcurrency
@@ -532,7 +532,7 @@ export class KnowledgeGraphService {
             const batch = gleaningEntries.slice(i, i + gleaningBatchSize)
             const batchResults = await Promise.all(
               batch.map(async (entry) => {
-                const existingEntities = chunkEntities.get(entry.noteId) || []
+                const existingEntities = chunkEntities.get(entry.docId) || []
                 const existingNames = existingEntities.map((e) => e.name)
                 if (existingNames.length === 0) return []
                 return this.gleanEntities(entry.content, existingNames)
@@ -541,17 +541,17 @@ export class KnowledgeGraphService {
 
             for (let j = 0; j < batch.length; j++) {
               if (batchResults[j].length > 0) {
-                const existing = chunkEntities.get(batch[j].noteId) || []
-                chunkEntities.set(batch[j].noteId, [...existing, ...batchResults[j]])
+                const existing = chunkEntities.get(batch[j].docId) || []
+                chunkEntities.set(batch[j].docId, [...existing, ...batchResults[j]])
               }
             }
           }
         }
       }
 
-      // 聚合所有实体（去重合并同笔记内同名实体）
+      // 聚合所有实体（去重合并同文档内同名实体）
       const allExtractedEntities: ExtractedEntity[] = []
-      for (const [noteId, entities] of chunkEntities) {
+      for (const [docId, entities] of chunkEntities) {
         const seen = new Map<string, ExtractedEntity>()
         for (const e of entities) {
           const existing = seen.get(e.name)
@@ -564,7 +564,7 @@ export class KnowledgeGraphService {
           } else {
             seen.set(e.name, {
               ...e,
-              source_note_ids: [noteId]
+              source_doc_ids: [docId]
             })
           }
         }
@@ -576,8 +576,8 @@ export class KnowledgeGraphService {
       // ========== Phase 3: 实体消歧合并 ==========
       onProgress?.({
         phase: 'merge_entities',
-        processedNotes: totalNotes,
-        totalNotes,
+        processedDocs: totalDocs,
+        totalDocs,
         message: '实体消歧合并中...'
       })
       const mergedEntities = await this.mergeEntities(allExtractedEntities)
@@ -585,8 +585,8 @@ export class KnowledgeGraphService {
       // ========== Phase 4: 批量保存实体 ==========
       onProgress?.({
         phase: 'save_entities',
-        processedNotes: totalNotes,
-        totalNotes,
+        processedDocs: totalDocs,
+        totalDocs,
         message: `保存 ${mergedEntities.length} 个实体...`
       })
 
@@ -599,7 +599,7 @@ export class KnowledgeGraphService {
           aliases: JSON.stringify(e.aliases),
           properties: null,
           confidence: e.confidence,
-          source_note_ids: JSON.stringify(e.source_note_ids)
+          source_note_ids: JSON.stringify(e.source_doc_ids)
         }))
       )
 
@@ -608,10 +608,10 @@ export class KnowledgeGraphService {
 
       // 按 Markdown 标题层级重新分块，与实体抽取保持相同粒度
       const relationChunks: TextChunk[] = []
-      for (const entry of noteEntries) {
+      for (const entry of docEntries) {
         const chunks = splitByMarkdownHeaders(entry.content, config?.maxChunkSize)
         chunks.forEach((chunk, idx) => {
-          relationChunks.push({ noteId: entry.noteId, chunkIndex: idx, content: chunk })
+          relationChunks.push({ docId: entry.docId, chunkIndex: idx, content: chunk })
         })
       }
 
@@ -620,8 +620,8 @@ export class KnowledgeGraphService {
 
       onProgress?.({
         phase: 'extract_relations',
-        processedNotes: 0,
-        totalNotes,
+        processedDocs: 0,
+        totalDocs,
         message: `开始关系抽取... ${totalRelationChunks} 个文本块`
       })
 
@@ -637,7 +637,7 @@ export class KnowledgeGraphService {
         const batchResults = await Promise.all(
           batchRelevant.map(async ({ chunk, relevantEntities }) => {
             if (relevantEntities.length < 2) return []
-            return this.extractRelations(chunk.content, relevantEntities, chunk.noteId)
+            return this.extractRelations(chunk.content, relevantEntities, chunk.docId)
           })
         )
 
@@ -646,23 +646,23 @@ export class KnowledgeGraphService {
         }
 
         const processedChunks = Math.min(i + maxConcurrency, totalRelationChunks)
-        const processedNoteIds = new Set(
-          relationChunks.slice(0, i + maxConcurrency).map((c) => c.noteId)
+        const processedDocIds = new Set(
+          relationChunks.slice(0, i + maxConcurrency).map((c) => c.docId)
         )
         onProgress?.({
           phase: 'extract_relations',
-          processedNotes: processedNoteIds.size,
-          totalNotes,
+          processedDocs: processedDocIds.size,
+          totalDocs,
           message: `关系抽取中... ${processedChunks}/${totalRelationChunks} 块`
         })
       }
 
-      // ========== Phase 5b: 跨块关系补全（轻量级：多块笔记逐篇补全跨章节关系） ==========
-      // 将 relationChunks 按 noteId 分组，找出多块笔记中跨块分布但尚未连接的实体
-      const noteChunksMap = new Map<number, TextChunk[]>()
+      // ========== Phase 5b: 跨块关系补全（轻量级：多块文档逐篇补全跨章节关系） ==========
+      // 将 relationChunks 按 docId 分组，找出多块文档中跨块分布但尚未连接的实体
+      const docChunksMap = new Map<number, TextChunk[]>()
       for (const chunk of relationChunks) {
-        if (!noteChunksMap.has(chunk.noteId)) noteChunksMap.set(chunk.noteId, [])
-        noteChunksMap.get(chunk.noteId)!.push(chunk)
+        if (!docChunksMap.has(chunk.docId)) docChunksMap.set(chunk.docId, [])
+        docChunksMap.get(chunk.docId)!.push(chunk)
       }
 
       const entityDescMap = new Map(
@@ -673,37 +673,37 @@ export class KnowledgeGraphService {
       )
 
       const crossChunkTasks: Array<{
-        noteId: number
-        noteTitle: string
+        docId: number
+        docTitle: string
         entities: { name: string; type: string; description: string }[]
         existingPairs: { source: string; target: string }[]
       }> = []
 
-      for (const [noteId, chunks] of noteChunksMap) {
+      for (const [docId, chunks] of docChunksMap) {
         if (chunks.length < 2) continue
 
-        // 收集该笔记所有块中出现的实体
-        const noteEntitySet = new Set<string>()
+        // 收集该文档所有块中出现的实体
+        const docEntitySet = new Set<string>()
         for (const chunk of chunks) {
-          filterEntitiesInText(allEntityNames, chunk.content).forEach((e) => noteEntitySet.add(e))
+          filterEntitiesInText(allEntityNames, chunk.content).forEach((e) => docEntitySet.add(e))
         }
-        if (noteEntitySet.size < 2) continue
+        if (docEntitySet.size < 2) continue
 
-        // 该笔记已有的 per-chunk 关系
+        // 该文档已有的 per-chunk 关系
         const existingPairs = allRelations
-          .filter((r) => r.source_note_id === noteId)
+          .filter((r) => r.source_note_id === docId)
           .map((r) => ({ source: r.source, target: r.target }))
 
-        const entityList = [...noteEntitySet]
+        const entityList = [...docEntitySet]
           .map((name) => entityDescMap.get(name)!)
           .filter(Boolean)
 
         if (entityList.length < 2) continue
 
-        const noteEntry = noteEntries.find((e) => e.noteId === noteId)
+        const docEntry = docEntries.find((e) => e.docId === docId)
         crossChunkTasks.push({
-          noteId,
-          noteTitle: noteEntry?.title || `笔记 #${noteId}`,
+          docId,
+          docTitle: docEntry?.title || `文档 #${docId}`,
           entities: entityList,
           existingPairs
         })
@@ -712,16 +712,16 @@ export class KnowledgeGraphService {
       if (crossChunkTasks.length > 0) {
         onProgress?.({
           phase: 'extract_relations',
-          processedNotes: totalNotes,
-          totalNotes,
-          message: `跨块关系补全中... ${crossChunkTasks.length} 篇笔记`
+          processedDocs: totalDocs,
+          totalDocs,
+          message: `跨块关系补全中... ${crossChunkTasks.length} 篇文档`
         })
 
         for (let i = 0; i < crossChunkTasks.length; i += maxConcurrency) {
           const batch = crossChunkTasks.slice(i, i + maxConcurrency)
           const batchResults = await Promise.all(
-            batch.map(({ noteId, noteTitle, entities, existingPairs }) =>
-              this.extractCrossChunkRelations(noteTitle, entities, existingPairs, noteId)
+            batch.map(({ docId, docTitle, entities, existingPairs }) =>
+              this.extractCrossChunkRelations(docTitle, entities, existingPairs, docId)
             )
           )
           for (const relations of batchResults) {
@@ -733,8 +733,8 @@ export class KnowledgeGraphService {
       // ========== Phase 6: 去重并批量保存关系 ==========
       onProgress?.({
         phase: 'save_relations',
-        processedNotes: totalNotes,
-        totalNotes,
+        processedDocs: totalDocs,
+        totalDocs,
         message: '保存关系...'
       })
 
@@ -771,13 +771,13 @@ export class KnowledgeGraphService {
       )
 
       // ========== 完成 ==========
-      const allNoteIds = noteEntries.map((e) => e.noteId)
+      const allDocIds = docEntries.map((e) => e.docId)
       await updateBuildJob(jobId, {
         status: 'completed',
-        processed_notes: totalNotes,
+        processed_notes: totalDocs,
         entity_count: mergedEntities.length,
         relation_count: savedRelationCount,
-        processed_note_ids: JSON.stringify(allNoteIds)
+        processed_note_ids: JSON.stringify(allDocIds)
       })
 
       logger.info(
@@ -796,77 +796,77 @@ export class KnowledgeGraphService {
   }
 
   /**
-   * 将多篇笔记增量追加到已有知识图谱
-   * 不会清空已有数据，只提取这些笔记的实体和关系并合并到图谱中
+   * 将多篇文档增量追加到已有知识图谱
+   * 不会清空已有数据，只提取这些文档的实体和关系并合并到图谱中
    */
-  async appendNotes(
+  async appendDocs(
     wikiId: number,
-    noteIds: number[],
+    docIds: number[],
     onProgress?: ProgressCallback,
     config?: BuildConfig
   ): Promise<{ entitiesAdded: number; relationsAdded: number }> {
     const maxConcurrency = config?.maxConcurrency ?? 8
     const maxChunkSize = config?.maxChunkSize
     const startTime = Date.now()
-    const totalNotes = noteIds.length
+    const totalDocs = docIds.length
 
-    if (totalNotes === 0) {
+    if (totalDocs === 0) {
       return { entitiesAdded: 0, relationsAdded: 0 }
     }
 
-    // 1. 并行读取所有笔记内容
+    // 1. 并行读取所有文档内容
     onProgress?.({
       phase: 'collect',
-      processedNotes: 0,
-      totalNotes,
-      message: '读取笔记内容...'
+      processedDocs: 0,
+      totalDocs,
+      message: '读取文档内容...'
     })
 
-    const noteEntries: { noteId: number; content: string; title: string }[] = []
-    for (let i = 0; i < noteIds.length; i++) {
-      const note = await getNoteById(noteIds[i])
+    const docEntries: { docId: number; content: string; title: string }[] = []
+    for (let i = 0; i < docIds.length; i++) {
+      const note = await getDocById(docIds[i])
       if (!note || !note.content) {
-        logger.warn(`Note ${noteIds[i]} not found or empty, skipping`)
+        logger.warn(`Doc ${docIds[i]} not found or empty, skipping`)
         continue
       }
-      noteEntries.push({
-        noteId: note.id,
+      docEntries.push({
+        docId: note.id,
         title: note.title,
-        content: assembleNoteContent(note.title, note.content)
+        content: assembleDocContent(note.title, note.content)
       })
     }
 
-    if (noteEntries.length === 0) {
-      throw new Error('所选笔记均不存在或内容为空')
+    if (docEntries.length === 0) {
+      throw new Error('所选文档均不存在或内容为空')
     }
 
     // 2. 获取已有图谱实体
     onProgress?.({
       phase: 'extract_entities',
-      processedNotes: 0,
-      totalNotes,
+      processedDocs: 0,
+      totalDocs,
       message: '加载已有图谱实体...'
     })
     const { entities: existingEntities } = await getFullGraphData(wikiId)
 
     // 3. 分块 + 实体抽取（并行批处理）
     const allChunks: TextChunk[] = []
-    for (const entry of noteEntries) {
+    for (const entry of docEntries) {
       const chunks = splitByMarkdownHeaders(entry.content, maxChunkSize)
       chunks.forEach((chunk, idx) => {
-        allChunks.push({ noteId: entry.noteId, chunkIndex: idx, content: chunk })
+        allChunks.push({ docId: entry.docId, chunkIndex: idx, content: chunk })
       })
     }
 
     const totalChunks = allChunks.length
     onProgress?.({
       phase: 'extract_entities',
-      processedNotes: 0,
-      totalNotes,
+      processedDocs: 0,
+      totalDocs,
       message: `开始实体抽取... ${totalChunks} 个文本块`
     })
 
-    const chunkEntities: Map<number, Omit<ExtractedEntity, 'source_note_ids'>[]> = new Map()
+    const chunkEntities: Map<number, Omit<ExtractedEntity, 'source_doc_ids'>[]> = new Map()
 
     for (let i = 0; i < allChunks.length; i += maxConcurrency) {
       const batch = allChunks.slice(i, i + maxConcurrency)
@@ -875,37 +875,37 @@ export class KnowledgeGraphService {
       )
 
       for (let j = 0; j < batch.length; j++) {
-        const noteId = batch[j].noteId
-        const existing = chunkEntities.get(noteId) || []
-        chunkEntities.set(noteId, [...existing, ...batchResults[j]])
+        const docId = batch[j].docId
+        const existing = chunkEntities.get(docId) || []
+        chunkEntities.set(docId, [...existing, ...batchResults[j]])
       }
 
       const processedChunks = Math.min(i + maxConcurrency, totalChunks)
-      const processedNotes = new Set(allChunks.slice(0, i + maxConcurrency).map((c) => c.noteId))
+      const processedDocs = new Set(allChunks.slice(0, i + maxConcurrency).map((c) => c.docId))
         .size
       onProgress?.({
         phase: 'extract_entities',
-        processedNotes: Math.min(processedNotes, totalNotes),
-        totalNotes,
+        processedDocs: Math.min(processedDocs, totalDocs),
+        totalDocs,
         message: `实体抽取中... ${processedChunks}/${totalChunks} 块`
       })
     }
 
-    // Gleaning 二次抽取（可选，由 gleaningMaxNotes 控制成本上限）
+    // Gleaning 二次抽取（可选，由 gleaningMaxDocs 控制成本上限）
     const enableGleaning = config?.enableGleaning !== false
     if (enableGleaning) {
-      const maxGleaningNotes = config?.gleaningMaxNotes ?? 100
+      const maxGleaningDocs = config?.gleaningMaxDocs ?? 100
       const gleaningEntries =
-        maxGleaningNotes > 0 && noteEntries.length > maxGleaningNotes
-          ? noteEntries.slice(0, maxGleaningNotes)
-          : noteEntries
+        maxGleaningDocs > 0 && docEntries.length > maxGleaningDocs
+          ? docEntries.slice(0, maxGleaningDocs)
+          : docEntries
 
       if (gleaningEntries.length > 0) {
         onProgress?.({
           phase: 'extract_entities',
-          processedNotes: totalNotes,
-          totalNotes,
-          message: `二次扫描遗漏实体... (${gleaningEntries.length} 篇笔记)`
+          processedDocs: totalDocs,
+          totalDocs,
+          message: `二次扫描遗漏实体... (${gleaningEntries.length} 篇文档)`
         })
 
         const gleaningBatchSize = maxConcurrency
@@ -913,7 +913,7 @@ export class KnowledgeGraphService {
           const batch = gleaningEntries.slice(i, i + gleaningBatchSize)
           const batchResults = await Promise.all(
             batch.map(async (entry) => {
-              const existingEntities = chunkEntities.get(entry.noteId) || []
+              const existingEntities = chunkEntities.get(entry.docId) || []
               const existingNames = existingEntities.map((e) => e.name)
               if (existingNames.length === 0) return []
               return this.gleanEntities(entry.content, existingNames)
@@ -922,19 +922,19 @@ export class KnowledgeGraphService {
 
           for (let j = 0; j < batch.length; j++) {
             if (batchResults[j].length > 0) {
-              const existing = chunkEntities.get(batch[j].noteId) || []
-              chunkEntities.set(batch[j].noteId, [...existing, ...batchResults[j]])
+              const existing = chunkEntities.get(batch[j].docId) || []
+              chunkEntities.set(batch[j].docId, [...existing, ...batchResults[j]])
             }
           }
         }
       }
     }
 
-    const noteToEntities = chunkEntities
+    const docToEntities = chunkEntities
 
-    // 4. 去重合并同笔记内的同名实体，附加 source_note_ids
+    // 4. 去重合并同文档内的同名实体，附加 source_doc_ids
     const allNewEntities: ExtractedEntity[] = []
-    for (const [noteId, entities] of noteToEntities) {
+    for (const [docId, entities] of docToEntities) {
       const seen = new Map<string, ExtractedEntity>()
       for (const e of entities) {
         const existing = seen.get(e.name)
@@ -945,7 +945,7 @@ export class KnowledgeGraphService {
             existing.description = e.description
           }
         } else {
-          seen.set(e.name, { ...e, source_note_ids: [noteId] })
+          seen.set(e.name, { ...e, source_doc_ids: [docId] })
         }
       }
       for (const entity of seen.values()) {
@@ -965,15 +965,15 @@ export class KnowledgeGraphService {
       description: e.description || '',
       aliases: e.aliases ? JSON.parse(e.aliases) : [],
       confidence: e.confidence,
-      source_note_ids: e.source_note_ids ? JSON.parse(e.source_note_ids) : []
+      source_doc_ids: e.source_note_ids ? JSON.parse(e.source_note_ids) : []
     }))
 
     const allEntitiesForMerge = [...existingAsExtracted, ...allNewEntities]
 
     onProgress?.({
       phase: 'merge_entities',
-      processedNotes: totalNotes,
-      totalNotes,
+      processedDocs: totalDocs,
+      totalDocs,
       message: '实体消歧合并中...'
     })
     const mergedEntities = await this.mergeEntities(allEntitiesForMerge)
@@ -981,8 +981,8 @@ export class KnowledgeGraphService {
     // 6. 批量保存实体
     onProgress?.({
       phase: 'save_entities',
-      processedNotes: totalNotes,
-      totalNotes,
+      processedDocs: totalDocs,
+      totalDocs,
       message: `保存 ${mergedEntities.length} 个实体...`
     })
 
@@ -995,7 +995,7 @@ export class KnowledgeGraphService {
         aliases: JSON.stringify(e.aliases),
         properties: null,
         confidence: e.confidence,
-        source_note_ids: JSON.stringify(e.source_note_ids)
+        source_note_ids: JSON.stringify(e.source_doc_ids)
       }))
     )
 
@@ -1004,10 +1004,10 @@ export class KnowledgeGraphService {
 
     // 按 Markdown 标题层级重新分块，与实体抽取保持相同粒度
     const relationChunks: TextChunk[] = []
-    for (const entry of noteEntries) {
+    for (const entry of docEntries) {
       const chunks = splitByMarkdownHeaders(entry.content, maxChunkSize)
       chunks.forEach((chunk, idx) => {
-        relationChunks.push({ noteId: entry.noteId, chunkIndex: idx, content: chunk })
+        relationChunks.push({ docId: entry.docId, chunkIndex: idx, content: chunk })
       })
     }
 
@@ -1016,8 +1016,8 @@ export class KnowledgeGraphService {
 
     onProgress?.({
       phase: 'extract_relations',
-      processedNotes: 0,
-      totalNotes,
+      processedDocs: 0,
+      totalDocs,
       message: `开始关系抽取... ${totalRelationChunks} 个文本块`
     })
 
@@ -1033,7 +1033,7 @@ export class KnowledgeGraphService {
       const batchResults = await Promise.all(
         batchRelevant.map(async ({ chunk, relevantEntities }) => {
           if (relevantEntities.length < 2) return []
-          return this.extractRelations(chunk.content, relevantEntities, chunk.noteId)
+          return this.extractRelations(chunk.content, relevantEntities, chunk.docId)
         })
       )
 
@@ -1042,22 +1042,22 @@ export class KnowledgeGraphService {
       }
 
       const processedChunks = Math.min(i + maxConcurrency, totalRelationChunks)
-      const processedNoteIds = new Set(
-        relationChunks.slice(0, i + maxConcurrency).map((c) => c.noteId)
+      const processedDocIds = new Set(
+        relationChunks.slice(0, i + maxConcurrency).map((c) => c.docId)
       )
       onProgress?.({
         phase: 'extract_relations',
-        processedNotes: processedNoteIds.size,
-        totalNotes,
+        processedDocs: processedDocIds.size,
+        totalDocs,
         message: `关系抽取中... ${processedChunks}/${totalRelationChunks} 块`
       })
     }
 
-    // ========== Phase 7b: 跨块关系补全（轻量级：多块笔记逐篇补全跨章节关系） ==========
-    const noteChunksMap = new Map<number, TextChunk[]>()
+    // ========== Phase 7b: 跨块关系补全（轻量级：多块文档逐篇补全跨章节关系） ==========
+    const docChunksMap = new Map<number, TextChunk[]>()
     for (const chunk of relationChunks) {
-      if (!noteChunksMap.has(chunk.noteId)) noteChunksMap.set(chunk.noteId, [])
-      noteChunksMap.get(chunk.noteId)!.push(chunk)
+      if (!docChunksMap.has(chunk.docId)) docChunksMap.set(chunk.docId, [])
+      docChunksMap.get(chunk.docId)!.push(chunk)
     }
 
     const entityDescMap = new Map(
@@ -1068,33 +1068,33 @@ export class KnowledgeGraphService {
     )
 
     const crossChunkTasks: Array<{
-      noteId: number
-      noteTitle: string
+      docId: number
+      docTitle: string
       entities: { name: string; type: string; description: string }[]
       existingPairs: { source: string; target: string }[]
     }> = []
 
-    for (const [noteId, chunks] of noteChunksMap) {
+    for (const [docId, chunks] of docChunksMap) {
       if (chunks.length < 2) continue
 
-      const noteEntitySet = new Set<string>()
+      const docEntitySet = new Set<string>()
       for (const chunk of chunks) {
-        filterEntitiesInText(allEntityNames, chunk.content).forEach((e) => noteEntitySet.add(e))
+        filterEntitiesInText(allEntityNames, chunk.content).forEach((e) => docEntitySet.add(e))
       }
-      if (noteEntitySet.size < 2) continue
+      if (docEntitySet.size < 2) continue
 
       const existingPairs = allRelations
-        .filter((r) => r.source_note_id === noteId)
+        .filter((r) => r.source_note_id === docId)
         .map((r) => ({ source: r.source, target: r.target }))
 
-      const entityList = [...noteEntitySet].map((name) => entityDescMap.get(name)!).filter(Boolean)
+      const entityList = [...docEntitySet].map((name) => entityDescMap.get(name)!).filter(Boolean)
 
       if (entityList.length < 2) continue
 
-      const noteEntry = noteEntries.find((e) => e.noteId === noteId)
+      const docEntry = docEntries.find((e) => e.docId === docId)
       crossChunkTasks.push({
-        noteId,
-        noteTitle: noteEntry?.title || `笔记 #${noteId}`,
+        docId,
+        docTitle: docEntry?.title || `文档 #${docId}`,
         entities: entityList,
         existingPairs
       })
@@ -1103,16 +1103,16 @@ export class KnowledgeGraphService {
     if (crossChunkTasks.length > 0) {
       onProgress?.({
         phase: 'extract_relations',
-        processedNotes: totalNotes,
-        totalNotes,
-        message: `跨块关系补全中... ${crossChunkTasks.length} 篇笔记`
+        processedDocs: totalDocs,
+        totalDocs,
+        message: `跨块关系补全中... ${crossChunkTasks.length} 篇文档`
       })
 
       for (let i = 0; i < crossChunkTasks.length; i += maxConcurrency) {
         const batch = crossChunkTasks.slice(i, i + maxConcurrency)
         const batchResults = await Promise.all(
-          batch.map(({ noteId, noteTitle, entities, existingPairs }) =>
-            this.extractCrossChunkRelations(noteTitle, entities, existingPairs, noteId)
+          batch.map(({ docId, docTitle, entities, existingPairs }) =>
+            this.extractCrossChunkRelations(docTitle, entities, existingPairs, docId)
           )
         )
         for (const relations of batchResults) {
@@ -1124,8 +1124,8 @@ export class KnowledgeGraphService {
     // 8. 去重并批量保存关系
     onProgress?.({
       phase: 'save_relations',
-      processedNotes: totalNotes,
-      totalNotes,
+      processedDocs: totalDocs,
+      totalDocs,
       message: '保存关系...'
     })
 
@@ -1159,15 +1159,15 @@ export class KnowledgeGraphService {
       `Notes append completed: ${mergedEntities.length - existingEntities.length} entities, ${savedRelationCount} relations in ${Date.now() - startTime}ms`
     )
 
-    // 更新 build job 的 processed_note_ids（与已有笔记 ID 合并去重）
+    // 更新 build job 的 processed_note_ids（与已有文档 ID 合并去重）
     const existingJob = await getBuildJobByWikiId(wikiId)
-    const existingNoteIds: number[] = existingJob?.processed_note_ids
+    const existingDocIds: number[] = existingJob?.processed_note_ids
       ? JSON.parse(existingJob.processed_note_ids)
       : []
-    const mergedNoteIds = [...new Set([...existingNoteIds, ...noteIds])]
+    const mergedDocIds = [...new Set([...existingDocIds, ...docIds])]
     if (existingJob) {
       await updateBuildJob(existingJob.id, {
-        processed_note_ids: JSON.stringify(mergedNoteIds)
+        processed_note_ids: JSON.stringify(mergedDocIds)
       })
     }
 
@@ -1178,39 +1178,39 @@ export class KnowledgeGraphService {
   }
 
   /**
-   * 收集知识库下所有笔记的内容（优化：并行读取笔记）
+   * 收集知识库下所有文档的内容（优化：并行读取文档）
    */
-  private async collectWikiNotes(
+  private async collectWikiDocs(
     wikiId: number
-  ): Promise<{ noteId: number; content: string; title: string }[]> {
+  ): Promise<{ docId: number; content: string; title: string }[]> {
     const directories = await getDirectoriesByWikiId(wikiId)
-    const seenNoteIds = new Set<number>()
+    const seenDocIds = new Set<number>()
 
-    // 先收集所有笔记引用
-    const noteRefs: { note_id: number }[] = []
+    // 先收集所有文档引用
+    const docRefs: { doc_id: number }[] = []
     for (const dir of directories) {
-      const refs = await getNotesByDirectoryId(dir.id)
+      const refs = await getDocsByDirectoryId(dir.id)
       for (const ref of refs) {
-        if (!seenNoteIds.has(ref.note_id)) {
-          seenNoteIds.add(ref.note_id)
-          noteRefs.push({ note_id: ref.note_id })
+        if (!seenDocIds.has(ref.doc_id)) {
+          seenDocIds.add(ref.doc_id)
+          docRefs.push({ doc_id: ref.doc_id })
         }
       }
     }
 
-    // 并行读取所有笔记（分批防止过载）
+    // 并行读取所有文档（分批防止过载）
     const BATCH_SIZE = 20
-    const results: { noteId: number; content: string; title: string }[] = []
+    const results: { docId: number; content: string; title: string }[] = []
 
-    for (let i = 0; i < noteRefs.length; i += BATCH_SIZE) {
-      const batch = noteRefs.slice(i, i + BATCH_SIZE)
+    for (let i = 0; i < docRefs.length; i += BATCH_SIZE) {
+      const batch = docRefs.slice(i, i + BATCH_SIZE)
       const batchResults = await Promise.all(
         batch.map(async (ref) => {
-          const note = await getNoteById(ref.note_id)
+          const note = await getDocById(ref.doc_id)
           if (note && note.content) {
             return {
-              noteId: note.id,
-              content: assembleNoteContent(note.title, note.content),
+              docId: note.id,
+              content: assembleDocContent(note.title, note.content),
               title: note.title
             }
           }
@@ -1230,7 +1230,7 @@ export class KnowledgeGraphService {
    */
   private async extractEntitiesFromChunk(
     text: string
-  ): Promise<Omit<ExtractedEntity, 'source_note_ids'>[]> {
+  ): Promise<Omit<ExtractedEntity, 'source_doc_ids'>[]> {
     try {
       const parsed = await this.cachedStructuredInvoke<EntitiesArrayOutput>(
         ENTITY_EXTRACTION_PROMPT.replace('{text}', text),
@@ -1261,7 +1261,7 @@ export class KnowledgeGraphService {
   private async gleanEntities(
     text: string,
     existingNames: string[]
-  ): Promise<Omit<ExtractedEntity, 'source_note_ids'>[]> {
+  ): Promise<Omit<ExtractedEntity, 'source_doc_ids'>[]> {
     try {
       const parsed = await this.cachedStructuredInvoke<EntitiesArrayOutput>(
         ENTITY_GLEANING_PROMPT.replace('{existing_entities}', existingNames.join('、')).replace(
@@ -1304,8 +1304,8 @@ export class KnowledgeGraphService {
       const existing = nameMap.get(key)
       if (existing) {
         existing.aliases = [...new Set([...existing.aliases, ...entity.aliases])]
-        existing.source_note_ids = [
-          ...new Set([...existing.source_note_ids, ...entity.source_note_ids])
+        existing.source_doc_ids = [
+          ...new Set([...existing.source_doc_ids, ...entity.source_doc_ids])
         ]
         existing.confidence = Math.max(existing.confidence, entity.confidence)
         if (entity.description.length > existing.description.length) {
@@ -1336,7 +1336,7 @@ export class KnowledgeGraphService {
                 description: e.description || '',
                 aliases: e.aliases || [],
                 confidence: e.confidence ?? 0.9,
-                source_note_ids: e.source_note_ids || []
+                source_doc_ids: e.source_doc_ids || []
               }) as ExtractedEntity
           )
         }
@@ -1393,8 +1393,8 @@ export class KnowledgeGraphService {
   }
 
   /**
-   * 跨块关系补全（轻量级：仅送实体描述 + 笔记标题，不送全文）
-   * 用于发现同一篇笔记中分散在不同块之间的实体间关系
+   * 跨块关系补全（轻量级：仅送实体描述 + 文档标题，不送全文）
+   * 用于发现同一篇文档中分散在不同块之间的实体间关系
    */
   private async extractCrossChunkRelations(
     noteTitle: string,

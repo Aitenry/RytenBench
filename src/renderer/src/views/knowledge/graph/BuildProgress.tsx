@@ -7,15 +7,15 @@ const { Text } = Typography
 interface BuildProgressProps {
   open: boolean
   phase: string
-  processedNotes: number
-  totalNotes: number
+  processedDocs: number
+  totalDocs: number
   message: string
   onCancel?: () => void
 }
 
 const PHASE_LABELS: Record<string, string> = {
   cleanup: '清理数据',
-  collect: '收集笔记',
+  collect: '收集文档',
   extract_entities: '抽取实体',
   merge_entities: '消歧合并',
   save_entities: '保存实体',
@@ -26,12 +26,12 @@ const PHASE_LABELS: Record<string, string> = {
 const BuildProgress: React.FC<BuildProgressProps> = ({
   open,
   phase,
-  processedNotes,
-  totalNotes,
+  processedDocs,
+  totalDocs,
   message,
   onCancel
 }) => {
-  const percent = totalNotes > 0 ? Math.round((processedNotes / totalNotes) * 100) : 0
+  const percent = totalDocs > 0 ? Math.round((processedDocs / totalDocs) * 100) : 0
   const phaseLabel = PHASE_LABELS[phase] || phase
 
   return (
@@ -65,10 +65,10 @@ const BuildProgress: React.FC<BuildProgressProps> = ({
           {message}
         </Text>
 
-        {totalNotes > 0 && (
+        {totalDocs > 0 && (
           <div style={{ marginTop: 8 }}>
             <Text type="secondary" style={{ fontSize: 12 }}>
-              已处理 {processedNotes}/{totalNotes} 篇笔记
+              已处理 {processedDocs}/{totalDocs} 篇文档
             </Text>
           </div>
         )}

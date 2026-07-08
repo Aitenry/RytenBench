@@ -38,7 +38,7 @@ interface EntityDetailProps {
   entities: GraphEntity[]
   relations: GraphRelation[]
   onRelationClick?: (entityId: number) => void
-  onNoteClick?: (noteId: number) => void
+  onDocClick?: (docId: number) => void
   onClose?: () => void
 }
 
@@ -47,7 +47,7 @@ const EntityDetail: React.FC<EntityDetailProps> = ({
   entities,
   relations,
   onRelationClick,
-  onNoteClick,
+  onDocClick,
   onClose
 }) => {
   const {
@@ -63,13 +63,13 @@ const EntityDetail: React.FC<EntityDetailProps> = ({
     return map
   }, [entities])
 
-  // 获取来源笔记的标题
-  const [noteTitles, setNoteTitles] = useState<Map<number, string>>(new Map())
+  // 获取来源文档的标题
+  const [docTitles, setDocTitles] = useState<Map<number, string>>(new Map())
 
   useEffect(() => {
     if (!entity) return
 
-    const sourceNoteIds: number[] = entity.source_note_ids
+    const sourceDocIds: number[] = entity.source_note_ids
       ? (() => {
           try {
             return JSON.parse(entity.source_note_ids)
@@ -79,17 +79,17 @@ const EntityDetail: React.FC<EntityDetailProps> = ({
         })()
       : []
 
-    if (sourceNoteIds.length === 0) return
+    if (sourceDocIds.length === 0) return
 
     let cancelled = false
     const fetchTitles = async (): Promise<void> => {
       const titles = new Map<number, string>()
       await Promise.all(
-        sourceNoteIds.map(async (id) => {
+        sourceDocIds.map(async (id) => {
           try {
-            const note = await (window as unknown as Window).api.notes.getById(id)
-            if (!cancelled && note) {
-              titles.set(id, note.title)
+            const doc = await (window as unknown as Window).api.docs.getById(id)
+            if (!cancelled && doc) {
+              titles.set(id, doc.title)
             }
           } catch {
             // ignore fetch errors
@@ -97,7 +97,7 @@ const EntityDetail: React.FC<EntityDetailProps> = ({
         })
       )
       if (!cancelled) {
-        setNoteTitles(titles)
+        setDocTitles(titles)
       }
     }
     fetchTitles().then()
@@ -135,7 +135,7 @@ const EntityDetail: React.FC<EntityDetailProps> = ({
       })()
     : []
 
-  const sourceNoteIds: number[] = entity.source_note_ids
+  const sourceDocIds: number[] = entity.source_note_ids
     ? (() => {
         try {
           return JSON.parse(entity.source_note_ids)
@@ -222,25 +222,25 @@ const EntityDetail: React.FC<EntityDetailProps> = ({
         </div>
       )}
 
-      {/* Source Notes */}
-      {sourceNoteIds.length > 0 && (
+      {/* Source Docs */}
+      {sourceDocIds.length > 0 && (
         <div style={{ marginBottom: 16 }}>
-          <Text strong>来源笔记 ({sourceNoteIds.length})</Text>
+          <Text strong>来源文档 ({sourceDocIds.length})</Text>
           <div style={{ marginTop: 4, display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-            {sourceNoteIds.map((id) => (
+            {sourceDocIds.map((id) => (
               <Tag
                 key={id}
                 color="blue"
                 style={{
-                  cursor: onNoteClick ? 'pointer' : 'default',
+                  cursor: onDocClick ? 'pointer' : 'default',
                   maxWidth: '100%',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap'
                 }}
-                onClick={() => onNoteClick?.(id)}
+                onClick={() => onDocClick?.(id)}
               >
-                {noteTitles.get(id) || `笔记 #${id}`}
+                {docTitles.get(id) || `文档 #${id}`}
               </Tag>
             ))}
           </div>

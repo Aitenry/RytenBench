@@ -154,7 +154,7 @@ const Index: React.FC = () => {
 
   // --- 对话 ---
 
-  const handleChatChange = (field: keyof ChatSettings, value: unknown): void => {
+  const handleChatChange = (field: keyof ChatSettings, value: number): void => {
     if (!settings) return
     updateSettings({ chat: { ...settings.chat, [field]: value } }).then()
   }
@@ -182,7 +182,9 @@ const Index: React.FC = () => {
         style={{ background: colorBgContainer, borderRadius: borderRadiusLG }}
       >
         <div className="mb-4">
-          <h2 className="text-lg font-semibold m-0" style={{ color: colorText }}>系统设置</h2>
+          <h2 className="text-lg font-semibold m-0" style={{ color: colorText }}>
+            系统设置
+          </h2>
           <p className="text-sm mt-1" style={{ color: colorTextSecondary }}>
             管理应用的全局配置，设置项保存在本地且跨会话持久化
           </p>
@@ -410,7 +412,7 @@ const Index: React.FC = () => {
 
                 <Form.Item
                   label="Gleaning 二次扫描"
-                  tooltip="实体抽取后再扫描一次，确保遗漏的实体也被发现（笔记数量 ≤ 阈值时执行）"
+                  tooltip="实体抽取后再扫描一次，确保遗漏的实体也被发现（文档数量 ≤ 阈值时执行）"
                 >
                   <Space>
                     <Switch
@@ -424,8 +426,8 @@ const Index: React.FC = () => {
                 </Form.Item>
 
                 <Form.Item
-                  label="Gleaning 笔记数阈值"
-                  tooltip="仅当知识库笔记总数不超过此阈值时才执行 Gleaning，超出则跳过以节省时间"
+                  label="Gleaning 文档数阈值"
+                  tooltip="仅当知识库文档总数不超过此阈值时才执行 Gleaning，超出则跳过以节省时间"
                 >
                   <InputNumber
                     min={0}

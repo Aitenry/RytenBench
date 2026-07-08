@@ -5,7 +5,7 @@ import { RiApps2AddLine, RiArrowLeftLine } from '@remixicon/react'
 
 const { Text } = Typography
 
-interface NoteOption {
+interface DocOption {
   id: number
   title: string
 }
@@ -17,14 +17,14 @@ interface GraphToolbarProps {
   typeFilter: string | undefined
   entityCount: number
   relationCount: number
-  notes: NoteOption[]
-  addedNoteIds: Set<number>
+  docs: DocOption[]
+  addedDocIds: Set<number>
   isAppending: boolean
-  noteFilter: number[]
+  docFilter: number[]
   onSearchChange: (value: string) => void
   onTypeFilterChange: (value: string | undefined) => void
-  onAppendNotes: (noteIds: number[]) => void
-  onNoteFilterChange: (noteIds: number[]) => void
+  onAppendDocs: (docIds: number[]) => void
+  onDocFilterChange: (docIds: number[]) => void
   onBuildGraph: () => void
   onBackToWikiList: () => void
 }
@@ -35,42 +35,42 @@ const GraphToolbar: React.FC<GraphToolbarProps> = ({
   searchQuery,
   entityCount,
   relationCount,
-  notes,
-  addedNoteIds,
+  docs,
+  addedDocIds,
   isAppending,
-  noteFilter,
+  docFilter,
   onSearchChange,
-  onAppendNotes,
-  onNoteFilterChange,
+  onAppendDocs,
+  onDocFilterChange,
   onBuildGraph,
   onBackToWikiList
 }) => {
   const [modalOpen, setModalOpen] = useState(false)
-  const [selectedNoteIds, setSelectedNoteIds] = useState<number[]>([])
+  const [selectedDocIds, setSelectedDocIds] = useState<number[]>([])
 
-  // 过滤掉已在图谱中的笔记
-  const availableNotes = useMemo(
-    () => notes.filter((n) => !addedNoteIds.has(n.id)),
-    [notes, addedNoteIds]
+  // 过滤掉已在图谱中的文档
+  const availableDocs = useMemo(
+    () => docs.filter((d) => !addedDocIds.has(d.id)),
+    [docs, addedDocIds]
   )
 
-  // 笔记过滤下拉选项（稳定引用，避免 Select 反复重建）
-  const noteOptions = useMemo(() => notes.map((n) => ({ value: n.id, label: n.title })), [notes])
+  // 文档过滤下拉选项（稳定引用，避免 Select 反复重建）
+  const docOptions = useMemo(() => docs.map((d) => ({ value: d.id, label: d.title })), [docs])
 
-  // Modal 内追加笔记的选项
+  // Modal 内追加文档的选项
   const appendOptions = useMemo(
-    () => availableNotes.map((n) => ({ value: n.id, label: n.title })),
-    [availableNotes]
+    () => availableDocs.map((d) => ({ value: d.id, label: d.title })),
+    [availableDocs]
   )
 
   const handleOpenModal = (): void => {
-    setSelectedNoteIds([])
+    setSelectedDocIds([])
     setModalOpen(true)
   }
 
   const handleConfirm = (): void => {
-    if (selectedNoteIds.length > 0) {
-      onAppendNotes(selectedNoteIds)
+    if (selectedDocIds.length > 0) {
+      onAppendDocs(selectedDocIds)
     }
     setModalOpen(false)
   }
@@ -114,16 +114,16 @@ const GraphToolbar: React.FC<GraphToolbarProps> = ({
           <Select
             mode="multiple"
             size="small"
-            placeholder="全部笔记"
+            placeholder="全部文档"
             style={{ minWidth: 130, maxWidth: 200 }}
             popupStyle={{ minWidth: 270 }}
-            value={noteFilter}
-            onChange={onNoteFilterChange}
-            options={noteOptions}
+            value={docFilter}
+            onChange={onDocFilterChange}
+            options={docOptions}
             showSearch
             maxTagCount={1}
             allowClear
-            notFoundContent="暂无笔记"
+            notFoundContent="暂无文档"
             maxTagPlaceholder={(omitted) => <span>+{omitted.length}</span>}
             tagRender={(props) => {
               const { label, closable, onClose } = props
@@ -171,30 +171,30 @@ const GraphToolbar: React.FC<GraphToolbarProps> = ({
       </div>
 
       <Modal
-        title="选择笔记追加到图谱"
+        title="选择文档追加到图谱"
         open={modalOpen}
         onOk={handleConfirm}
         onCancel={handleCancel}
         okText="确认追加"
         cancelText="取消"
-        okButtonProps={{ disabled: selectedNoteIds.length === 0 }}
+        okButtonProps={{ disabled: selectedDocIds.length === 0 }}
         destroyOnHidden
       >
         <div style={{ marginBottom: 12 }}>
           <Text type="secondary">
-            已加入图谱的笔记将不会显示在列表中（{addedNoteIds.size} 篇已加入）
+            已加入图谱的文档将不会显示在列表中（{addedDocIds.size} 篇已加入）
           </Text>
         </div>
         <Select
           mode="multiple"
           style={{ width: '100%' }}
-          placeholder="搜索并选择笔记..."
-          value={selectedNoteIds}
-          onChange={setSelectedNoteIds}
+          placeholder="搜索并选择文档..."
+          value={selectedDocIds}
+          onChange={setSelectedDocIds}
           options={appendOptions}
           showSearch
           optionFilterProp="label"
-          notFoundContent={notes.length === 0 ? '暂无笔记' : '所有笔记均已加入图谱'}
+          notFoundContent={docs.length === 0 ? '暂无文档' : '所有文档均已加入图谱'}
           tagRender={(props) => {
             const { label, closable, onClose } = props
             return (

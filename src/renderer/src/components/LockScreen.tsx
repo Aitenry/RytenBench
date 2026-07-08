@@ -41,7 +41,9 @@ const LockScreen: React.FC<LockScreenProps> = ({ onUnlock }) => {
       rootClassName="lock-screen-modal"
     >
       <div className="text-center p-8">
-        <h2 className="text-xl font-semibold mb-4" style={{ color: colorText }}>系统已锁屏</h2>
+        <h2 className="text-xl font-semibold mb-4" style={{ color: colorText }}>
+          系统已锁屏
+        </h2>
         <p className="mb-6" style={{ color: colorTextSecondary }}>
           请输入密码解锁
         </p>

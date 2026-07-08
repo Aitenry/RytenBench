@@ -12,7 +12,7 @@ interface WikiRow {
   image: string | null
   created_at: string
   updated_at: string
-  note_count: number
+  doc_count: number
   tags: string | null
 }
 
@@ -155,7 +155,7 @@ const WikiCard: React.FC<WikiCardProps> = ({ item, onSelect, onEdit, onDelete })
             {new Date(item.updated_at).toLocaleString()}
           </Tag>
           <Tag color="blue" style={{ margin: 0, fontSize: token.fontSizeSM - 2 }}>
-            {item.note_count} 篇笔记
+            {item.doc_count} 篇文档
           </Tag>
         </div>
       </div>

@@ -70,7 +70,7 @@ export const ENTITY_MERGING_PROMPT = `你是一个知识图谱实体消歧助手
       "description": "综合描述",
       "aliases": ["别名1"],
       "confidence": 0.95,
-      "source_note_ids": [1, 2]
+      "source_doc_ids": [1, 2]
     }}
   ],
   "removed_names": ["被合并掉的名称"]
@@ -138,10 +138,10 @@ export const ENTITY_GLEANING_PROMPT = `你之前从以下文本中抽取了一�
 请仅返回 JSON 数组，每个实体包含 name、type、description 字段，格式与第一次抽取相同：`
 
 /** 跨块关系补全 Prompt（轻量级：仅送实体描述，不送全文） */
-export const CROSS_CHUNK_RELATION_PROMPT = `你是一个知识图谱关系补全助手。以下实体出现在同一篇笔记的不同章节中。各章节内的关系已经抽取完毕，请找出跨章节存在的实体间关系。
+export const CROSS_CHUNK_RELATION_PROMPT = `你是一个知识图谱关系补全助手。以下实体出现在同一篇文档的不同章节中。各章节内的关系已经抽取完毕，请找出跨章节存在的实体间关系。
 
-笔记标题：
-{noteTitle}
+文档标题：
+{docTitle}
 
 所有实体（含描述）：
 {entities}
@@ -170,7 +170,7 @@ export const CROSS_CHUNK_RELATION_PROMPT = `你是一个知识图谱关系补全
 - located_in: A 位于 B
 
 要求：
-1. 只返回有合理推断依据的跨章节关系（实体虽分散在不同章节，但在同一篇笔记的上下文中有关联）
+1. 只返回有合理推断依据的跨章节关系（实体虽分散在不同章节，但在同一篇文档的上下文中有关联）
 2. 不要重复「已发现的关系」中列出的关系
 3. source 和 target 必须是给定实体列表中的名称（完全匹配）
 4. description 简短描述关系（15字内）

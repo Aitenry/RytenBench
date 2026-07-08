@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import { TodoItemRow } from '../main/database/mapper/todo'
-import { NoteRow } from '../main/database/mapper/note'
+import { DocRow } from '../main/database/mapper/document'
 import { WikiRow, WikiDirectoryRow } from '../main/database/mapper/wiki'
 import { ChatTopicRow, ChatDialogueRow } from '../main/database/mapper/chat'
 import type { LlmProviderInput, LlmProviderConfig } from '../main/database/mapper/provider'
@@ -23,28 +23,28 @@ const api = {
       ipcRenderer.invoke('todo-items-update', id, updates),
     delete: (id: number) => ipcRenderer.invoke('todo-items-delete', id)
   },
-  notes: {
-    getById: (id: number) => ipcRenderer.invoke('note-get-by-id', id),
+  docs: {
+    getById: (id: number) => ipcRenderer.invoke('doc-get-by-id', id),
     getAll: (page?: number, pageSize?: number, excludeWikiId?: number, search?: string) =>
-      ipcRenderer.invoke('note-get-all', page, pageSize, excludeWikiId, search),
+      ipcRenderer.invoke('doc-get-all', page, pageSize, excludeWikiId, search),
     getPage: (query: string, page?: number, pageSize?: number) =>
-      ipcRenderer.invoke('note-page-get', query, page, pageSize),
+      ipcRenderer.invoke('doc-page-get', query, page, pageSize),
     add: (
-      note: Omit<NoteRow, 'id' | 'created_at' | 'updated_at' | 'version'> & {
+      doc: Omit<DocRow, 'id' | 'created_at' | 'updated_at'> & {
         image?: string | null
         content?: string | null
       }
-    ) => ipcRenderer.invoke('note-add', note),
+    ) => ipcRenderer.invoke('doc-add', doc),
     update: (
       id: number,
-      updates: Partial<Omit<NoteRow, 'id' | 'created_at' | 'version'>> & {
+      updates: Partial<Omit<DocRow, 'id' | 'created_at'>> & {
         image?: string | null
         content?: string | null
       }
-    ) => ipcRenderer.invoke('note-update', id, updates),
-    delete: (id: number) => ipcRenderer.invoke('note-delete', id),
+    ) => ipcRenderer.invoke('doc-update', id, updates),
+    delete: (id: number) => ipcRenderer.invoke('doc-delete', id),
     deleteByTimeRange: (startTime: string, endTime: string) =>
-      ipcRenderer.invoke('note-delete-by-time-range', startTime, endTime)
+      ipcRenderer.invoke('doc-delete-by-time-range', startTime, endTime)
   },
   wikis: {
     getById: (id: number) => ipcRenderer.invoke('wiki-get-by-id', id),
@@ -62,13 +62,13 @@ const api = {
       ipcRenderer.invoke('wiki-directory-update', id, updates),
     deleteDirectory: (id: number) => ipcRenderer.invoke('wiki-directory-delete', id),
     getNotesByDirectory: (directoryId: number) =>
-      ipcRenderer.invoke('wiki-directory-notes-get', directoryId),
+      ipcRenderer.invoke('wiki-directory-docs-get', directoryId),
     addNoteToDirectory: (directoryId: number, noteId: number, sortOrder?: number) =>
       ipcRenderer.invoke('wiki-directory-note-add', directoryId, noteId, sortOrder),
     removeNoteFromDirectory: (directoryId: number, noteId: number) =>
-      ipcRenderer.invoke('wiki-directory-note-remove', directoryId, noteId),
+      ipcRenderer.invoke('wiki-directory-doc-remove', directoryId, noteId),
     getDirectoriesByNote: (noteId: number) =>
-      ipcRenderer.invoke('wiki-note-directories-get', noteId)
+      ipcRenderer.invoke('wiki-doc-directories-get', noteId)
   },
   file: {
     selectImageFile: (allowImages?: boolean) =>
@@ -77,18 +77,7 @@ const api = {
       ipcRenderer.invoke('select-text-file') as Promise<{
         fileName: string
         filePath: string
-      } | null>,
-    importNovel: (options: { filePath: string; coverDataUrl?: string | null }) =>
-      ipcRenderer.invoke('import-novel', options) as Promise<{ chapterCount: number }>,
-    onImportNovelProgress: (
-      callback: (progress: { processedNotes: number; totalNotes: number; message: string }) => void
-    ) => {
-      ipcRenderer.removeAllListeners('import-novel-progress')
-      ipcRenderer.on('import-novel-progress', (_event, progress) => callback(progress))
-      return () => {
-        ipcRenderer.removeAllListeners('import-novel-progress')
-      }
-    }
+      } | null>
   },
   setting: {
     getLockScreenCode: () => ipcRenderer.invoke('lock-screen-code'),
@@ -146,8 +135,8 @@ const api = {
       ipcRenderer.invoke('chat-dialogue-delete-by-topic', topicId)
   },
   graph: {
-    getData: (wikiId: number, typeFilter?: string, noteIds?: number[]) =>
-      ipcRenderer.invoke('graph-data-get', wikiId, typeFilter, noteIds),
+    getData: (wikiId: number, typeFilter?: string, docIds?: number[]) =>
+      ipcRenderer.invoke('graph-data-get', wikiId, typeFilter, docIds),
     getEntity: (entityId: number) => ipcRenderer.invoke('graph-entity-get', entityId),
     searchEntities: (wikiId: number, query: string) =>
       ipcRenderer.invoke('graph-entity-search', wikiId, query),
@@ -156,18 +145,18 @@ const api = {
     deleteEntity: (id: number) => ipcRenderer.invoke('graph-entity-delete', id),
     deleteRelation: (id: number) => ipcRenderer.invoke('graph-relation-delete', id),
     getBuildStatus: (wikiId: number) => ipcRenderer.invoke('graph-build-status', wikiId),
-    appendNotes: (wikiId: number, noteIds: number[]) =>
-      ipcRenderer.invoke('graph-notes-append', wikiId, noteIds),
-    getProcessedNoteIds: (wikiId: number) =>
-      ipcRenderer.invoke('graph-processed-notes-get', wikiId) as Promise<number[]>,
+    appendDocs: (wikiId: number, docIds: number[]) =>
+      ipcRenderer.invoke('graph-docs-append', wikiId, docIds),
+    getProcessedDocIds: (wikiId: number) =>
+      ipcRenderer.invoke('graph-processed-docs-get', wikiId) as Promise<number[]>,
     buildGraph: (wikiId: number, config?: Record<string, unknown>) => {
       ipcRenderer.send('graph-build-start', wikiId, config)
     },
     onBuildProgress: (
       callback: (progress: {
         phase: string
-        processedNotes: number
-        totalNotes: number
+        processedDocs: number
+        totalDocs: number
         message: string
       }) => void
     ) => {

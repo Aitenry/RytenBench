@@ -37,7 +37,7 @@ export const MergedEntitySchema = z.object({
   description: z.string().describe('综合描述'),
   aliases: z.array(z.string()).describe('别名列表'),
   confidence: z.number().describe('置信度 0-1'),
-  source_note_ids: z.array(z.number()).describe('来源笔记 ID 列表')
+  source_doc_ids: z.array(z.number()).describe('来源文档 ID 列表')
 })
 
 /** 实体消歧合并结果 */

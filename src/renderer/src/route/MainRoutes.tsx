@@ -1,7 +1,7 @@
 import React from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import Home from '../views/home/Index'
-import NoteManage from '@renderer/views/notes/manage/Index'
+import DocumentManage from '../views/docs/manage/Index'
 import KnowledgeManage from '../views/knowledge/manage/Index'
 import KnowledgeGraph from '../views/knowledge/graph/Index'
 import PlannerMatters from '../views/planner/matters/Index'
@@ -24,7 +24,7 @@ const MainRoutes: React.FC<MainRoutesProps> = ({ defaultRoute = '/home' }) => {
       {/* 根据参数设置默认路由 */}
       <Route path="/" element={<Navigate to={defaultRoute} replace />} />
       <Route path="/home" element={<Home />} />
-      <Route path="/notes/manage" element={<NoteManage />} />
+      <Route path="/docs/manage" element={<DocumentManage />} />
       <Route path="/knowledge/manage" element={<KnowledgeManage />} />
       <Route path="/knowledge/graph" element={<KnowledgeGraph />} />
       <Route path="/planner/matters" element={<PlannerMatters />} />

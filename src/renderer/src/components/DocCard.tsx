@@ -1,17 +1,16 @@
 import React from 'react'
 import { theme, Card, Typography, Tag, Space } from 'antd'
 import { RiQuillPenAiLine } from '@remixicon/react'
-import { getTagsArray } from '@renderer/utils/note'
+import { getTagsArray } from '@renderer/utils/document'
 
 const { Title, Text } = Typography
 
-interface NoteItem {
+interface DocItem {
   id: number
   title: string
   image: string | null
   summary: string | null
   tags: string | null
-  version: number
   created_at: string
   updated_at: string
   word_count: number
@@ -19,14 +18,14 @@ interface NoteItem {
   isPinned?: boolean
 }
 
-interface NoteCardProps {
-  item: NoteItem
+interface DocCardProps {
+  item: DocItem
   onClick?: () => void
   actions?: React.ReactNode[]
   showContentPreview?: boolean
 }
 
-const NoteCard: React.FC<NoteCardProps> = ({
+const DocCard: React.FC<DocCardProps> = ({
   item,
   onClick,
   actions,
@@ -90,7 +89,7 @@ const NoteCard: React.FC<NoteCardProps> = ({
               style={{ userSelect: 'none', display: 'flex', alignItems: 'center', margin: 0 }}
             >
               <RiQuillPenAiLine size={12} />
-              笔记
+              文档
             </Tag>
             <Title level={5} style={{ margin: 0, color: token.colorTextHeading, flex: 1 }}>
               {item.title}
@@ -146,7 +145,6 @@ const NoteCard: React.FC<NoteCardProps> = ({
             {new Date(item.updated_at).toLocaleString()}
           </Tag>
           <div style={{ display: 'flex', gap: token.marginXS / 2 }}>
-            <Tag style={{ margin: 0, fontSize: token.fontSizeSM - 2 }}>v{item.version}</Tag>
             {word_count > 0 && (
               <Tag style={{ margin: 0, fontSize: token.fontSizeSM - 2 }}>{word_count}字</Tag>
             )}
@@ -157,4 +155,4 @@ const NoteCard: React.FC<NoteCardProps> = ({
   )
 }
 
-export default NoteCard
+export default DocCard

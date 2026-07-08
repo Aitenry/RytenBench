@@ -52,7 +52,7 @@ export interface WikiRow {
   image: string | null
   created_at: string
   updated_at: string
-  note_count: number
+  doc_count: number
   tags: string | null
 }
 

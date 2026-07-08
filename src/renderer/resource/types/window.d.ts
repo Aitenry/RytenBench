@@ -1,5 +1,5 @@
 import { TodoItemRow } from '../../../main/database/mapper/todo'
-import { NoteRow, NoteListItem, NoteWithContent } from '../../../main/database/mapper/note'
+import { DocRow, DocListItem, DocWithContent } from '../../../main/database/mapper/document'
 import { WikiRow, WikiDirectoryRow } from '../../../main/database/mapper/wiki'
 import { ChatTopicRow, ChatDialogueRow } from '../../../main/database/mapper/chat'
 import { GraphEntity, GraphBuildJob, GraphData } from '../../../main/database/mapper/graph'
@@ -67,28 +67,28 @@ export interface Window {
       update: (id: number, updates: Partial<Omit<TodoItemRow, 'id'>>) => Promise<boolean>
       delete: (id: number) => Promise<boolean>
     }
-    notes: {
-      getById: (id: number) => Promise<NoteWithContent | null>
+    docs: {
+      getById: (id: number) => Promise<DocWithContent | null>
       getAll: (
         page?: number,
         pageSize?: number,
         excludeWikiId?: number,
         search?: string
-      ) => Promise<PaginatedResult<NoteListItem>>
+      ) => Promise<PaginatedResult<DocListItem>>
       getPage: (
         query: string,
         page?: number,
         pageSize?: number
-      ) => Promise<PaginatedResult<NoteListItem>>
+      ) => Promise<PaginatedResult<DocListItem>>
       add: (
-        note: Omit<NoteRow, 'id' | 'created_at' | 'updated_at' | 'version'> & {
+        doc: Omit<DocRow, 'id' | 'created_at' | 'updated_at' | 'version'> & {
           image?: string | null
           content?: string | null
         }
       ) => Promise<number>
       update: (
         id: number,
-        updates: Partial<Omit<NoteRow, 'id' | 'created_at' | 'version'>> & {
+        updates: Partial<Omit<DocRow, 'id' | 'created_at'>> & {
           image?: string | null
           content?: string | null
         }
@@ -106,23 +106,12 @@ export interface Window {
         fileName: string
         filePath: string
       } | null>
-      importNovel: (options: {
-        filePath: string
-        coverDataUrl?: string | null
-      }) => Promise<{ chapterCount: number }>
-      onImportNovelProgress: (
-        callback: (progress: {
-          processedNotes: number
-          totalNotes: number
-          message: string
-        }) => void
-      ) => () => void
     }
     wikis: {
       getById: (id: number) => Promise<WikiRow | null>
       getAll: (page?: number, pageSize?: number) => Promise<PaginatedResult<WikiRow>>
       add: (
-        wiki: Omit<WikiRow, 'id' | 'note_count' | 'tags' | 'created_at' | 'updated_at'>
+        wiki: Omit<WikiRow, 'id' | 'doc_count' | 'tags' | 'created_at' | 'updated_at'>
       ) => Promise<number>
       update: (id: number, updates: Partial<Omit<WikiRow, 'id' | 'created_at'>>) => Promise<boolean>
       delete: (id: number) => Promise<boolean>
@@ -137,7 +126,7 @@ export interface Window {
       deleteDirectory: (id: number) => Promise<boolean>
       getNotesByDirectory: (
         directoryId: number
-      ) => Promise<{ note_id: number; sort_order: number }[]>
+      ) => Promise<{ doc_id: number; sort_order: number }[]>
       addNoteToDirectory: (
         directoryId: number,
         noteId: number,
@@ -186,27 +175,27 @@ export interface Window {
       deleteDialoguesByTopic: (topicId: number) => Promise<boolean>
     }
     graph: {
-      getData: (wikiId: number, typeFilter?: string, noteIds?: number[]) => Promise<GraphData>
+      getData: (wikiId: number, typeFilter?: string, docIds?: number[]) => Promise<GraphData>
       getEntity: (entityId: number) => Promise<GraphEntity | null>
       searchEntities: (wikiId: number, query: string) => Promise<GraphEntity[]>
       updateEntity: (id: number, updates: Record<string, unknown>) => Promise<boolean>
       deleteEntity: (id: number) => Promise<boolean>
       deleteRelation: (id: number) => Promise<boolean>
       getBuildStatus: (wikiId: number) => Promise<GraphBuildJob | null>
-      appendNotes: (
+      appendDocs: (
         wikiId: number,
-        noteIds: number[]
+        docIds: number[]
       ) => Promise<{
         entitiesAdded: number
         relationsAdded: number
       }>
-      getProcessedNoteIds: (wikiId: number) => Promise<number[]>
+      getProcessedDocIds: (wikiId: number) => Promise<number[]>
       buildGraph: (wikiId: number, config?: Record<string, unknown>) => void
       onBuildProgress: (
         callback: (progress: {
           phase: string
-          processedNotes: number
-          totalNotes: number
+          processedDocs: number
+          totalDocs: number
           message: string
         }) => void
       ) => () => void

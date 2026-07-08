@@ -48,10 +48,10 @@ const Sidebar: React.FC<SidebarProps> = ({ currentKey, setCurrentKey }) => {
   const mainMenuItems: MenuProps['items'] = [
     { key: 'home', label: '首页', icon: <RiDashboardLine size={18} /> },
     {
-      key: 'notes',
-      label: '笔记',
+      key: 'docs',
+      label: '文档',
       icon: <RiQuillPenAiLine size={18} />,
-      children: [{ key: 'notes/manage', label: '所有笔记', icon: <RiFileListLine size={18} /> }]
+      children: [{ key: 'docs/manage', label: '文档管理', icon: <RiFileListLine size={18} /> }]
     },
     {
       key: 'knowledge',

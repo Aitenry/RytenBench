@@ -7,7 +7,7 @@ import GraphCanvas, { GraphChartData } from './GraphCanvas'
 import EntityDetail from './EntityDetail'
 import GraphToolbar from './GraphToolbar'
 import BuildProgress from './BuildProgress'
-import NotePreviewModal from '@renderer/components/NotePreviewModal'
+import DocPreviewModal from '@renderer/components/DocPreviewModal'
 import {
   ENTITY_TYPE_COLORS,
   ENTITY_TYPE_LABELS,
@@ -44,25 +44,24 @@ const Index: React.FC = () => {
   const [buildMessage, setBuildMessage] = useState('')
   const [showBuildProgress, setShowBuildProgress] = useState(false)
 
-  // Append note state
-  const [notes, setNotes] = useState<{ id: number; title: string }[]>([])
-  const [addedNoteIds, setAddedNoteIds] = useState<Set<number>>(new Set())
+  // Append doc state
+  const [docs, setDocs] = useState<{ id: number; title: string }[]>([])
+  const [addedDocIds, setAddedDocIds] = useState<Set<number>>(new Set())
   const [isAppending, setIsAppending] = useState(false)
 
-  // Note preview state
-  const [previewNote, setPreviewNote] = useState<{
+  // Doc preview state
+  const [previewDoc, setPreviewDoc] = useState<{
     id: number
     title: string
     image: string | null
     summary: string | null
     tags: string | null
-    version: number
     created_at: string
     updated_at: string
     word_count: number
     content?: string | null
   } | null>(null)
-  const [isNotePreviewOpen, setIsNotePreviewOpen] = useState(false)
+  const [isDocPreviewOpen, setIsDocPreviewOpen] = useState(false)
 
   // Load wikis list
   const loadWikis = useCallback(async () => {
@@ -74,13 +73,13 @@ const Index: React.FC = () => {
     }
   }, [])
 
-  // Note filter state (empty = show all)
-  const [noteFilter, setNoteFilter] = useState<number[]>([])
+  // Doc filter state (empty = show all)
+  const [docFilter, setDocFilter] = useState<number[]>([])
 
   // Load all graph data for selected wiki (entities + relations at once)
-  const loadGraphData = useCallback(async (wikiId: number, noteIds?: number[]) => {
+  const loadGraphData = useCallback(async (wikiId: number, docIds?: number[]) => {
     try {
-      const data = await (window as unknown as Window).api.graph.getData(wikiId, undefined, noteIds)
+      const data = await (window as unknown as Window).api.graph.getData(wikiId, undefined, docIds)
       setGraphData(data)
       if (data.entities.length === 0) {
         setSelectedEntity(null)
@@ -90,39 +89,39 @@ const Index: React.FC = () => {
     }
   }, [])
 
-  // Load notes list for the selected wiki
-  const loadNotes = useCallback(async (wikiId: number) => {
+  // Load docs list for the selected wiki
+  const loadDocs = useCallback(async (wikiId: number) => {
     try {
       const directories = await (window as unknown as Window).api.wikis.getDirectories(wikiId)
-      const noteIds = new Set<number>()
-      const noteList: { id: number; title: string }[] = []
+      const docIds = new Set<number>()
+      const docList: { id: number; title: string }[] = []
 
       for (const dir of directories) {
         const refs = await (window as unknown as Window).api.wikis.getNotesByDirectory(dir.id)
         for (const ref of refs) {
-          if (!noteIds.has(ref.note_id)) {
-            noteIds.add(ref.note_id)
-            const note = await (window as unknown as Window).api.notes.getById(ref.note_id)
-            if (note) {
-              noteList.push({ id: note.id, title: note.title })
+          if (!docIds.has(ref.doc_id)) {
+            docIds.add(ref.doc_id)
+            const doc = await (window as unknown as Window).api.docs.getById(ref.doc_id)
+            if (doc) {
+              docList.push({ id: doc.id, title: doc.title })
             }
           }
         }
       }
 
-      setNotes(noteList)
+      setDocs(docList)
     } catch (error) {
-      console.error('Failed to load notes:', error)
+      console.error('Failed to load docs:', error)
     }
   }, [])
 
-  // Load processed note IDs (already in graph)
-  const loadProcessedNoteIds = useCallback(async (wikiId: number) => {
+  // Load processed doc IDs (already in graph)
+  const loadProcessedDocIds = useCallback(async (wikiId: number) => {
     try {
-      const ids = await (window as unknown as Window).api.graph.getProcessedNoteIds(wikiId)
-      setAddedNoteIds(new Set(ids))
+      const ids = await (window as unknown as Window).api.graph.getProcessedDocIds(wikiId)
+      setAddedDocIds(new Set(ids))
     } catch (error) {
-      console.error('Failed to load processed note ids:', error)
+      console.error('Failed to load processed doc ids:', error)
     }
   }, [])
 
@@ -178,27 +177,27 @@ const Index: React.FC = () => {
     loadWikis().then()
   }, [loadWikis])
 
-  // Load notes and processed IDs only when wiki changes
+  // Load docs and processed IDs only when wiki changes
   useEffect(() => {
     if (selectedWiki) {
-      loadNotes(selectedWiki.id).then()
-      loadProcessedNoteIds(selectedWiki.id).then()
+      loadDocs(selectedWiki.id).then()
+      loadProcessedDocIds(selectedWiki.id).then()
     }
-  }, [selectedWiki, loadNotes, loadProcessedNoteIds])
+  }, [selectedWiki, loadDocs, loadProcessedDocIds])
 
-  // Load graph when wiki or noteFilter changes
+  // Load graph when wiki or docFilter changes
   useEffect(() => {
     if (selectedWiki) {
-      loadGraphData(selectedWiki.id, noteFilter.length > 0 ? noteFilter : undefined).then()
+      loadGraphData(selectedWiki.id, docFilter.length > 0 ? docFilter : undefined).then()
     }
-  }, [selectedWiki, noteFilter, loadGraphData])
+  }, [selectedWiki, docFilter, loadGraphData])
 
   // Listen for build progress
   useEffect(() => {
     return (window as unknown as Window).api.graph.onBuildProgress((progress) => {
       setBuildPhase(progress.phase)
-      setBuildProcessed(progress.processedNotes)
-      setBuildTotal(progress.totalNotes)
+      setBuildProcessed(progress.processedDocs)
+      setBuildTotal(progress.totalDocs)
       setBuildMessage(progress.message)
     })
   }, [])
@@ -217,10 +216,10 @@ const Index: React.FC = () => {
       )
       if (selectedWiki) {
         loadGraphData(selectedWiki.id).then()
-        loadProcessedNoteIds(selectedWiki.id).then()
+        loadProcessedDocIds(selectedWiki.id).then()
       }
     })
-  }, [selectedWiki, loadGraphData, loadProcessedNoteIds, viewMessage])
+  }, [selectedWiki, loadGraphData, loadProcessedDocIds, viewMessage])
 
   // Listen for build error
   useEffect(() => {
@@ -285,22 +284,22 @@ const Index: React.FC = () => {
     setSelectedEntity(null)
     setSearchQuery('')
     setTypeFilter(undefined)
-    setNoteFilter([])
+    setDocFilter([])
   }
 
-  // Handle append notes to graph
-  const handleAppendNotes = async (noteIds: number[]): Promise<void> => {
-    if (!selectedWiki || noteIds.length === 0) return
+  // Handle append docs to graph
+  const handleAppendDocs = async (docIds: number[]): Promise<void> => {
+    if (!selectedWiki || docIds.length === 0) return
 
     setIsAppending(true)
     setShowBuildProgress(true)
     setBuildPhase('collect')
     setBuildProcessed(0)
-    setBuildTotal(noteIds.length)
+    setBuildTotal(docIds.length)
     setBuildMessage('初始化...')
 
     try {
-      await (window as unknown as Window).api.graph.appendNotes(selectedWiki.id, noteIds)
+      await (window as unknown as Window).api.graph.appendDocs(selectedWiki.id, docIds)
     } catch {
       setIsAppending(false)
       setShowBuildProgress(false)
@@ -322,16 +321,16 @@ const Index: React.FC = () => {
     }
   }
 
-  // Handle note tag click (open note preview)
-  const handleNoteClick = async (noteId: number): Promise<void> => {
+  // Handle doc tag click (open doc preview)
+  const handleDocClick = async (docId: number): Promise<void> => {
     try {
-      const note = await (window as unknown as Window).api.notes.getById(noteId)
-      if (note) {
-        setPreviewNote(note)
-        setIsNotePreviewOpen(true)
+      const doc = await (window as unknown as Window).api.docs.getById(docId)
+      if (doc) {
+        setPreviewDoc(doc)
+        setIsDocPreviewOpen(true)
       }
     } catch (error) {
-      console.error('Failed to load note:', error)
+      console.error('Failed to load doc:', error)
     }
   }
 
@@ -364,7 +363,7 @@ const Index: React.FC = () => {
                     <Flex justify="space-between" align="center">
                       <Text>{option.label}</Text>
                       <Text type="secondary" style={{ fontSize: 12 }}>
-                        {wikis.find((w) => w.id === option.value)?.note_count ?? 0} 篇笔记
+                        {wikis.find((w) => w.id === option.value)?.doc_count ?? 0} 篇文档
                       </Text>
                     </Flex>
                   )}
@@ -394,14 +393,14 @@ const Index: React.FC = () => {
           typeFilter={typeFilter}
           entityCount={graphData?.entities.length || 0}
           relationCount={graphData?.relations.length || 0}
-          notes={notes}
-          addedNoteIds={addedNoteIds}
+          docs={docs}
+          addedDocIds={addedDocIds}
           isAppending={isAppending}
-          noteFilter={noteFilter}
+          docFilter={docFilter}
           onSearchChange={setSearchQuery}
           onTypeFilterChange={handleTypeFilterChange}
-          onAppendNotes={handleAppendNotes}
-          onNoteFilterChange={setNoteFilter}
+          onAppendDocs={handleAppendDocs}
+          onDocFilterChange={setDocFilter}
           onBuildGraph={handleBuildGraph}
           onBackToWikiList={handleBackToWikiList}
         />
@@ -453,7 +452,7 @@ const Index: React.FC = () => {
             entities={graphData?.entities || []}
             relations={graphData?.relations || []}
             onRelationClick={handleRelationClick}
-            onNoteClick={handleNoteClick}
+            onDocClick={handleDocClick}
           />
         </div>
       </div>
@@ -462,16 +461,16 @@ const Index: React.FC = () => {
       <BuildProgress
         open={showBuildProgress}
         phase={buildPhase}
-        processedNotes={buildProcessed}
-        totalNotes={buildTotal}
+        processedDocs={buildProcessed}
+        totalDocs={buildTotal}
         message={buildMessage}
       />
 
-      {/* Note preview modal */}
-      <NotePreviewModal
-        open={isNotePreviewOpen}
-        onCancel={() => setIsNotePreviewOpen(false)}
-        currentNote={previewNote}
+      {/* Doc preview modal */}
+      <DocPreviewModal
+        open={isDocPreviewOpen}
+        onCancel={() => setIsDocPreviewOpen(false)}
+        currentDoc={previewDoc}
       />
     </div>
   )

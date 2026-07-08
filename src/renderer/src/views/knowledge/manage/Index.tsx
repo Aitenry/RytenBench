@@ -3,8 +3,8 @@ import { theme, Modal, Button, Input, Empty, Select, Space, Flex, Typography, Ma
 import { PlusOutlined, EditOutlined, DeleteOutlined, FileTextOutlined } from '@ant-design/icons'
 import { RiBook2Line } from '@remixicon/react'
 import { useMessage } from '@renderer/hooks/useMessage'
-import NoteCard from '@renderer/components/NoteCard'
-import NotePreviewModal from '@renderer/components/NotePreviewModal'
+import DocCard from '@renderer/components/DocCard'
+import DocPreviewModal from '@renderer/components/DocPreviewModal'
 import { Window } from '../../../../resource/types/window'
 import WikiCard from './components/WikiCard'
 import DirectoryTree from './components/DirectoryTree'
@@ -17,7 +17,7 @@ interface WikiRow {
   image: string | null
   created_at: string
   updated_at: string
-  note_count: number
+  doc_count: number
   tags: string | null
 }
 
@@ -32,13 +32,12 @@ interface WikiDirectoryRow {
   updated_at: string
 }
 
-interface NoteListItem {
+interface DocListItem {
   id: number
   title: string
   image: string | null
   summary: string | null
   tags: string | null
-  version: number
   created_at: string
   updated_at: string
   word_count: number
@@ -47,7 +46,7 @@ interface NoteListItem {
 const { Title, Text } = Typography
 const { Option } = Select
 
-interface DirectoryNoteWithDetail extends NoteListItem {
+interface DirectoryDocWithDetail extends DocListItem {
   directory_id: number
   content?: string | null
 }
@@ -62,18 +61,18 @@ const Index: React.FC = () => {
   const [directories, setDirectories] = useState<WikiDirectoryRow[]>([])
   const [directoryTree, setDirectoryTree] = useState<DirectoryWithChildren[]>([])
   const [selectedDirectory, setSelectedDirectory] = useState<WikiDirectoryRow | null>(null)
-  const [directoryNotes, setDirectoryNotes] = useState<DirectoryNoteWithDetail[]>([])
-  const [allNotes, setAllNotes] = useState<NoteListItem[]>([])
-  const [allNotesPage, setAllNotesPage] = useState(1)
-  const [allNotesHasMore, setAllNotesHasMore] = useState(true)
-  const [allNotesLoading, setAllNotesLoading] = useState(false)
+  const [directoryDocs, setDirectoryDocs] = useState<DirectoryDocWithDetail[]>([])
+  const [allDocs, setAllDocs] = useState<DocListItem[]>([])
+  const [allDocsPage, setAllDocsPage] = useState(1)
+  const [allDocsHasMore, setAllDocsHasMore] = useState(true)
+  const [allDocsLoading, setAllDocsLoading] = useState(false)
 
   const [isWikiModalOpen, setIsWikiModalOpen] = useState(false)
   const [isDirectoryModalOpen, setIsDirectoryModalOpen] = useState(false)
   const [isNoteArchiveModalOpen, setIsNoteArchiveModalOpen] = useState(false)
   const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false)
   const [currentItem, setCurrentItem] = useState<WikiRow | WikiDirectoryRow | null>(null)
-  const [currentNote, setCurrentNote] = useState<DirectoryNoteWithDetail | null>(null)
+  const [currentDoc, setCurrentDoc] = useState<DirectoryDocWithDetail | null>(null)
   const [isNew, setIsNew] = useState(false)
 
   const [editTitle, setEditTitle] = useState('')
@@ -86,7 +85,7 @@ const Index: React.FC = () => {
   const [hasMore, setHasMore] = useState(true)
   const [isLoading, setIsLoading] = useState(false)
   const [wikiMasonryKey, setWikiMasonryKey] = useState(0)
-  const [directoryNotesMasonryKey, setDirectoryNotesMasonryKey] = useState(0)
+  const [directoryDocsMasonryKey, setDirectoryDocsMasonryKey] = useState(0)
   const loadMoreRef = useRef<HTMLDivElement>(null)
 
   const { viewMessage } = useMessage()
@@ -163,67 +162,67 @@ const Index: React.FC = () => {
     [buildDirectoryTree]
   )
 
-  const loadDirectoryNotes = useCallback(async (directoryId: number) => {
+  const loadDirectoryDocs = useCallback(async (directoryId: number) => {
     try {
       const noteIds = await (window as unknown as Window).api.wikis.getNotesByDirectory(directoryId)
-      const notes: DirectoryNoteWithDetail[] = []
-      for (const { note_id } of noteIds) {
-        const note = await (window as unknown as Window).api.notes.getById(note_id)
-        if (note) {
-          notes.push({ ...note, directory_id: directoryId })
+      const docs: DirectoryDocWithDetail[] = []
+      for (const { doc_id } of noteIds) {
+        const doc = await (window as unknown as Window).api.docs.getById(doc_id)
+        if (doc) {
+          docs.push({ ...doc, directory_id: directoryId })
         }
       }
-      setDirectoryNotes(notes)
-      setDirectoryNotesMasonryKey((prev) => prev + 1)
+      setDirectoryDocs(docs)
+      setDirectoryDocsMasonryKey((prev) => prev + 1)
     } catch (error) {
-      console.error('Failed to load directory notes:', error)
+      console.error('Failed to load directory docs:', error)
     }
   }, [])
 
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const searchRef = useRef<string>('')
 
-  const loadAllNotes = useCallback(
+  const loadAllDocs = useCallback(
     async (
       pageNum: number = 1,
       excludeWikiId?: number,
       isAppend: boolean = false,
       search?: string
     ) => {
-      if (allNotesLoading) return
-      setAllNotesLoading(true)
+      if (allDocsLoading) return
+      setAllDocsLoading(true)
       try {
-        const result = await (window as unknown as Window).api.notes.getAll(
+        const result = await (window as unknown as Window).api.docs.getAll(
           pageNum,
           20,
           excludeWikiId,
           search
         )
         if (isAppend) {
-          setAllNotes((prev) => [...prev, ...result.items])
+          setAllDocs((prev) => [...prev, ...result.items])
         } else {
-          setAllNotes(result.items)
+          setAllDocs(result.items)
         }
-        setAllNotesHasMore(result.hasMore)
-        setAllNotesPage(pageNum)
+        setAllDocsHasMore(result.hasMore)
+        setAllDocsPage(pageNum)
       } catch (error) {
-        console.error('Failed to load all notes:', error)
+        console.error('Failed to load all docs:', error)
       } finally {
-        setAllNotesLoading(false)
+        setAllDocsLoading(false)
       }
     },
-    [allNotesLoading]
+    [allDocsLoading]
   )
 
-  const handleSearchNotes = useCallback(
+  const handleSearchDocs = useCallback(
     (value: string) => {
       searchRef.current = value
       if (searchTimerRef.current) clearTimeout(searchTimerRef.current)
       searchTimerRef.current = setTimeout(() => {
-        loadAllNotes(1, selectedWiki?.id, false, value || undefined)
+        loadAllDocs(1, selectedWiki?.id, false, value || undefined)
       }, 300)
     },
-    [loadAllNotes, selectedWiki?.id]
+    [loadAllDocs, selectedWiki?.id]
   )
 
   useEffect(() => {
@@ -256,7 +255,7 @@ const Index: React.FC = () => {
   const handleSelectWiki = (wiki: WikiRow): void => {
     setSelectedWiki(wiki)
     setSelectedDirectory(null)
-    setDirectoryNotes([])
+    setDirectoryDocs([])
     loadDirectories(wiki.id).then()
   }
 
@@ -266,26 +265,26 @@ const Index: React.FC = () => {
       const dir = directories.find((d) => d.id === dirId)
       if (dir) {
         setSelectedDirectory(dir)
-        loadDirectoryNotes(dir.id).then()
+        loadDirectoryDocs(dir.id).then()
       }
     }
   }
 
-  const handlePreviewNote = async (note: DirectoryNoteWithDetail): Promise<void> => {
-    const messageKey = 'note-preview-load'
+  const handlePreviewDoc = async (doc: DirectoryDocWithDetail): Promise<void> => {
+    const messageKey = 'doc-preview-load'
     try {
-      viewMessage(messageKey, 'loading', '正在加载笔记内容...')
-      const fullNote = await (window as unknown as Window).api.notes.getById(note.id)
-      if (fullNote) {
-        setCurrentNote({ ...note, content: fullNote.content })
+      viewMessage(messageKey, 'loading', '正在加载文档内容...')
+      const fullDoc = await (window as unknown as Window).api.docs.getById(doc.id)
+      if (fullDoc) {
+        setCurrentDoc({ ...doc, content: fullDoc.content })
         setIsPreviewModalOpen(true)
-        viewMessage(messageKey, 'success', '笔记内容加载成功！', 2)
+        viewMessage(messageKey, 'success', '文档内容加载成功！', 2)
       } else {
-        viewMessage(messageKey, 'error', '笔记不存在')
+        viewMessage(messageKey, 'error', '文档不存在')
       }
     } catch (error) {
-      console.error('Failed to load note content:', error)
-      viewMessage(messageKey, 'error', '加载笔记内容失败')
+      console.error('Failed to load doc content:', error)
+      viewMessage(messageKey, 'error', '加载文档内容失败')
     }
   }
 
@@ -317,7 +316,7 @@ const Index: React.FC = () => {
       setHasMore(true)
       setSelectedWiki(null)
       setSelectedDirectory(null)
-      setDirectoryNotes([])
+      setDirectoryDocs([])
       await loadWikis(1, false)
     } catch (error) {
       console.error('Failed to delete wiki:', error)
@@ -418,7 +417,7 @@ const Index: React.FC = () => {
       await (window as unknown as Window).api.wikis.deleteDirectory(dir.id)
       viewMessage(messageKey, 'success', '目录删除成功！', 2)
       setSelectedDirectory(null)
-      setDirectoryNotes([])
+      setDirectoryDocs([])
       if (selectedWiki) {
         await loadDirectories(selectedWiki.id)
       }
@@ -430,45 +429,45 @@ const Index: React.FC = () => {
 
   const handleOpenArchiveModal = (): void => {
     setSelectedNoteIds([])
-    loadAllNotes(1, selectedWiki?.id, false).then(() => {
+    loadAllDocs(1, selectedWiki?.id, false).then(() => {
       setIsNoteArchiveModalOpen(true)
     })
   }
 
-  const handleArchiveNotes = async (): Promise<void> => {
+  const handleArchiveDocs = async (): Promise<void> => {
     if (!selectedDirectory) return
-    const messageKey = 'archive-notes'
+    const messageKey = 'archive-docs'
     try {
-      viewMessage(messageKey, 'loading', '正在归档笔记...')
-      for (const noteId of selectedNoteIds) {
+      viewMessage(messageKey, 'loading', '正在归档文档...')
+      for (const docId of selectedNoteIds) {
         await (window as unknown as Window).api.wikis.addNoteToDirectory(
           selectedDirectory.id,
-          noteId
+          docId
         )
       }
-      viewMessage(messageKey, 'success', '笔记归档成功！', 2)
+      viewMessage(messageKey, 'success', '文档归档成功！', 2)
       setIsNoteArchiveModalOpen(false)
-      await loadDirectoryNotes(selectedDirectory.id)
+      await loadDirectoryDocs(selectedDirectory.id)
     } catch (error) {
-      console.error('Failed to archive notes:', error)
-      viewMessage(messageKey, 'error', '归档笔记失败')
+      console.error('Failed to archive docs:', error)
+      viewMessage(messageKey, 'error', '归档文档失败')
     }
   }
 
-  const handleRemoveNoteFromDirectory = async (noteId: number): Promise<void> => {
+  const handleRemoveDocFromDirectory = async (docId: number): Promise<void> => {
     if (!selectedDirectory) return
-    const messageKey = 'remove-note'
+    const messageKey = 'remove-doc'
     try {
-      viewMessage(messageKey, 'loading', '正在移除笔记...')
+      viewMessage(messageKey, 'loading', '正在移除文档...')
       await (window as unknown as Window).api.wikis.removeNoteFromDirectory(
         selectedDirectory.id,
-        noteId
+        docId
       )
-      viewMessage(messageKey, 'success', '笔记移除成功！', 2)
-      await loadDirectoryNotes(selectedDirectory.id)
+      viewMessage(messageKey, 'success', '文档移除成功！', 2)
+      await loadDirectoryDocs(selectedDirectory.id)
     } catch (error) {
-      console.error('Failed to remove note:', error)
-      viewMessage(messageKey, 'error', '移除笔记失败')
+      console.error('Failed to remove doc:', error)
+      viewMessage(messageKey, 'error', '移除文档失败')
     }
   }
 
@@ -654,7 +653,7 @@ const Index: React.FC = () => {
               </Title>
               {selectedDirectory && (
                 <Button type="primary" icon={<PlusOutlined />} onClick={handleOpenArchiveModal}>
-                  归档笔记
+                  归档文档
                 </Button>
               )}
             </div>
@@ -662,33 +661,33 @@ const Index: React.FC = () => {
             <div style={{ padding: '12px', flex: 1, overflow: 'auto' }}>
               {!selectedDirectory ? (
                 <Empty description="请从左侧选择一个目录" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-              ) : directoryNotes.length === 0 ? (
-                <Empty description="目录中暂无笔记" image={Empty.PRESENTED_IMAGE_SIMPLE}>
+              ) : directoryDocs.length === 0 ? (
+                <Empty description="目录中暂无文档" image={Empty.PRESENTED_IMAGE_SIMPLE}>
                   <Button type="primary" icon={<PlusOutlined />} onClick={handleOpenArchiveModal}>
-                    归档笔记
+                    归档文档
                   </Button>
                 </Empty>
               ) : (
                 <Masonry
-                  key={directoryNotesMasonryKey}
+                  key={directoryDocsMasonryKey}
                   columns={3}
                   gutter={12}
-                  items={directoryNotes.map((item) => ({
+                  items={directoryDocs.map((item) => ({
                     key: item.id,
                     data: item
                   }))}
                   itemRender={(record) => (
-                    <NoteCard
+                    <DocCard
                       item={record.data}
-                      onClick={() => handlePreviewNote(record.data)}
+                      onClick={() => handlePreviewDoc(record.data)}
                       actions={[
                         <DeleteOutlined
                           key="remove"
                           onClick={(e) => {
                             e.stopPropagation()
                             Modal.confirm({
-                              title: '确定要从目录中移除这篇笔记吗？',
-                              onOk: () => handleRemoveNoteFromDirectory(record.data.id),
+                              title: '确定要从目录中移除这篇文档吗？',
+                              onOk: () => handleRemoveDocFromDirectory(record.data.id),
                               okText: '确定',
                               cancelText: '取消'
                             })
@@ -763,9 +762,9 @@ const Index: React.FC = () => {
       </Modal>
 
       <Modal
-        title="归档笔记"
+        title="归档文档"
         open={isNoteArchiveModalOpen}
-        onOk={handleArchiveNotes}
+        onOk={handleArchiveDocs}
         onCancel={() => setIsNoteArchiveModalOpen(false)}
         okText="归档"
         cancelText="取消"
@@ -773,40 +772,40 @@ const Index: React.FC = () => {
         <Select
           mode="multiple"
           style={{ width: '100%' }}
-          placeholder="搜索并选择要归档的笔记"
+          placeholder="搜索并选择要归档的文档"
           value={selectedNoteIds}
           onChange={setSelectedNoteIds}
           optionLabelProp="label"
           showSearch
-          onSearch={handleSearchNotes}
+          onSearch={handleSearchDocs}
           filterOption={false}
           onPopupScroll={(e) => {
             const target = e.target as HTMLElement
             if (
               target.scrollTop + target.offsetHeight >= target.scrollHeight - 10 &&
-              allNotesHasMore &&
-              !allNotesLoading
+              allDocsHasMore &&
+              !allDocsLoading
             ) {
-              loadAllNotes(allNotesPage + 1, selectedWiki?.id, true, searchRef.current || undefined)
+              loadAllDocs(allDocsPage + 1, selectedWiki?.id, true, searchRef.current || undefined)
             }
           }}
-          notFoundContent={allNotesLoading ? '加载中...' : null}
+          notFoundContent={allDocsLoading ? '加载中...' : null}
         >
-          {allNotes.map((note) => (
-            <Option key={note.id} value={note.id} label={note.title}>
+          {allDocs.map((doc) => (
+            <Option key={doc.id} value={doc.id} label={doc.title}>
               <Space>
                 <FileTextOutlined />
-                <span>{note.title}</span>
+                <span>{doc.title}</span>
               </Space>
             </Option>
           ))}
         </Select>
       </Modal>
 
-      <NotePreviewModal
+      <DocPreviewModal
         open={isPreviewModalOpen}
         onCancel={() => setIsPreviewModalOpen(false)}
-        currentNote={currentNote}
+        currentDoc={currentDoc}
       />
     </div>
   )

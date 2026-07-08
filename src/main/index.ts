@@ -21,16 +21,15 @@ import {
   TodoItemRow
 } from './database/mapper/todo'
 import {
-  getNoteById,
-  getAllNotes,
-  getNotePage,
-  addNote,
-  updateNote,
-  deleteNote,
-  batchAddNotes,
-  deleteNotesByTimeRange,
-  NoteRow
-} from './database/mapper/note'
+  getDocById,
+  getAllDocs,
+  getDocPage,
+  addDoc,
+  updateDoc,
+  deleteDoc,
+  deleteDocsByTimeRange,
+  DocRow
+} from './database/mapper/document'
 import {
   getWikiById,
   getAllWikis,
@@ -41,10 +40,10 @@ import {
   addDirectory,
   updateDirectory,
   deleteDirectory,
-  getNotesByDirectoryId,
-  addNoteToDirectory,
-  removeNoteFromDirectory,
-  getDirectoriesByNoteId,
+  getDocsByDirectoryId,
+  addDocToDirectory,
+  removeDocFromDirectory,
+  getDirectoriesByDocId,
   WikiRow,
   WikiDirectoryRow
 } from './database/mapper/wiki'
@@ -801,92 +800,92 @@ app.whenReady().then(async () => {
     }))
   })
 
-  ipcMain.handle('note-get-by-id', async (_event, id: number) => {
+  ipcMain.handle('doc-get-by-id', async (_event, id: number) => {
     try {
-      return await getNoteById(id)
+      return await getDocById(id)
     } catch (error) {
-      console.error('Error in note-get-by-id:', error)
+      console.error('Error in doc-get-by-id:', error)
       throw error
     }
   })
 
   ipcMain.handle(
-    'note-get-all',
+    'doc-get-all',
     async (_event, page?: number, pageSize?: number, excludeWikiId?: number, search?: string) => {
       try {
-        return await getAllNotes(page, pageSize, excludeWikiId, search)
+        return await getAllDocs(page, pageSize, excludeWikiId, search)
       } catch (error) {
-        console.error('Error in note-get-all:', error)
+        console.error('Error in doc-get-all:', error)
         throw error
       }
     }
   )
 
   ipcMain.handle(
-    'note-page-get',
+    'doc-page-get',
     async (_event, query: string, page?: number, pageSize?: number) => {
       try {
-        return await getNotePage(query, page, pageSize)
+        return await getDocPage(query, page, pageSize)
       } catch (error) {
-        console.error('Error in note-get-by-title:', error)
+        console.error('Error in doc-get-by-title:', error)
         throw error
       }
     }
   )
 
   ipcMain.handle(
-    'note-add',
+    'doc-add',
     async (
       _event,
-      note: Omit<NoteRow, 'id' | 'created_at' | 'updated_at' | 'version'> & {
+      doc: Omit<DocRow, 'id' | 'created_at' | 'updated_at'> & {
         image?: string | null
         content?: string | null
       }
     ) => {
       try {
-        return await addNote(note)
+        return await addDoc(doc)
       } catch (error) {
-        console.error('Error in note-add:', error)
+        console.error('Error in doc-add:', error)
         throw error
       }
     }
   )
 
   ipcMain.handle(
-    'note-update',
+    'doc-update',
     async (
       _event,
       id: number,
-      updates: Partial<Omit<NoteRow, 'id' | 'created_at' | 'version'>> & {
+      updates: Partial<Omit<DocRow, 'id' | 'created_at'>> & {
         image?: string | null
         content?: string | null
       }
     ) => {
       try {
-        return await updateNote(id, updates)
+        return await updateDoc(id, updates)
       } catch (error) {
-        console.error('Error in note-update:', error)
+        console.error('Error in doc-update:', error)
         throw error
       }
     }
   )
 
-  ipcMain.handle('note-delete', async (_event, id: number) => {
+  ipcMain.handle('doc-delete', async (_event, id: number) => {
     try {
-      return await deleteNote(id)
+      return await deleteDoc(id)
     } catch (error) {
-      console.error('Error in note-delete:', error)
+      console.error('Error in doc-delete:', error)
       throw error
     }
   })
 
   ipcMain.handle(
-    'note-delete-by-time-range',
+    'doc-delete-by-time-range',
     async (_event, startTime: string, endTime: string) => {
       try {
-        return await deleteNotesByTimeRange(startTime, endTime)
+        return await deleteDocsByTimeRange(startTime, endTime)
       } catch (error) {
-        console.error('Error in note-delete-by-time-range:', error)
+        console.error('Error in doc-delete-by-time-range:', error)
         throw error
       }
     }
@@ -985,11 +984,11 @@ app.whenReady().then(async () => {
     }
   })
 
-  ipcMain.handle('wiki-directory-notes-get', async (_event, directoryId: number) => {
+  ipcMain.handle('wiki-directory-docs-get', async (_event, directoryId: number) => {
     try {
-      return await getNotesByDirectoryId(directoryId)
+      return await getDocsByDirectoryId(directoryId)
     } catch (error) {
-      console.error('Error in wiki-directory-notes-get:', error)
+      console.error('Error in wiki-directory-docs-get:', error)
       throw error
     }
   })
@@ -998,7 +997,7 @@ app.whenReady().then(async () => {
     'wiki-directory-note-add',
     async (_event, directoryId: number, noteId: number, sortOrder?: number) => {
       try {
-        return await addNoteToDirectory(directoryId, noteId, sortOrder)
+        return await addDocToDirectory(directoryId, noteId, sortOrder)
       } catch (error) {
         console.error('Error in wiki-directory-note-add:', error)
         throw error
@@ -1007,22 +1006,22 @@ app.whenReady().then(async () => {
   )
 
   ipcMain.handle(
-    'wiki-directory-note-remove',
-    async (_event, directoryId: number, noteId: number) => {
+    'wiki-directory-doc-remove',
+    async (_event, directoryId: number, docId: number) => {
       try {
-        return await removeNoteFromDirectory(directoryId, noteId)
+        return await removeDocFromDirectory(directoryId, docId)
       } catch (error) {
-        console.error('Error in wiki-directory-note-remove:', error)
+        console.error('Error in wiki-directory-doc-remove:', error)
         throw error
       }
     }
   )
 
-  ipcMain.handle('wiki-note-directories-get', async (_event, noteId: number) => {
+  ipcMain.handle('wiki-doc-directories-get', async (_event, docId: number) => {
     try {
-      return await getDirectoriesByNoteId(noteId)
+      return await getDirectoriesByDocId(docId)
     } catch (error) {
-      console.error('Error in wiki-note-directories-get:', error)
+      console.error('Error in wiki-doc-directories-get:', error)
       throw error
     }
   })
@@ -1096,82 +1095,6 @@ app.whenReady().then(async () => {
       throw error
     }
   })
-
-  ipcMain.handle(
-    'import-novel',
-    async (
-      event,
-      options: { filePath: string; coverDataUrl?: string | null }
-    ): Promise<{ chapterCount: number }> => {
-      const { filePath, coverDataUrl } = options
-      const content = fs.readFileSync(filePath, 'utf-8')
-
-      // Parse chapters by splitting on chapter headings
-      const chapterRegex = /^第\d+章\s+.+$/gm
-      const headings: { title: string; index: number }[] = []
-      let match: RegExpExecArray | null
-      while ((match = chapterRegex.exec(content)) !== null) {
-        headings.push({ title: match[0].trim(), index: match.index })
-      }
-
-      if (headings.length === 0) {
-        throw new Error('未找到任何章节')
-      }
-
-      // Parse all chapters first
-      const chapters: Array<{
-        title: string
-        content: string
-      }> = []
-      for (let i = 0; i < headings.length; i++) {
-        const { title, index: startIdx } = headings[i]
-        const contentStart = startIdx + title.length
-        const contentEnd = i < headings.length - 1 ? headings[i + 1].index : content.length
-        const chapterContent = content
-          .slice(contentStart, contentEnd)
-          .split('\n')
-          .map((line) => line.replace(/^[ \t]+/, ''))
-          .join('\n')
-          .trim()
-
-        chapters.push({ title, content: chapterContent })
-      }
-
-      event.sender.send('import-novel-progress', {
-        processedNotes: 0,
-        totalNotes: chapters.length,
-        message: '正在解析章节...'
-      })
-
-      // Batch insert in chunks of 50
-      const BATCH_SIZE = 100
-      for (let i = 0; i < chapters.length; i += BATCH_SIZE) {
-        const batch = chapters.slice(i, i + BATCH_SIZE).map((ch) => ({
-          title: ch.title,
-          image: coverDataUrl || null,
-          summary: null,
-          content: ch.content,
-          tags: JSON.stringify(['小说'])
-        }))
-
-        await batchAddNotes(batch)
-
-        event.sender.send('import-novel-progress', {
-          processedNotes: Math.min(i + BATCH_SIZE, chapters.length),
-          totalNotes: chapters.length,
-          message: `正在导入章节...`
-        })
-      }
-
-      event.sender.send('import-novel-progress', {
-        processedNotes: chapters.length,
-        totalNotes: chapters.length,
-        message: '导入完成'
-      })
-
-      return { chapterCount: headings.length }
-    }
-  )
 
   ipcMain.handle(
     'chat-send-message',
@@ -1409,9 +1332,9 @@ app.whenReady().then(async () => {
 
   ipcMain.handle(
     'graph-data-get',
-    async (_event, wikiId: number, typeFilter?: string, noteIds?: number[]) => {
+    async (_event, wikiId: number, typeFilter?: string, docIds?: number[]) => {
       try {
-        return await getFullGraphData(wikiId, typeFilter, noteIds)
+        return await getFullGraphData(wikiId, typeFilter, docIds)
       } catch (error) {
         logger.error('Error in graph-data-get:', error)
         throw error
@@ -1516,7 +1439,7 @@ app.whenReady().then(async () => {
     }
   )
 
-  ipcMain.handle('graph-processed-notes-get', async (_event, wikiId: number) => {
+  ipcMain.handle('graph-processed-docs-get', async (_event, wikiId: number) => {
     try {
       const job = await getBuildJobByWikiId(wikiId)
       if (job?.processed_note_ids) {
@@ -1524,17 +1447,17 @@ app.whenReady().then(async () => {
       }
       return []
     } catch (error) {
-      logger.error('Error in graph-processed-notes-get:', error)
+      logger.error('Error in graph-processed-docs-get:', error)
       throw error
     }
   })
 
-  ipcMain.handle('graph-notes-append', async (event, wikiId: number, noteIds: number[]) => {
+  ipcMain.handle('graph-docs-append', async (event, wikiId: number, docIds: number[]) => {
     const defaultModelId = settingsStore.get('defaultModelId') as number | undefined
     const model = await getProviderService().createModel(defaultModelId)
     const graphService = new KnowledgeGraphService(model)
     try {
-      const result = await graphService.appendNotes(wikiId, noteIds, (progress) => {
+      const result = await graphService.appendDocs(wikiId, docIds, (progress) => {
         event.sender.send('graph-build-progress', progress)
       })
       event.sender.send('graph-build-complete', {
@@ -1544,7 +1467,7 @@ app.whenReady().then(async () => {
       })
       return result
     } catch (error) {
-      logger.error('Error in graph-notes-append:', error)
+      logger.error('Error in graph-docs-append:', error)
       event.sender.send('graph-build-error', {
         wikiId,
         error: error instanceof Error ? error.message : String(error)

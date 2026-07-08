@@ -371,7 +371,9 @@ const Index: React.FC = () => {
         {/* 标题栏 */}
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h2 className="text-lg font-semibold m-0" style={{ color: colorText }}>大模型供应商</h2>
+            <h2 className="text-lg font-semibold m-0" style={{ color: colorText }}>
+              大模型供应商
+            </h2>
             <p className="text-sm mt-1" style={{ color: colorTextSecondary }}>
               管理 AI 聊天和知识图谱使用的模型供应商配置，API Key 使用机器唯一密钥加密存储
             </p>

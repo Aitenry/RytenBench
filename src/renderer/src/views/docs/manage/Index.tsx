@@ -2,29 +2,21 @@ import React, { useState, useEffect, useCallback, useRef } from 'react'
 import dayjs from 'dayjs'
 import { theme, Modal, Button, Input, Tag as AntTag, DatePicker, Table, Space, Flex } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import {
-  PlusOutlined,
-  DeleteOutlined,
-  EditOutlined,
-  SearchOutlined,
-  ImportOutlined
-} from '@ant-design/icons'
+import { PlusOutlined, DeleteOutlined, EditOutlined, SearchOutlined } from '@ant-design/icons'
 import MarkdownEditor from '@renderer/components/MarkdownEditor'
 import { useMessage } from '@renderer/hooks/useMessage'
 import { Window } from '../../../../resource/types/window'
-import NotePreviewModal from '@renderer/components/NotePreviewModal'
-import ImportNovelModal from '@renderer/components/ImportNovelModal'
-import { getTagsArray } from '@renderer/utils/note'
+import DocPreviewModal from '@renderer/components/DocPreviewModal'
+import { getTagsArray } from '@renderer/utils/document'
 
 const { Search } = Input
 
-interface NoteItem {
+interface DocItem {
   id: number
   title: string
   image: string | null
   summary: string | null
   tags: string | null
-  version: number
   created_at: string
   updated_at: string
   word_count: number
@@ -38,15 +30,14 @@ const Index: React.FC = () => {
     token: { colorBgContainer, borderRadiusLG, colorTextTertiary, colorTextSecondary }
   } = theme.useToken()
 
-  const [filteredNotes, setFilteredNotes] = useState<NoteItem[]>([])
+  const [filteredDocs, setFilteredDocs] = useState<DocItem[]>([])
   const [searchText, setSearchText] = useState('')
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
   const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false)
-  const [isImportModalOpen, setIsImportModalOpen] = useState(false)
   const [isBatchDeleteModalOpen, setIsBatchDeleteModalOpen] = useState(false)
   const [deleteDateRange, setDeleteDateRange] = useState<[dayjs.Dayjs, dayjs.Dayjs] | null>(null)
-  const [currentNote, setCurrentNote] = useState<NoteItem | null>(null)
-  const [isNewNote, setIsNewNote] = useState(false)
+  const [currentDoc, setCurrentDoc] = useState<DocItem | null>(null)
+  const [isNewDoc, setIsNewDoc] = useState(false)
   const [editTitle, setEditTitle] = useState('')
   const [editTags, setEditTags] = useState<string[]>([])
   const [tagInput, setTagInput] = useState('')
@@ -60,35 +51,35 @@ const Index: React.FC = () => {
 
   const { viewMessage } = useMessage()
 
-  const loadNotes = useCallback(async (pageNum: number = 1) => {
+  const loadDocs = useCallback(async (pageNum: number = 1) => {
     try {
       setIsLoading(true)
-      const result = await (window as unknown as Window).api.notes.getAll(pageNum, PAGE_SIZE)
-      setFilteredNotes(result.items)
+      const result = await (window as unknown as Window).api.docs.getAll(pageNum, PAGE_SIZE)
+      setFilteredDocs(result.items)
       setTotal(result.total)
       setPage(pageNum)
     } catch (error) {
-      console.error('Failed to load notes:', error)
+      console.error('Failed to load docs:', error)
     } finally {
       setIsLoading(false)
     }
   }, [])
 
-  const searchNotes = useCallback(
+  const searchDocs = useCallback(
     async (searchStr: string, pageNum: number = 1) => {
-      const messageKey = 'notes-search'
+      const messageKey = 'docs-search'
       try {
         setIsLoading(true)
-        const result = await (window as unknown as Window).api.notes.getPage(
+        const result = await (window as unknown as Window).api.docs.getPage(
           searchStr,
           pageNum,
           PAGE_SIZE
         )
-        setFilteredNotes(result.items)
+        setFilteredDocs(result.items)
         setTotal(result.total)
         setPage(pageNum)
       } catch (error) {
-        console.error('Failed to search notes:', error)
+        console.error('Failed to search docs:', error)
         viewMessage(messageKey, 'error', '搜索失败')
       } finally {
         setIsLoading(false)
@@ -100,12 +91,12 @@ const Index: React.FC = () => {
   const executeSearch = useCallback(
     (text: string) => {
       if (text.trim()) {
-        searchNotes(text, 1)
+        searchDocs(text, 1)
       } else {
-        loadNotes(1)
+        loadDocs(1)
       }
     },
-    [searchNotes, loadNotes]
+    [searchDocs, loadDocs]
   )
 
   const debouncedSearch = useCallback(
@@ -147,14 +138,14 @@ const Index: React.FC = () => {
 
   const handlePageChange = (newPage: number): void => {
     if (searchText.trim()) {
-      searchNotes(searchText, newPage)
+      searchDocs(searchText, newPage)
     } else {
-      loadNotes(newPage)
+      loadDocs(newPage)
     }
   }
 
   useEffect(() => {
-    loadNotes(1)
+    loadDocs(1)
   }, [])
 
   useEffect(() => {
@@ -165,10 +156,10 @@ const Index: React.FC = () => {
     }
   }, [])
 
-  const handleCreateNote = (): void => {
-    setCurrentNote(null)
-    setIsNewNote(true)
-    setEditTitle('新笔记')
+  const handleCreateDoc = (): void => {
+    setCurrentDoc(null)
+    setIsNewDoc(true)
+    setEditTitle('新文档')
     setEditTags([])
     setTagInput('')
     setEditImage(null)
@@ -176,83 +167,75 @@ const Index: React.FC = () => {
     setIsEditModalOpen(true)
   }
 
-  const handleImportNovel = (): void => {
-    setIsImportModalOpen(true)
-  }
-
-  const handleImportComplete = async (): Promise<void> => {
-    await loadNotes(1)
-  }
-
-  const handlePreviewNote = async (note: NoteItem): Promise<void> => {
-    const messageKey = 'note-preview-load'
+  const handlePreviewDoc = async (doc: DocItem): Promise<void> => {
+    const messageKey = 'doc-preview-load'
     try {
-      viewMessage(messageKey, 'loading', '正在加载笔记内容...')
-      const fullNote = await (window as unknown as Window).api.notes.getById(note.id)
-      if (fullNote) {
-        setCurrentNote({ ...note, content: fullNote.content })
+      viewMessage(messageKey, 'loading', '正在加载文档内容...')
+      const fullDoc = await (window as unknown as Window).api.docs.getById(doc.id)
+      if (fullDoc) {
+        setCurrentDoc({ ...doc, content: fullDoc.content })
         setIsPreviewModalOpen(true)
-        viewMessage(messageKey, 'success', '笔记内容加载成功！', 2)
+        viewMessage(messageKey, 'success', '文档内容加载成功！', 2)
       } else {
-        viewMessage(messageKey, 'error', '笔记不存在')
+        viewMessage(messageKey, 'error', '文档不存在')
       }
     } catch (error) {
-      console.error('Failed to load note content:', error)
-      viewMessage(messageKey, 'error', '加载笔记内容失败')
+      console.error('Failed to load doc content:', error)
+      viewMessage(messageKey, 'error', '加载文档内容失败')
     }
   }
 
-  const handleEditNote = async (note: NoteItem): Promise<void> => {
-    const messageKey = 'note-edit-load'
+  const handleEditDoc = async (doc: DocItem): Promise<void> => {
+    const messageKey = 'doc-edit-load'
     try {
-      viewMessage(messageKey, 'loading', '正在加载笔记内容...')
-      const fullNote = await (window as unknown as Window).api.notes.getById(note.id)
-      if (fullNote) {
-        setCurrentNote({ ...note, content: fullNote.content })
-        setIsNewNote(false)
-        setEditTitle(note.title)
-        setEditTags(getTagsArray(note.tags))
+      viewMessage(messageKey, 'loading', '正在加载文档内容...')
+      const fullDoc = await (window as unknown as Window).api.docs.getById(doc.id)
+      if (fullDoc) {
+        setCurrentDoc({ ...doc, content: fullDoc.content })
+        setIsNewDoc(false)
+        setEditTitle(doc.title)
+        setEditTags(getTagsArray(doc.tags))
         setTagInput('')
-        setEditImage(fullNote.image)
-        setEditSummary(fullNote.summary || '')
+        setEditImage(fullDoc.image)
+        setEditSummary(fullDoc.summary || '')
         setIsEditModalOpen(true)
-        viewMessage(messageKey, 'success', '笔记内容加载成功！', 2)
+        viewMessage(messageKey, 'success', '文档内容加载成功！', 2)
       } else {
-        viewMessage(messageKey, 'error', '笔记不存在')
+        viewMessage(messageKey, 'error', '文档不存在')
       }
     } catch (error) {
-      console.error('Failed to load note content:', error)
-      viewMessage(messageKey, 'error', '加载笔记内容失败')
+      console.error('Failed to load doc content:', error)
+      viewMessage(messageKey, 'error', '加载文档内容失败')
     }
   }
 
-  const handleDeleteNote = async (id: number): Promise<void> => {
-    const messageKey = 'note-delete'
+  const handleDeleteDoc = async (id: number): Promise<void> => {
+    const messageKey = 'doc-delete'
     try {
-      viewMessage(messageKey, 'loading', '正在删除笔记...')
-      await (window as unknown as Window).api.notes.delete(id)
-      viewMessage(messageKey, 'success', '笔记删除成功！', 2)
-      await loadNotes(page)
+      viewMessage(messageKey, 'loading', '正在删除文档...')
+      await (window as unknown as Window).api.docs.delete(id)
+      viewMessage(messageKey, 'success', '文档删除成功！', 2)
+      await loadDocs(page)
     } catch (error) {
-      console.error('Failed to delete note:', error)
-      viewMessage(messageKey, 'error', '删除笔记失败')
+      console.error('Failed to delete doc:', error)
+      viewMessage(messageKey, 'error', '删除文档失败')
     }
   }
 
   const handleBatchDeleteByTimeRange = async (dates: [dayjs.Dayjs, dayjs.Dayjs]): Promise<void> => {
-    const messageKey = 'note-batch-delete'
+    const messageKey = 'doc-batch-delete'
     try {
-      viewMessage(messageKey, 'loading', '正在批量删除笔记...')
-      const count = await (window as unknown as Window).api.notes.deleteByTimeRange(
+      viewMessage(messageKey, 'loading', '正在批量删除文档...')
+      const count = await (window as unknown as Window).api.docs.deleteByTimeRange(
         dates[0].startOf('day').toISOString(),
         dates[1].endOf('day').toISOString()
       )
-      viewMessage(messageKey, 'success', `成功删除 ${count} 篇笔记！`, 2)
+      viewMessage(messageKey, 'success', `成功删除 ${count} 篇文档！`, 2)
       setIsBatchDeleteModalOpen(false)
       setDeleteDateRange(null)
-      await loadNotes(1)
+      await loadDocs(1)
     } catch (error) {
-      console.error('Failed to batch delete notes:', error)
+      console.error('Failed to batch delete docs:', error)
       viewMessage(messageKey, 'error', '批量删除失败')
     }
   }
@@ -287,38 +270,38 @@ const Index: React.FC = () => {
   }
 
   const handleEditorSave = async (newContent: string): Promise<void> => {
-    const messageKey = isNewNote ? 'note-create' : 'note-update'
+    const messageKey = isNewDoc ? 'doc-create' : 'doc-update'
     try {
-      if (isNewNote) {
-        viewMessage(messageKey, 'loading', '正在创建笔记...')
-        await (window as unknown as Window).api.notes.add({
-          title: editTitle || '新笔记',
+      if (isNewDoc) {
+        viewMessage(messageKey, 'loading', '正在创建文档...')
+        await (window as unknown as Window).api.docs.add({
+          title: editTitle || '新文档',
           image: editImage,
           summary: editSummary || null,
           content: newContent,
           tags: editTags.length > 0 ? JSON.stringify(editTags) : null
         })
-        viewMessage(messageKey, 'success', '笔记创建成功！', 2)
-      } else if (currentNote) {
-        viewMessage(messageKey, 'loading', '正在保存笔记...')
-        await (window as unknown as Window).api.notes.update(currentNote.id, {
+        viewMessage(messageKey, 'success', '文档创建成功！', 2)
+      } else if (currentDoc) {
+        viewMessage(messageKey, 'loading', '正在保存文档...')
+        await (window as unknown as Window).api.docs.update(currentDoc.id, {
           title: editTitle,
           image: editImage,
           summary: editSummary || null,
           content: newContent,
           tags: editTags.length > 0 ? JSON.stringify(editTags) : null
         })
-        viewMessage(messageKey, 'success', '笔记保存成功！', 2)
+        viewMessage(messageKey, 'success', '文档保存成功！', 2)
       }
       setIsEditModalOpen(false)
-      await loadNotes(1)
+      await loadDocs(1)
     } catch (error) {
-      console.error('Failed to save note:', error)
-      viewMessage(messageKey, 'error', '保存笔记失败')
+      console.error('Failed to save doc:', error)
+      viewMessage(messageKey, 'error', '保存文档失败')
     }
   }
 
-  const columns: ColumnsType<NoteItem> = [
+  const columns: ColumnsType<DocItem> = [
     {
       title: '封面',
       dataIndex: 'image',
@@ -340,14 +323,31 @@ const Index: React.FC = () => {
       dataIndex: 'title',
       key: 'title',
       ellipsis: true,
-      render: (text: string, record: NoteItem) => (
-        <a onClick={() => handlePreviewNote(record)}>{text}</a>
+      render: (text: string, record: DocItem) => (
+        <a onClick={() => handlePreviewDoc(record)}>{text}</a>
       )
+    },
+    {
+      title: '摘要',
+      dataIndex: 'summary',
+      key: 'summary',
+      ellipsis: true,
+      render: (text: string | null) => (
+        <span style={{ color: text ? undefined : colorTextTertiary }}>{text || '-'}</span>
+      )
+    },
+    {
+      title: '字数',
+      dataIndex: 'word_count',
+      key: 'word_count',
+      width: 80,
+      align: 'center'
     },
     {
       title: '标签',
       dataIndex: 'tags',
       key: 'tags',
+      align: 'center',
       width: 200,
       render: (tags: string | null) => {
         const tagList = getTagsArray(tags)
@@ -365,33 +365,11 @@ const Index: React.FC = () => {
       }
     },
     {
-      title: '摘要',
-      dataIndex: 'summary',
-      key: 'summary',
-      ellipsis: true,
-      render: (text: string | null) => (
-        <span style={{ color: text ? undefined : colorTextTertiary }}>{text || '-'}</span>
-      )
-    },
-    {
-      title: '字数',
-      dataIndex: 'word_count',
-      key: 'word_count',
-      width: 80,
-      align: 'right'
-    },
-    {
-      title: '版本',
-      dataIndex: 'version',
-      key: 'version',
-      width: 60,
-      align: 'center'
-    },
-    {
       title: '创建时间',
       dataIndex: 'created_at',
       key: 'created_at',
       width: 170,
+      align: 'center',
       render: (text: string) => new Date(text).toLocaleString()
     },
     {
@@ -399,19 +377,21 @@ const Index: React.FC = () => {
       dataIndex: 'updated_at',
       key: 'updated_at',
       width: 170,
+      align: 'center',
       render: (text: string) => new Date(text).toLocaleString()
     },
     {
       title: '操作',
       key: 'actions',
       width: 100,
-      render: (_: unknown, record: NoteItem) => (
+      align: 'center',
+      render: (_: unknown, record: DocItem) => (
         <Space>
           <Button
             type="text"
             size="small"
             icon={<EditOutlined />}
-            onClick={() => handleEditNote(record)}
+            onClick={() => handleEditDoc(record)}
           />
           <Button
             type="text"
@@ -420,8 +400,8 @@ const Index: React.FC = () => {
             icon={<DeleteOutlined />}
             onClick={() => {
               Modal.confirm({
-                title: '确定要删除这篇笔记吗？',
-                onOk: () => handleDeleteNote(record.id),
+                title: '确定要删除这篇文档吗？',
+                onOk: () => handleDeleteDoc(record.id),
                 okText: '确定',
                 cancelText: '取消'
               })
@@ -453,7 +433,7 @@ const Index: React.FC = () => {
           <Flex justify="space-between" align="center">
             <Space>
               <Search
-                placeholder="搜索笔记..."
+                placeholder="搜索文档..."
                 allowClear
                 enterButton={<SearchOutlined />}
                 size="middle"
@@ -464,11 +444,8 @@ const Index: React.FC = () => {
                 onCompositionStart={handleCompositionStart}
                 onCompositionEnd={handleCompositionEnd}
               />
-              <Button type="primary" icon={<PlusOutlined />} onClick={handleCreateNote}>
-                新建笔记
-              </Button>
-              <Button type="default" icon={<ImportOutlined />} onClick={handleImportNovel}>
-                导入小说
+              <Button type="primary" icon={<PlusOutlined />} onClick={handleCreateDoc}>
+                新建文档
               </Button>
               <Button
                 type="default"
@@ -485,7 +462,7 @@ const Index: React.FC = () => {
         <div style={{ padding: '16px', flex: 1, overflow: 'hidden' }}>
           <Table
             columns={columns}
-            dataSource={filteredNotes}
+            dataSource={filteredDocs}
             rowKey="id"
             loading={isLoading}
             pagination={{
@@ -493,7 +470,7 @@ const Index: React.FC = () => {
               pageSize: PAGE_SIZE,
               total,
               showSizeChanger: false,
-              showTotal: (t) => `共 ${t} 篇笔记`,
+              showTotal: (t) => `共 ${t} 篇文档`,
               onChange: handlePageChange,
               placement: ['bottomCenter']
             }}
@@ -504,7 +481,7 @@ const Index: React.FC = () => {
       </main>
 
       <Modal
-        title={isNewNote ? '新建笔记' : '编辑笔记'}
+        title={isNewDoc ? '新建文档' : '编辑文档'}
         open={isEditModalOpen}
         onCancel={() => setIsEditModalOpen(false)}
         width="calc(100vw - 137px)"
@@ -527,7 +504,7 @@ const Index: React.FC = () => {
           }}
         >
           <Input
-            placeholder="笔记标题"
+            placeholder="文档标题"
             value={editTitle}
             onChange={(e) => setEditTitle(e.target.value)}
             size="large"
@@ -571,14 +548,14 @@ const Index: React.FC = () => {
               <div style={{ width: '100%', maxHeight: 200, overflow: 'hidden', borderRadius: 8 }}>
                 <img
                   src={editImage}
-                  alt="笔记封面"
+                  alt="文档封面"
                   style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                 />
               </div>
             )}
           </div>
           <Input.TextArea
-            placeholder="笔记摘要"
+            placeholder="文档摘要"
             value={editSummary}
             onChange={(e) => setEditSummary(e.target.value)}
             style={{ flex: 1, minHeight: 0, resize: 'none' }}
@@ -586,24 +563,18 @@ const Index: React.FC = () => {
           />
         </div>
         <div style={{ flex: 1, minWidth: 0, minHeight: 0 }}>
-          <MarkdownEditor initialValue={currentNote?.content || ''} onSave={handleEditorSave} />
+          <MarkdownEditor initialValue={currentDoc?.content || ''} onSave={handleEditorSave} />
         </div>
       </Modal>
 
-      <NotePreviewModal
+      <DocPreviewModal
         open={isPreviewModalOpen}
         onCancel={() => setIsPreviewModalOpen(false)}
-        currentNote={currentNote}
-      />
-
-      <ImportNovelModal
-        open={isImportModalOpen}
-        onCancel={() => setIsImportModalOpen(false)}
-        onImportComplete={handleImportComplete}
+        currentDoc={currentDoc}
       />
 
       <Modal
-        title="批量删除笔记"
+        title="批量删除文档"
         open={isBatchDeleteModalOpen}
         onCancel={() => {
           setIsBatchDeleteModalOpen(false)
@@ -614,7 +585,7 @@ const Index: React.FC = () => {
       >
         <div style={{ padding: '8px 0' }}>
           <div style={{ marginBottom: 16, color: colorTextSecondary }}>
-            选择要删除笔记的创建时间范围，范围内的所有笔记将被永久删除。
+            选择要删除文档的创建时间范围，范围内的所有文档将被永久删除。
           </div>
           <DatePicker.RangePicker
             showTime
@@ -631,7 +602,7 @@ const Index: React.FC = () => {
             onClick={() => {
               if (!deleteDateRange) return
               Modal.confirm({
-                title: '确定要删除该时间范围内的所有笔记吗？',
+                title: '确定要删除该时间范围内的所有文档吗？',
                 content: '删除后不可恢复',
                 onOk: () => handleBatchDeleteByTimeRange(deleteDateRange),
                 okText: '确定',

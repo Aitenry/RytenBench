@@ -12,7 +12,7 @@ export interface WikiBaseRow {
 }
 
 export interface WikiRow extends WikiBaseRow {
-  note_count: number
+  doc_count: number
   tags: string | null
 }
 
@@ -39,18 +39,18 @@ async function getWikiById(id: number): Promise<WikiRow | null> {
     const sql = `
       SELECT
         w.id, w.title, w.summary, img.data as image, w.created_at, w.updated_at,
-        COUNT(DISTINCT dn.note_id) as note_count,
+        COUNT(DISTINCT dd.doc_id) as doc_count,
         (
-          SELECT STRING_AGG(DISTINCT n.tags, ',')
-          FROM notes n
-          INNER JOIN directory_notes dn2 ON n.id = dn2.note_id
-          INNER JOIN wiki_directories wd2 ON dn2.directory_id = wd2.id
-          WHERE wd2.wiki_id = w.id AND n.tags IS NOT NULL AND n.tags != ''
+          SELECT STRING_AGG(DISTINCT d.tags, ',')
+          FROM documents d
+          INNER JOIN directory_documents dd2 ON d.id = dd2.doc_id
+          INNER JOIN wiki_directories wd2 ON dd2.directory_id = wd2.id
+          WHERE wd2.wiki_id = w.id AND d.tags IS NOT NULL AND d.tags != ''
         ) as tags
       FROM wiki w
       LEFT JOIN images img ON w.image_id = img.id
       LEFT JOIN wiki_directories wd ON w.id = wd.wiki_id
-      LEFT JOIN directory_notes dn ON wd.id = dn.directory_id
+      LEFT JOIN directory_documents dd ON wd.id = dd.directory_id
       WHERE w.id = $1
       GROUP BY w.id, img.data
     `
@@ -58,7 +58,7 @@ async function getWikiById(id: number): Promise<WikiRow | null> {
     if (result.rows.length > 0) {
       return {
         ...result.rows[0],
-        note_count: result.rows[0].note_count || 0,
+        doc_count: result.rows[0].doc_count || 0,
         tags: result.rows[0].tags || null
       }
     }
@@ -83,18 +83,18 @@ async function getAllWikis(
     const dataSql = `
       SELECT
         w.id, w.title, w.summary, img.data as image, w.created_at, w.updated_at,
-        COUNT(DISTINCT dn.note_id) as note_count,
+        COUNT(DISTINCT dd.doc_id) as doc_count,
         (
-          SELECT STRING_AGG(DISTINCT n.tags, ',')
-          FROM notes n
-          INNER JOIN directory_notes dn2 ON n.id = dn2.note_id
-          INNER JOIN wiki_directories wd2 ON dn2.directory_id = wd2.id
-          WHERE wd2.wiki_id = w.id AND n.tags IS NOT NULL AND n.tags != ''
+          SELECT STRING_AGG(DISTINCT d.tags, ',')
+          FROM documents d
+          INNER JOIN directory_documents dd2 ON d.id = dd2.doc_id
+          INNER JOIN wiki_directories wd2 ON dd2.directory_id = wd2.id
+          WHERE wd2.wiki_id = w.id AND d.tags IS NOT NULL AND d.tags != ''
         ) as tags
       FROM wiki w
       LEFT JOIN images img ON w.image_id = img.id
       LEFT JOIN wiki_directories wd ON w.id = wd.wiki_id
-      LEFT JOIN directory_notes dn ON wd.id = dn.directory_id
+      LEFT JOIN directory_documents dd ON wd.id = dd.directory_id
       GROUP BY w.id, img.data
       ORDER BY w.updated_at DESC
       LIMIT $1 OFFSET $2
@@ -104,7 +104,7 @@ async function getAllWikis(
 
     const items = result.rows.map((row) => ({
       ...row,
-      note_count: row.note_count || 0,
+      doc_count: row.doc_count || 0,
       tags: row.tags || null
     }))
     const hasMore = offset + items.length < total
@@ -296,69 +296,69 @@ async function deleteDirectory(id: number): Promise<boolean> {
   }
 }
 
-async function getNotesByDirectoryId(
+async function getDocsByDirectoryId(
   directoryId: number
-): Promise<{ note_id: number; sort_order: number }[]> {
+): Promise<{ doc_id: number; sort_order: number }[]> {
   try {
     const db = (await getDatabaseInstance()).getDatabase()
     const sql =
-      'SELECT note_id, sort_order FROM directory_notes WHERE directory_id = $1 ORDER BY sort_order, id'
-    const result = await db.query<{ note_id: number; sort_order: number }>(sql, [directoryId])
+      'SELECT doc_id, sort_order FROM directory_documents WHERE directory_id = $1 ORDER BY sort_order, id'
+    const result = await db.query<{ doc_id: number; sort_order: number }>(sql, [directoryId])
     return result.rows
   } catch (error) {
-    logger.error('Failed to get notes by directory id:', error)
+    logger.error('Failed to get docs by directory id:', error)
     throw error
   }
 }
 
-async function addNoteToDirectory(
+async function addDocToDirectory(
   directoryId: number,
-  noteId: number,
+  docId: number,
   sortOrder: number = 0
 ): Promise<number> {
   try {
     const db = (await getDatabaseInstance()).getDatabase()
     const result = await db.query<{ id: number }>(
-      'INSERT INTO directory_notes (directory_id, note_id, sort_order) VALUES ($1, $2, $3) RETURNING id',
-      [directoryId, noteId, sortOrder]
+      'INSERT INTO directory_documents (directory_id, doc_id, sort_order) VALUES ($1, $2, $3) RETURNING id',
+      [directoryId, docId, sortOrder]
     )
-    logger.info(`Added note ${noteId} to directory ${directoryId} with ID: ${result.rows[0].id}`)
+    logger.info(`Added doc ${docId} to directory ${directoryId} with ID: ${result.rows[0].id}`)
     return result.rows[0].id
   } catch (error) {
-    logger.error('Failed to add note to directory:', error)
+    logger.error('Failed to add doc to directory:', error)
     throw error
   }
 }
 
-async function removeNoteFromDirectory(directoryId: number, noteId: number): Promise<boolean> {
+async function removeDocFromDirectory(directoryId: number, docId: number): Promise<boolean> {
   try {
     const db = (await getDatabaseInstance()).getDatabase()
-    const sql = 'DELETE FROM directory_notes WHERE directory_id = $1 AND note_id = $2'
-    const result = await db.query(sql, [directoryId, noteId])
+    const sql = 'DELETE FROM directory_documents WHERE directory_id = $1 AND doc_id = $2'
+    const result = await db.query(sql, [directoryId, docId])
     const changes = result.affectedRows ?? 0
     if (changes > 0) {
-      logger.info(`Removed note ${noteId} from directory ${directoryId}`)
+      logger.info(`Removed doc ${docId} from directory ${directoryId}`)
     }
     return changes > 0
   } catch (error) {
-    logger.error('Failed to remove note from directory:', error)
+    logger.error('Failed to remove doc from directory:', error)
     throw error
   }
 }
 
-async function getDirectoriesByNoteId(noteId: number): Promise<WikiDirectoryRow[]> {
+async function getDirectoriesByDocId(docId: number): Promise<WikiDirectoryRow[]> {
   try {
     const db = (await getDatabaseInstance()).getDatabase()
     const sql = `
       SELECT wd.* FROM wiki_directories wd
-      INNER JOIN directory_notes dn ON wd.id = dn.directory_id
-      WHERE dn.note_id = $1
+      INNER JOIN directory_documents dd ON wd.id = dd.directory_id
+      WHERE dd.doc_id = $1
       ORDER BY wd.sort_order, wd.id
     `
-    const result = await db.query<WikiDirectoryRow>(sql, [noteId])
+    const result = await db.query<WikiDirectoryRow>(sql, [docId])
     return result.rows
   } catch (error) {
-    logger.error('Failed to get directories by note id:', error)
+    logger.error('Failed to get directories by doc id:', error)
     throw error
   }
 }
@@ -373,8 +373,8 @@ export {
   addDirectory,
   updateDirectory,
   deleteDirectory,
-  getNotesByDirectoryId,
-  addNoteToDirectory,
-  removeNoteFromDirectory,
-  getDirectoriesByNoteId
+  getDocsByDirectoryId,
+  addDocToDirectory,
+  removeDocFromDirectory,
+  getDirectoriesByDocId
 }

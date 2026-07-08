@@ -14,7 +14,7 @@ interface WikiRow {
   image: string | null
   created_at: string
   updated_at: string
-  note_count: number
+  doc_count: number
   tags: string | null
 }
 
@@ -29,19 +29,18 @@ interface WikiDirectoryRow {
   updated_at: string
 }
 
-interface NoteListItem {
+interface DocListItem {
   id: number
   title: string
   image: string | null
   summary: string | null
   tags: string | null
-  version: number
   created_at: string
   updated_at: string
   word_count: number
 }
 
-interface DirectoryNoteWithDetail extends NoteListItem {
+interface DirectoryDocWithDetail extends DocListItem {
   directory_id: number
   content?: string | null
 }
@@ -75,9 +74,9 @@ const MainContent: React.FC = () => {
   const [directoryTree, setDirectoryTree] = useState<TreeNode[]>([])
   const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([])
   const [selectedDirectory, setSelectedDirectory] = useState<WikiDirectoryRow | null>(null)
-  const [directoryNotes, setDirectoryNotes] = useState<DirectoryNoteWithDetail[]>([])
-  const [notesLoading, setNotesLoading] = useState(false)
-  const [previewNote, setPreviewNote] = useState<DirectoryNoteWithDetail | null>(null)
+  const [directoryDocs, setDirectoryDocs] = useState<DirectoryDocWithDetail[]>([])
+  const [docsLoading, setDocsLoading] = useState(false)
+  const [previewDoc, setPreviewDoc] = useState<DirectoryDocWithDetail | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
 
   const buildTree = useCallback((dirs: WikiDirectoryRow[]): TreeNode[] => {
@@ -166,8 +165,8 @@ const MainContent: React.FC = () => {
   const handleOpenPreview = async (wiki: WikiRow): Promise<void> => {
     setSelectedWiki(wiki)
     setSelectedDirectory(null)
-    setDirectoryNotes([])
-    setPreviewNote(null)
+    setDirectoryDocs([])
+    setPreviewDoc(null)
     setIsPreviewOpen(true)
 
     try {
@@ -188,35 +187,35 @@ const MainContent: React.FC = () => {
     if (!dir) return
 
     setSelectedDirectory(dir)
-    setPreviewNote(null)
-    setNotesLoading(true)
+    setPreviewDoc(null)
+    setDocsLoading(true)
 
     try {
       const noteIds = await (window as unknown as Window).api.wikis.getNotesByDirectory(dirId)
-      const notes: DirectoryNoteWithDetail[] = []
-      for (const { note_id } of noteIds) {
-        const note = await (window as unknown as Window).api.notes.getById(note_id)
-        if (note) {
-          notes.push({ ...note, directory_id: dirId })
+      const docs: DirectoryDocWithDetail[] = []
+      for (const { doc_id } of noteIds) {
+        const doc = await (window as unknown as Window).api.docs.getById(doc_id)
+        if (doc) {
+          docs.push({ ...doc, directory_id: dirId })
         }
       }
-      setDirectoryNotes(notes)
+      setDirectoryDocs(docs)
     } catch (error) {
-      console.error('Failed to load directory notes:', error)
+      console.error('Failed to load directory docs:', error)
     } finally {
-      setNotesLoading(false)
+      setDocsLoading(false)
     }
   }
 
-  const handleSelectNote = async (note: DirectoryNoteWithDetail): Promise<void> => {
+  const handleSelectDoc = async (doc: DirectoryDocWithDetail): Promise<void> => {
     setPreviewLoading(true)
     try {
-      const fullNote = await (window as unknown as Window).api.notes.getById(note.id)
-      if (fullNote) {
-        setPreviewNote({ ...note, content: fullNote.content })
+      const fullDoc = await (window as unknown as Window).api.docs.getById(doc.id)
+      if (fullDoc) {
+        setPreviewDoc({ ...doc, content: fullDoc.content })
       }
     } catch (error) {
-      console.error('Failed to load note content:', error)
+      console.error('Failed to load doc content:', error)
     } finally {
       setPreviewLoading(false)
     }
@@ -323,8 +322,8 @@ const MainContent: React.FC = () => {
                   style={{ cursor: 'pointer' }}
                   onClick={() => {
                     setSelectedDirectory(null)
-                    setDirectoryNotes([])
-                    setPreviewNote(null)
+                    setDirectoryDocs([])
+                    setPreviewDoc(null)
                   }}
                 />
                 <Text strong>{selectedDirectory.name}</Text>
@@ -335,31 +334,31 @@ const MainContent: React.FC = () => {
           </div>
           <div style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}>
             {selectedDirectory ? (
-              notesLoading ? (
+              docsLoading ? (
                 <div style={{ padding: '24px', textAlign: 'center' }}>
                   <Spin />
                 </div>
-              ) : directoryNotes.length === 0 ? (
+              ) : directoryDocs.length === 0 ? (
                 <div style={{ padding: '16px', textAlign: 'center' }}>
-                  <Text type="secondary">暂无笔记</Text>
+                  <Text type="secondary">暂无文档</Text>
                 </div>
               ) : (
                 <List
-                  dataSource={directoryNotes}
-                  renderItem={(note) => (
+                  dataSource={directoryDocs}
+                  renderItem={(doc) => (
                     <List.Item
-                      onClick={() => handleSelectNote(note)}
+                      onClick={() => handleSelectDoc(doc)}
                       style={{
                         cursor: 'pointer',
                         padding: '8px 16px',
                         background:
-                          previewNote?.id === note.id ? 'rgba(22, 119, 255, 0.08)' : undefined
+                          previewDoc?.id === doc.id ? 'rgba(22, 119, 255, 0.08)' : undefined
                       }}
                     >
                       <Flex align="center" gap={8} style={{ width: '100%' }}>
                         <FileTextOutlined />
                         <Text ellipsis style={{ flex: 1 }}>
-                          {note.title}
+                          {doc.title}
                         </Text>
                       </Flex>
                     </List.Item>
@@ -390,21 +389,24 @@ const MainContent: React.FC = () => {
             <div style={{ padding: '48px', textAlign: 'center' }}>
               <Spin />
             </div>
-          ) : previewNote ? (
+          ) : previewDoc ? (
             <div>
-              <Title level={4}>{previewNote.title}</Title>
-              {previewNote.summary && (
+              <Title level={4}>{previewDoc.title}</Title>
+              {previewDoc.summary && (
                 <Text type="secondary" style={{ marginBottom: 16, display: 'block' }}>
-                  {previewNote.summary}
+                  {previewDoc.summary}
                 </Text>
               )}
               <div style={{ marginTop: 16 }}>
-                <MarkdownView content={previewNote.content || ''} isDarkMode={effectiveTheme === 'dark'} />
+                <MarkdownView
+                  content={previewDoc.content || ''}
+                  isDarkMode={effectiveTheme === 'dark'}
+                />
               </div>
             </div>
           ) : (
             <Flex flex={1} justify="center" align="center" style={{ height: '100%' }}>
-              <Text type="secondary">选择左侧笔记进行预览</Text>
+              <Text type="secondary">选择左侧文档进行预览</Text>
             </Flex>
           )}
         </div>

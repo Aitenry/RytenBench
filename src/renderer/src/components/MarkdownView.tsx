@@ -354,9 +354,11 @@ const MarkdownView = ({ content, isDarkMode = false }: MarkdownViewProps): React
       <TableOfContents headings={headings} isDarkMode={isDarkMode} onNavigate={handleNavigate} />
       <div
         ref={contentRef}
-        className={`flex-1 overflow-y-auto ${isDarkMode ? 'bg-gray-950' : 'bg-white'}`}
+        className={`flex-1 overflow-y-auto custom-scrollbar ${isDarkMode ? 'bg-gray-950' : 'bg-white'}`}
       >
-        <div className={`markdown-body ${isDarkMode ? 'text-gray-100' : 'text-gray-700'}`}>
+        <div
+          className={`markdown-body px-[13px] ${isDarkMode ? 'text-gray-100' : 'text-gray-700'}`}
+        >
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             rehypePlugins={[rehypeRaw, rehypeHighlight, rehypeSanitize]}

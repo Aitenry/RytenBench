@@ -3,30 +3,29 @@ import { Modal, Empty } from 'antd'
 import MarkdownView from './MarkdownView'
 import { useTheme } from '@renderer/contexts/useTheme'
 
-interface NoteItem {
+interface DocItem {
   id: number
   title: string
   image: string | null
   summary: string | null
   tags: string | null
-  version: number
   created_at: string
   updated_at: string
   word_count: number
   content?: string | null
 }
 
-interface NotePreviewModalProps {
+interface DocPreviewModalProps {
   open: boolean
   onCancel: () => void
-  currentNote: NoteItem | null
+  currentDoc: DocItem | null
 }
 
-const NotePreviewModal: React.FC<NotePreviewModalProps> = ({ open, onCancel, currentNote }) => {
+const DocPreviewModal: React.FC<DocPreviewModalProps> = ({ open, onCancel, currentDoc }) => {
   const { effectiveTheme } = useTheme()
   return (
     <Modal
-      title={currentNote?.title || '笔记预览'}
+      title={currentDoc?.title || '文档预览'}
       open={open}
       onCancel={onCancel}
       width="calc(100vw - 137px)"
@@ -38,8 +37,8 @@ const NotePreviewModal: React.FC<NotePreviewModalProps> = ({ open, onCancel, cur
     >
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
         <div style={{ flex: 1, overflow: 'auto' }}>
-          {currentNote?.content ? (
-            <MarkdownView content={currentNote.content} isDarkMode={effectiveTheme === 'dark'} />
+          {currentDoc?.content ? (
+            <MarkdownView content={currentDoc.content} isDarkMode={effectiveTheme === 'dark'} />
           ) : (
             <Empty description="暂无内容" />
           )}
@@ -49,4 +48,4 @@ const NotePreviewModal: React.FC<NotePreviewModalProps> = ({ open, onCancel, cur
   )
 }
 
-export default NotePreviewModal
+export default DocPreviewModal

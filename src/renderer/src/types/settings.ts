@@ -4,4 +4,4 @@ export type {
   GraphSettings,
   ChatSettings,
   ThemeMode
-} from '../../main/types/settings'
+} from '../../../main/types/settings'
