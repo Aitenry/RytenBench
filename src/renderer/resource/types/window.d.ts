@@ -95,6 +95,8 @@ export interface Window {
       ) => Promise<boolean>
       delete: (id: number) => Promise<boolean>
       deleteByTimeRange: (startTime: string, endTime: string) => Promise<number>
+      importDocument: () => Promise<{ title: string; content: string } | null>
+      exportDocument: (id: number) => Promise<boolean>
     }
     file: {
       selectImageFile: (allowImages?: boolean) => Promise<{

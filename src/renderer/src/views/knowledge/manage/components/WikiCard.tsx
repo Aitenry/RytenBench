@@ -3,7 +3,7 @@ import { theme, Card, Typography, Tag, Space, Modal } from 'antd'
 import { EditOutlined, DeleteOutlined } from '@ant-design/icons'
 import { RiBook2Line } from '@remixicon/react'
 
-const { Title, Text } = Typography
+const { Title, Paragraph } = Typography
 
 interface WikiRow {
   id: number
@@ -65,7 +65,7 @@ const WikiCard: React.FC<WikiCardProps> = ({ item, onSelect, onEdit, onDelete })
       style={{
         background: token.colorFillAlter,
         border: `1px solid ${token.colorBorderSecondary}`,
-        minHeight: 180,
+        height: '100%',
         display: 'flex',
         flexDirection: 'column',
         cursor: 'pointer'
@@ -131,16 +131,18 @@ const WikiCard: React.FC<WikiCardProps> = ({ item, onSelect, onEdit, onDelete })
         )}
 
         {item.summary && (
-          <Text
+          <Paragraph
             type="secondary"
+            ellipsis={{ rows: 2 }}
             style={{
               marginTop: token.marginXS,
+              marginBottom: 0,
               fontSize: token.fontSizeSM,
               fontStyle: 'italic'
             }}
           >
             {item.summary}
-          </Text>
+          </Paragraph>
         )}
 
         <div

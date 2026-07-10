@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Typography, Tag, Descriptions, Empty, List } from 'antd'
+import { Typography, Tag, Descriptions, Empty } from 'antd'
 import {
   RiUserLine,
   RiBuildingLine,
@@ -251,17 +251,15 @@ const EntityDetail: React.FC<EntityDetailProps> = ({
       <div style={{ marginBottom: 16 }}>
         <Text strong>关联关系 ({relatedRelations.length})</Text>
         {relatedRelations.length > 0 ? (
-          <List
-            size="small"
-            style={{ marginTop: 8 }}
-            dataSource={relatedRelations}
-            renderItem={(rel) => {
+          <div style={{ marginTop: 8 }}>
+            {relatedRelations.map((rel) => {
               const isSource = rel.source_id === entity.id
               const otherId = isSource ? rel.target_id : rel.source_id
               const relLabel = RELATION_TYPE_LABELS[rel.relation_type] || rel.relation_type
 
               return (
-                <List.Item
+                <div
+                  key={`${rel.source_id}-${rel.target_id}-${rel.relation_type}`}
                   style={{ cursor: onRelationClick ? 'pointer' : 'default', padding: '4px 0' }}
                   onClick={() => onRelationClick?.(otherId)}
                 >
@@ -274,10 +272,10 @@ const EntityDetail: React.FC<EntityDetailProps> = ({
                       ? entityNameMap.get(rel.target_id) || `#${rel.target_id}`
                       : entity.name}
                   </Text>
-                </List.Item>
+                </div>
               )
-            }}
-          />
+            })}
+          </div>
         ) : (
           <Text type="secondary" style={{ fontSize: 12 }}>
             暂无关联关系

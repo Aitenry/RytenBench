@@ -2,7 +2,14 @@ import React, { useState, useEffect, useCallback, useRef } from 'react'
 import dayjs from 'dayjs'
 import { theme, Modal, Button, Input, Tag as AntTag, DatePicker, Table, Space, Flex } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import { PlusOutlined, DeleteOutlined, EditOutlined, SearchOutlined } from '@ant-design/icons'
+import {
+  PlusOutlined,
+  DeleteOutlined,
+  EditOutlined,
+  SearchOutlined,
+  ImportOutlined,
+  ExportOutlined
+} from '@ant-design/icons'
 import MarkdownEditor from '@renderer/components/MarkdownEditor'
 import { useMessage } from '@renderer/hooks/useMessage'
 import { Window } from '../../../../resource/types/window'
@@ -222,6 +229,20 @@ const Index: React.FC = () => {
     }
   }
 
+  const handleExportDoc = async (id: number): Promise<void> => {
+    const messageKey = 'doc-export'
+    try {
+      viewMessage(messageKey, 'loading', '正在导出文档...')
+      const success = await (window as unknown as Window).api.docs.exportDocument(id)
+      if (success) {
+        viewMessage(messageKey, 'success', '文档导出成功！', 2)
+      }
+    } catch (error) {
+      console.error('Failed to export doc:', error)
+      viewMessage(messageKey, 'error', '导出文档失败')
+    }
+  }
+
   const handleBatchDeleteByTimeRange = async (dates: [dayjs.Dayjs, dayjs.Dayjs]): Promise<void> => {
     const messageKey = 'doc-batch-delete'
     try {
@@ -298,6 +319,34 @@ const Index: React.FC = () => {
     } catch (error) {
       console.error('Failed to save doc:', error)
       viewMessage(messageKey, 'error', '保存文档失败')
+    }
+  }
+
+  const handleImportDoc = async (): Promise<void> => {
+    const messageKey = 'doc-import'
+    try {
+      viewMessage(messageKey, 'loading', '正在导入文档...')
+      const result = await (window as unknown as Window).api.docs.importDocument()
+      if (result) {
+        setCurrentDoc(null)
+        setIsNewDoc(true)
+        setEditTitle(result.title)
+        setEditTags([])
+        setTagInput('')
+        setEditImage(null)
+        setEditSummary('')
+        setIsEditModalOpen(true)
+        // 需要延迟设置 initialValue，因为 MarkdownEditor 在 modal 打开时才挂载
+        setTimeout(() => {
+          setCurrentDoc({ content: result.content } as DocItem)
+        }, 100)
+        viewMessage(messageKey, 'success', `文档"${result.title}"导入成功！`, 2)
+      } else {
+        viewMessage(messageKey, 'info', '已取消导入', 2)
+      }
+    } catch (error) {
+      console.error('Failed to import doc:', error)
+      viewMessage(messageKey, 'error', '导入文档失败')
     }
   }
 
@@ -383,7 +432,7 @@ const Index: React.FC = () => {
     {
       title: '操作',
       key: 'actions',
-      width: 100,
+      width: 140,
       align: 'center',
       render: (_: unknown, record: DocItem) => (
         <Space>
@@ -392,6 +441,12 @@ const Index: React.FC = () => {
             size="small"
             icon={<EditOutlined />}
             onClick={() => handleEditDoc(record)}
+          />
+          <Button
+            type="text"
+            size="small"
+            icon={<ExportOutlined />}
+            onClick={() => handleExportDoc(record.id)}
           />
           <Button
             type="text"
@@ -455,12 +510,16 @@ const Index: React.FC = () => {
               >
                 批量删除
               </Button>
+              <Button type="default" icon={<ImportOutlined />} onClick={handleImportDoc}>
+                导入文档
+              </Button>
             </Space>
           </Flex>
         </div>
 
         <div style={{ padding: '16px', flex: 1, overflow: 'hidden' }}>
           <Table
+            className="[&_.ant-table-body]:min-h-[calc(100vh-200px)]"
             columns={columns}
             dataSource={filteredDocs}
             rowKey="id"
@@ -475,7 +534,7 @@ const Index: React.FC = () => {
               placement: ['bottomCenter']
             }}
             size="middle"
-            scroll={{ x: 1100, y: 'calc(100vh - 200px)' }}
+            scroll={{ x: 1000, y: 'calc(100vh - 200px)' }}
           />
         </div>
       </main>

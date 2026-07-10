@@ -8,6 +8,10 @@ import _Store from 'electron-store'
 import logger from 'electron-log'
 import * as fs from 'fs'
 import crypto from 'crypto'
+import mammoth from 'mammoth'
+import TurndownService from 'turndown'
+import { JSDOM } from 'jsdom'
+import { Readability } from '@mozilla/readability'
 
 import {
   getTodoItemById,
@@ -884,6 +888,96 @@ app.whenReady().then(async () => {
       return await deleteDocsByTimeRange(startTime, endTime)
     } catch (error) {
       console.error('Error in doc-delete-by-time-range:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('doc-import', async () => {
+    try {
+      const result = await dialog.showOpenDialog({
+        properties: ['openFile'],
+        filters: [
+          {
+            name: '文档文件',
+            extensions: ['txt', 'md', 'docx', 'html', 'htm']
+          },
+          { name: '所有文件', extensions: ['*'] }
+        ]
+      })
+
+      if (result.canceled || result.filePaths.length === 0) {
+        return null
+      }
+
+      const filePath = result.filePaths[0]
+      const fileName = filePath.split(/[\\/]/).pop() || 'file'
+      const ext = filePath.split('.').pop()?.toLowerCase() || ''
+      const title = fileName.replace(/\.[^/.]+$/, '')
+
+      let content: string
+
+      const htmlToMarkdown = (html: string): string => {
+        const turndownService = new TurndownService()
+        return turndownService.turndown(html)
+      }
+
+      if (ext === 'docx') {
+        const buffer = fs.readFileSync(filePath)
+        const conversionResult = await mammoth.convertToHtml({ buffer })
+        // mammoth 输出的 HTML 不含 <head>/<body>，直接转换即可
+        content = htmlToMarkdown(conversionResult.value)
+      } else if (ext === 'txt' || ext === 'md') {
+        content = fs.readFileSync(filePath, 'utf-8')
+      } else if (ext === 'html' || ext === 'htm') {
+        const rawHtml = fs.readFileSync(filePath, 'utf-8')
+        // 使用 Readability 智能提取文章正文
+        const dom = new JSDOM(rawHtml, { url: `file://${filePath}` })
+        const reader = new Readability(dom.window.document)
+        const article = reader.parse()
+        if (article?.content) {
+          content = htmlToMarkdown(article.content)
+        } else {
+          // 降级：提取 <body> 内容
+          const bodyMatch = rawHtml.match(/<body[^>]*>([\s\S]*)<\/body>/i)
+          const bodyContent = bodyMatch ? bodyMatch[1] : rawHtml
+          const cleaned = bodyContent
+            .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+            .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+            .replace(/<noscript[^>]*>[\s\S]*?<\/noscript>/gi, '')
+            .replace(/<!--[\s\S]*?-->/g, '')
+          content = htmlToMarkdown(cleaned)
+        }
+      } else {
+        content = fs.readFileSync(filePath, 'utf-8')
+      }
+
+      return { title, content }
+    } catch (error) {
+      console.error('Error in doc-import:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('doc-export', async (_event, id: number) => {
+    try {
+      const doc = await getDocById(id)
+      if (!doc) {
+        return false
+      }
+
+      const result = await dialog.showSaveDialog({
+        defaultPath: `${doc.title || 'document'}.md`,
+        filters: [{ name: 'Markdown', extensions: ['md'] }]
+      })
+
+      if (result.canceled || !result.filePath) {
+        return false
+      }
+
+      fs.writeFileSync(result.filePath, doc.content || '', 'utf-8')
+      return true
+    } catch (error) {
+      console.error('Error in doc-export:', error)
       throw error
     }
   })

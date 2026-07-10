@@ -88,6 +88,7 @@ const parseHeadings = (content: string): HeadingItem[] => {
   const stack: HeadingItem[] = []
 
   let inCodeBlock = false
+  let headingIndex = 0
   const lines = content.split('\n')
 
   const stripBackslashes = (str: string): string => {
@@ -109,7 +110,7 @@ const parseHeadings = (content: string): HeadingItem[] => {
       const level = headingMatch[1].length
       const rawText = headingMatch[2]
       const cleanText = stripBackslashes(rawText)
-      const id = `heading-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`
+      const id = `h-${headingIndex++}`
 
       const item: HeadingItem = { id, level, text: cleanText, children: [] }
 
@@ -156,6 +157,7 @@ const TocItem = ({
         className={`flex items-center py-1.5 px-2 rounded cursor-pointer transition-colors ${
           isDarkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-100'
         }`}
+        onClick={() => onNavigate(item.id)}
         style={{ paddingLeft: `${indentLevel + 8}px` }}
       >
         {hasChildren && (
@@ -171,7 +173,6 @@ const TocItem = ({
         )}
         {!hasChildren && <span className="w-6" />}
         <span
-          onClick={() => onNavigate(item.id)}
           className={`text-sm w-42.5 truncate ${
             isDarkMode ? 'text-gray-300 hover:text-white' : 'text-gray-600 hover:text-gray-900'
           }`}
@@ -280,16 +281,18 @@ interface MarkdownViewProps {
 const MarkdownView = ({ content, isDarkMode = false }: MarkdownViewProps): React.ReactNode => {
   const contentRef = useRef<HTMLDivElement>(null)
   const headings = useMemo(() => parseHeadings(content), [content])
-  const textToIdMap = useMemo(() => {
-    const map = new Map<string, string>()
+
+  // 构建文档顺序的扁平 ID 列表，与 ReactMarkdown 渲染顺序一致
+  const headingFlatIds = useMemo(() => {
+    const ids: string[] = []
     const traverse = (items: HeadingItem[]): void => {
       items.forEach((item) => {
-        map.set(item.text, item.id)
+        ids.push(item.id)
         traverse(item.children)
       })
     }
     traverse(headings)
-    return map
+    return ids
   }, [headings])
 
   const dynamicStyles = `
@@ -331,21 +334,22 @@ const MarkdownView = ({ content, isDarkMode = false }: MarkdownViewProps): React
   `
 
   const handleNavigate = (id: string): void => {
-    const element = document.getElementById(id)
-    if (element) {
-      element.scrollIntoView({ behavior: 'smooth' })
+    // id 格式为 "h-{index}"，直接按 DOM 中标题元素的索引定位，不依赖 DOM id 属性
+    const index = parseInt(id.split('-')[1], 10)
+    if (isNaN(index)) return
+    const allHeadings = contentRef.current?.querySelectorAll('h1, h2, h3, h4, h5, h6')
+    if (allHeadings && allHeadings[index]) {
+      allHeadings[index].scrollIntoView({ behavior: 'smooth' })
     }
   }
 
-  const headingCounter = useRef<number>(0)
+  const headingIndexRef = useRef(0)
+  headingIndexRef.current = 0
 
-  const stripBackslashes = (str: string): string => {
-    return str.replace(/\\/g, '')
-  }
-
-  const getHeadingId = (text: string): string => {
-    const cleanText = stripBackslashes(text)
-    return textToIdMap.get(cleanText) || `heading-${headingCounter.current++}`
+  const getHeadingId = (): string => {
+    const id = headingFlatIds[headingIndexRef.current]
+    headingIndexRef.current++
+    return id || `heading-${headingIndexRef.current}`
   }
 
   return (
@@ -354,7 +358,7 @@ const MarkdownView = ({ content, isDarkMode = false }: MarkdownViewProps): React
       <TableOfContents headings={headings} isDarkMode={isDarkMode} onNavigate={handleNavigate} />
       <div
         ref={contentRef}
-        className={`flex-1 overflow-y-auto custom-scrollbar ${isDarkMode ? 'bg-gray-950' : 'bg-white'}`}
+        className={`flex-1 overflow-y-auto rounded-xl custom-scrollbar ${isDarkMode ? 'bg-gray-950' : 'bg-white'}`}
       >
         <div
           className={`markdown-body px-[13px] ${isDarkMode ? 'text-gray-100' : 'text-gray-700'}`}
@@ -382,60 +386,36 @@ const MarkdownView = ({ content, isDarkMode = false }: MarkdownViewProps): React
                   </code>
                 )
               },
-              h1: ({ children, ...props }) => {
-                const text = extractTextFromChildren(children)
-                const id = getHeadingId(text)
-                return (
-                  <h1 id={id} {...props}>
-                    {children}
-                  </h1>
-                )
-              },
-              h2: ({ children, ...props }) => {
-                const text = extractTextFromChildren(children)
-                const id = getHeadingId(text)
-                return (
-                  <h2 id={id} {...props}>
-                    {children}
-                  </h2>
-                )
-              },
-              h3: ({ children, ...props }) => {
-                const text = extractTextFromChildren(children)
-                const id = getHeadingId(text)
-                return (
-                  <h3 id={id} {...props}>
-                    {children}
-                  </h3>
-                )
-              },
-              h4: ({ children, ...props }) => {
-                const text = extractTextFromChildren(children)
-                const id = getHeadingId(text)
-                return (
-                  <h4 id={id} {...props}>
-                    {children}
-                  </h4>
-                )
-              },
-              h5: ({ children, ...props }) => {
-                const text = extractTextFromChildren(children)
-                const id = getHeadingId(text)
-                return (
-                  <h5 id={id} {...props}>
-                    {children}
-                  </h5>
-                )
-              },
-              h6: ({ children, ...props }) => {
-                const text = extractTextFromChildren(children)
-                const id = getHeadingId(text)
-                return (
-                  <h6 id={id} {...props}>
-                    {children}
-                  </h6>
-                )
-              },
+              h1: ({ children, ...props }) => (
+                <h1 {...props} id={getHeadingId()}>
+                  {children}
+                </h1>
+              ),
+              h2: ({ children, ...props }) => (
+                <h2 {...props} id={getHeadingId()}>
+                  {children}
+                </h2>
+              ),
+              h3: ({ children, ...props }) => (
+                <h3 {...props} id={getHeadingId()}>
+                  {children}
+                </h3>
+              ),
+              h4: ({ children, ...props }) => (
+                <h4 {...props} id={getHeadingId()}>
+                  {children}
+                </h4>
+              ),
+              h5: ({ children, ...props }) => (
+                <h5 {...props} id={getHeadingId()}>
+                  {children}
+                </h5>
+              ),
+              h6: ({ children, ...props }) => (
+                <h6 {...props} id={getHeadingId()}>
+                  {children}
+                </h6>
+              ),
               pre: ({ children, ...props }) => {
                 const codeText = extractTextFromChildren(children)
                 return (

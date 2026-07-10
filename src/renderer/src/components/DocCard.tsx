@@ -3,7 +3,7 @@ import { theme, Card, Typography, Tag, Space } from 'antd'
 import { RiQuillPenAiLine } from '@remixicon/react'
 import { getTagsArray } from '@renderer/utils/document'
 
-const { Title, Text } = Typography
+const { Title, Text, Paragraph } = Typography
 
 interface DocItem {
   id: number
@@ -38,7 +38,7 @@ const DocCard: React.FC<DocCardProps> = ({ item, onClick, actions, showContentPr
       style={{
         background: token.colorFillAlter,
         border: `1px solid ${token.colorBorderSecondary}`,
-        minHeight: 180,
+        height: '100%',
         display: 'flex',
         flexDirection: 'column',
         position: 'relative',
@@ -114,16 +114,18 @@ const DocCard: React.FC<DocCardProps> = ({ item, onClick, actions, showContentPr
         </div>
 
         {item.summary && (
-          <Text
+          <Paragraph
             type="secondary"
+            ellipsis={{ rows: 2 }}
             style={{
               marginTop: token.marginXS,
+              marginBottom: 0,
               fontSize: token.fontSizeSM,
               fontStyle: 'italic'
             }}
           >
             {item.summary}
-          </Text>
+          </Paragraph>
         )}
 
         {!item.summary && item.content && showContentPreview && (

@@ -44,7 +44,10 @@ const api = {
     ) => ipcRenderer.invoke('doc-update', id, updates),
     delete: (id: number) => ipcRenderer.invoke('doc-delete', id),
     deleteByTimeRange: (startTime: string, endTime: string) =>
-      ipcRenderer.invoke('doc-delete-by-time-range', startTime, endTime)
+      ipcRenderer.invoke('doc-delete-by-time-range', startTime, endTime),
+    importDocument: () =>
+      ipcRenderer.invoke('doc-import') as Promise<{ title: string; content: string } | null>,
+    exportDocument: (id: number) => ipcRenderer.invoke('doc-export', id) as Promise<boolean>
   },
   wikis: {
     getById: (id: number) => ipcRenderer.invoke('wiki-get-by-id', id),

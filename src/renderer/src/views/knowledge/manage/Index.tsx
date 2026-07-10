@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
-import { theme, Modal, Button, Input, Empty, Select, Space, Flex, Typography, Masonry } from 'antd'
+import { theme, Modal, Button, Input, Empty, Select, Space, Flex, Typography } from 'antd'
 import { PlusOutlined, EditOutlined, DeleteOutlined, FileTextOutlined } from '@ant-design/icons'
 import { RiBook2Line } from '@remixicon/react'
 import { useMessage } from '@renderer/hooks/useMessage'
@@ -84,8 +84,6 @@ const Index: React.FC = () => {
   const [page, setPage] = useState(1)
   const [hasMore, setHasMore] = useState(true)
   const [isLoading, setIsLoading] = useState(false)
-  const [wikiMasonryKey, setWikiMasonryKey] = useState(0)
-  const [directoryDocsMasonryKey, setDirectoryDocsMasonryKey] = useState(0)
   const loadMoreRef = useRef<HTMLDivElement>(null)
   const isLoadingRef = useRef(false)
   const hasMoreRef = useRef(true)
@@ -125,7 +123,6 @@ const Index: React.FC = () => {
         setWikis((prev) => [...prev, ...result.items])
       } else {
         setWikis(result.items)
-        setWikiMasonryKey((prev) => prev + 1)
       }
       setHasMore(result.hasMore)
       hasMoreRef.current = result.hasMore
@@ -175,7 +172,6 @@ const Index: React.FC = () => {
         }
       }
       setDirectoryDocs(docs)
-      setDirectoryDocsMasonryKey((prev) => prev + 1)
     } catch (error) {
       console.error('Failed to load directory docs:', error)
     }
@@ -540,27 +536,20 @@ const Index: React.FC = () => {
                   </Flex>
                 ) : (
                   <>
-                    <Masonry
-                      key={wikiMasonryKey}
-                      columns={4}
-                      gutter={16}
-                      items={wikis.map((item) => ({
-                        key: item.id,
-                        data: item
-                      }))}
-                      itemRender={(record) => (
-                        <WikiCard
-                          item={record.data}
-                          onSelect={() => handleSelectWiki(record.data)}
-                          onEdit={() => handleEditWiki(record.data)}
-                          onDelete={() => handleDeleteWiki(record.data.id)}
-                        />
-                      )}
-                    />
-                    <div ref={loadMoreRef} style={{ height: 20, marginTop: 16 }}>
-                      {isLoading && (
-                        <div style={{ textAlign: 'center', padding: '16px' }}>加载中...</div>
-                      )}
+                    <div className="grid grid-cols-4 gap-4">
+                      {wikis.map((item) => (
+                        <div key={item.id} className="h-[220px] min-w-0 overflow-hidden">
+                          <WikiCard
+                            item={item}
+                            onSelect={() => handleSelectWiki(item)}
+                            onEdit={() => handleEditWiki(item)}
+                            onDelete={() => handleDeleteWiki(item.id)}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                    <div ref={loadMoreRef} className="h-5 mt-4">
+                      {isLoading && <div className="text-center p-4">加载中...</div>}
                     </div>
                   </>
                 )}
@@ -636,18 +625,15 @@ const Index: React.FC = () => {
           </aside>
 
           <main
-            className="flex-1 flex flex-col"
+            className="flex-1 flex flex-col min-w-0"
             style={{
               background: colorBgContainer,
               borderRadius: borderRadiusLG
             }}
           >
             <div
+              className="p-4 flex items-center justify-between"
               style={{
-                padding: '16px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
                 borderBottom: `1px solid ${theme.useToken().token.colorBorder}`
               }}
             >
@@ -661,7 +647,7 @@ const Index: React.FC = () => {
               )}
             </div>
 
-            <div style={{ padding: '12px', flex: 1, overflow: 'auto' }}>
+            <div className="p-3 flex-1 overflow-y-auto overflow-x-hidden min-w-0">
               {!selectedDirectory ? (
                 <Empty description="请从左侧选择一个目录" image={Empty.PRESENTED_IMAGE_SIMPLE} />
               ) : directoryDocs.length === 0 ? (
@@ -671,36 +657,31 @@ const Index: React.FC = () => {
                   </Button>
                 </Empty>
               ) : (
-                <Masonry
-                  key={directoryDocsMasonryKey}
-                  columns={3}
-                  gutter={12}
-                  items={directoryDocs.map((item) => ({
-                    key: item.id,
-                    data: item
-                  }))}
-                  itemRender={(record) => (
-                    <DocCard
-                      item={record.data}
-                      onClick={() => handlePreviewDoc(record.data)}
-                      actions={[
-                        <DeleteOutlined
-                          key="remove"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            Modal.confirm({
-                              title: '确定要从目录中移除这篇文档吗？',
-                              onOk: () => handleRemoveDocFromDirectory(record.data.id),
-                              okText: '确定',
-                              cancelText: '取消'
-                            })
-                          }}
-                        />
-                      ]}
-                      showContentPreview={false}
-                    />
-                  )}
-                />
+                <div className="grid grid-cols-3 gap-3">
+                  {directoryDocs.map((item) => (
+                    <div key={item.id} className="h-[220px] min-w-0 overflow-hidden">
+                      <DocCard
+                        item={item}
+                        onClick={() => handlePreviewDoc(item)}
+                        actions={[
+                          <DeleteOutlined
+                            key="remove"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              Modal.confirm({
+                                title: '确定要从目录中移除这篇文档吗？',
+                                onOk: () => handleRemoveDocFromDirectory(item.id),
+                                okText: '确定',
+                                cancelText: '取消'
+                              })
+                            }}
+                          />
+                        ]}
+                        showContentPreview={false}
+                      />
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
           </main>

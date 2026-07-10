@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
-import { theme, Empty, Modal, Flex, Typography, Masonry, Tree, List, Spin } from 'antd'
+import { theme, Empty, Modal, Flex, Typography, Tree, Spin } from 'antd'
 import { FolderOutlined, FileTextOutlined, ArrowLeftOutlined } from '@ant-design/icons'
 import { RiBook2Line } from '@remixicon/react'
 import { Window } from '../../../../resource/types/window'
@@ -61,7 +61,6 @@ const MainContent: React.FC = () => {
 
   const [wikis, setWikis] = useState<WikiRow[]>([])
   const [isLoading, setIsLoading] = useState(false)
-  const [wikiMasonryKey, setWikiMasonryKey] = useState(0)
   const loadMoreRef = useRef<HTMLDivElement>(null)
   const isLoadingRef = useRef(false)
   const hasMoreRef = useRef(true)
@@ -125,7 +124,6 @@ const MainContent: React.FC = () => {
         setWikis((prev) => [...prev, ...result.items])
       } else {
         setWikis(result.items)
-        setWikiMasonryKey((prev) => prev + 1)
       }
 
       hasMoreRef.current = result.hasMore
@@ -245,25 +243,15 @@ const MainContent: React.FC = () => {
                 </Flex>
               ) : (
                 <>
-                  <Masonry
-                    key={wikiMasonryKey}
-                    columns={3}
-                    gutter={16}
-                    items={wikis.map((item) => ({
-                      key: item.id,
-                      data: item
-                    }))}
-                    itemRender={(record) => (
-                      <WikiCard
-                        item={record.data}
-                        onSelect={() => handleOpenPreview(record.data)}
-                      />
-                    )}
-                  />
-                  <div ref={loadMoreRef} style={{ height: 20, marginTop: 16 }}>
-                    {isLoading && (
-                      <div style={{ textAlign: 'center', padding: '16px' }}>加载中...</div>
-                    )}
+                  <div className="grid grid-cols-3 gap-4">
+                    {wikis.map((item) => (
+                      <div key={item.id} className="h-[220px] min-w-0 overflow-hidden">
+                        <WikiCard item={item} onSelect={() => handleOpenPreview(item)} />
+                      </div>
+                    ))}
+                  </div>
+                  <div ref={loadMoreRef} className="h-5 mt-4">
+                    {isLoading && <div className="text-center p-4">加载中...</div>}
                   </div>
                 </>
               )}
@@ -343,10 +331,10 @@ const MainContent: React.FC = () => {
                   <Text type="secondary">暂无文档</Text>
                 </div>
               ) : (
-                <List
-                  dataSource={directoryDocs}
-                  renderItem={(doc) => (
-                    <List.Item
+                <div>
+                  {directoryDocs.map((doc) => (
+                    <div
+                      key={doc.id}
                       onClick={() => handleSelectDoc(doc)}
                       style={{
                         cursor: 'pointer',
@@ -361,9 +349,9 @@ const MainContent: React.FC = () => {
                           {doc.title}
                         </Text>
                       </Flex>
-                    </List.Item>
-                  )}
-                />
+                    </div>
+                  ))}
+                </div>
               )
             ) : directoryTree.length === 0 ? (
               <div style={{ padding: '16px', textAlign: 'center' }}>
@@ -378,26 +366,35 @@ const MainContent: React.FC = () => {
                 onSelect={handleSelectDirectory}
                 selectedKeys={[]}
                 treeData={directoryTree}
+                className="[.ant-tree]:h-full"
+                style={{ padding: '10px 0' }}
                 icon={<FolderOutlined />}
               />
             )}
           </div>
         </div>
 
-        <div style={{ flex: 1, overflow: 'auto', padding: '16px' }}>
+        <div style={{ flex: 1, overflow: 'hidden', padding: '10px 16px', height: '100%' }}>
           {previewLoading ? (
-            <div style={{ padding: '48px', textAlign: 'center' }}>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'center',
+                alignItems: 'center',
+                height: '100%'
+              }}
+            >
               <Spin />
             </div>
           ) : previewDoc ? (
-            <div>
+            <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
               <Title level={4}>{previewDoc.title}</Title>
               {previewDoc.summary && (
                 <Text type="secondary" style={{ marginBottom: 16, display: 'block' }}>
                   {previewDoc.summary}
                 </Text>
               )}
-              <div style={{ marginTop: 16 }}>
+              <div style={{ marginTop: 16, flex: 1, minHeight: 0 }}>
                 <MarkdownView
                   content={previewDoc.content || ''}
                   isDarkMode={effectiveTheme === 'dark'}
