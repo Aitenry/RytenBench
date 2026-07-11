@@ -1,6 +1,9 @@
 import React, { ReactNode, useEffect, useRef, useState } from 'react'
-import { FloatButton, Tooltip } from 'antd'
-import { LoadingOutlined, MinusOutlined } from '@ant-design/icons'
+import { Dropdown, FloatButton } from 'antd'
+import type { MenuProps } from 'antd'
+import { CheckCircleOutlined, LoadingOutlined } from '@ant-design/icons'
+import { RiBubbleChartLine } from '@remixicon/react'
+import { useNavigate } from 'react-router-dom'
 import { Window } from '../../resource/types/window'
 import BuildProgress from '../views/knowledge/graph/BuildProgress'
 import { BuildProgressContext } from './BuildProgressContext'
@@ -20,6 +23,7 @@ interface BuildProgressState {
   relationCount: number
   message: string
   minimized: boolean
+  completed: boolean
 }
 
 interface BuildProgressProviderProps {
@@ -29,6 +33,7 @@ interface BuildProgressProviderProps {
 export const BuildProgressProvider: React.FC<BuildProgressProviderProps> = ({ children }) => {
   const [buildMap, setBuildMap] = useState<Map<number, BuildProgressState>>(new Map())
   const refreshCallbacks = useRef<Map<number, Set<() => void>>>(new Map())
+  const navigate = useNavigate()
 
   const subscribeToRefresh = (wikiId: number, callback: () => void): (() => void) => {
     const callbacks = refreshCallbacks.current.get(wikiId) || new Set()
@@ -59,7 +64,8 @@ export const BuildProgressProvider: React.FC<BuildProgressProviderProps> = ({ ch
         entityCount: 0,
         relationCount: 0,
         message: '初始化...',
-        minimized: false
+        minimized: false,
+        completed: false
       })
       return next
     })
@@ -72,6 +78,15 @@ export const BuildProgressProvider: React.FC<BuildProgressProviderProps> = ({ ch
       if (state) {
         next.set(wikiId, { ...state, minimized: false })
       }
+      return next
+    })
+  }
+
+  const navigateToGraph = (wikiId: number): void => {
+    navigate(`/knowledge/graph?wikiId=${wikiId}`)
+    setBuildMap((prev) => {
+      const next = new Map(prev)
+      next.delete(wikiId)
       return next
     })
   }
@@ -119,7 +134,8 @@ export const BuildProgressProvider: React.FC<BuildProgressProviderProps> = ({ ch
         entityCount: progress.entityCount,
         relationCount: progress.relationCount,
         message: progress.message,
-        minimized: existing?.minimized ?? false
+        minimized: existing?.minimized ?? false,
+        completed: existing?.completed ?? false
       })
       return next
     })
@@ -139,7 +155,16 @@ export const BuildProgressProvider: React.FC<BuildProgressProviderProps> = ({ ch
   }): void => {
     setBuildMap((prev) => {
       const next = new Map(prev)
-      next.delete(result.wikiId)
+      const state = next.get(result.wikiId)
+      if (state) {
+        next.set(result.wikiId, {
+          ...state,
+          completed: true,
+          entityCount: result.entityCount,
+          relationCount: result.relationCount,
+          overallProgress: 100
+        })
+      }
       return next
     })
   }
@@ -166,48 +191,56 @@ export const BuildProgressProvider: React.FC<BuildProgressProviderProps> = ({ ch
 
   const activeBuilds = Array.from(buildMap.values())
   const hasActiveBuilds = activeBuilds.length > 0
+  const allCompleted = hasActiveBuilds && activeBuilds.every((s) => s.completed)
+  const incompleteCount = activeBuilds.filter((s) => !s.completed).length
+
+  const menuItems: MenuProps['items'] = activeBuilds.map((state) => ({
+    key: String(state.wikiId),
+    icon: state.completed ? (
+      <CheckCircleOutlined style={{ color: '#52c41a' }} />
+    ) : (
+      <LoadingOutlined spin />
+    ),
+    label: state.completed ? state.wikiTitle : `${state.wikiTitle}  ${state.overallProgress}%`,
+    onClick: () => (state.completed ? navigateToGraph(state.wikiId) : restoreBuild(state.wikiId))
+  }))
 
   return (
-    <BuildProgressContext.Provider value={{ startBuild, restoreBuild, subscribeToRefresh }}>
+    <BuildProgressContext.Provider
+      value={{ startBuild, restoreBuild, navigateToGraph, subscribeToRefresh }}
+    >
       {children}
 
-      {activeBuilds.map((state) => (
-        <BuildProgress
-          key={state.wikiId}
-          open={!state.minimized}
-          wikiId={state.wikiId}
-          wikiTitle={state.wikiTitle}
-          phase={state.phase}
-          phaseLabel={state.phaseLabel}
-          phaseProgress={state.phaseProgress}
-          overallProgress={state.overallProgress}
-          processedDocs={state.processedDocs}
-          totalDocs={state.totalDocs}
-          processedChunks={state.processedChunks}
-          totalChunks={state.totalChunks}
-          entityCount={state.entityCount}
-          relationCount={state.relationCount}
-          message={state.message}
-          onMinimize={() => handleMinimize(state.wikiId)}
-        />
-      ))}
+      {activeBuilds
+        .filter((state) => !state.completed)
+        .map((state) => (
+          <BuildProgress
+            key={state.wikiId}
+            open={!state.minimized}
+            wikiId={state.wikiId}
+            wikiTitle={state.wikiTitle}
+            phaseLabel={state.phaseLabel}
+            phaseProgress={state.phaseProgress}
+            overallProgress={state.overallProgress}
+            processedDocs={state.processedDocs}
+            totalDocs={state.totalDocs}
+            processedChunks={state.processedChunks}
+            totalChunks={state.totalChunks}
+            entityCount={state.entityCount}
+            relationCount={state.relationCount}
+            message={state.message}
+            onMinimize={() => handleMinimize(state.wikiId)}
+          />
+        ))}
 
       {hasActiveBuilds && (
-        <FloatButton.Group icon={<LoadingOutlined />} style={{ right: 24, bottom: 24 }}>
-          {activeBuilds.map((state) => {
-            const percent = state.overallProgress
-
-            return (
-              <Tooltip title={`${state.wikiTitle} - ${percent}%`} key={state.wikiId}>
-                <FloatButton
-                  icon={<MinusOutlined />}
-                  badge={{ count: percent, color: percent === 100 ? '#52c41a' : '#1677ff' }}
-                  onClick={() => restoreBuild(state.wikiId)}
-                />
-              </Tooltip>
-            )
-          })}
-        </FloatButton.Group>
+        <Dropdown menu={{ items: menuItems }} trigger={['click']} placement="topRight">
+          <FloatButton
+            icon={allCompleted ? <RiBubbleChartLine /> : <LoadingOutlined spin />}
+            badge={allCompleted ? { dot: true } : { count: incompleteCount }}
+            style={{ right: 24, bottom: 24 }}
+          />
+        </Dropdown>
       )}
     </BuildProgressContext.Provider>
   )

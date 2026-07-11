@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Button, Empty, Flex, Modal, Select, theme, Typography } from 'antd'
 import { PlayCircleOutlined } from '@ant-design/icons'
 import { Window } from '../../../../resource/types/window'
@@ -26,6 +27,8 @@ const Index: React.FC = () => {
 
   const { viewMessage } = useMessage()
   const { startBuild, subscribeToRefresh } = useBuildProgress()
+  const [searchParams] = useSearchParams()
+  const [modal, contextHolder] = Modal.useModal()
 
   const [wikis, setWikis] = useState<WikiRow[]>([])
   const [selectedWiki, setSelectedWiki] = useState<WikiRow | null>(null)
@@ -154,6 +157,17 @@ const Index: React.FC = () => {
   }, [loadWikis])
 
   useEffect(() => {
+    const wikiIdParam = searchParams.get('wikiId')
+    if (wikiIdParam && wikis.length > 0) {
+      const wikiId = Number(wikiIdParam)
+      const wiki = wikis.find((w) => w.id === wikiId)
+      if (wiki) {
+        setSelectedWiki(wiki)
+      }
+    }
+  }, [wikis, searchParams])
+
+  useEffect(() => {
     if (selectedWiki) {
       loadDocs(selectedWiki.id).then()
       loadProcessedDocIds(selectedWiki.id).then()
@@ -210,7 +224,7 @@ const Index: React.FC = () => {
   const handleBuildGraph = async (): Promise<void> => {
     if (!selectedWiki) return
 
-    Modal.confirm({
+    modal.confirm({
       title: '确认构建图谱',
       content: `将为知识库「${selectedWiki.title}」重新构建知识图谱，已有图谱数据将被清除。确定继续吗？`,
       okText: '确定构建',
@@ -281,122 +295,128 @@ const Index: React.FC = () => {
 
   if (!selectedWiki) {
     return (
-      <div className="h-full flex-1 flex flex-row gap-2.5">
-        <main
-          className="w-full"
+      <>
+        {contextHolder}
+        <div className="h-full flex-1 flex flex-row gap-2.5">
+          <main
+            className="w-full"
+            style={{
+              background: colorBgContainer,
+              borderRadius: borderRadiusLG
+            }}
+          >
+            <div style={{ padding: '12px', height: '100%' }}>
+              <Flex vertical align="center" justify="center" style={{ height: '100%' }} gap={16}>
+                <Empty
+                  description="选择一个知识库来查看其知识图谱"
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                >
+                  <Select
+                    placeholder="选择知识库"
+                    style={{ width: 260 }}
+                    onChange={(value) => {
+                      const wiki = wikis.find((w) => w.id === value)
+                      if (wiki) handleSelectWiki(wiki)
+                    }}
+                    options={wikis.map((wiki) => ({ value: wiki.id, label: wiki.title }))}
+                    optionRender={(option) => (
+                      <Flex justify="space-between" align="center">
+                        <Text>{option.label}</Text>
+                        <Text type="secondary" style={{ fontSize: 12 }}>
+                          {wikis.find((w) => w.id === option.value)?.doc_count ?? 0} 篇文档
+                        </Text>
+                      </Flex>
+                    )}
+                  />
+                </Empty>
+              </Flex>
+            </div>
+          </main>
+        </div>
+      </>
+    )
+  }
+
+  return (
+    <>
+      {contextHolder}
+      <div className="h-full flex-1 flex flex-col gap-2.5">
+        <div
           style={{
             background: colorBgContainer,
             borderRadius: borderRadiusLG
           }}
         >
-          <div style={{ padding: '12px', height: '100%' }}>
-            <Flex vertical align="center" justify="center" style={{ height: '100%' }} gap={16}>
-              <Empty
-                description="选择一个知识库来查看其知识图谱"
-                image={Empty.PRESENTED_IMAGE_SIMPLE}
-              >
-                <Select
-                  placeholder="选择知识库"
-                  style={{ width: 260 }}
-                  onChange={(value) => {
-                    const wiki = wikis.find((w) => w.id === value)
-                    if (wiki) handleSelectWiki(wiki)
-                  }}
-                  options={wikis.map((wiki) => ({ value: wiki.id, label: wiki.title }))}
-                  optionRender={(option) => (
-                    <Flex justify="space-between" align="center">
-                      <Text>{option.label}</Text>
-                      <Text type="secondary" style={{ fontSize: 12 }}>
-                        {wikis.find((w) => w.id === option.value)?.doc_count ?? 0} 篇文档
-                      </Text>
-                    </Flex>
-                  )}
-                />
-              </Empty>
-            </Flex>
-          </div>
-        </main>
-      </div>
-    )
-  }
-
-  return (
-    <div className="h-full flex-1 flex flex-col gap-2.5">
-      <div
-        style={{
-          background: colorBgContainer,
-          borderRadius: borderRadiusLG
-        }}
-      >
-        <GraphToolbar
-          wikiTitle={selectedWiki.title}
-          isLoading={false}
-          searchQuery={searchQuery}
-          typeFilter={typeFilter}
-          entityCount={graphData?.entities.length || 0}
-          relationCount={graphData?.relations.length || 0}
-          docs={docs}
-          addedDocIds={addedDocIds}
-          isAppending={isAppending}
-          docFilter={docFilter}
-          onSearchChange={setSearchQuery}
-          onTypeFilterChange={handleTypeFilterChange}
-          onAppendDocs={handleAppendDocs}
-          onDocFilterChange={setDocFilter}
-          onBuildGraph={handleBuildGraph}
-          onBackToWikiList={handleBackToWikiList}
-        />
-      </div>
-
-      <div className="flex-1 flex flex-row gap-2.5" style={{ minHeight: 0 }}>
-        <div
-          className="flex-1"
-          style={{
-            background: colorBgContainer,
-            borderRadius: borderRadiusLG,
-            overflow: 'hidden',
-            minWidth: 0
-          }}
-        >
-          {graphChartData && graphChartData.nodes.length > 0 ? (
-            <GraphCanvas
-              data={graphChartData}
-              onEntityClick={handleEntityClick}
-              searchQuery={searchQuery}
-            />
-          ) : (
-            <Flex vertical align="center" justify="center" style={{ height: '100%' }} gap={16}>
-              <Empty description="该知识库还没有图谱数据" image={Empty.PRESENTED_IMAGE_SIMPLE}>
-                <Button type="primary" icon={<PlayCircleOutlined />} onClick={handleBuildGraph}>
-                  开始构建图谱
-                </Button>
-              </Empty>
-            </Flex>
-          )}
-        </div>
-
-        <div
-          style={{
-            width: 300,
-            flexShrink: 0
-          }}
-        >
-          <EntityDetail
-            entity={selectedEntity}
-            entities={graphData?.entities || []}
-            relations={graphData?.relations || []}
-            onRelationClick={handleRelationClick}
-            onDocClick={handleDocClick}
+          <GraphToolbar
+            wikiTitle={selectedWiki.title}
+            isLoading={false}
+            searchQuery={searchQuery}
+            typeFilter={typeFilter}
+            entityCount={graphData?.entities.length || 0}
+            relationCount={graphData?.relations.length || 0}
+            docs={docs}
+            addedDocIds={addedDocIds}
+            isAppending={isAppending}
+            docFilter={docFilter}
+            onSearchChange={setSearchQuery}
+            onTypeFilterChange={handleTypeFilterChange}
+            onAppendDocs={handleAppendDocs}
+            onDocFilterChange={setDocFilter}
+            onBuildGraph={handleBuildGraph}
+            onBackToWikiList={handleBackToWikiList}
           />
         </div>
-      </div>
 
-      <DocPreviewModal
-        open={isDocPreviewOpen}
-        onCancel={() => setIsDocPreviewOpen(false)}
-        currentDoc={previewDoc}
-      />
-    </div>
+        <div className="flex-1 flex flex-row gap-2.5" style={{ minHeight: 0 }}>
+          <div
+            className="flex-1"
+            style={{
+              background: colorBgContainer,
+              borderRadius: borderRadiusLG,
+              overflow: 'hidden',
+              minWidth: 0
+            }}
+          >
+            {graphChartData && graphChartData.nodes.length > 0 ? (
+              <GraphCanvas
+                data={graphChartData}
+                onEntityClick={handleEntityClick}
+                searchQuery={searchQuery}
+              />
+            ) : (
+              <Flex vertical align="center" justify="center" style={{ height: '100%' }} gap={16}>
+                <Empty description="该知识库还没有图谱数据" image={Empty.PRESENTED_IMAGE_SIMPLE}>
+                  <Button type="primary" icon={<PlayCircleOutlined />} onClick={handleBuildGraph}>
+                    开始构建图谱
+                  </Button>
+                </Empty>
+              </Flex>
+            )}
+          </div>
+
+          <div
+            style={{
+              width: 300,
+              flexShrink: 0
+            }}
+          >
+            <EntityDetail
+              entity={selectedEntity}
+              entities={graphData?.entities || []}
+              relations={graphData?.relations || []}
+              onRelationClick={handleRelationClick}
+              onDocClick={handleDocClick}
+            />
+          </div>
+        </div>
+
+        <DocPreviewModal
+          open={isDocPreviewOpen}
+          onCancel={() => setIsDocPreviewOpen(false)}
+          currentDoc={previewDoc}
+        />
+      </div>
+    </>
   )
 }
 

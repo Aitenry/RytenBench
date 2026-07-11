@@ -182,17 +182,20 @@ export const ENTITY_RELATION_EXTRACTION_PROMPT = `你是一个知识图谱构建
 
 请仅返回 JSON 对象（直接输出对象，不要包裹在代码块中）：`
 
-/** 跨块关系补全 Prompt（轻量级：仅送实体描述，不送全文） */
-export const CROSS_CHUNK_RELATION_PROMPT = `你是一个知识图谱关系补全助手。以下实体出现在同一篇文档的不同章节中。各章节内的关系已经抽取完毕，请找出跨章节存在的实体间关系。
+/** 增量跨块关系补全 Prompt（按 chunk 顺序推进，每次只比较当前 chunk 实体与已处理的前序实体） */
+export const INCREMENTAL_CROSS_CHUNK_PROMPT = `你是一个知识图谱关系补全助手。以下 A 组实体出现在文档的前序章节中，B 组实体出现在当前章节中。请找出 A 组与 B 组之间可能存在的关系（A-B 之间、B-B 内部均可，但不要重复 A-A 内部的关系——这些已经抽取完毕）。
 
 文档标题：
 {docTitle}
 
-所有实体（含描述）：
-{entities}
+前序章节实体（A 组）：
+{previousEntities}
+
+当前章节实体（B 组）：
+{currentEntities}
 
 已发现的关系（请勿重复抽取）：
-{existingRelations}
+{existingPairs}
 
 关系类型定义（relation_type 必须严格从以下 24 种中选择，禁止使用列表外的任何值）：
 - contains: A 包含 B
@@ -207,8 +210,8 @@ export const CROSS_CHUNK_RELATION_PROMPT = `你是一个知识图谱关系补全
 - produces: A 生产/制造/产出 B
 - operates: A 运营/操作/运行 B
 - owns: A 拥有/持有 B
-- acquires: A 获得 B（物品、技能、资源、许可）
-- belongs_to: A 归属于 B（组织、团体、阵营）
+- acquires: A 获得 B
+- belongs_to: A 归属于 B
 - governs: A 管辖/监管/治理 B
 - monitors: A 监测/监控/监督 B
 - employs: A 雇用/聘用 B
@@ -221,7 +224,7 @@ export const CROSS_CHUNK_RELATION_PROMPT = `你是一个知识图谱关系补全
 - kills: A 杀死 B
 
 要求：
-1. 只返回有合理推断依据的跨章节关系（实体虽分散在不同章节，但在同一篇文档的上下文中有关联）
+1. 只返回有合理推断依据的关系
 2. 不要重复「已发现的关系」中列出的关系
 3. source 和 target 必须是给定实体列表中的名称（完全匹配）
 4. description 简短描述关系（15字内）

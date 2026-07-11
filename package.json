@@ -66,6 +66,7 @@
     "rehype-highlight": "^7.0.2",
     "rehype-sanitize": "^6.0.0",
     "remark-gfm": "^4.0.1",
+    "strsimkit": "^0.1.0",
     "tailwindcss": "^4.1.14",
     "turndown": "^7.2.4",
     "zod": "^4.4.3"

@@ -2,6 +2,7 @@ import { BaseChatModel } from '@langchain/core/language_models/chat_models'
 import { StructuredOutputParser } from '@langchain/core/output_parsers'
 import logger from 'electron-log'
 import { parseFromLLM } from 'json-llm-repair'
+import { dice } from 'strsimkit'
 import type { z } from 'zod/v3'
 import {
   batchUpsertEntities,
@@ -21,8 +22,8 @@ import { getDirectoriesByWikiId, getDocsByDirectoryId } from '../database/mapper
 import {
   ENTITY_GLEANING_PROMPT,
   ENTITY_MERGING_PROMPT,
-  CROSS_CHUNK_RELATION_PROMPT,
-  ENTITY_RELATION_EXTRACTION_PROMPT
+  ENTITY_RELATION_EXTRACTION_PROMPT,
+  INCREMENTAL_CROSS_CHUNK_PROMPT
 } from './prompts'
 import {
   EntitiesArraySchema,
@@ -723,74 +724,72 @@ export class KnowledgeGraphService {
         await updateBuildJob(jobId, { processed_notes: processedDocs })
       }
 
-      // ========== Phase 2: Gleaning 二次抽取（可选） ==========
+      // ========== Phase 2: Gleaning 二次抽取（可选，按块级批处理） ==========
       const enableGleaning = config?.enableGleaning !== false
-      if (enableGleaning) {
-        const maxGleaningDocs = config?.gleaningMaxDocs ?? 100
-        const gleaningEntries =
-          maxGleaningDocs > 0 && docEntries.length > maxGleaningDocs
-            ? docEntries.slice(0, maxGleaningDocs)
-            : docEntries
+      if (enableGleaning && allChunks.length > 0) {
+        currentPhaseIndex = PHASE_ORDER.indexOf('gleaning')
+        phaseProgress = 0
+        sendProgress('gleaning', `二次扫描遗漏实体... ${allChunks.length} 个文本块`, {
+          totalDocs,
+          totalChunks,
+          entityCount: entityNameToId.size,
+          relationCount: allExtractedRelations.length
+        })
 
-        if (gleaningEntries.length > 0) {
-          currentPhaseIndex = PHASE_ORDER.indexOf('gleaning')
-          phaseProgress = 0
-          sendProgress('gleaning', `二次扫描遗漏实体... (${gleaningEntries.length} 篇文档)`, {
-            totalDocs,
-            entityCount: entityNameToId.size,
-            relationCount: allExtractedRelations.length
-          })
-
-          const gleaningBatchSize = maxConcurrency
-          for (let i = 0; i < gleaningEntries.length; i += gleaningBatchSize) {
-            const batch = gleaningEntries.slice(i, i + gleaningBatchSize)
-            const batchResults = await Promise.all(
-              batch.map(async (entry) => {
-                const existingNames = [...entityNameToId.keys()]
-                if (existingNames.length === 0) return []
-                return this.gleanEntities(entry.content, existingNames)
-              })
-            )
-
-            for (let j = 0; j < batch.length; j++) {
-              if (batchResults[j].length > 0) {
-                const gleanedEntities = batchResults[j].map((e) => ({
-                  ...e,
-                  source_doc_ids: [batch[j].docId]
-                }))
-                allExtractedEntities.push(...gleanedEntities)
-
-                const gleanedNameToId = await batchUpsertEntities(
-                  gleanedEntities.map((e) => ({
-                    wiki_id: wikiId,
-                    name: e.name,
-                    type: e.type,
-                    description: e.description,
-                    aliases: JSON.stringify(e.aliases),
-                    properties: null,
-                    confidence: e.confidence,
-                    source_note_ids: JSON.stringify(e.source_doc_ids)
-                  }))
+        for (let i = 0; i < allChunks.length; i += maxConcurrency) {
+          const batch = allChunks.slice(i, i + maxConcurrency)
+          const existingNames = [...entityNameToId.keys()]
+          const batchResults =
+            existingNames.length > 0
+              ? await Promise.all(
+                  batch.map((chunk) => this.gleanEntities(chunk.content, existingNames))
                 )
+              : batch.map(() => [] as Omit<ExtractedEntity, 'source_doc_ids'>[])
 
-                for (const [name, id] of gleanedNameToId) {
-                  entityNameToId.set(name, id)
-                }
+          for (let j = 0; j < batch.length; j++) {
+            if (batchResults[j].length > 0) {
+              const gleanedEntities = batchResults[j].map((e) => ({
+                ...e,
+                source_doc_ids: [batch[j].docId]
+              }))
+              allExtractedEntities.push(...gleanedEntities)
+
+              const gleanedNameToId = await batchUpsertEntities(
+                gleanedEntities.map((e) => ({
+                  wiki_id: wikiId,
+                  name: e.name,
+                  type: e.type,
+                  description: e.description,
+                  aliases: JSON.stringify(e.aliases),
+                  properties: null,
+                  confidence: e.confidence,
+                  source_note_ids: JSON.stringify(e.source_doc_ids)
+                }))
+              )
+
+              for (const [name, id] of gleanedNameToId) {
+                entityNameToId.set(name, id)
               }
             }
-
-            phaseProgress = Math.min(1, (i + gleaningBatchSize) / gleaningEntries.length)
-            sendProgress(
-              'gleaning',
-              `二次抽取中... ${Math.min(i + gleaningBatchSize, gleaningEntries.length)}/${gleaningEntries.length} 篇`,
-              {
-                totalDocs,
-                entityCount: entityNameToId.size,
-                relationCount: allExtractedRelations.length,
-                needsRefresh: true
-              }
-            )
           }
+
+          const processedChunks = Math.min(i + maxConcurrency, allChunks.length)
+          const processedDocs = new Set(allChunks.slice(0, i + maxConcurrency).map((c) => c.docId))
+            .size
+          phaseProgress = processedChunks / allChunks.length
+          sendProgress(
+            'gleaning',
+            `二次抽取中... ${processedChunks}/${allChunks.length} 块（${entityNameToId.size} 实体）`,
+            {
+              processedDocs: Math.min(processedDocs, totalDocs),
+              totalDocs,
+              processedChunks,
+              totalChunks,
+              entityCount: entityNameToId.size,
+              relationCount: allExtractedRelations.length,
+              needsRefresh: true
+            }
+          )
         }
       }
 
@@ -802,7 +801,15 @@ export class KnowledgeGraphService {
         entityCount: entityNameToId.size,
         relationCount: allExtractedRelations.length
       })
-      let mergedEntities = await this.mergeEntities(allExtractedEntities)
+      let mergedEntities = await this.mergeEntities(allExtractedEntities, (done, total) => {
+        phaseProgress = Math.min(1, done / total)
+        sendProgress('merge_entities', `实体消歧合并中... ${done}/${total} 批次`, {
+          totalDocs,
+          entityCount: entityNameToId.size,
+          relationCount: allExtractedRelations.length,
+          needsRefresh: true
+        })
+      })
       phaseProgress = 1
       sendProgress('merge_entities', `实体消歧合并完成，共 ${mergedEntities.length} 个实体`, {
         totalDocs,
@@ -810,7 +817,7 @@ export class KnowledgeGraphService {
         relationCount: allExtractedRelations.length
       })
 
-      // ========== Phase 4: 跨块关系补全（轻量级） ==========
+      // ========== Phase 4: 跨块关系补全（增量块级批处理） ==========
       const allEntityNames = mergedEntities.map((e) => e.name)
       const entityDescMap = new Map(
         mergedEntities.map((e) => [
@@ -825,43 +832,64 @@ export class KnowledgeGraphService {
         docChunksMap.get(chunk.docId)!.push(chunk)
       }
 
+      // 增量任务：每个文档内，将 chunk 按顺序与已处理的前序 chunk 实体进行比对
       const crossChunkTasks: Array<{
         docId: number
         docTitle: string
-        entities: { name: string; type: string; description: string }[]
+        previousEntities: { name: string; type: string; description: string }[]
+        currentEntities: { name: string; type: string; description: string }[]
         existingPairs: { source: string; target: string }[]
       }> = []
 
       for (const [docId, chunks] of docChunksMap) {
         if (chunks.length < 2) continue
 
-        const docEntitySet = new Set<string>()
-        for (const chunk of chunks) {
-          filterEntitiesInText(allEntityNames, chunk.content).forEach((e) => docEntitySet.add(e))
-        }
-        if (docEntitySet.size < 2) continue
+        const docEntry = docEntries.find((e) => e.docId === docId)
+        const docTitle = docEntry?.title || `文档 #${docId}`
 
-        const existingPairs = allExtractedRelations
+        // 收集该文档在 extract 阶段已发现的关系，避免增量步骤间重复
+        const allDocPairs = allExtractedRelations
           .filter((r) => r.source_note_id === docId)
           .map((r) => ({ source: r.source, target: r.target }))
 
-        const entityList = [...docEntitySet].map((name) => entityDescMap.get(name)!).filter(Boolean)
+        // 预计算每个 chunk 中出现的实体
+        const chunkEntityLists: { name: string; type: string; description: string }[][] = []
+        for (const chunk of chunks) {
+          const names = filterEntitiesInText(allEntityNames, chunk.content)
+          chunkEntityLists.push(names.map((name) => entityDescMap.get(name)!).filter(Boolean))
+        }
 
-        if (entityList.length < 2) continue
+        // 增量推进：从第 2 个 chunk 开始，每次比较当前 chunk 实体与前序累积实体
+        const accumulated: { name: string; type: string; description: string }[] = [
+          ...chunkEntityLists[0]
+        ]
+        const seen = new Set(chunkEntityLists[0].map((e) => e.name))
 
-        const docEntry = docEntries.find((e) => e.docId === docId)
-        crossChunkTasks.push({
-          docId,
-          docTitle: docEntry?.title || `文档 #${docId}`,
-          entities: entityList,
-          existingPairs
-        })
+        for (let ci = 1; ci < chunks.length; ci++) {
+          if (accumulated.length > 0 && chunkEntityLists[ci].length > 0) {
+            crossChunkTasks.push({
+              docId,
+              docTitle,
+              previousEntities: [...accumulated],
+              currentEntities: chunkEntityLists[ci],
+              existingPairs: allDocPairs
+            })
+          }
+
+          // 将当前 chunk 的新实体累积到前序集合中
+          for (const e of chunkEntityLists[ci]) {
+            if (!seen.has(e.name)) {
+              seen.add(e.name)
+              accumulated.push(e)
+            }
+          }
+        }
       }
 
       if (crossChunkTasks.length > 0) {
         currentPhaseIndex = PHASE_ORDER.indexOf('cross_chunk')
         phaseProgress = 0
-        sendProgress('cross_chunk', `跨块关系补全中... ${crossChunkTasks.length} 篇文档`, {
+        sendProgress('cross_chunk', `跨块关系补全中... ${crossChunkTasks.length} 个片段`, {
           totalDocs,
           entityCount: mergedEntities.length,
           relationCount: allExtractedRelations.length
@@ -870,25 +898,32 @@ export class KnowledgeGraphService {
         for (let i = 0; i < crossChunkTasks.length; i += maxConcurrency) {
           const batch = crossChunkTasks.slice(i, i + maxConcurrency)
           const batchResults = await Promise.all(
-            batch.map(({ docId, docTitle, entities, existingPairs }) =>
-              this.extractCrossChunkRelations(docTitle, entities, existingPairs, docId)
+            batch.map(({ docId, docTitle, previousEntities, currentEntities, existingPairs }) =>
+              this.extractIncrementalCrossChunkRelations(
+                docTitle,
+                previousEntities,
+                currentEntities,
+                existingPairs,
+                docId
+              )
             )
           )
-          for (const relations of batchResults) {
-            allExtractedRelations.push(...relations)
+          for (let j = 0; j < batchResults.length; j++) {
+            allExtractedRelations.push(...batchResults[j])
           }
 
-          phaseProgress = Math.min(1, (i + maxConcurrency) / crossChunkTasks.length)
-          sendProgress(
-            'cross_chunk',
-            `跨块关系补全中... ${Math.min(i + maxConcurrency, crossChunkTasks.length)}/${crossChunkTasks.length} 篇`,
-            {
-              totalDocs,
-              entityCount: mergedEntities.length,
-              relationCount: allExtractedRelations.length,
-              needsRefresh: true
-            }
-          )
+          const processed = Math.min(i + maxConcurrency, crossChunkTasks.length)
+          phaseProgress = processed / crossChunkTasks.length
+          sendProgress('cross_chunk', `跨块关系补全中... ${processed}/${crossChunkTasks.length}`, {
+            processedDocs: Math.min(
+              processed,
+              new Set(crossChunkTasks.slice(0, i + maxConcurrency).map((t) => t.docId)).size
+            ),
+            totalDocs,
+            entityCount: mergedEntities.length,
+            relationCount: allExtractedRelations.length,
+            needsRefresh: true
+          })
         }
       }
 
@@ -1242,62 +1277,72 @@ export class KnowledgeGraphService {
       )
     }
 
-    // Gleaning 二次抽取（可选）
+    // Gleaning 二次抽取（可选，按块级批处理）
     const enableGleaning = config?.enableGleaning !== false
-    if (enableGleaning) {
-      const maxGleaningDocs = config?.gleaningMaxDocs ?? 100
-      const gleaningEntries =
-        maxGleaningDocs > 0 && docEntries.length > maxGleaningDocs
-          ? docEntries.slice(0, maxGleaningDocs)
-          : docEntries
+    if (enableGleaning && allChunks.length > 0) {
+      currentPhaseIndex = PHASE_ORDER.indexOf('gleaning')
+      phaseProgress = 0
+      sendProgress('gleaning', `二次扫描遗漏实体... ${allChunks.length} 个文本块`, {
+        totalDocs,
+        totalChunks,
+        entityCount: entityNameToId.size,
+        relationCount: allNewRelations.length
+      })
 
-      if (gleaningEntries.length > 0) {
-        currentPhaseIndex = PHASE_ORDER.indexOf('gleaning')
-        phaseProgress = 0
-        sendProgress('gleaning', `二次扫描遗漏实体... (${gleaningEntries.length} 篇文档)`, {
-          totalDocs,
-          entityCount: entityNameToId.size,
-          relationCount: allNewRelations.length
-        })
-
-        const gleaningBatchSize = maxConcurrency
-        for (let i = 0; i < gleaningEntries.length; i += gleaningBatchSize) {
-          const batch = gleaningEntries.slice(i, i + gleaningBatchSize)
-          const batchResults = await Promise.all(
-            batch.map(async (entry) => {
-              const existingNames = [...entityNameToId.keys()]
-              if (existingNames.length === 0) return []
-              return this.gleanEntities(entry.content, existingNames)
-            })
-          )
-
-          for (let j = 0; j < batch.length; j++) {
-            if (batchResults[j].length > 0) {
-              const gleanedEntities = batchResults[j].map((e) => ({
-                ...e,
-                source_doc_ids: [batch[j].docId]
-              }))
-              allNewEntities.push(...gleanedEntities)
-
-              const gleanedNameToId = await batchUpsertEntities(
-                gleanedEntities.map((e) => ({
-                  wiki_id: wikiId,
-                  name: e.name,
-                  type: e.type,
-                  description: e.description,
-                  aliases: JSON.stringify(e.aliases),
-                  properties: null,
-                  confidence: e.confidence,
-                  source_note_ids: JSON.stringify(e.source_doc_ids)
-                }))
+      for (let i = 0; i < allChunks.length; i += maxConcurrency) {
+        const batch = allChunks.slice(i, i + maxConcurrency)
+        const existingNames = [...entityNameToId.keys()]
+        const batchResults =
+          existingNames.length > 0
+            ? await Promise.all(
+                batch.map((chunk) => this.gleanEntities(chunk.content, existingNames))
               )
+            : batch.map(() => [] as Omit<ExtractedEntity, 'source_doc_ids'>[])
 
-              for (const [name, id] of gleanedNameToId) {
-                entityNameToId.set(name, id)
-              }
+        for (let j = 0; j < batch.length; j++) {
+          if (batchResults[j].length > 0) {
+            const gleanedEntities = batchResults[j].map((e) => ({
+              ...e,
+              source_doc_ids: [batch[j].docId]
+            }))
+            allNewEntities.push(...gleanedEntities)
+
+            const gleanedNameToId = await batchUpsertEntities(
+              gleanedEntities.map((e) => ({
+                wiki_id: wikiId,
+                name: e.name,
+                type: e.type,
+                description: e.description,
+                aliases: JSON.stringify(e.aliases),
+                properties: null,
+                confidence: e.confidence,
+                source_note_ids: JSON.stringify(e.source_doc_ids)
+              }))
+            )
+
+            for (const [name, id] of gleanedNameToId) {
+              entityNameToId.set(name, id)
             }
           }
         }
+
+        const processedChunks = Math.min(i + maxConcurrency, allChunks.length)
+        const processedDocs = new Set(allChunks.slice(0, i + maxConcurrency).map((c) => c.docId))
+          .size
+        phaseProgress = processedChunks / allChunks.length
+        sendProgress(
+          'gleaning',
+          `二次抽取中... ${processedChunks}/${allChunks.length} 块（${entityNameToId.size} 实体）`,
+          {
+            processedDocs: Math.min(processedDocs, totalDocs),
+            totalDocs,
+            processedChunks,
+            totalChunks,
+            entityCount: entityNameToId.size,
+            relationCount: allNewRelations.length,
+            needsRefresh: true
+          }
+        )
       }
     }
 
@@ -1325,7 +1370,15 @@ export class KnowledgeGraphService {
       entityCount: entityNameToId.size,
       relationCount: allNewRelations.length
     })
-    let mergedEntities = await this.mergeEntities(allEntitiesForMerge)
+    let mergedEntities = await this.mergeEntities(allEntitiesForMerge, (done, total) => {
+      phaseProgress = Math.min(1, done / total)
+      sendProgress('merge_entities', `实体消歧合并中... ${done}/${total} 批次`, {
+        totalDocs,
+        entityCount: entityNameToId.size,
+        relationCount: allNewRelations.length,
+        needsRefresh: true
+      })
+    })
     phaseProgress = 1
     sendProgress('merge_entities', `实体消歧合并完成，共 ${mergedEntities.length} 个实体`, {
       totalDocs,
@@ -1333,7 +1386,7 @@ export class KnowledgeGraphService {
       relationCount: allNewRelations.length
     })
 
-    // 5. 跨块关系补全（轻量级）
+    // 5. 跨块关系补全（增量块级批处理）
     const allEntityNames = mergedEntities.map((e) => e.name)
     const entityDescMap = new Map(
       mergedEntities.map((e) => [
@@ -1348,43 +1401,64 @@ export class KnowledgeGraphService {
       docChunksMap.get(chunk.docId)!.push(chunk)
     }
 
+    // 增量任务：每个文档内，将 chunk 按顺序与已处理的前序 chunk 实体进行比对
     const crossChunkTasks: Array<{
       docId: number
       docTitle: string
-      entities: { name: string; type: string; description: string }[]
+      previousEntities: { name: string; type: string; description: string }[]
+      currentEntities: { name: string; type: string; description: string }[]
       existingPairs: { source: string; target: string }[]
     }> = []
 
     for (const [docId, chunks] of docChunksMap) {
       if (chunks.length < 2) continue
 
-      const docEntitySet = new Set<string>()
-      for (const chunk of chunks) {
-        filterEntitiesInText(allEntityNames, chunk.content).forEach((e) => docEntitySet.add(e))
-      }
-      if (docEntitySet.size < 2) continue
+      const docEntry = docEntries.find((e) => e.docId === docId)
+      const docTitle = docEntry?.title || `文档 #${docId}`
 
-      const existingPairs = allNewRelations
+      // 收集该文档在 extract 阶段已发现的关系，避免增量步骤间重复
+      const allDocPairs = allNewRelations
         .filter((r) => r.source_note_id === docId)
         .map((r) => ({ source: r.source, target: r.target }))
 
-      const entityList = [...docEntitySet].map((name) => entityDescMap.get(name)!).filter(Boolean)
+      // 预计算每个 chunk 中出现的实体
+      const chunkEntityLists: { name: string; type: string; description: string }[][] = []
+      for (const chunk of chunks) {
+        const names = filterEntitiesInText(allEntityNames, chunk.content)
+        chunkEntityLists.push(names.map((name) => entityDescMap.get(name)!).filter(Boolean))
+      }
 
-      if (entityList.length < 2) continue
+      // 增量推进：从第 2 个 chunk 开始，每次比较当前 chunk 实体与前序累积实体
+      const accumulated: { name: string; type: string; description: string }[] = [
+        ...chunkEntityLists[0]
+      ]
+      const seen = new Set(chunkEntityLists[0].map((e) => e.name))
 
-      const docEntry = docEntries.find((e) => e.docId === docId)
-      crossChunkTasks.push({
-        docId,
-        docTitle: docEntry?.title || `文档 #${docId}`,
-        entities: entityList,
-        existingPairs
-      })
+      for (let ci = 1; ci < chunks.length; ci++) {
+        if (accumulated.length > 0 && chunkEntityLists[ci].length > 0) {
+          crossChunkTasks.push({
+            docId,
+            docTitle,
+            previousEntities: [...accumulated],
+            currentEntities: chunkEntityLists[ci],
+            existingPairs: allDocPairs
+          })
+        }
+
+        // 将当前 chunk 的新实体累积到前序集合中
+        for (const e of chunkEntityLists[ci]) {
+          if (!seen.has(e.name)) {
+            seen.add(e.name)
+            accumulated.push(e)
+          }
+        }
+      }
     }
 
     if (crossChunkTasks.length > 0) {
       currentPhaseIndex = PHASE_ORDER.indexOf('cross_chunk')
       phaseProgress = 0
-      sendProgress('cross_chunk', `跨块关系补全中... ${crossChunkTasks.length} 篇文档`, {
+      sendProgress('cross_chunk', `跨块关系补全中... ${crossChunkTasks.length} 个片段`, {
         totalDocs,
         entityCount: mergedEntities.length,
         relationCount: allNewRelations.length
@@ -1393,25 +1467,32 @@ export class KnowledgeGraphService {
       for (let i = 0; i < crossChunkTasks.length; i += maxConcurrency) {
         const batch = crossChunkTasks.slice(i, i + maxConcurrency)
         const batchResults = await Promise.all(
-          batch.map(({ docId, docTitle, entities, existingPairs }) =>
-            this.extractCrossChunkRelations(docTitle, entities, existingPairs, docId)
+          batch.map(({ docId, docTitle, previousEntities, currentEntities, existingPairs }) =>
+            this.extractIncrementalCrossChunkRelations(
+              docTitle,
+              previousEntities,
+              currentEntities,
+              existingPairs,
+              docId
+            )
           )
         )
-        for (const relations of batchResults) {
-          allNewRelations.push(...relations)
+        for (let j = 0; j < batchResults.length; j++) {
+          allNewRelations.push(...batchResults[j])
         }
 
-        phaseProgress = Math.min(1, (i + maxConcurrency) / crossChunkTasks.length)
-        sendProgress(
-          'cross_chunk',
-          `跨块关系补全中... ${Math.min(i + maxConcurrency, crossChunkTasks.length)}/${crossChunkTasks.length} 篇`,
-          {
-            totalDocs,
-            entityCount: mergedEntities.length,
-            relationCount: allNewRelations.length,
-            needsRefresh: true
-          }
-        )
+        const processed = Math.min(i + maxConcurrency, crossChunkTasks.length)
+        phaseProgress = processed / crossChunkTasks.length
+        sendProgress('cross_chunk', `跨块关系补全中... ${processed}/${crossChunkTasks.length}`, {
+          processedDocs: Math.min(
+            processed,
+            new Set(crossChunkTasks.slice(0, i + maxConcurrency).map((t) => t.docId)).size
+          ),
+          totalDocs,
+          entityCount: mergedEntities.length,
+          relationCount: allNewRelations.length,
+          needsRefresh: true
+        })
       }
     }
 
@@ -1657,11 +1738,17 @@ export class KnowledgeGraphService {
   }
 
   /**
-   * 实体消歧合并（优化：先程序化去重，再 LLM 合并）
-   * Stage 2 LLM 合并使用 StructuredOutputParser + Zod 校验
+   * 实体消歧合并（Stage 1 程序化去重 → Stage 2 按名前缀分批次 LLM 合并）
+   * onProgress(processedBatches, totalBatches) 用于上报阶段详情进度
    */
-  private async mergeEntities(entities: ExtractedEntity[]): Promise<ExtractedEntity[]> {
-    if (entities.length <= 1) return entities
+  private async mergeEntities(
+    entities: ExtractedEntity[],
+    onProgress?: (processed: number, total: number) => void
+  ): Promise<ExtractedEntity[]> {
+    if (entities.length <= 1) {
+      onProgress?.(1, 1)
+      return entities
+    }
 
     // Stage 1: 程序化合并（完全同名 + 简单别名匹配）
     const nameMap = new Map<string, ExtractedEntity>()
@@ -1677,7 +1764,7 @@ export class KnowledgeGraphService {
         existing.confidence = Math.max(existing.confidence, entity.confidence)
         if (entity.description.length > existing.description.length) {
           existing.description = entity.description
-          existing.name = entity.name // 用更长的名称
+          existing.name = entity.name
         }
       } else {
         nameMap.set(key, { ...entity })
@@ -1685,63 +1772,142 @@ export class KnowledgeGraphService {
     }
 
     const stage1Entities = Array.from(nameMap.values())
-
-    // Stage 2: LLM 合并（只在实体数量适中时使用，含 Zod 校验）
-    if (stage1Entities.length > 10 && stage1Entities.length <= 200) {
-      try {
-        const parsed = await this.cachedStructuredInvoke<EntityMergingResultOutput>(
-          ENTITY_MERGING_PROMPT.replace('{entities}', JSON.stringify(stage1Entities, null, 2)),
-          this.mergeParser
-        )
-
-        if (parsed?.merged && Array.isArray(parsed.merged)) {
-          return parsed.merged.map(
-            (e) =>
-              ({
-                name: e.name,
-                type: e.type || 'other',
-                description: e.description || '',
-                aliases: e.aliases || [],
-                confidence: e.confidence ?? 0.9,
-                source_doc_ids: e.source_doc_ids || []
-              }) as ExtractedEntity
-          )
-        }
-      } catch (error) {
-        logger.warn('Entity merging with LLM failed, using simple dedup:', error)
-      }
+    if (stage1Entities.length <= 1) {
+      onProgress?.(1, 1)
+      return stage1Entities
     }
 
-    return stage1Entities
+    // Stage 2: 按名前缀分组 → 分批次 LLM 合并
+    const batches = this.groupEntitiesByPrefix(stage1Entities)
+    onProgress?.(0, batches.length)
+
+    const allMerged: ExtractedEntity[] = []
+
+    for (let i = 0; i < batches.length; i++) {
+      const batch = batches[i]
+      if (batch.length <= 1) {
+        allMerged.push(...batch)
+      } else {
+        try {
+          const parsed = await this.cachedStructuredInvoke<EntityMergingResultOutput>(
+            ENTITY_MERGING_PROMPT.replace('{entities}', JSON.stringify(batch, null, 2)),
+            this.mergeParser
+          )
+
+          if (parsed?.merged && Array.isArray(parsed.merged)) {
+            allMerged.push(
+              ...parsed.merged.map(
+                (e) =>
+                  ({
+                    name: e.name,
+                    type: e.type || 'other',
+                    description: e.description || '',
+                    aliases: e.aliases || [],
+                    confidence: e.confidence ?? 0.9,
+                    source_doc_ids: e.source_doc_ids || []
+                  }) as ExtractedEntity
+              )
+            )
+          } else {
+            allMerged.push(...batch)
+          }
+        } catch (error) {
+          logger.warn(
+            `Entity merging batch ${i + 1}/${batches.length} failed, keeping original:`,
+            error
+          )
+          allMerged.push(...batch)
+        }
+      }
+      onProgress?.(i + 1, batches.length)
+    }
+
+    return allMerged
   }
 
   /**
-   * 跨块关系补全（轻量级：仅送实体描述 + 文档标题，不送全文）
-   * 用于发现同一篇文档中分散在不同块之间的实体间关系
+   * 按实体名文本相似度聚类分组，确保同名/相似名的实体在同一批次中合并
+   * 使用 Dice 系数（string-similarity），相似度阈值 0.6 以上为同一组
+   * - 单批次上限 40 个实体
+   * - 优先比较短名称实体（更可能是其他名称的子串/简称）
    */
-  private async extractCrossChunkRelations(
+  private groupEntitiesByPrefix(entities: ExtractedEntity[]): ExtractedEntity[][] {
+    const MAX_BATCH = 40
+    const SIMILARITY_THRESHOLD = 0.6
+
+    if (entities.length <= MAX_BATCH) return [entities]
+
+    // 按名称长度升序排列：短名称优先聚类（短名更可能是子串/别名/简称）
+    const sorted = [...entities].sort((a, b) => a.name.length - b.name.length)
+
+    // 贪心聚类：每个实体尝试加入已有簇，否则新建簇
+    const clusters: { names: string[]; entities: ExtractedEntity[] }[] = []
+
+    for (const entity of sorted) {
+      const name = entity.name
+
+      // 先在已有簇中找一个未满的相似簇
+      let bestClusterIndex = -1
+      let bestScore = 0
+
+      for (let i = 0; i < clusters.length; i++) {
+        if (clusters[i].entities.length >= MAX_BATCH) continue
+
+        // 与簇中所有已存在名称比对，取最高相似度
+        let maxSimilarity = 0
+        for (const existingName of clusters[i].names) {
+          const sim = dice(name, existingName)
+          if (sim > maxSimilarity) maxSimilarity = sim
+          if (maxSimilarity >= SIMILARITY_THRESHOLD) break // 已达标，无需继续比
+        }
+
+        if (maxSimilarity >= SIMILARITY_THRESHOLD && maxSimilarity > bestScore) {
+          bestScore = maxSimilarity
+          bestClusterIndex = i
+        }
+      }
+
+      if (bestClusterIndex >= 0) {
+        clusters[bestClusterIndex].names.push(name)
+        clusters[bestClusterIndex].entities.push(entity)
+      } else {
+        clusters.push({ names: [name], entities: [entity] })
+      }
+    }
+
+    return clusters.map((c) => c.entities)
+  }
+
+  /**
+   * 增量跨块关系补全（按 chunk 顺序推进）
+   * 每次只比较当前 chunk 实体(A组) 与已处理的前序 chunk 实体(B组)之间的关系
+   * 上下文窗口可控，同时产生更多批次实现渐进式进度展示
+   */
+  private async extractIncrementalCrossChunkRelations(
     noteTitle: string,
-    allEntitiesInNote: { name: string; type: string; description: string }[],
-    existingRelations: { source: string; target: string }[],
+    previousEntities: { name: string; type: string; description: string }[],
+    currentEntities: { name: string; type: string; description: string }[],
+    existingPairs: { source: string; target: string }[],
     noteId: number
   ): Promise<(ExtractedRelation & { source_note_id: number })[]> {
-    const entityNames = allEntitiesInNote.map((e) => e.name)
-    if (entityNames.length < 2) return []
+    const allNames = [...previousEntities.map((e) => e.name), ...currentEntities.map((e) => e.name)]
+    if (allNames.length < 2 || previousEntities.length === 0 || currentEntities.length === 0)
+      return []
 
     try {
       const parsed = await this.cachedStructuredInvoke<RelationsArrayOutput>(
-        CROSS_CHUNK_RELATION_PROMPT.replace('{noteTitle}', noteTitle)
-          .replace('{entities}', JSON.stringify(allEntitiesInNote))
+        INCREMENTAL_CROSS_CHUNK_PROMPT.replace('{docTitle}', noteTitle)
+          .replace('{previousEntities}', JSON.stringify(previousEntities))
+          .replace('{currentEntities}', JSON.stringify(currentEntities))
           .replace(
-            '{existingRelations}',
-            existingRelations.length > 0 ? JSON.stringify(existingRelations) : '[]'
+            '{existingPairs}',
+            existingPairs.length > 0 ? JSON.stringify(existingPairs) : '[]'
           ),
         this.relationParser
       )
 
       if (parsed && Array.isArray(parsed)) {
-        // 过滤掉已有关系中的重复
-        const existingSet = new Set(existingRelations.map((r) => `${r.source}:${r.target}`))
+        const existingSet = new Set(existingPairs.map((r) => `${r.source}:${r.target}`))
         let invalidTypeCount = 0
         const filtered = parsed
           .filter(
@@ -1749,8 +1915,9 @@ export class KnowledgeGraphService {
               r.source &&
               r.target &&
               r.relation_type &&
-              entityNames.includes(r.source) &&
-              entityNames.includes(r.target) &&
+              allNames.includes(r.source) &&
+              allNames.includes(r.target) &&
+              r.source !== r.target &&
               !existingSet.has(`${r.source}:${r.target}`)
           )
           .filter((r) => {
@@ -1768,13 +1935,13 @@ export class KnowledgeGraphService {
 
         if (invalidTypeCount > 0) {
           logger.warn(
-            `Filtered out ${invalidTypeCount} cross-chunk relation(s) with invalid type in doc #${noteId}`
+            `Filtered out ${invalidTypeCount} incremental cross-chunk relation(s) with invalid type in doc #${noteId}`
           )
         }
         return filtered
       }
     } catch (error) {
-      logger.warn('Cross-chunk relation extraction failed:', error)
+      logger.warn('Incremental cross-chunk relation extraction failed:', error)
     }
 
     return []

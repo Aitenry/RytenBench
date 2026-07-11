@@ -8,7 +8,6 @@ interface BuildProgressProps {
   open: boolean
   wikiId: number
   wikiTitle: string
-  phase: string
   phaseLabel: string
   phaseProgress: number
   overallProgress: number
@@ -24,7 +23,6 @@ interface BuildProgressProps {
 
 const BuildProgress: React.FC<BuildProgressProps> = ({
   open,
-  phase,
   wikiTitle,
   phaseLabel,
   phaseProgress,
@@ -46,9 +44,7 @@ const BuildProgress: React.FC<BuildProgressProps> = ({
             <LoadingOutlined />
             <span>{wikiTitle}</span>
           </Space>
-          <Button type="text" icon={<MinusOutlined />} onClick={onMinimize} size="small">
-            最小化
-          </Button>
+          <Button type="text" icon={<MinusOutlined />} onClick={onMinimize} size="small" />
         </Space>
       }
       open={open}
@@ -74,21 +70,19 @@ const BuildProgress: React.FC<BuildProgressProps> = ({
           />
         </div>
 
-        {phase === 'extract' && (
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-              <Tag color="processing">{phaseLabel}</Tag>
-              <Text style={{ fontSize: 13 }}>{phaseProgress}%</Text>
-            </div>
-            <Progress
-              percent={phaseProgress}
-              status="active"
-              strokeColor="#52c41a"
-              showInfo={false}
-              strokeWidth={6}
-            />
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+            <Tag color="processing">{phaseLabel}</Tag>
+            <Text style={{ fontSize: 13 }}>{phaseProgress}%</Text>
           </div>
-        )}
+          <Progress
+            percent={phaseProgress}
+            status="active"
+            strokeColor="#52c41a"
+            showInfo={false}
+            strokeWidth={6}
+          />
+        </div>
 
         <div style={{ marginBottom: 12 }}>
           <Text style={{ fontSize: 14 }}>{message}</Text>
