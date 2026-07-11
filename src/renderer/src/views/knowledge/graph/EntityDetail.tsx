@@ -8,7 +8,19 @@ import {
   RiCalendarLine,
   RiMapPinLine,
   RiBox3Line,
-  RiQuestionLine
+  RiQuestionLine,
+  RiDashboardLine,
+  RiFileTextLine,
+  RiScalesLine,
+  RiBuilding2Line,
+  RiFlaskLine,
+  RiGitBranchLine,
+  RiUserStarLine,
+  RiStarLine,
+  RiBarChartLine,
+  RiSwordLine,
+  RiBugLine,
+  RiMedalLine
 } from '@remixicon/react'
 import { theme } from 'antd'
 import { Window } from '../../../../resource/types/window'
@@ -30,6 +42,18 @@ const ENTITY_ICONS: Record<string, React.ReactNode> = {
   event: <RiCalendarLine />,
   location: <RiMapPinLine />,
   product: <RiBox3Line />,
+  system: <RiDashboardLine />,
+  document: <RiFileTextLine />,
+  standard: <RiScalesLine />,
+  facility: <RiBuilding2Line />,
+  substance: <RiFlaskLine />,
+  process: <RiGitBranchLine />,
+  role: <RiUserStarLine />,
+  skill: <RiStarLine />,
+  measure: <RiBarChartLine />,
+  artifact: <RiSwordLine />,
+  creature: <RiBugLine />,
+  realm: <RiMedalLine />,
   other: <RiQuestionLine />
 }
 
@@ -260,7 +284,7 @@ const EntityDetail: React.FC<EntityDetailProps> = ({
               return (
                 <div
                   key={`${rel.source_id}-${rel.target_id}-${rel.relation_type}`}
-                  style={{ cursor: onRelationClick ? 'pointer' : 'default', padding: '4px 0' }}
+                  style={{ cursor: onRelationClick ? 'pointer' : 'default', padding: '6px 0' }}
                   onClick={() => onRelationClick?.(otherId)}
                 >
                   <Text style={{ fontSize: 12 }}>
@@ -272,6 +296,11 @@ const EntityDetail: React.FC<EntityDetailProps> = ({
                       ? entityNameMap.get(rel.target_id) || `#${rel.target_id}`
                       : entity.name}
                   </Text>
+                  {rel.description && (
+                    <div style={{ marginTop: 2, fontSize: 11, color: '#999' }}>
+                      {rel.description}
+                    </div>
+                  )}
                 </div>
               )
             })}

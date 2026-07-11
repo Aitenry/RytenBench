@@ -1,74 +1,130 @@
 import React from 'react'
-import { Modal, Progress, Typography, Space, Tag } from 'antd'
-import { LoadingOutlined } from '@ant-design/icons'
+import { Modal, Progress, Typography, Space, Tag, Button, Row, Col } from 'antd'
+import { LoadingOutlined, MinusOutlined, DatabaseOutlined, LinkOutlined } from '@ant-design/icons'
 
 const { Text } = Typography
 
 interface BuildProgressProps {
   open: boolean
+  wikiId: number
+  wikiTitle: string
   phase: string
+  phaseLabel: string
+  phaseProgress: number
+  overallProgress: number
   processedDocs: number
   totalDocs: number
+  processedChunks: number
+  totalChunks: number
+  entityCount: number
+  relationCount: number
   message: string
-  onCancel?: () => void
-}
-
-const PHASE_LABELS: Record<string, string> = {
-  cleanup: '清理数据',
-  collect: '收集文档',
-  extract_entities: '抽取实体',
-  merge_entities: '消歧合并',
-  save_entities: '保存实体',
-  extract_relations: '抽取关系',
-  save_relations: '保存关系'
+  onMinimize: () => void
 }
 
 const BuildProgress: React.FC<BuildProgressProps> = ({
   open,
   phase,
+  wikiTitle,
+  phaseLabel,
+  phaseProgress,
+  overallProgress,
   processedDocs,
   totalDocs,
+  processedChunks,
+  totalChunks,
+  entityCount,
+  relationCount,
   message,
-  onCancel
+  onMinimize
 }) => {
-  const percent = totalDocs > 0 ? Math.round((processedDocs / totalDocs) * 100) : 0
-  const phaseLabel = PHASE_LABELS[phase] || phase
-
   return (
     <Modal
       title={
-        <Space>
-          <LoadingOutlined />
-          <span>构建知识图谱</span>
+        <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+          <Space>
+            <LoadingOutlined />
+            <span>{wikiTitle}</span>
+          </Space>
+          <Button type="text" icon={<MinusOutlined />} onClick={onMinimize} size="small">
+            最小化
+          </Button>
         </Space>
       }
       open={open}
       footer={null}
-      closable={!!onCancel}
-      onCancel={onCancel}
+      closable={false}
       mask={{ closable: false }}
-      width={420}
+      width={480}
     >
-      <div style={{ padding: '16px 0' }}>
-        <Progress
-          percent={percent}
-          status="active"
-          strokeColor="#1677ff"
-          style={{ marginBottom: 16 }}
-        />
-
-        <div style={{ marginBottom: 12 }}>
-          <Tag color="processing">{phaseLabel}</Tag>
+      <div style={{ padding: '8px 0' }}>
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+            <Text type="secondary" style={{ fontSize: 13 }}>
+              整体进度
+            </Text>
+            <Text style={{ fontSize: 13, fontWeight: 500 }}>{overallProgress}%</Text>
+          </div>
+          <Progress
+            percent={overallProgress}
+            status="active"
+            strokeColor="#1677ff"
+            showInfo={false}
+            strokeWidth={10}
+          />
         </div>
 
-        <Text type="secondary" style={{ fontSize: 13 }}>
-          {message}
-        </Text>
+        {phase === 'extract' && (
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+              <Tag color="processing">{phaseLabel}</Tag>
+              <Text style={{ fontSize: 13 }}>{phaseProgress}%</Text>
+            </div>
+            <Progress
+              percent={phaseProgress}
+              status="active"
+              strokeColor="#52c41a"
+              showInfo={false}
+              strokeWidth={6}
+            />
+          </div>
+        )}
+
+        <div style={{ marginBottom: 12 }}>
+          <Text style={{ fontSize: 14 }}>{message}</Text>
+        </div>
+
+        <Row gutter={16} style={{ marginBottom: 12 }}>
+          <Col span={12}>
+            <Space>
+              <DatabaseOutlined style={{ color: '#1677ff' }} />
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                实体: <Text strong>{entityCount}</Text>
+              </Text>
+            </Space>
+          </Col>
+          <Col span={12}>
+            <Space>
+              <LinkOutlined style={{ color: '#52c41a' }} />
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                关系: <Text strong>{relationCount}</Text>
+              </Text>
+            </Space>
+          </Col>
+        </Row>
 
         {totalDocs > 0 && (
-          <div style={{ marginTop: 8 }}>
+          <div style={{ marginBottom: 8 }}>
             <Text type="secondary" style={{ fontSize: 12 }}>
               已处理 {processedDocs}/{totalDocs} 篇文档
+            </Text>
+          </div>
+        )}
+
+        {totalChunks > 0 && (
+          <div>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              已处理 {processedChunks}/{totalChunks} 个文本块
             </Text>
           </div>
         )}

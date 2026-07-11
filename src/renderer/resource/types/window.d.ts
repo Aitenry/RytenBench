@@ -195,10 +195,19 @@ export interface Window {
       buildGraph: (wikiId: number, config?: Record<string, unknown>) => void
       onBuildProgress: (
         callback: (progress: {
+          wikiId: number
           phase: string
+          phaseLabel: string
+          phaseProgress: number
+          overallProgress: number
           processedDocs: number
           totalDocs: number
+          processedChunks: number
+          totalChunks: number
+          entityCount: number
+          relationCount: number
           message: string
+          needsRefresh?: boolean
         }) => void
       ) => () => void
       onBuildComplete: (

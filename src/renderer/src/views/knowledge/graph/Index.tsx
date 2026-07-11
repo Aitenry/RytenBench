@@ -3,10 +3,10 @@ import { Button, Empty, Flex, Modal, Select, theme, Typography } from 'antd'
 import { PlayCircleOutlined } from '@ant-design/icons'
 import { Window } from '../../../../resource/types/window'
 import { useMessage } from '@renderer/hooks/useMessage'
+import { useBuildProgress } from '@renderer/hooks/useBuildProgress'
 import GraphCanvas, { GraphChartData } from './GraphCanvas'
 import EntityDetail from './EntityDetail'
 import GraphToolbar from './GraphToolbar'
-import BuildProgress from './BuildProgress'
 import DocPreviewModal from '@renderer/components/DocPreviewModal'
 import {
   ENTITY_TYPE_COLORS,
@@ -25,31 +25,20 @@ const Index: React.FC = () => {
   } = theme.useToken()
 
   const { viewMessage } = useMessage()
+  const { startBuild, subscribeToRefresh } = useBuildProgress()
 
-  // Wiki selection state
   const [wikis, setWikis] = useState<WikiRow[]>([])
   const [selectedWiki, setSelectedWiki] = useState<WikiRow | null>(null)
 
-  // Graph data state
   const [graphData, setGraphData] = useState<GraphData | null>(null)
   const [selectedEntity, setSelectedEntity] = useState<GraphEntity | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [typeFilter, setTypeFilter] = useState<string | undefined>(undefined)
 
-  // Build progress state
-  const [isBuilding, setIsBuilding] = useState(false)
-  const [buildPhase, setBuildPhase] = useState('')
-  const [buildProcessed, setBuildProcessed] = useState(0)
-  const [buildTotal, setBuildTotal] = useState(0)
-  const [buildMessage, setBuildMessage] = useState('')
-  const [showBuildProgress, setShowBuildProgress] = useState(false)
-
-  // Append doc state
   const [docs, setDocs] = useState<{ id: number; title: string }[]>([])
   const [addedDocIds, setAddedDocIds] = useState<Set<number>>(new Set())
   const [isAppending, setIsAppending] = useState(false)
 
-  // Doc preview state
   const [previewDoc, setPreviewDoc] = useState<{
     id: number
     title: string
@@ -63,7 +52,6 @@ const Index: React.FC = () => {
   } | null>(null)
   const [isDocPreviewOpen, setIsDocPreviewOpen] = useState(false)
 
-  // Load wikis list
   const loadWikis = useCallback(async () => {
     try {
       const result = await (window as unknown as Window).api.wikis.getAll(1, 100)
@@ -73,10 +61,8 @@ const Index: React.FC = () => {
     }
   }, [])
 
-  // Doc filter state (empty = show all)
   const [docFilter, setDocFilter] = useState<number[]>([])
 
-  // Load all graph data for selected wiki (entities + relations at once)
   const loadGraphData = useCallback(async (wikiId: number, docIds?: number[]) => {
     try {
       const data = await (window as unknown as Window).api.graph.getData(wikiId, undefined, docIds)
@@ -89,7 +75,6 @@ const Index: React.FC = () => {
     }
   }, [])
 
-  // Load docs list for the selected wiki
   const loadDocs = useCallback(async (wikiId: number) => {
     try {
       const directories = await (window as unknown as Window).api.wikis.getDirectories(wikiId)
@@ -115,7 +100,6 @@ const Index: React.FC = () => {
     }
   }, [])
 
-  // Load processed doc IDs (already in graph)
   const loadProcessedDocIds = useCallback(async (wikiId: number) => {
     try {
       const ids = await (window as unknown as Window).api.graph.getProcessedDocIds(wikiId)
@@ -125,14 +109,9 @@ const Index: React.FC = () => {
     }
   }, [])
 
-  // Build ECharts graph data from entities + relations
-  // Database: graph_relations.source_id / target_id → graph_entities.id
-  // Main process returns: { entities: GraphEntity[], relations: GraphRelation[] }
-  // ECharts graph format: { nodes: [{id,name,category,original}], links: [{source,target,label}], categories: [{name,itemStyle}] }
   const graphChartData = useMemo((): GraphChartData | null => {
     if (!graphData) return null
 
-    // Build entity ID → entity lookup for relation resolution
     const entityMap = new Map<number, GraphEntity>()
     const entityTypeSet = new Set<string>()
     for (const entity of graphData.entities) {
@@ -140,7 +119,6 @@ const Index: React.FC = () => {
       entityTypeSet.add(entity.type)
     }
 
-    // Build categories from unique entity types (for legend & color mapping)
     const typeList = Array.from(entityTypeSet)
     const typeToIndex = new Map<string, number>()
     const categories = typeList.map((type, i) => {
@@ -151,7 +129,6 @@ const Index: React.FC = () => {
       }
     })
 
-    // Build nodes from entities
     const nodes = graphData.entities.map((entity) => ({
       id: String(entity.id),
       name: entity.name,
@@ -160,24 +137,22 @@ const Index: React.FC = () => {
       original: entity
     }))
 
-    // Build links from relations, filtering orphaned references
     const links = graphData.relations
       .filter((r) => entityMap.has(r.source_id) && entityMap.has(r.target_id))
       .map((r) => ({
         source: String(r.source_id),
         target: String(r.target_id),
-        label: RELATION_TYPE_LABELS[r.relation_type] || r.relation_type
+        label: RELATION_TYPE_LABELS[r.relation_type] || r.relation_type,
+        description: r.description
       }))
 
     return { nodes, links, categories }
   }, [graphData])
 
-  // Initial load
   useEffect(() => {
     loadWikis().then()
   }, [loadWikis])
 
-  // Load docs and processed IDs only when wiki changes
   useEffect(() => {
     if (selectedWiki) {
       loadDocs(selectedWiki.id).then()
@@ -185,53 +160,42 @@ const Index: React.FC = () => {
     }
   }, [selectedWiki, loadDocs, loadProcessedDocIds])
 
-  // Load graph when wiki or docFilter changes
   useEffect(() => {
     if (selectedWiki) {
       loadGraphData(selectedWiki.id, docFilter.length > 0 ? docFilter : undefined).then()
     }
   }, [selectedWiki, docFilter, loadGraphData])
 
-  // Listen for build progress
   useEffect(() => {
-    return (window as unknown as Window).api.graph.onBuildProgress((progress) => {
-      setBuildPhase(progress.phase)
-      setBuildProcessed(progress.processedDocs)
-      setBuildTotal(progress.totalDocs)
-      setBuildMessage(progress.message)
+    if (!selectedWiki) return
+    return subscribeToRefresh(selectedWiki.id, () => {
+      loadGraphData(selectedWiki.id).then()
     })
-  }, [])
+  }, [selectedWiki, loadGraphData, subscribeToRefresh])
 
-  // Listen for build complete
   useEffect(() => {
     return (window as unknown as Window).api.graph.onBuildComplete((result) => {
-      setIsBuilding(false)
       setIsAppending(false)
-      setShowBuildProgress(false)
       viewMessage(
         'graph-build',
         'success',
         `图谱构建完成！实体 ${result.entityCount}，关系 ${result.relationCount}`,
         4
       )
-      if (selectedWiki) {
+      if (selectedWiki && result.wikiId === selectedWiki.id) {
         loadGraphData(selectedWiki.id).then()
         loadProcessedDocIds(selectedWiki.id).then()
       }
     })
   }, [selectedWiki, loadGraphData, loadProcessedDocIds, viewMessage])
 
-  // Listen for build error
   useEffect(() => {
     return (window as unknown as Window).api.graph.onBuildError((error) => {
-      setIsBuilding(false)
       setIsAppending(false)
-      setShowBuildProgress(false)
       viewMessage('graph-build-error', 'error', `图谱构建失败: ${error.error}`)
     })
   }, [viewMessage])
 
-  // Handle wiki selection
   const handleSelectWiki = (wiki: WikiRow): void => {
     setSelectedWiki(wiki)
     setSelectedEntity(null)
@@ -239,12 +203,10 @@ const Index: React.FC = () => {
     setTypeFilter(undefined)
   }
 
-  // Handle entity click
   const handleEntityClick = useCallback((entity: GraphEntity): void => {
     setSelectedEntity(entity)
   }, [])
 
-  // Handle build graph
   const handleBuildGraph = async (): Promise<void> => {
     if (!selectedWiki) return
 
@@ -258,26 +220,18 @@ const Index: React.FC = () => {
         const messageKey = 'graph-build-trigger'
         viewMessage(messageKey, 'loading', '正在启动图谱构建...')
 
-        setIsBuilding(true)
-        setShowBuildProgress(true)
-        setBuildPhase('collect')
-        setBuildProcessed(0)
-        setBuildTotal(0)
-        setBuildMessage('初始化...')
+        startBuild(selectedWiki.id, selectedWiki.title)
 
         try {
           ;(window as unknown as Window).api.graph.buildGraph(selectedWiki.id, { force: true })
           viewMessage(messageKey, 'success', '图谱构建已启动', 2)
         } catch (error) {
-          setIsBuilding(false)
-          setShowBuildProgress(false)
           viewMessage(messageKey, 'error', `启动构建失败: ${error}`)
         }
       }
     })
   }
 
-  // Handle back to wiki list
   const handleBackToWikiList = (): void => {
     setSelectedWiki(null)
     setGraphData(null)
@@ -287,31 +241,23 @@ const Index: React.FC = () => {
     setDocFilter([])
   }
 
-  // Handle append docs to graph
   const handleAppendDocs = async (docIds: number[]): Promise<void> => {
     if (!selectedWiki || docIds.length === 0) return
 
     setIsAppending(true)
-    setShowBuildProgress(true)
-    setBuildPhase('collect')
-    setBuildProcessed(0)
-    setBuildTotal(docIds.length)
-    setBuildMessage('初始化...')
+    startBuild(selectedWiki.id, selectedWiki.title)
 
     try {
       await (window as unknown as Window).api.graph.appendDocs(selectedWiki.id, docIds)
     } catch {
       setIsAppending(false)
-      setShowBuildProgress(false)
     }
   }
 
-  // Handle type filter change
   const handleTypeFilterChange = (value: string | undefined): void => {
     setTypeFilter(value)
   }
 
-  // Handle relation click (navigate to related entity)
   const handleRelationClick = (entityId: number): void => {
     if (graphData) {
       const entity = graphData.entities.find((e) => e.id === entityId)
@@ -321,7 +267,6 @@ const Index: React.FC = () => {
     }
   }
 
-  // Handle doc tag click (open doc preview)
   const handleDocClick = async (docId: number): Promise<void> => {
     try {
       const doc = await (window as unknown as Window).api.docs.getById(docId)
@@ -334,7 +279,6 @@ const Index: React.FC = () => {
     }
   }
 
-  // Wiki selection view
   if (!selectedWiki) {
     return (
       <div className="h-full flex-1 flex flex-row gap-2.5">
@@ -376,10 +320,8 @@ const Index: React.FC = () => {
     )
   }
 
-  // Graph view
   return (
     <div className="h-full flex-1 flex flex-col gap-2.5">
-      {/* Toolbar */}
       <div
         style={{
           background: colorBgContainer,
@@ -388,7 +330,7 @@ const Index: React.FC = () => {
       >
         <GraphToolbar
           wikiTitle={selectedWiki.title}
-          isLoading={isBuilding}
+          isLoading={false}
           searchQuery={searchQuery}
           typeFilter={typeFilter}
           entityCount={graphData?.entities.length || 0}
@@ -406,9 +348,7 @@ const Index: React.FC = () => {
         />
       </div>
 
-      {/* Main content area */}
       <div className="flex-1 flex flex-row gap-2.5" style={{ minHeight: 0 }}>
-        {/* Graph canvas */}
         <div
           className="flex-1"
           style={{
@@ -427,12 +367,7 @@ const Index: React.FC = () => {
           ) : (
             <Flex vertical align="center" justify="center" style={{ height: '100%' }} gap={16}>
               <Empty description="该知识库还没有图谱数据" image={Empty.PRESENTED_IMAGE_SIMPLE}>
-                <Button
-                  type="primary"
-                  icon={<PlayCircleOutlined />}
-                  onClick={handleBuildGraph}
-                  loading={isBuilding}
-                >
+                <Button type="primary" icon={<PlayCircleOutlined />} onClick={handleBuildGraph}>
                   开始构建图谱
                 </Button>
               </Empty>
@@ -440,7 +375,6 @@ const Index: React.FC = () => {
           )}
         </div>
 
-        {/* Entity detail panel */}
         <div
           style={{
             width: 300,
@@ -457,16 +391,6 @@ const Index: React.FC = () => {
         </div>
       </div>
 
-      {/* Build progress modal */}
-      <BuildProgress
-        open={showBuildProgress}
-        phase={buildPhase}
-        processedDocs={buildProcessed}
-        totalDocs={buildTotal}
-        message={buildMessage}
-      />
-
-      {/* Doc preview modal */}
       <DocPreviewModal
         open={isDocPreviewOpen}
         onCancel={() => setIsDocPreviewOpen(false)}

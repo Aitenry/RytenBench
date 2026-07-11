@@ -156,32 +156,74 @@ const api = {
     },
     onBuildProgress: (
       callback: (progress: {
+        wikiId: number
         phase: string
+        phaseLabel: string
+        phaseProgress: number
+        overallProgress: number
         processedDocs: number
         totalDocs: number
+        processedChunks: number
+        totalChunks: number
+        entityCount: number
+        relationCount: number
         message: string
+        needsRefresh?: boolean
       }) => void
     ) => {
-      ipcRenderer.removeAllListeners('graph-build-progress')
-      ipcRenderer.on('graph-build-progress', (_event, progress) => callback(progress))
+      const handler = (
+        _event: Electron.IpcRendererEvent,
+        progress: {
+          wikiId: number
+          phase: string
+          phaseLabel: string
+          phaseProgress: number
+          overallProgress: number
+          processedDocs: number
+          totalDocs: number
+          processedChunks: number
+          totalChunks: number
+          entityCount: number
+          relationCount: number
+          message: string
+          needsRefresh?: boolean
+        }
+      ): void => {
+        callback(progress)
+      }
+      ipcRenderer.on('graph-build-progress', handler)
       return () => {
-        ipcRenderer.removeAllListeners('graph-build-progress')
+        ipcRenderer.off('graph-build-progress', handler)
       }
     },
     onBuildComplete: (
       callback: (result: { wikiId: number; entityCount: number; relationCount: number }) => void
     ) => {
-      ipcRenderer.removeAllListeners('graph-build-complete')
-      ipcRenderer.on('graph-build-complete', (_event, result) => callback(result))
+      const handler = (
+        _event: Electron.IpcRendererEvent,
+        result: {
+          wikiId: number
+          entityCount: number
+          relationCount: number
+        }
+      ): void => {
+        callback(result)
+      }
+      ipcRenderer.on('graph-build-complete', handler)
       return () => {
-        ipcRenderer.removeAllListeners('graph-build-complete')
+        ipcRenderer.off('graph-build-complete', handler)
       }
     },
     onBuildError: (callback: (error: { wikiId: number; error: string }) => void) => {
-      ipcRenderer.removeAllListeners('graph-build-error')
-      ipcRenderer.on('graph-build-error', (_event, error) => callback(error))
+      const handler = (
+        _event: Electron.IpcRendererEvent,
+        error: { wikiId: number; error: string }
+      ): void => {
+        callback(error)
+      }
+      ipcRenderer.on('graph-build-error', handler)
       return () => {
-        ipcRenderer.removeAllListeners('graph-build-error')
+        ipcRenderer.off('graph-build-error', handler)
       }
     }
   },

@@ -617,6 +617,28 @@ async function getFullGraphData(
   return { entities, relations }
 }
 
+async function batchUpdateEntityConfidence(
+  updates: Array<{ id: number; confidence: number }>
+): Promise<void> {
+  if (updates.length === 0) return
+
+  try {
+    const db = (await getDatabaseInstance()).getDatabase()
+
+    await db.transaction(async (tx) => {
+      for (const { id, confidence } of updates) {
+        await tx.query(
+          'UPDATE graph_entities SET confidence = $1, updated_at = NOW() WHERE id = $2',
+          [confidence, id]
+        )
+      }
+    })
+  } catch (error) {
+    logger.error('Failed to batch update entity confidence:', error)
+    throw error
+  }
+}
+
 export {
   getEntitiesByWikiId,
   getEntityById,
@@ -635,5 +657,6 @@ export {
   getBuildJobByWikiId,
   getLatestBuildJob,
   batchUpsertEntities,
-  batchUpsertRelations
+  batchUpsertRelations,
+  batchUpdateEntityConfidence
 }

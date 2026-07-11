@@ -3,6 +3,7 @@ import { HashRouter } from 'react-router-dom'
 import { theme } from 'antd'
 import { MessageContext } from './contexts/MessageContext'
 import { AudioProvider } from './contexts/AudioContext'
+import { BuildProgressProvider } from './providers/BuildProgressProvider'
 import AppContent from './components/AppContent'
 
 const App: React.FC = () => {
@@ -18,9 +19,11 @@ const App: React.FC = () => {
         }}
       >
         <AudioProvider>
-          <div className="min-h-screen flex flex-col" style={{ background: colorBgLayout }}>
-            <AppContent />
-          </div>
+          <BuildProgressProvider>
+            <div className="min-h-screen flex flex-col" style={{ background: colorBgLayout }}>
+              <AppContent />
+            </div>
+          </BuildProgressProvider>
         </AudioProvider>
       </MessageContext.Provider>
     </HashRouter>

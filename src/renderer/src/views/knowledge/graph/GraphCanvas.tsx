@@ -20,6 +20,7 @@ export interface GraphChartLink {
   source: string
   target: string
   label: string
+  description?: string | null
 }
 
 /** ECharts graph category (built in Index.tsx useMemo) */
@@ -126,12 +127,25 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({ data, onEntityClick, onEntity
       backgroundColor: colorBgContainer,
       tooltip: {
         formatter: (params: unknown) => {
-          const p = params as { dataType?: string; data?: { name?: string; label?: string } }
+          const p = params as {
+            dataType?: string
+            data?: {
+              name?: string
+              original?: GraphEntity
+              data?: {
+                label?: string
+                description?: string | null
+              }
+            }
+          }
           if (p.dataType === 'node') {
-            return `<b>${p.data?.name || ''}</b>`
+            const desc = p.data?.original?.description
+            return `<b>${p.data?.name || ''}</b>${desc ? `<br/>${desc}` : ''}`
           }
           if (p.dataType === 'edge') {
-            return p.data?.label || ''
+            const label = p.data?.data?.label
+            const desc = p.data?.data?.description
+            return `<b>${label || ''}</b>${desc ? `<br/>${desc}` : ''}`
           }
           return ''
         }
@@ -156,7 +170,7 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({ data, onEntityClick, onEntity
           links: data.links.map((l) => ({
             source: l.source,
             target: l.target,
-            data: { label: l.label }
+            data: { label: l.label, description: l.description }
           })),
           categories: data.categories,
           roam: true,
