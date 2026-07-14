@@ -10,25 +10,14 @@ import {
   ImportOutlined,
   ExportOutlined
 } from '@ant-design/icons'
-import MarkdownEditor from '@renderer/components/MarkdownEditor'
 import { useMessage } from '@renderer/hooks/useMessage'
 import { Window } from '../../../../resource/types/window'
-import DocPreviewModal from '@renderer/components/DocPreviewModal'
+import DocumentPreviewModal from '@renderer/components/document/DocumentPreviewModal'
+import DocumentEditModal from '@renderer/components/document/DocumentEditModal'
 import { getTagsArray } from '@renderer/utils/document'
+import type { DocItem } from '@renderer/types/models'
 
 const { Search } = Input
-
-interface DocItem {
-  id: number
-  title: string
-  image: string | null
-  summary: string | null
-  tags: string | null
-  created_at: string
-  updated_at: string
-  word_count: number
-  content?: string | null
-}
 
 const PAGE_SIZE = 20
 
@@ -44,12 +33,6 @@ const Index: React.FC = () => {
   const [isBatchDeleteModalOpen, setIsBatchDeleteModalOpen] = useState(false)
   const [deleteDateRange, setDeleteDateRange] = useState<[dayjs.Dayjs, dayjs.Dayjs] | null>(null)
   const [currentDoc, setCurrentDoc] = useState<DocItem | null>(null)
-  const [isNewDoc, setIsNewDoc] = useState(false)
-  const [editTitle, setEditTitle] = useState('')
-  const [editTags, setEditTags] = useState<string[]>([])
-  const [tagInput, setTagInput] = useState('')
-  const [editImage, setEditImage] = useState<string | null>(null)
-  const [editSummary, setEditSummary] = useState('')
   const [page, setPage] = useState(1)
   const [total, setTotal] = useState(0)
   const [isLoading, setIsLoading] = useState(false)
@@ -165,12 +148,6 @@ const Index: React.FC = () => {
 
   const handleCreateDoc = (): void => {
     setCurrentDoc(null)
-    setIsNewDoc(true)
-    setEditTitle('新文档')
-    setEditTags([])
-    setTagInput('')
-    setEditImage(null)
-    setEditSummary('')
     setIsEditModalOpen(true)
   }
 
@@ -199,12 +176,6 @@ const Index: React.FC = () => {
       const fullDoc = await (window as unknown as Window).api.docs.getById(doc.id)
       if (fullDoc) {
         setCurrentDoc({ ...doc, content: fullDoc.content })
-        setIsNewDoc(false)
-        setEditTitle(doc.title)
-        setEditTags(getTagsArray(doc.tags))
-        setTagInput('')
-        setEditImage(fullDoc.image)
-        setEditSummary(fullDoc.summary || '')
         setIsEditModalOpen(true)
         viewMessage(messageKey, 'success', '文档内容加载成功！', 2)
       } else {
@@ -261,66 +232,46 @@ const Index: React.FC = () => {
     }
   }
 
-  const handleAddTag = (e: React.KeyboardEvent<HTMLInputElement>): void => {
-    if (e.key === 'Enter' && tagInput.trim()) {
-      e.preventDefault()
-      if (!editTags.includes(tagInput.trim())) {
-        setEditTags([...editTags, tagInput.trim()])
+  const handleEditSave = useCallback(
+    async (data: {
+      title: string
+      image: string | null
+      summary: string | null
+      content: string
+      tags: string[]
+    }): Promise<void> => {
+      const messageKey = currentDoc ? 'doc-update' : 'doc-create'
+      try {
+        if (currentDoc) {
+          viewMessage(messageKey, 'loading', '正在保存文档...')
+          await (window as unknown as Window).api.docs.update(currentDoc.id, {
+            title: data.title,
+            image: data.image,
+            summary: data.summary,
+            content: data.content,
+            tags: data.tags.length > 0 ? JSON.stringify(data.tags) : null
+          })
+          viewMessage(messageKey, 'success', '文档保存成功！', 2)
+        } else {
+          viewMessage(messageKey, 'loading', '正在创建文档...')
+          await (window as unknown as Window).api.docs.add({
+            title: data.title || '新文档',
+            image: data.image,
+            summary: data.summary,
+            content: data.content,
+            tags: data.tags.length > 0 ? JSON.stringify(data.tags) : null
+          })
+          viewMessage(messageKey, 'success', '文档创建成功！', 2)
+        }
+        setIsEditModalOpen(false)
+        await loadDocs(1)
+      } catch (error) {
+        console.error('Failed to save doc:', error)
+        viewMessage(messageKey, 'error', '保存文档失败')
       }
-      setTagInput('')
-    }
-  }
-
-  const handleRemoveTag = (tagToRemove: string): void => {
-    setEditTags(editTags.filter((tag) => tag !== tagToRemove))
-  }
-
-  const handleSelectImage = async (): Promise<void> => {
-    try {
-      const result = await (window as unknown as Window).api.file.selectImageFile(true)
-      if (result?.isImage) {
-        setEditImage(result.dataUrl)
-      }
-    } catch (error) {
-      console.error('Failed to select image:', error)
-    }
-  }
-
-  const handleRemoveImage = (): void => {
-    setEditImage(null)
-  }
-
-  const handleEditorSave = async (newContent: string): Promise<void> => {
-    const messageKey = isNewDoc ? 'doc-create' : 'doc-update'
-    try {
-      if (isNewDoc) {
-        viewMessage(messageKey, 'loading', '正在创建文档...')
-        await (window as unknown as Window).api.docs.add({
-          title: editTitle || '新文档',
-          image: editImage,
-          summary: editSummary || null,
-          content: newContent,
-          tags: editTags.length > 0 ? JSON.stringify(editTags) : null
-        })
-        viewMessage(messageKey, 'success', '文档创建成功！', 2)
-      } else if (currentDoc) {
-        viewMessage(messageKey, 'loading', '正在保存文档...')
-        await (window as unknown as Window).api.docs.update(currentDoc.id, {
-          title: editTitle,
-          image: editImage,
-          summary: editSummary || null,
-          content: newContent,
-          tags: editTags.length > 0 ? JSON.stringify(editTags) : null
-        })
-        viewMessage(messageKey, 'success', '文档保存成功！', 2)
-      }
-      setIsEditModalOpen(false)
-      await loadDocs(1)
-    } catch (error) {
-      console.error('Failed to save doc:', error)
-      viewMessage(messageKey, 'error', '保存文档失败')
-    }
-  }
+    },
+    [currentDoc, viewMessage, loadDocs]
+  )
 
   const handleImportDoc = async (): Promise<void> => {
     const messageKey = 'doc-import'
@@ -328,17 +279,10 @@ const Index: React.FC = () => {
       viewMessage(messageKey, 'loading', '正在导入文档...')
       const result = await (window as unknown as Window).api.docs.importDocument()
       if (result) {
-        setCurrentDoc(null)
-        setIsNewDoc(true)
-        setEditTitle(result.title)
-        setEditTags([])
-        setTagInput('')
-        setEditImage(null)
-        setEditSummary('')
-        setIsEditModalOpen(true)
-        // 需要延迟设置 initialValue，因为 MarkdownEditor 在 modal 打开时才挂载
+        // Open the edit modal with imported content (as new doc)
         setTimeout(() => {
-          setCurrentDoc({ content: result.content } as DocItem)
+          setCurrentDoc({ title: result.title, content: result.content } as DocItem)
+          setIsEditModalOpen(true)
         }, 100)
         viewMessage(messageKey, 'success', `文档"${result.title}"导入成功！`, 2)
       } else {
@@ -539,94 +483,17 @@ const Index: React.FC = () => {
         </div>
       </main>
 
-      <Modal
-        title={isNewDoc ? '新建文档' : '编辑文档'}
+      <DocumentEditModal
         open={isEditModalOpen}
-        onCancel={() => setIsEditModalOpen(false)}
-        width="calc(100vw - 137px)"
-        centered={true}
-        mask={{ closable: false }}
-        styles={{
-          body: { height: 'calc(100vh - 205px)', display: 'flex', flexDirection: 'row', gap: 16 }
+        currentDoc={currentDoc}
+        onClose={() => {
+          setIsEditModalOpen(false)
+          setCurrentDoc(null)
         }}
-        footer={null}
-      >
-        <div
-          style={{
-            width: 320,
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 12,
-            overflowY: 'auto',
-            height: '100%',
-            minHeight: 0
-          }}
-        >
-          <Input
-            placeholder="文档标题"
-            value={editTitle}
-            onChange={(e) => setEditTitle(e.target.value)}
-            size="large"
-            style={{ fontWeight: 600, flexShrink: 0 }}
-          />
-          <div
-            style={{
-              display: 'flex',
-              flexWrap: 'wrap',
-              gap: 8,
-              alignItems: 'center',
-              flexShrink: 0
-            }}
-          >
-            {editTags.map((tag, index) => (
-              <AntTag key={index} closable onClose={() => handleRemoveTag(tag)} color="processing">
-                {tag}
-              </AntTag>
-            ))}
-            <Input
-              placeholder="输入标签后按回车添加"
-              value={tagInput}
-              onChange={(e) => setTagInput(e.target.value)}
-              onKeyDown={handleAddTag}
-              style={{ width: '100%' }}
-              allowClear
-            />
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flexShrink: 0 }}>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <Button type="default" onClick={handleSelectImage} block>
-                上传图片
-              </Button>
-              {editImage && (
-                <Button type="default" danger onClick={handleRemoveImage} block>
-                  移除图片
-                </Button>
-              )}
-            </div>
-            {editImage && (
-              <div style={{ width: '100%', maxHeight: 200, overflow: 'hidden', borderRadius: 8 }}>
-                <img
-                  src={editImage}
-                  alt="文档封面"
-                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                />
-              </div>
-            )}
-          </div>
-          <Input.TextArea
-            placeholder="文档摘要"
-            value={editSummary}
-            onChange={(e) => setEditSummary(e.target.value)}
-            style={{ flex: 1, minHeight: 0, resize: 'none' }}
-            maxLength={500}
-          />
-        </div>
-        <div style={{ flex: 1, minWidth: 0, minHeight: 0 }}>
-          <MarkdownEditor initialValue={currentDoc?.content || ''} onSave={handleEditorSave} />
-        </div>
-      </Modal>
+        onSave={handleEditSave}
+      />
 
-      <DocPreviewModal
+      <DocumentPreviewModal
         open={isPreviewModalOpen}
         onCancel={() => setIsPreviewModalOpen(false)}
         currentDoc={currentDoc}

@@ -1,11 +1,7 @@
 import React from 'react'
+import type { BuildProgressContextType } from '@renderer/types/build-progress'
 
-export interface BuildProgressContextType {
-  startBuild: (wikiId: number, wikiTitle: string) => void
-  restoreBuild: (wikiId: number) => void
-  navigateToGraph: (wikiId: number) => void
-  subscribeToRefresh: (wikiId: number, callback: () => void) => () => void
-}
+export type { BuildProgressContextType }
 
 export const BuildProgressContext = React.createContext<BuildProgressContextType | undefined>(
   undefined

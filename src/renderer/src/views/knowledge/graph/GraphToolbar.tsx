@@ -2,32 +2,9 @@ import React, { useMemo, useState } from 'react'
 import { Button, Space, Input, Flex, Typography, Select, Modal, Tag } from 'antd'
 import { SyncOutlined, SearchOutlined } from '@ant-design/icons'
 import { RiApps2AddLine, RiArrowLeftLine } from '@remixicon/react'
+import type { GraphToolbarProps } from '@renderer/types/components'
 
 const { Text } = Typography
-
-interface DocOption {
-  id: number
-  title: string
-}
-
-interface GraphToolbarProps {
-  wikiTitle: string
-  isLoading: boolean
-  searchQuery: string
-  typeFilter: string | undefined
-  entityCount: number
-  relationCount: number
-  docs: DocOption[]
-  addedDocIds: Set<number>
-  isAppending: boolean
-  docFilter: number[]
-  onSearchChange: (value: string) => void
-  onTypeFilterChange: (value: string | undefined) => void
-  onAppendDocs: (docIds: number[]) => void
-  onDocFilterChange: (docIds: number[]) => void
-  onBuildGraph: () => void
-  onBackToWikiList: () => void
-}
 
 const GraphToolbar: React.FC<GraphToolbarProps> = ({
   wikiTitle,

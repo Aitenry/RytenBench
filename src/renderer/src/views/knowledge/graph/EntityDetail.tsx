@@ -24,15 +24,8 @@ import {
 } from '@remixicon/react'
 import { theme } from 'antd'
 import { Window } from '../../../../resource/types/window'
-import {
-  GraphEntity,
-  GraphRelation,
-  ENTITY_TYPE_COLORS,
-  ENTITY_TYPE_LABELS,
-  RELATION_TYPE_LABELS
-} from './types'
-
-const { Title, Text, Paragraph } = Typography
+import { ENTITY_TYPE_COLORS, ENTITY_TYPE_LABELS, RELATION_TYPE_LABELS } from './types'
+import type { EntityDetailProps } from '@renderer/types/components'
 
 const ENTITY_ICONS: Record<string, React.ReactNode> = {
   person: <RiUserLine />,
@@ -57,14 +50,7 @@ const ENTITY_ICONS: Record<string, React.ReactNode> = {
   other: <RiQuestionLine />
 }
 
-interface EntityDetailProps {
-  entity: GraphEntity | null
-  entities: GraphEntity[]
-  relations: GraphRelation[]
-  onRelationClick?: (entityId: number) => void
-  onDocClick?: (docId: number) => void
-  onClose?: () => void
-}
+const { Title, Text, Paragraph } = Typography
 
 const EntityDetail: React.FC<EntityDetailProps> = ({
   entity,

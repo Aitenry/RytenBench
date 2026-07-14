@@ -1,10 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { Input } from 'antd'
-
-interface MarkdownEditorProps {
-  initialValue?: string
-  onSave?: (content: string) => void
-}
+import type { MarkdownEditorProps } from '@renderer/types/components'
 
 const { TextArea } = Input
 

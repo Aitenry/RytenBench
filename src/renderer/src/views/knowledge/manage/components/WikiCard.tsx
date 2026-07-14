@@ -2,19 +2,9 @@ import React, { useMemo } from 'react'
 import { theme, Card, Typography, Tag, Space, Modal } from 'antd'
 import { EditOutlined, DeleteOutlined } from '@ant-design/icons'
 import { RiBook2Line } from '@remixicon/react'
+import type { WikiCardProps } from '@renderer/types/components'
 
 const { Title, Paragraph } = Typography
-
-interface WikiRow {
-  id: number
-  title: string
-  summary: string | null
-  image: string | null
-  created_at: string
-  updated_at: string
-  doc_count: number
-  tags: string | null
-}
 
 const getTagsArray = (tagsStr: string | null): string[] => {
   if (!tagsStr) return []
@@ -33,13 +23,6 @@ const getTagsArray = (tagsStr: string | null): string[] => {
   } catch {
     return []
   }
-}
-
-interface WikiCardProps {
-  item: WikiRow
-  onSelect: () => void
-  onEdit?: () => void
-  onDelete?: () => void
 }
 
 const WikiCard: React.FC<WikiCardProps> = ({ item, onSelect, onEdit, onDelete }) => {

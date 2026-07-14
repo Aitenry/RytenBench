@@ -1,27 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { Modal, Form, Input, DatePicker, Select } from 'antd'
-import dayjs from 'dayjs'
+import { Modal } from 'antd'
 import { RiCheckFill, RiCloseFill, RiAddFill, RiPlayFill } from '@remixicon/react'
 import { Window } from '../../../../resource/types/window'
 import { useMessage } from '../../../hooks/useMessage'
-
-export interface TodoItem {
-  id: number
-  title: string
-  description: string
-  due_date: string | null // 保持为字符串格式，可能为null
-  priority: number // 0-7
-  status: number // 0: 待办, 1: 进行中, 2: 已完成
-  category: string | null // 对应数据库的category字段
-  created_at: string // 对应数据库的created_at字段
-  updated_at: string // 对应数据库的updated_at字段
-  completed_at: string | null // 对应数据库的completed_at字段
-  started_at: string | null // 对应数据库的started_at字段
-}
-
-interface TodoListProps {
-  initialTodos?: TodoItem[]
-}
+import TodoEditModal from '@renderer/components/todo/TodoEditModal'
+import type { TodoItem } from '@renderer/types/models'
+import type { TodoListProps } from '@renderer/types/components'
 
 const TodoList: React.FC<TodoListProps> = ({ initialTodos = [] }) => {
   const [todos, setTodos] = useState<TodoItem[]>([])
@@ -32,8 +16,6 @@ const TodoList: React.FC<TodoListProps> = ({ initialTodos = [] }) => {
   const [addModalVisible, setAddModalVisible] = useState(false)
   const activeInitialAnimationCount = useRef(0)
   const [currentTodo, setCurrentTodo] = useState<TodoItem | null>(null)
-  const [form] = Form.useForm()
-  const [addForm] = Form.useForm()
   const { viewMessage } = useMessage()
 
   // 排序函数
@@ -88,20 +70,6 @@ const TodoList: React.FC<TodoListProps> = ({ initialTodos = [] }) => {
       })
     }
   }, [activeTodos, initialLoad])
-
-  // 当currentTodo变化时，更新表单
-  useEffect(() => {
-    if (currentTodo) {
-      form.setFieldsValue({
-        title: currentTodo.title,
-        description: currentTodo.description,
-        due_date: currentTodo.due_date ? dayjs(currentTodo.due_date) : null,
-        priority: currentTodo.priority,
-        status: currentTodo.status,
-        category: currentTodo.category
-      })
-    }
-  }, [currentTodo, form])
 
   useEffect(() => {
     setTodos(initialTodos)
@@ -219,106 +187,88 @@ const TodoList: React.FC<TodoListProps> = ({ initialTodos = [] }) => {
   }
 
   const openAddModal = (): void => {
-    addForm.resetFields()
     setAddModalVisible(true)
   }
 
-  const handleModalOk = async (): Promise<void> => {
+  const handleEditSave = async (values: {
+    title: string
+    description: string
+    due_date: string | null
+    priority: number
+    status: number
+    category: string | null
+  }): Promise<void> => {
+    const messageKey = 'todo-update'
+    if (!currentTodo) return
+    // 检查是否尝试将进行中的任务改为待办状态
+    if (currentTodo.status === 1 && values.status === 0) {
+      viewMessage(messageKey, 'error', '进行中的任务不能退回待办状态')
+      return
+    }
+    viewMessage(messageKey, 'loading', '正在更新代办事项...')
     try {
-      const values = await form.validateFields()
-      const messageKey = 'todo-update'
-      viewMessage(messageKey, 'loading', '正在更新代办事项...')
-      if (currentTodo) {
-        // 检查是否尝试将进行中的任务改为待办状态
-        if (currentTodo.status === 1 && values.status === 0) {
-          viewMessage('todo-update', 'error', '进行中的任务不能退回待办状态')
-          return
-        }
-
-        const success = await (window as unknown as Window).api.todoItems.update(currentTodo.id, {
-          title: values.title,
-          description: values.description,
-          due_date: values.due_date ? values.due_date.format('YYYY-MM-DD') : currentTodo.due_date,
-          priority: values.priority,
-          status: values.status,
-          category: values.category
-        })
-        if (success) {
-          setTodos((prevTodos) =>
-            sortTodos(
-              prevTodos.map((todo) =>
-                todo.id === currentTodo.id
-                  ? {
-                      ...todo,
-                      title: values.title,
-                      description: values.description,
-                      due_date: values.due_date
-                        ? values.due_date.format('YYYY-MM-DD')
-                        : todo.due_date,
-                      priority: values.priority,
-                      status: values.status,
-                      category: values.category
-                    }
-                  : todo
-              )
+      const success = await (window as unknown as Window).api.todoItems.update(currentTodo.id, {
+        title: values.title,
+        description: values.description,
+        due_date: values.due_date,
+        priority: values.priority,
+        status: values.status,
+        category: values.category
+      })
+      if (success) {
+        setTodos((prevTodos) =>
+          sortTodos(
+            prevTodos.map((todo) =>
+              todo.id === currentTodo.id
+                ? { ...todo, ...values, due_date: values.due_date ?? todo.due_date }
+                : todo
             )
           )
-          setPreviewModalVisible(false)
-          viewMessage(messageKey, 'success', '待办事项更新成功！', 2)
-        } else {
-          viewMessage(messageKey, 'error', '更新待办事项失败！', 2)
-        }
+        )
+        setPreviewModalVisible(false)
+        setCurrentTodo(null)
+        viewMessage(messageKey, 'success', '待办事项更新成功！', 2)
+      } else {
+        viewMessage(messageKey, 'error', '更新待办事项失败！', 2)
       }
-    } catch (info) {
-      console.log('Validate Failed:', info)
+    } catch (error) {
+      console.error('Failed to update todo:', error)
+      viewMessage(messageKey, 'error', '更新待办事项失败')
     }
   }
 
-  const handleAddModalOk = async (): Promise<void> => {
+  const handleAddSave = async (values: {
+    title: string
+    description: string
+    due_date: string | null
+    priority: number
+    category: string | null
+  }): Promise<void> => {
+    const messageKey = 'todo-add'
+    viewMessage(messageKey, 'loading', '正在添加待办事项...')
     try {
-      const values = await addForm.validateFields()
-      const newTodo: Omit<
-        TodoItem,
-        'id' | 'created_at' | 'updated_at' | 'completed_at' | 'started_at'
-      > = {
-        title: values.title,
-        description: values.description,
-        due_date: values.due_date
-          ? values.due_date.format('YYYY-MM-DD')
-          : dayjs().add(7, 'day').format('YYYY-MM-DD'),
-        priority: values.priority,
-        status: 0, // 新增待办事项默认为待办状态
-        category: values.category || null
+      const newTodo = {
+        ...values,
+        status: 0,
+        due_date: values.due_date ?? null
       }
-
       const newId = await (window as unknown as Window).api.todoItems.add(newTodo)
-
       const todoWithId: TodoItem = {
         ...newTodo,
         id: newId,
-        created_at: new Date().toISOString(), // 假设后端会处理时间
+        due_date: newTodo.due_date,
+        created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
         completed_at: null,
         started_at: null
       }
-
       setTodos((prevTodos) => sortTodos([...prevTodos, todoWithId]))
       setAddModalVisible(false)
-      viewMessage('todo-add', 'success', '待办事项添加成功')
-    } catch (info) {
-      console.log('Validate Failed:', info)
+      viewMessage(messageKey, 'success', '待办事项添加成功')
+    } catch (error) {
+      console.error('Failed to add todo:', error)
+      viewMessage(messageKey, 'error', '添加待办事项失败')
     }
-  }
-
-  const handleModalCancel = (): void => {
-    setPreviewModalVisible(false)
-    form.resetFields()
-    setCurrentTodo(null)
-  }
-
-  const handleAddModalCancel = (): void => {
-    setAddModalVisible(false)
-    addForm.resetFields()
   }
 
   const formatDate = (dateString: string | null): string => {
@@ -377,29 +327,6 @@ const TodoList: React.FC<TodoListProps> = ({ initialTodos = [] }) => {
     if (diffDays === 0) return { text: '今天到期', color: 'text-orange-500' }
     if (diffDays <= 3) return { text: `${diffDays}天后到期`, color: 'text-yellow-500' }
     return { text: `${diffDays}天后到期`, color: 'text-gray-500 dark:text-gray-400' }
-  }
-
-  // 根据当前状态决定可用的状态选项
-  interface StatusOption {
-    value: number
-    label: string
-  }
-
-  const getStatusOptions = (currentStatus: number): StatusOption[] => {
-    if (currentStatus === 1) {
-      // 如果当前是进行中状态，只允许改为已完成
-      return [
-        { value: 1, label: '进行中' },
-        { value: 2, label: '已完成' }
-      ]
-    } else {
-      // 如果当前不是进行中状态，允许所有选项
-      return [
-        { value: 0, label: '待办' },
-        { value: 1, label: '进行中' },
-        { value: 2, label: '已完成' }
-      ]
-    }
   }
 
   return (
@@ -571,155 +498,18 @@ const TodoList: React.FC<TodoListProps> = ({ initialTodos = [] }) => {
         </span>
       </div>
 
-      {/* 预览与修改一体的弹窗 */}
-      <Modal
-        title="待办事项详情"
-        open={previewModalVisible}
-        onOk={handleModalOk}
-        onCancel={handleModalCancel}
-        width={600}
-        okText="保存"
-        cancelText="取消"
-      >
-        {currentTodo && (
-          <Form
-            form={form}
-            layout="vertical"
-            initialValues={{
-              title: currentTodo.title,
-              description: currentTodo.description,
-              due_date: currentTodo.due_date ? dayjs(currentTodo.due_date) : null,
-              priority: currentTodo.priority,
-              status: currentTodo.status,
-              category: currentTodo.category
-            }}
-          >
-            <Form.Item
-              name="title"
-              label="标题"
-              rules={[{ required: true, message: '请输入标题' }]}
-            >
-              <Input placeholder="请输入待办事项标题" />
-            </Form.Item>
-
-            <Form.Item name="description" label="描述">
-              <Input.TextArea rows={4} placeholder="请输入待办事项描述" />
-            </Form.Item>
-
-            <Form.Item name="due_date" label="截止日期">
-              <DatePicker
-                style={{ width: '100%' }}
-                placeholder="请选择截止日期"
-                format="YYYY-MM-DD"
-              />
-            </Form.Item>
-
-            <div className="grid grid-cols-3 gap-4">
-              <Form.Item name="priority" label="优先级" className="mb-0">
-                <Select placeholder="请选择优先级">
-                  <Select.Option value={0}>P0</Select.Option>
-                  <Select.Option value={1}>P1</Select.Option>
-                  <Select.Option value={2}>P2</Select.Option>
-                  <Select.Option value={3}>P3</Select.Option>
-                  <Select.Option value={4}>P4</Select.Option>
-                  <Select.Option value={5}>P5</Select.Option>
-                  <Select.Option value={6}>P6</Select.Option>
-                  <Select.Option value={7}>P7</Select.Option>
-                </Select>
-              </Form.Item>
-
-              <Form.Item name="status" label="状态" className="mb-0">
-                <Select placeholder="请选择状态">
-                  {getStatusOptions(currentTodo.status).map((option) => (
-                    <Select.Option key={option.value} value={option.value}>
-                      {option.label}
-                    </Select.Option>
-                  ))}
-                </Select>
-              </Form.Item>
-
-              <Form.Item name="category" label="分类" className="mb-0">
-                <Input placeholder="请输入分类" />
-              </Form.Item>
-            </div>
-
-            <div className="mb-4 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg mt-4">
-              <h4 className="font-medium text-gray-700 dark:text-gray-300 mb-2">当前状态</h4>
-              <div className="flex flex-wrap items-center gap-2">
-                <span
-                  className={`text-xs px-2 py-0.5 rounded-full ${getPriorityBadgeColor(currentTodo.priority)}`}
-                >
-                  {getPriorityText(currentTodo.priority)}
-                </span>
-                <span
-                  className={`text-xs px-2 py-0.5 rounded-full ${getStatusColor(currentTodo.status)}`}
-                >
-                  {getStatusText(currentTodo.status)}
-                </span>
-                {currentTodo.category && (
-                  <span className="text-xs px-2 py-0.5 rounded-full bg-purple-100 text-purple-800">
-                    {currentTodo.category}
-                  </span>
-                )}
-                <span className="text-sm text-gray-600 dark:text-gray-400">
-                  截止日期: {formatDate(currentTodo.due_date)}
-                </span>
-                {currentTodo.started_at && (
-                  <span className="text-sm text-gray-600 dark:text-gray-400">
-                    开始时间: {new Date(currentTodo.started_at).toLocaleString('zh-CN')}
-                  </span>
-                )}
-              </div>
-            </div>
-          </Form>
-        )}
-      </Modal>
-
-      {/* 添加待办事项弹窗 */}
-      <Modal
-        title="添加待办事项"
-        open={addModalVisible}
-        onOk={handleAddModalOk}
-        onCancel={handleAddModalCancel}
-        width={600}
-        okText="添加"
-        cancelText="取消"
-      >
-        <Form form={addForm} layout="vertical">
-          <Form.Item name="title" label="标题" rules={[{ required: true, message: '请输入标题' }]}>
-            <Input placeholder="请输入待办事项标题" />
-          </Form.Item>
-
-          <Form.Item name="description" label="描述">
-            <Input.TextArea rows={4} placeholder="请输入待办事项描述" />
-          </Form.Item>
-
-          <Form.Item name="due_date" label="截止日期">
-            <DatePicker
-              style={{ width: '100%' }}
-              placeholder="请选择截止日期"
-              format="YYYY-MM-DD"
-            />
-          </Form.Item>
-
-          <Form.Item name="priority" label="优先级">
-            <Select placeholder="请选择优先级">
-              <Select.Option value={0}>P0</Select.Option>
-              <Select.Option value={1}>P1</Select.Option>
-              <Select.Option value={2}>P2</Select.Option>
-              <Select.Option value={3}>P3</Select.Option>
-              <Select.Option value={4}>P4</Select.Option>
-              <Select.Option value={5}>P5</Select.Option>
-              <Select.Option value={6}>P6</Select.Option>
-              <Select.Option value={7}>P7</Select.Option>
-            </Select>
-          </Form.Item>
-
-          <Form.Item name="category" label="分类">
-            <Input placeholder="请输入分类" />
-          </Form.Item>
-        </Form>
-      </Modal>
+      <TodoEditModal
+        editModalOpen={previewModalVisible}
+        currentTodo={currentTodo}
+        onEditClose={() => {
+          setPreviewModalVisible(false)
+          setCurrentTodo(null)
+        }}
+        onEditSave={handleEditSave}
+        addModalOpen={addModalVisible}
+        onAddClose={() => setAddModalVisible(false)}
+        onAddSave={handleAddSave}
+      />
     </div>
   )
 }

@@ -1,17 +1,8 @@
 // contexts/MessageContext.tsx
 import { createContext } from 'react'
-import { MessageInstance } from 'antd/es/message/interface'
+import type { MessageContextType } from '@renderer/types/components'
 
-// 定义Context类型
-export interface MessageContextType {
-  messageApi?: MessageInstance
-  viewMessage: (
-    key: string,
-    type: 'loading' | 'success' | 'info' | 'warning' | 'error',
-    content: string,
-    duration?: number
-  ) => void
-}
+export type { MessageContextType }
 
 // 创建Context
 export const MessageContext = createContext<MessageContextType | undefined>(undefined)

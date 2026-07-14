@@ -1,16 +1,12 @@
 import React from 'react'
 import { theme } from 'antd'
 import { RiMusic2Line, RiHistoryLine, RiHeartLine } from '@remixicon/react'
-import type { MusicFolder } from '../../../types/music'
+import type { NowPlayingProps } from '@renderer/types/components'
 
 const RECENTLY_PLAYED_ID = '__recent__'
 const LIKED_TRACKS_ID = '__liked__'
 
-interface Props {
-  folder: MusicFolder | null
-}
-
-const NowPlaying: React.FC<Props> = ({ folder }) => {
+const NowPlaying: React.FC<NowPlayingProps> = ({ folder }) => {
   const {
     token: {
       colorFillAlter,

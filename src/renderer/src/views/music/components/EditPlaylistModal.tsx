@@ -1,16 +1,14 @@
 import React, { useState, useEffect } from 'react'
 import { theme, Modal, Input, Form } from 'antd'
 import { RiMusic2Line, RiCameraLine } from '@remixicon/react'
-import type { MusicFolder } from '../../../types/music'
+import type { EditPlaylistModalProps } from '@renderer/types/components'
 
-interface Props {
-  open: boolean
-  folder: MusicFolder | null
-  onClose: () => void
-  onSaved: () => void
-}
-
-const EditPlaylistModal: React.FC<Props> = ({ open, folder, onClose, onSaved }) => {
+const EditPlaylistModal: React.FC<EditPlaylistModalProps> = ({
+  open,
+  folder,
+  onClose,
+  onSaved
+}) => {
   const {
     token: { colorFillAlter, colorTextTertiary }
   } = theme.useToken()

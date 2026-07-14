@@ -2,30 +2,16 @@ import React from 'react'
 import { theme, Card, Typography, Tag, Space } from 'antd'
 import { RiQuillPenAiLine } from '@remixicon/react'
 import { getTagsArray } from '@renderer/utils/document'
+import type { DocCardProps } from '@renderer/types/components'
 
 const { Title, Text, Paragraph } = Typography
 
-interface DocItem {
-  id: number
-  title: string
-  image: string | null
-  summary: string | null
-  tags: string | null
-  created_at: string
-  updated_at: string
-  word_count: number
-  content?: string | null
-  isPinned?: boolean
-}
-
-interface DocCardProps {
-  item: DocItem
-  onClick?: () => void
-  actions?: React.ReactNode[]
-  showContentPreview?: boolean
-}
-
-const DocCard: React.FC<DocCardProps> = ({ item, onClick, actions, showContentPreview = true }) => {
+const DocumentCard: React.FC<DocCardProps> = ({
+  item,
+  onClick,
+  actions,
+  showContentPreview = true
+}) => {
   const { token } = theme.useToken()
   const tags = getTagsArray(item.tags)
   const word_count = item.word_count || 0
@@ -152,4 +138,4 @@ const DocCard: React.FC<DocCardProps> = ({ item, onClick, actions, showContentPr
   )
 }
 
-export default DocCard
+export default DocumentCard

@@ -13,10 +13,7 @@ import Music from '../views/music/Index'
 import Chat from '../views/chat/Index'
 import ProviderConfig from '../views/settings/provider/Index'
 import SystemSettings from '../views/settings/system/Index'
-
-interface MainRoutesProps {
-  defaultRoute?: string // 默认路由参数
-}
+import type { MainRoutesProps } from '@renderer/types/components'
 
 const MainRoutes: React.FC<MainRoutesProps> = ({ defaultRoute = '/home' }) => {
   return (

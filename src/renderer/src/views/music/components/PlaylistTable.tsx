@@ -11,18 +11,9 @@ import {
 } from '@remixicon/react'
 import { formatTime } from '../../../utils/formatTime'
 import type { Track } from '../../../types/music'
+import type { PlaylistTableProps } from '@renderer/types/components'
 
-interface Props {
-  tracks: Track[]
-  currentIndex: number
-  isPlaying: boolean
-  onPlay: (index: number) => void
-  onRemove: (index: number) => void | Promise<void>
-  onUpdate: () => void
-  onToggleLike?: (trackId: string) => void
-}
-
-const PlaylistTable: React.FC<Props> = ({
+const PlaylistTable: React.FC<PlaylistTableProps> = ({
   tracks,
   currentIndex,
   onPlay,

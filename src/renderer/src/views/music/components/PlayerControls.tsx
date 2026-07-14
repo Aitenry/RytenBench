@@ -19,24 +19,8 @@ import {
 import { useAudioProgress } from '../../../contexts/AudioContext'
 import { formatTime } from '../../../utils/formatTime'
 import { REPEAT_STRATEGIES } from '../../../types/music'
-import type { RepeatMode, Track } from '../../../types/music'
-
-interface Props {
-  currentTrack: Track | null
-  duration: number
-  volume: number
-  isPlaying: boolean
-  repeatMode: RepeatMode
-  liked: boolean
-  onSeek: (v: number) => void
-  onVolumeChange: (v: number) => void
-  onToggleRepeat: () => void
-  onPrev: () => void
-  onNext: () => void
-  onPlayPause: () => void
-  onToggleLike: () => void
-  onTogglePlaylist: () => void
-}
+import type { RepeatMode } from '../../../types/music'
+import type { PlayerControlsProps } from '@renderer/types/components'
 
 const MODE_ICON: Record<RepeatMode, React.ReactNode> = {
   all: <RiRepeatLine size={20} />,
@@ -50,7 +34,7 @@ const MODE_LABEL: Record<RepeatMode, string> = {
   shuffle: REPEAT_STRATEGIES.shuffle.label
 }
 
-const PlayerControls: React.FC<Props> = ({
+const PlayerControls: React.FC<PlayerControlsProps> = ({
   currentTrack,
   duration: durationProp,
   volume,

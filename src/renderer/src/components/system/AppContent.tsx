@@ -1,13 +1,13 @@
 // AppContent.tsx
 import React, { useState, useEffect, useCallback } from 'react'
 import { type MenuProps } from 'antd'
-import Sidebar from './Sidebar'
-import MainRoutes from '../route/MainRoutes'
-import LockScreen from './LockScreen'
+import Sidebar from '@renderer/components/system/Sidebar'
+import MainRoutes from '@renderer/route/MainRoutes'
+import LockScreen from '@renderer/components/system/LockScreen'
 import CryptoJS from 'crypto-js'
-import { Window } from '../../resource/types/window'
-import { MessageProvider } from '../providers/MessageProvider'
-import { useMessage } from '../hooks/useMessage'
+import { Window } from '../../../resource/types/window'
+import { MessageProvider } from '@renderer/providers/MessageProvider'
+import { useMessage } from '@renderer/hooks/useMessage'
 
 const AppContent: React.FC = () => {
   const { viewMessage } = useMessage()

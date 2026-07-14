@@ -10,21 +10,9 @@ import {
   RiHeartLine
 } from '@remixicon/react'
 import type { MusicFolder } from '../../../types/music'
+import type { MusicSidebarProps } from '@renderer/types/components'
 
-interface Props {
-  folders: MusicFolder[]
-  specialFolders: MusicFolder[]
-  selectedFolderId: string | null
-  onSelectFolder: (folder: MusicFolder) => void
-  onAddTracks: (folderId: string) => void
-  onEditFolder: (folder: MusicFolder) => void
-  onDeleteFolder: (folderId: string) => void
-  onCreateClick: () => void
-  colorBgContainer: string
-  borderRadiusLG: number
-}
-
-const MusicSidebar: React.FC<Props> = ({
+const MusicSidebar: React.FC<MusicSidebarProps> = ({
   folders,
   specialFolders,
   selectedFolderId,

@@ -1,25 +1,9 @@
 import React from 'react'
 import { Modal, Progress, Typography, Space, Tag, Button, Row, Col } from 'antd'
 import { LoadingOutlined, MinusOutlined, DatabaseOutlined, LinkOutlined } from '@ant-design/icons'
+import type { BuildProgressProps } from '@renderer/types/components'
 
 const { Text } = Typography
-
-interface BuildProgressProps {
-  open: boolean
-  wikiId: number
-  wikiTitle: string
-  phaseLabel: string
-  phaseProgress: number
-  overallProgress: number
-  processedDocs: number
-  totalDocs: number
-  processedChunks: number
-  totalChunks: number
-  entityCount: number
-  relationCount: number
-  message: string
-  onMinimize: () => void
-}
 
 const BuildProgress: React.FC<BuildProgressProps> = ({
   open,

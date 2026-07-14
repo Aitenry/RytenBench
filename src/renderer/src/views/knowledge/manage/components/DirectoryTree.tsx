@@ -2,23 +2,8 @@ import React from 'react'
 import { Tree, Space, Modal } from 'antd'
 import { FolderOutlined, PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons'
 import { DirectoryWithChildren } from '../types'
-
-interface DirectoryTreeProps {
-  directoryTree: DirectoryWithChildren[]
-  expandedKeys: React.Key[]
-  onExpand: (keys: React.Key[]) => void
-  onSelect: (keys: React.Key[]) => void
-  selectedKeys: React.Key[]
-  onCreateDirectory: (parentId: number) => void
-  onEditDirectory: (dir: DirectoryWithChildren) => void
-  onDeleteDirectory: (dir: DirectoryWithChildren) => void
-}
-
-interface TreeNodeData {
-  key: React.Key
-  title: React.ReactNode
-  children?: TreeNodeData[]
-}
+import type { DirectoryTreeProps } from '@renderer/types/components'
+import type { TreeNodeData } from '@renderer/types/knowledge'
 
 const DirectoryTree: React.FC<DirectoryTreeProps> = ({
   directoryTree,

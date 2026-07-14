@@ -23,6 +23,7 @@ import {
 } from '@ant-design/icons'
 import { useMessage } from '@renderer/hooks/useMessage'
 import { Window } from '../../../../resource/types/window'
+import type { LlmProviderConfig, LlmProviderInput } from '@renderer/types/provider'
 
 // 供应商类型与 @langchain 包名映射，直接复用 mapper 中的 CHECK 约束值
 const PROVIDER_TYPES = [
@@ -55,37 +56,6 @@ const MODEL_TAGS = [
 const TAG_COLOR_MAP: Record<string, string> = Object.fromEntries(
   MODEL_TAGS.map((t) => [t.value, t.color])
 )
-
-interface LlmProviderConfig {
-  id: number
-  name: string
-  provider: string
-  base_url: string | null
-  api_key: string | null
-  model: string
-  temperature: number
-  max_tokens: number | null
-  extra_config: Record<string, unknown> | null
-  tags: string[] | null
-  is_default: boolean
-  is_enabled: boolean
-  sort_order: number
-}
-
-interface LlmProviderInput {
-  name: string
-  provider: string
-  base_url?: string | null
-  api_key?: string | null
-  model: string
-  temperature?: number
-  max_tokens?: number | null
-  extra_config?: Record<string, unknown> | null
-  tags?: string[] | null
-  is_default?: boolean
-  is_enabled?: boolean
-  sort_order?: number
-}
 
 const Index: React.FC = () => {
   const {

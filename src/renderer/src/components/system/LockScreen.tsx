@@ -1,9 +1,6 @@
 import React, { useState } from 'react'
 import { Modal, Input, theme } from 'antd'
-
-interface LockScreenProps {
-  onUnlock: (password: string) => void
-}
+import type { LockScreenProps } from '@renderer/types/components'
 
 const LockScreen: React.FC<LockScreenProps> = ({ onUnlock }) => {
   const [password, setPassword] = useState('')

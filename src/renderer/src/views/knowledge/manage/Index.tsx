@@ -1,85 +1,28 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
-import { theme, Modal, Button, Input, Empty, Select, Space, Flex, Typography } from 'antd'
-import { PlusOutlined, EditOutlined, DeleteOutlined, FileTextOutlined } from '@ant-design/icons'
-import { RiBook2Line } from '@remixicon/react'
+import { theme, Button, Empty, Space, Flex } from 'antd'
+import { PlusOutlined } from '@ant-design/icons'
 import { useMessage } from '@renderer/hooks/useMessage'
-import DocCard from '@renderer/components/DocCard'
-import DocPreviewModal from '@renderer/components/DocPreviewModal'
+import WikiEditModal from '@renderer/components/wiki/WikiEditModal'
+import WikiDetail from '@renderer/components/wiki/WikiDocumentModal'
 import { Window } from '../../../../resource/types/window'
 import WikiCard from './components/WikiCard'
-import DirectoryTree from './components/DirectoryTree'
-import { DirectoryWithChildren } from './types'
-
-interface WikiRow {
-  id: number
-  title: string
-  summary: string | null
-  image: string | null
-  created_at: string
-  updated_at: string
-  doc_count: number
-  tags: string | null
-}
-
-interface WikiDirectoryRow {
-  id: number
-  wiki_id: number
-  parent_id: number | null
-  name: string
-  sort_order: number
-  level: number
-  created_at: string
-  updated_at: string
-}
-
-interface DocListItem {
-  id: number
-  title: string
-  image: string | null
-  summary: string | null
-  tags: string | null
-  created_at: string
-  updated_at: string
-  word_count: number
-}
-
-const { Title, Text } = Typography
-const { Option } = Select
-
-interface DirectoryDocWithDetail extends DocListItem {
-  directory_id: number
-  content?: string | null
-}
+import type { WikiRow } from '@renderer/types/models'
 
 const Index: React.FC = () => {
   const {
-    token: { colorBgContainer, borderRadiusLG }
+    token: { colorBgContainer, borderRadiusLG, colorBorder }
   } = theme.useToken()
 
   const [wikis, setWikis] = useState<WikiRow[]>([])
   const [selectedWiki, setSelectedWiki] = useState<WikiRow | null>(null)
-  const [directories, setDirectories] = useState<WikiDirectoryRow[]>([])
-  const [directoryTree, setDirectoryTree] = useState<DirectoryWithChildren[]>([])
-  const [selectedDirectory, setSelectedDirectory] = useState<WikiDirectoryRow | null>(null)
-  const [directoryDocs, setDirectoryDocs] = useState<DirectoryDocWithDetail[]>([])
-  const [allDocs, setAllDocs] = useState<DocListItem[]>([])
-  const [allDocsPage, setAllDocsPage] = useState(1)
-  const [allDocsHasMore, setAllDocsHasMore] = useState(true)
-  const [allDocsLoading, setAllDocsLoading] = useState(false)
 
   const [isWikiModalOpen, setIsWikiModalOpen] = useState(false)
-  const [isDirectoryModalOpen, setIsDirectoryModalOpen] = useState(false)
-  const [isNoteArchiveModalOpen, setIsNoteArchiveModalOpen] = useState(false)
-  const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false)
-  const [currentItem, setCurrentItem] = useState<WikiRow | WikiDirectoryRow | null>(null)
-  const [currentDoc, setCurrentDoc] = useState<DirectoryDocWithDetail | null>(null)
+  const [currentItem, setCurrentItem] = useState<WikiRow | null>(null)
   const [isNew, setIsNew] = useState(false)
 
   const [editTitle, setEditTitle] = useState('')
   const [editSummary, setEditSummary] = useState('')
   const [editImage, setEditImage] = useState<string | null>(null)
-  const [editDirectoryName, setEditDirectoryName] = useState('')
-  const [selectedNoteIds, setSelectedNoteIds] = useState<number[]>([])
 
   const [page, setPage] = useState(1)
   const [hasMore, setHasMore] = useState(true)
@@ -89,29 +32,6 @@ const Index: React.FC = () => {
   const hasMoreRef = useRef(true)
 
   const { viewMessage } = useMessage()
-
-  const buildDirectoryTree = useCallback((dirs: WikiDirectoryRow[]): DirectoryWithChildren[] => {
-    const map = new Map<number, DirectoryWithChildren>()
-    const roots: DirectoryWithChildren[] = []
-
-    dirs.forEach((dir) => {
-      map.set(dir.id, { ...dir, children: [] })
-    })
-
-    dirs.forEach((dir) => {
-      const node = map.get(dir.id)!
-      if (dir.parent_id === null) {
-        roots.push(node)
-      } else {
-        const parent = map.get(dir.parent_id)
-        if (parent) {
-          parent.children!.push(node)
-        }
-      }
-    })
-
-    return roots
-  }, [])
 
   const loadWikis = useCallback(async (pageNum: number = 1, isAppend: boolean = false) => {
     if (isLoadingRef.current || (!hasMoreRef.current && isAppend)) return
@@ -134,94 +54,6 @@ const Index: React.FC = () => {
       setIsLoading(false)
     }
   }, [])
-
-  const getAllDirectoryIds = useCallback((nodes: DirectoryWithChildren[]): React.Key[] => {
-    let ids: React.Key[] = []
-    nodes.forEach((node) => {
-      ids.push(node.id)
-      if (node.children && node.children.length > 0) {
-        ids = ids.concat(getAllDirectoryIds(node.children))
-      }
-    })
-    return ids
-  }, [])
-
-  const loadDirectories = useCallback(
-    async (wikiId: number) => {
-      try {
-        const dirs = await (window as unknown as Window).api.wikis.getDirectories(wikiId)
-        const tree = buildDirectoryTree(dirs)
-        setDirectories(dirs)
-        setDirectoryTree(tree)
-        setExpandedKeys(getAllDirectoryIds(tree))
-      } catch (error) {
-        console.error('Failed to load directories:', error)
-      }
-    },
-    [buildDirectoryTree, getAllDirectoryIds]
-  )
-
-  const loadDirectoryDocs = useCallback(async (directoryId: number) => {
-    try {
-      const noteIds = await (window as unknown as Window).api.wikis.getNotesByDirectory(directoryId)
-      const docs: DirectoryDocWithDetail[] = []
-      for (const { doc_id } of noteIds) {
-        const doc = await (window as unknown as Window).api.docs.getById(doc_id)
-        if (doc) {
-          docs.push({ ...doc, directory_id: directoryId })
-        }
-      }
-      setDirectoryDocs(docs)
-    } catch (error) {
-      console.error('Failed to load directory docs:', error)
-    }
-  }, [])
-
-  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const searchRef = useRef<string>('')
-
-  const loadAllDocs = useCallback(
-    async (
-      pageNum: number = 1,
-      excludeWikiId?: number,
-      isAppend: boolean = false,
-      search?: string
-    ) => {
-      if (allDocsLoading) return
-      setAllDocsLoading(true)
-      try {
-        const result = await (window as unknown as Window).api.docs.getAll(
-          pageNum,
-          20,
-          excludeWikiId,
-          search
-        )
-        if (isAppend) {
-          setAllDocs((prev) => [...prev, ...result.items])
-        } else {
-          setAllDocs(result.items)
-        }
-        setAllDocsHasMore(result.hasMore)
-        setAllDocsPage(pageNum)
-      } catch (error) {
-        console.error('Failed to load all docs:', error)
-      } finally {
-        setAllDocsLoading(false)
-      }
-    },
-    [allDocsLoading]
-  )
-
-  const handleSearchDocs = useCallback(
-    (value: string) => {
-      searchRef.current = value
-      if (searchTimerRef.current) clearTimeout(searchTimerRef.current)
-      searchTimerRef.current = setTimeout(() => {
-        loadAllDocs(1, selectedWiki?.id, false, value || undefined)
-      }, 300)
-    },
-    [loadAllDocs, selectedWiki?.id]
-  )
 
   useEffect(() => {
     loadWikis(1, false).then()
@@ -253,38 +85,6 @@ const Index: React.FC = () => {
 
   const handleSelectWiki = (wiki: WikiRow): void => {
     setSelectedWiki(wiki)
-    setSelectedDirectory(null)
-    setDirectoryDocs([])
-    loadDirectories(wiki.id).then()
-  }
-
-  const handleSelectDirectory = (selectedKeys: React.Key[]): void => {
-    if (selectedKeys.length > 0) {
-      const dirId = selectedKeys[0] as number
-      const dir = directories.find((d) => d.id === dirId)
-      if (dir) {
-        setSelectedDirectory(dir)
-        loadDirectoryDocs(dir.id).then()
-      }
-    }
-  }
-
-  const handlePreviewDoc = async (doc: DirectoryDocWithDetail): Promise<void> => {
-    const messageKey = 'doc-preview-load'
-    try {
-      viewMessage(messageKey, 'loading', '正在加载文档内容...')
-      const fullDoc = await (window as unknown as Window).api.docs.getById(doc.id)
-      if (fullDoc) {
-        setCurrentDoc({ ...doc, content: fullDoc.content })
-        setIsPreviewModalOpen(true)
-        viewMessage(messageKey, 'success', '文档内容加载成功！', 2)
-      } else {
-        viewMessage(messageKey, 'error', '文档不存在')
-      }
-    } catch (error) {
-      console.error('Failed to load doc content:', error)
-      viewMessage(messageKey, 'error', '加载文档内容失败')
-    }
   }
 
   const handleCreateWiki = (): void => {
@@ -314,8 +114,6 @@ const Index: React.FC = () => {
       setPage(1)
       setHasMore(true)
       setSelectedWiki(null)
-      setSelectedDirectory(null)
-      setDirectoryDocs([])
       await loadWikis(1, false)
     } catch (error) {
       console.error('Failed to delete wiki:', error)
@@ -323,23 +121,27 @@ const Index: React.FC = () => {
     }
   }
 
-  const handleSaveWiki = async (): Promise<void> => {
+  const handleSaveWiki = async (data: {
+    title: string
+    summary: string | null
+    image: string | null
+  }): Promise<void> => {
     const messageKey = isNew ? 'wiki-create' : 'wiki-update'
     try {
       if (isNew) {
         viewMessage(messageKey, 'loading', '正在创建知识库...')
         await (window as unknown as Window).api.wikis.add({
-          title: editTitle,
-          summary: editSummary || null,
-          image: editImage
+          title: data.title,
+          summary: data.summary,
+          image: data.image
         })
         viewMessage(messageKey, 'success', '知识库创建成功！', 2)
-      } else if (currentItem && 'id' in currentItem) {
+      } else if (currentItem) {
         viewMessage(messageKey, 'loading', '正在保存知识库...')
         await (window as unknown as Window).api.wikis.update(currentItem.id, {
-          title: editTitle,
-          summary: editSummary || null,
-          image: editImage
+          title: data.title,
+          summary: data.summary,
+          image: data.image
         })
         viewMessage(messageKey, 'success', '知识库保存成功！', 2)
         if (selectedWiki?.id === currentItem.id) {
@@ -355,135 +157,6 @@ const Index: React.FC = () => {
       console.error('Failed to save wiki:', error)
       viewMessage(messageKey, 'error', '保存知识库失败')
     }
-  }
-
-  const [creatingSubDirectoryFor, setCreatingSubDirectoryFor] = useState<number | null>(null)
-  const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([])
-
-  const handleCreateDirectory = (parentId: number | null = null): void => {
-    setCurrentItem(null)
-    setIsNew(true)
-    setEditDirectoryName('新目录')
-    setCreatingSubDirectoryFor(parentId)
-    setIsDirectoryModalOpen(true)
-  }
-
-  const handleEditDirectory = (dir: WikiDirectoryRow): void => {
-    setCurrentItem(dir)
-    setIsNew(false)
-    setEditDirectoryName(dir.name)
-    setIsDirectoryModalOpen(true)
-  }
-
-  const handleSaveDirectory = async (): Promise<void> => {
-    if (!selectedWiki) return
-    const messageKey = isNew ? 'directory-create' : 'directory-update'
-    try {
-      if (isNew) {
-        viewMessage(messageKey, 'loading', '正在创建目录...')
-        const parentDir = creatingSubDirectoryFor
-          ? directories.find((d) => d.id === creatingSubDirectoryFor)
-          : null
-
-        await (window as unknown as Window).api.wikis.addDirectory({
-          wiki_id: selectedWiki.id,
-          parent_id: creatingSubDirectoryFor ?? null,
-          name: editDirectoryName,
-          sort_order: 0,
-          level: parentDir ? parentDir.level + 1 : 0
-        })
-        viewMessage(messageKey, 'success', '目录创建成功！', 2)
-      } else if (currentItem && 'id' in currentItem) {
-        viewMessage(messageKey, 'loading', '正在保存目录...')
-        await (window as unknown as Window).api.wikis.updateDirectory(currentItem.id, {
-          name: editDirectoryName
-        })
-        viewMessage(messageKey, 'success', '目录保存成功！', 2)
-      }
-      setIsDirectoryModalOpen(false)
-      setCreatingSubDirectoryFor(null)
-      await loadDirectories(selectedWiki.id)
-    } catch (error) {
-      console.error('Failed to save directory:', error)
-      viewMessage(messageKey, 'error', '保存目录失败')
-    }
-  }
-
-  const handleDeleteDirectory = async (dir: WikiDirectoryRow): Promise<void> => {
-    const messageKey = 'directory-delete'
-    try {
-      viewMessage(messageKey, 'loading', '正在删除目录...')
-      await (window as unknown as Window).api.wikis.deleteDirectory(dir.id)
-      viewMessage(messageKey, 'success', '目录删除成功！', 2)
-      setSelectedDirectory(null)
-      setDirectoryDocs([])
-      if (selectedWiki) {
-        await loadDirectories(selectedWiki.id)
-      }
-    } catch (error) {
-      console.error('Failed to delete directory:', error)
-      viewMessage(messageKey, 'error', '删除目录失败')
-    }
-  }
-
-  const handleOpenArchiveModal = (): void => {
-    setSelectedNoteIds([])
-    loadAllDocs(1, selectedWiki?.id, false).then(() => {
-      setIsNoteArchiveModalOpen(true)
-    })
-  }
-
-  const handleArchiveDocs = async (): Promise<void> => {
-    if (!selectedDirectory) return
-    const messageKey = 'archive-docs'
-    try {
-      viewMessage(messageKey, 'loading', '正在归档文档...')
-      for (const docId of selectedNoteIds) {
-        await (window as unknown as Window).api.wikis.addNoteToDirectory(
-          selectedDirectory.id,
-          docId
-        )
-      }
-      viewMessage(messageKey, 'success', '文档归档成功！', 2)
-      setIsNoteArchiveModalOpen(false)
-      await loadDirectoryDocs(selectedDirectory.id)
-    } catch (error) {
-      console.error('Failed to archive docs:', error)
-      viewMessage(messageKey, 'error', '归档文档失败')
-    }
-  }
-
-  const handleRemoveDocFromDirectory = async (docId: number): Promise<void> => {
-    if (!selectedDirectory) return
-    const messageKey = 'remove-doc'
-    try {
-      viewMessage(messageKey, 'loading', '正在移除文档...')
-      await (window as unknown as Window).api.wikis.removeNoteFromDirectory(
-        selectedDirectory.id,
-        docId
-      )
-      viewMessage(messageKey, 'success', '文档移除成功！', 2)
-      await loadDirectoryDocs(selectedDirectory.id)
-    } catch (error) {
-      console.error('Failed to remove doc:', error)
-      viewMessage(messageKey, 'error', '移除文档失败')
-    }
-  }
-
-  const handleSelectImage = async (): Promise<void> => {
-    try {
-      const result = await (window as unknown as Window).api.file.selectImageFile(true)
-      if (result?.isImage) {
-        setEditImage(result.dataUrl)
-      }
-    } catch (error) {
-      console.error('Failed to select image:', error)
-      viewMessage('image-select-error', 'error', '选择图片失败')
-    }
-  }
-
-  const handleRemoveImage = (): void => {
-    setEditImage(null)
   }
 
   return (
@@ -502,7 +175,7 @@ const Index: React.FC = () => {
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'end',
-              borderBottom: `1px solid ${theme.useToken().token.colorBorder}`
+              borderBottom: `1px solid ${colorBorder}`
             }}
           >
             <Flex justify="space-between" align="center">
@@ -558,238 +231,21 @@ const Index: React.FC = () => {
           </div>
         </main>
       ) : (
-        <>
-          <aside
-            style={{
-              width: 300,
-              background: colorBgContainer,
-              borderRadius: borderRadiusLG,
-              padding: 16,
-              display: 'flex',
-              flexDirection: 'column'
-            }}
-          >
-            <div style={{ marginBottom: 16 }}>
-              <Flex justify="space-between" align="center">
-                <Space>
-                  <RiBook2Line />
-                  <Title level={5} style={{ margin: 0 }}>
-                    {selectedWiki.title}
-                  </Title>
-                </Space>
-                <Space>
-                  <EditOutlined onClick={() => handleEditWiki(selectedWiki)} />
-                </Space>
-              </Flex>
-              {selectedWiki.summary && (
-                <Text type="secondary" style={{ fontSize: 12, marginTop: 8 }}>
-                  {selectedWiki.summary}
-                </Text>
-              )}
-            </div>
-
-            <div
-              style={{
-                marginBottom: 8,
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center'
-              }}
-            >
-              <Text strong>目录</Text>
-              <Button type="text" icon={<PlusOutlined />} onClick={() => handleCreateDirectory()}>
-                新建
-              </Button>
-            </div>
-
-            <div style={{ flex: 1, overflowY: 'auto' }}>
-              {directoryTree.length === 0 ? (
-                <Empty description="暂无目录" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-              ) : (
-                <DirectoryTree
-                  directoryTree={directoryTree}
-                  expandedKeys={expandedKeys}
-                  onExpand={setExpandedKeys}
-                  onSelect={handleSelectDirectory}
-                  selectedKeys={selectedDirectory ? [selectedDirectory.id] : []}
-                  onCreateDirectory={handleCreateDirectory}
-                  onEditDirectory={handleEditDirectory}
-                  onDeleteDirectory={handleDeleteDirectory}
-                />
-              )}
-            </div>
-
-            <Button style={{ marginTop: 8 }} onClick={() => setSelectedWiki(null)}>
-              返回知识库列表
-            </Button>
-          </aside>
-
-          <main
-            className="flex-1 flex flex-col min-w-0"
-            style={{
-              background: colorBgContainer,
-              borderRadius: borderRadiusLG
-            }}
-          >
-            <div
-              className="p-4 flex items-center justify-between"
-              style={{
-                borderBottom: `1px solid ${theme.useToken().token.colorBorder}`
-              }}
-            >
-              <Title level={5} style={{ margin: 0 }}>
-                {selectedDirectory ? selectedDirectory.name : '请选择目录'}
-              </Title>
-              {selectedDirectory && (
-                <Button type="primary" icon={<PlusOutlined />} onClick={handleOpenArchiveModal}>
-                  归档文档
-                </Button>
-              )}
-            </div>
-
-            <div className="p-3 flex-1 overflow-y-auto overflow-x-hidden min-w-0">
-              {!selectedDirectory ? (
-                <Empty description="请从左侧选择一个目录" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-              ) : directoryDocs.length === 0 ? (
-                <Empty description="目录中暂无文档" image={Empty.PRESENTED_IMAGE_SIMPLE}>
-                  <Button type="primary" icon={<PlusOutlined />} onClick={handleOpenArchiveModal}>
-                    归档文档
-                  </Button>
-                </Empty>
-              ) : (
-                <div className="grid grid-cols-3 gap-3">
-                  {directoryDocs.map((item) => (
-                    <div key={item.id} className="h-[220px] min-w-0 overflow-hidden">
-                      <DocCard
-                        item={item}
-                        onClick={() => handlePreviewDoc(item)}
-                        actions={[
-                          <DeleteOutlined
-                            key="remove"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              Modal.confirm({
-                                title: '确定要从目录中移除这篇文档吗？',
-                                onOk: () => handleRemoveDocFromDirectory(item.id),
-                                okText: '确定',
-                                cancelText: '取消'
-                              })
-                            }}
-                          />
-                        ]}
-                        showContentPreview={false}
-                      />
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </main>
-        </>
+        <WikiDetail
+          wiki={selectedWiki}
+          onBack={() => setSelectedWiki(null)}
+          onEditWiki={handleEditWiki}
+        />
       )}
 
-      <Modal
-        title={isNew ? '新建知识库' : '编辑知识库'}
+      <WikiEditModal
         open={isWikiModalOpen}
-        onOk={handleSaveWiki}
+        isNew={isNew}
+        initialTitle={editTitle}
+        initialSummary={editSummary}
+        initialImage={editImage}
+        onSave={handleSaveWiki}
         onCancel={() => setIsWikiModalOpen(false)}
-        okText="保存"
-        cancelText="取消"
-      >
-        <Space vertical style={{ width: '100%' }}>
-          <Input
-            placeholder="知识库标题"
-            value={editTitle}
-            onChange={(e) => setEditTitle(e.target.value)}
-          />
-          <Input.TextArea
-            placeholder="知识库摘要"
-            value={editSummary}
-            onChange={(e) => setEditSummary(e.target.value)}
-            rows={4}
-          />
-          <Space>
-            <Button type="default" onClick={handleSelectImage}>
-              上传封面图片
-            </Button>
-            {editImage && (
-              <Button type="default" danger onClick={handleRemoveImage}>
-                移除图片
-              </Button>
-            )}
-          </Space>
-          {editImage && (
-            <div style={{ maxHeight: 200, overflow: 'hidden', borderRadius: 8 }}>
-              <img
-                src={editImage}
-                alt="封面"
-                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-              />
-            </div>
-          )}
-        </Space>
-      </Modal>
-
-      <Modal
-        title={isNew ? '新建目录' : '编辑目录'}
-        open={isDirectoryModalOpen}
-        onOk={handleSaveDirectory}
-        onCancel={() => setIsDirectoryModalOpen(false)}
-        okText="保存"
-        cancelText="取消"
-      >
-        <Input
-          placeholder="目录名称"
-          value={editDirectoryName}
-          onChange={(e) => setEditDirectoryName(e.target.value)}
-        />
-      </Modal>
-
-      <Modal
-        title="归档文档"
-        open={isNoteArchiveModalOpen}
-        onOk={handleArchiveDocs}
-        onCancel={() => setIsNoteArchiveModalOpen(false)}
-        okText="归档"
-        cancelText="取消"
-      >
-        <Select
-          mode="multiple"
-          style={{ width: '100%' }}
-          placeholder="搜索并选择要归档的文档"
-          value={selectedNoteIds}
-          onChange={setSelectedNoteIds}
-          optionLabelProp="label"
-          showSearch
-          onSearch={handleSearchDocs}
-          filterOption={false}
-          onPopupScroll={(e) => {
-            const target = e.target as HTMLElement
-            if (
-              target.scrollTop + target.offsetHeight >= target.scrollHeight - 10 &&
-              allDocsHasMore &&
-              !allDocsLoading
-            ) {
-              loadAllDocs(allDocsPage + 1, selectedWiki?.id, true, searchRef.current || undefined)
-            }
-          }}
-          notFoundContent={allDocsLoading ? '加载中...' : null}
-        >
-          {allDocs.map((doc) => (
-            <Option key={doc.id} value={doc.id} label={doc.title}>
-              <Space>
-                <FileTextOutlined />
-                <span>{doc.title}</span>
-              </Space>
-            </Option>
-          ))}
-        </Select>
-      </Modal>
-
-      <DocPreviewModal
-        open={isPreviewModalOpen}
-        onCancel={() => setIsPreviewModalOpen(false)}
-        currentDoc={currentDoc}
       />
     </div>
   )

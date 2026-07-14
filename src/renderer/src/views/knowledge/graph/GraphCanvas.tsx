@@ -5,43 +5,7 @@ import { Button, theme } from 'antd'
 import { RiEyeLine, RiEyeOffLine } from '@remixicon/react'
 import { useTheme } from '@renderer/contexts/useTheme'
 import { GraphEntity } from './types'
-
-/** ECharts graph node (built in Index.tsx useMemo) */
-export interface GraphChartNode {
-  id: string
-  name: string
-  category: number
-  symbolSize: number
-  original: GraphEntity
-}
-
-/** ECharts graph link (built in Index.tsx useMemo) */
-export interface GraphChartLink {
-  source: string
-  target: string
-  label: string
-  description?: string | null
-}
-
-/** ECharts graph category (built in Index.tsx useMemo) */
-export interface GraphChartCategory {
-  name: string
-  itemStyle: { color: string }
-}
-
-/** Complete ECharts graph data (from Index.tsx useMemo) */
-export interface GraphChartData {
-  nodes: GraphChartNode[]
-  links: GraphChartLink[]
-  categories: GraphChartCategory[]
-}
-
-interface GraphCanvasProps {
-  data: GraphChartData
-  onEntityClick: (entity: GraphEntity) => void
-  onEntityDblClick?: (entity: GraphEntity) => void
-  searchQuery?: string
-}
+import type { GraphCanvasProps } from '@renderer/types/components'
 
 let _chart: echarts.ECharts | null = null
 let _container: HTMLDivElement | null = null
@@ -57,6 +21,8 @@ function getOrCreateChart(container: HTMLDivElement): echarts.ECharts {
 const GraphCanvas: React.FC<GraphCanvasProps> = ({ data, onEntityClick, onEntityDblClick }) => {
   const containerRef = useRef<HTMLDivElement>(null)
   const [hideIsolated, setHideIsolated] = useState(true)
+  const [hiddenCats, setHiddenCats] = useState<Record<string, boolean>>({})
+  const [hoveredCategory, setHoveredCategory] = useState<string | null>(null)
   const {
     token: { colorBgContainer }
   } = theme.useToken()
@@ -123,14 +89,57 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({ data, onEntityClick, onEntity
     const lineOpacity = 0.35
     const lineWidth = 1
 
+    // Build node id→name lookup for edge tooltips
+    const nodeNameMap = new Map(data.nodes.map((n) => [n.id, n.name]))
+
+    // Filter series data when a category is hovered (show that category + connected nodes)
+    let seriesNodes = positionedNodes
+    let seriesLinks = data.links.map((l) => ({
+      source: l.source,
+      target: l.target,
+      data: { label: l.label, description: l.description }
+    }))
+
+    if (hoveredCategory) {
+      const catNodeIds = new Set(
+        data.nodes
+          .filter((n) => {
+            const c = data.categories[n.category]
+            return c && c.name === hoveredCategory
+          })
+          .map((n) => n.id)
+      )
+
+      const visibleIds = new Set(catNodeIds)
+      for (const link of data.links) {
+        const s = String(link.source)
+        const t = String(link.target)
+        if (catNodeIds.has(s)) visibleIds.add(t)
+        if (catNodeIds.has(t)) visibleIds.add(s)
+      }
+
+      seriesNodes = positionedNodes.filter((n) => visibleIds.has(n.id))
+      seriesLinks = data.links
+        .filter((l) => visibleIds.has(String(l.source)) && visibleIds.has(String(l.target)))
+        .map((l) => ({
+          source: l.source,
+          target: l.target,
+          data: { label: l.label, description: l.description }
+        }))
+    }
+
     const option: EChartsOption = {
       backgroundColor: colorBgContainer,
       tooltip: {
+        confine: true,
+        extraCssText: 'max-width: 320px; white-space: normal; word-break: break-word;',
         formatter: (params: unknown) => {
           const p = params as {
             dataType?: string
             data?: {
               name?: string
+              source?: string
+              target?: string
               original?: GraphEntity
               data?: {
                 label?: string
@@ -140,38 +149,37 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({ data, onEntityClick, onEntity
           }
           if (p.dataType === 'node') {
             const desc = p.data?.original?.description
-            return `<b>${p.data?.name || ''}</b>${desc ? `<br/>${desc}` : ''}`
+            return `<b>${p.data?.name || ''}</b>${desc ? `<br/><div style="margin-top:4px;line-height:1.5;">描述：${desc}</div>` : ''}`
           }
           if (p.dataType === 'edge') {
-            const label = p.data?.data?.label
+            const sourceId = String(p.data?.source ?? '')
+            const targetId = String(p.data?.target ?? '')
+            const sourceName = nodeNameMap.get(sourceId) || sourceId
+            const targetName = nodeNameMap.get(targetId) || targetId
+            const label = p.data?.data?.label || ''
             const desc = p.data?.data?.description
-            return `<b>${label || ''}</b>${desc ? `<br/>${desc}` : ''}`
+            const body = `${sourceName}${label}${targetName}`
+            return `<b>${body}</b>${desc ? `<br/><div style="margin-top:4px;line-height:1.5;">描述：${desc}</div>` : ''}`
           }
           return ''
         }
       },
       legend:
         data.categories.length > 0
-          ? [
-              {
-                data: data.categories.map((c) => c.name),
-                orient: 'vertical',
-                left: 8,
-                top: 8,
-                textStyle: { fontSize: effectiveCount > 300 ? 10 : 11 }
-              }
-            ]
+          ? {
+              show: false,
+              data: data.categories.map((c) => c.name),
+              selected: Object.fromEntries(
+                data.categories.map((c) => [c.name, !hiddenCats[c.name]])
+              )
+            }
           : undefined,
       series: [
         {
           type: 'graph',
           layout: 'none',
-          data: positionedNodes,
-          links: data.links.map((l) => ({
-            source: l.source,
-            target: l.target,
-            data: { label: l.label, description: l.description }
-          })),
+          data: seriesNodes,
+          links: seriesLinks,
           categories: data.categories,
           roam: true,
           label: {
@@ -204,6 +212,11 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({ data, onEntityClick, onEntity
               show: true,
               fontSize: Math.max(labelFontSize, 10)
             }
+          },
+          blur: {
+            itemStyle: { opacity: 0 },
+            lineStyle: { opacity: 0 },
+            label: { show: false }
           }
         }
       ]
@@ -232,6 +245,8 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({ data, onEntityClick, onEntity
       chart.off('dblclick')
       chart.on('dblclick', handleDblClick)
     }
+
+    // Legend hover is handled by the custom React legend component below
   }, [
     data,
     onEntityClick,
@@ -239,7 +254,9 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({ data, onEntityClick, onEntity
     colorBgContainer,
     hideIsolated,
     connectedNodes,
-    isDarkMode
+    isDarkMode,
+    hiddenCats,
+    hoveredCategory
   ])
 
   // Handle resize
@@ -263,6 +280,76 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({ data, onEntityClick, onEntity
         ref={containerRef}
         style={{ width: '100%', height: '100%', background: colorBgContainer }}
       />
+      {/* Custom legend — hover to highlight category entities & relationships */}
+      {data.categories.length > 0 && (
+        <div
+          style={{
+            position: 'absolute',
+            left: 8,
+            top: 8,
+            zIndex: 10,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 4,
+            padding: '6px 8px',
+            background: isDarkMode ? 'rgba(0,0,0,0.55)' : 'rgba(255,255,255,0.85)',
+            borderRadius: 6,
+            fontSize: 12,
+            maxHeight: '60%',
+            overflowY: 'auto'
+          }}
+        >
+          {data.categories.map((cat) => {
+            const isHidden = hiddenCats[cat.name] === true
+            return (
+              <div
+                key={cat.name}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '2px 6px',
+                  borderRadius: 4,
+                  cursor: 'pointer',
+                  transition: 'background 0.15s',
+                  opacity: isHidden ? 0.45 : 1,
+                  textDecoration: isHidden ? 'line-through' : 'none'
+                }}
+                onMouseEnter={() => {
+                  if (isHidden) return
+                  setHoveredCategory(cat.name)
+                }}
+                onMouseLeave={() => {
+                  setHoveredCategory(null)
+                }}
+                onClick={() => {
+                  setHoveredCategory(null)
+                  setHiddenCats((prev) => ({ ...prev, [cat.name]: !prev[cat.name] }))
+                }}
+              >
+                <span
+                  style={{
+                    width: 10,
+                    height: 10,
+                    borderRadius: '50%',
+                    background: cat.itemStyle.color,
+                    flexShrink: 0
+                  }}
+                />
+                <span
+                  style={{
+                    color: isDarkMode ? 'rgba(255,255,255,0.85)' : '#333',
+                    whiteSpace: 'nowrap'
+                  }}
+                >
+                  {cat.name}
+                </span>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
       {isolatedCount > 0 && (
         <>
           <Button

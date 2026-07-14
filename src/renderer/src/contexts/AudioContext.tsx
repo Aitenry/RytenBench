@@ -9,44 +9,9 @@ import React, {
 } from 'react'
 import type { Track, RepeatMode } from '../types/music'
 import { REPEAT_STRATEGIES } from '../types/music'
+import type { AudioState, AudioActions, AudioProgress } from '../types/audio'
 
 // ---- Split context: fast-changing progress vs everything else ----
-
-interface AudioState {
-  currentTrack: Track | null
-  currentIndex: number
-  playlist: Track[]
-  isPlaying: boolean
-  isBuffering: boolean
-  duration: number
-  volume: number
-  repeatMode: RepeatMode
-  selectedFolderId: string | null
-}
-
-interface AudioActions {
-  play: (index: number) => void
-  pause: () => void
-  resume: () => void
-  next: () => void
-  prev: () => void
-  seek: (time: number) => void
-  setVolume: (v: number) => void
-  toggleRepeat: () => void
-  setSelectedFolderId: (id: string | null) => void
-  setPlaylist: (tracks: Track[], startIndex?: number) => void
-  updatePlaylist: (tracks: Track[], folderId?: string) => void
-  addToPlaylist: (tracks: Track[]) => void
-  removeFromPlaylist: (index: number) => void
-  clearPlaylist: () => void
-  playTrack: (track: Track) => void
-}
-
-interface AudioProgress {
-  progress: number
-  duration: number
-  isBuffering: boolean
-}
 
 const AudioStateContext = createContext<(AudioState & AudioActions) | null>(null)
 const AudioProgressContext = createContext<AudioProgress | null>(null)

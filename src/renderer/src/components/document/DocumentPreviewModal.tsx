@@ -1,27 +1,10 @@
 import React from 'react'
 import { Modal, Empty } from 'antd'
-import MarkdownView from './MarkdownView'
+import MarkdownView from '@renderer/components/markdown/MarkdownView'
 import { useTheme } from '@renderer/contexts/useTheme'
+import type { DocPreviewModalProps } from '@renderer/types/components'
 
-interface DocItem {
-  id: number
-  title: string
-  image: string | null
-  summary: string | null
-  tags: string | null
-  created_at: string
-  updated_at: string
-  word_count: number
-  content?: string | null
-}
-
-interface DocPreviewModalProps {
-  open: boolean
-  onCancel: () => void
-  currentDoc: DocItem | null
-}
-
-const DocPreviewModal: React.FC<DocPreviewModalProps> = ({ open, onCancel, currentDoc }) => {
+const DocumentPreviewModal: React.FC<DocPreviewModalProps> = ({ open, onCancel, currentDoc }) => {
   const { effectiveTheme } = useTheme()
   return (
     <Modal
@@ -48,4 +31,4 @@ const DocPreviewModal: React.FC<DocPreviewModalProps> = ({ open, onCancel, curre
   )
 }
 
-export default DocPreviewModal
+export default DocumentPreviewModal

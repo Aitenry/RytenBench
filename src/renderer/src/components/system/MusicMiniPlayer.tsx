@@ -1,8 +1,8 @@
 import React from 'react'
 import { Button, Slider, Space, theme } from 'antd'
 import { RiPlayLine, RiPauseLine, RiSkipLeftLine, RiSkipRightLine } from '@remixicon/react'
-import { useAudioState, useAudioProgress } from '../contexts/AudioContext'
-import { formatTime } from '../utils/formatTime'
+import { useAudioState, useAudioProgress } from '@renderer/contexts/AudioContext'
+import { formatTime } from '@renderer/utils/formatTime'
 
 const ProgressBar: React.FC = React.memo(function ProgressBar() {
   const { progress, duration } = useAudioProgress()

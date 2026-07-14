@@ -1,22 +1,18 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Button, Empty, Flex, Modal, Select, theme, Typography } from 'antd'
+import { Button, Empty, Flex, Modal, Select, Spin, theme, Typography } from 'antd'
 import { PlayCircleOutlined } from '@ant-design/icons'
 import { Window } from '../../../../resource/types/window'
 import { useMessage } from '@renderer/hooks/useMessage'
 import { useBuildProgress } from '@renderer/hooks/useBuildProgress'
-import GraphCanvas, { GraphChartData } from './GraphCanvas'
+import GraphCanvas from './GraphCanvas'
+import type { GraphChartData } from '@renderer/types/knowledge'
 import EntityDetail from './EntityDetail'
 import GraphToolbar from './GraphToolbar'
-import DocPreviewModal from '@renderer/components/DocPreviewModal'
-import {
-  ENTITY_TYPE_COLORS,
-  ENTITY_TYPE_LABELS,
-  GraphData,
-  GraphEntity,
-  RELATION_TYPE_LABELS,
-  WikiRow
-} from './types'
+import DocumentPreviewModal from '@renderer/components/document/DocumentPreviewModal'
+import { ENTITY_TYPE_COLORS, ENTITY_TYPE_LABELS, RELATION_TYPE_LABELS } from './types'
+import type { GraphEntity, GraphData } from '@renderer/types/knowledge'
+import type { WikiRow } from '@renderer/types/models'
 
 const { Text } = Typography
 
@@ -41,6 +37,7 @@ const Index: React.FC = () => {
   const [docs, setDocs] = useState<{ id: number; title: string }[]>([])
   const [addedDocIds, setAddedDocIds] = useState<Set<number>>(new Set())
   const [isAppending, setIsAppending] = useState(false)
+  const [isGraphLoading, setIsGraphLoading] = useState(false)
 
   const [previewDoc, setPreviewDoc] = useState<{
     id: number
@@ -67,6 +64,7 @@ const Index: React.FC = () => {
   const [docFilter, setDocFilter] = useState<number[]>([])
 
   const loadGraphData = useCallback(async (wikiId: number, docIds?: number[]) => {
+    setIsGraphLoading(true)
     try {
       const data = await (window as unknown as Window).api.graph.getData(wikiId, undefined, docIds)
       setGraphData(data)
@@ -75,6 +73,8 @@ const Index: React.FC = () => {
       }
     } catch (error) {
       console.error('Failed to load graph data:', error)
+    } finally {
+      setIsGraphLoading(false)
     }
   }, [])
 
@@ -377,7 +377,13 @@ const Index: React.FC = () => {
               minWidth: 0
             }}
           >
-            {graphChartData && graphChartData.nodes.length > 0 ? (
+            {isGraphLoading ? (
+              <Flex vertical align="center" justify="center" style={{ height: '100%' }} gap={16}>
+                <Spin size="large">
+                  <div style={{ padding: 50 }} />
+                </Spin>
+              </Flex>
+            ) : graphChartData && graphChartData.nodes.length > 0 ? (
               <GraphCanvas
                 data={graphChartData}
                 onEntityClick={handleEntityClick}
@@ -410,7 +416,7 @@ const Index: React.FC = () => {
           </div>
         </div>
 
-        <DocPreviewModal
+        <DocumentPreviewModal
           open={isDocPreviewOpen}
           onCancel={() => setIsDocPreviewOpen(false)}
           currentDoc={previewDoc}

@@ -1,29 +1,12 @@
 import React from 'react'
 import { Card, Flex, Typography, Space, theme } from 'antd'
 import { RiMapPin2Line, RiSunLine, RiUser3Line } from '@remixicon/react'
+import type { CardItemProps } from '@renderer/types/components'
 import MusicMiniCard from './MusicMiniCard'
 
 const { Title, Text } = Typography
 
-interface SidebarProps {
-  weatherData: {
-    city: string
-    date: string
-    temperature: string
-    condition: string
-    highLow: string
-    feelsLike: string
-    icon?: string
-  }
-  workTimeData: {
-    today: string
-    avgLastWeek: string
-    thisWeek: string
-    todayWorked: string
-  }
-}
-
-const CardItem: React.FC<SidebarProps> = ({ weatherData, workTimeData }) => {
+const CardItem: React.FC<CardItemProps> = ({ weatherData, workTimeData }) => {
   const {
     token: { borderRadiusLG, colorFillAlter }
   } = theme.useToken()

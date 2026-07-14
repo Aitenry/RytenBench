@@ -1,4 +1,4 @@
-import React, { ReactNode, useEffect, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { Dropdown, FloatButton } from 'antd'
 import type { MenuProps } from 'antd'
 import { CheckCircleOutlined, LoadingOutlined } from '@ant-design/icons'
@@ -7,28 +7,8 @@ import { useNavigate } from 'react-router-dom'
 import { Window } from '../../resource/types/window'
 import BuildProgress from '../views/knowledge/graph/BuildProgress'
 import { BuildProgressContext } from './BuildProgressContext'
-
-interface BuildProgressState {
-  wikiId: number
-  wikiTitle: string
-  phase: string
-  phaseLabel: string
-  phaseProgress: number
-  overallProgress: number
-  processedDocs: number
-  totalDocs: number
-  processedChunks: number
-  totalChunks: number
-  entityCount: number
-  relationCount: number
-  message: string
-  minimized: boolean
-  completed: boolean
-}
-
-interface BuildProgressProviderProps {
-  children: ReactNode
-}
+import type { BuildProgressState } from '@renderer/types/build-progress'
+import type { BuildProgressProviderProps } from '@renderer/types/components'
 
 export const BuildProgressProvider: React.FC<BuildProgressProviderProps> = ({ children }) => {
   const [buildMap, setBuildMap] = useState<Map<number, BuildProgressState>>(new Map())

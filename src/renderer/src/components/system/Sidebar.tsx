@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { theme, Menu, Card, Select } from 'antd'
 import type { MenuProps } from 'antd'
+import type { SidebarProps } from '@renderer/types/components'
 import {
   RiDashboardLine,
   RiQuillPenAiLine,
@@ -21,16 +22,10 @@ import {
   RiSettings3Line,
   RiComputerLine
 } from '@remixicon/react'
-import LogoLight from '../assets/logo-light.png'
-import LogoNight from '../assets/logo-night.png'
+import LogoLight from '@renderer/assets/logo-light.png'
+import LogoNight from '@renderer/assets/logo-night.png'
 import MusicMiniPlayer from './MusicMiniPlayer'
 import { useTheme } from '@renderer/contexts/useTheme'
-
-interface SidebarProps {
-  currentKey: string
-  setCurrentKey: (key: string) => void
-  onUserMenuClick?: MenuProps['onClick']
-}
 
 const Sidebar: React.FC<SidebarProps> = ({ currentKey, setCurrentKey }) => {
   const navigate = useNavigate()

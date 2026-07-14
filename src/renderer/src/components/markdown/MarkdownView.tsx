@@ -1,12 +1,26 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react'
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
 import rehypeSanitize from 'rehype-sanitize'
 import rehypeRaw from 'rehype-raw'
-import { RiCheckLine, RiFileCopyLine, RiArrowRightSLine, RiArrowDownSLine } from '@remixicon/react'
+import {
+  RiCheckLine,
+  RiFileCopyLine,
+  RiArrowRightSLine,
+  RiArrowDownSLine,
+  RiSearchLine,
+  RiCloseLine,
+  RiArrowUpSLine
+} from '@remixicon/react'
 import { extractTextFromChildren } from '@renderer/utils/markdown'
 import { useMessage } from '@renderer/hooks/useMessage'
+import type {
+  HeadingItem,
+  TocItemProps,
+  TableOfContentsProps,
+  MarkdownViewProps
+} from '@renderer/types/components'
 
 const CopyButton = ({
   text,
@@ -76,13 +90,6 @@ export const InlineCodeCopy = ({
   )
 }
 
-interface HeadingItem {
-  id: string
-  level: number
-  text: string
-  children: HeadingItem[]
-}
-
 const parseHeadings = (content: string): HeadingItem[] => {
   const headings: HeadingItem[] = []
   const stack: HeadingItem[] = []
@@ -129,14 +136,6 @@ const parseHeadings = (content: string): HeadingItem[] => {
   }
 
   return headings
-}
-
-interface TocItemProps {
-  item: HeadingItem
-  isDarkMode?: boolean
-  expandedIds: Set<string>
-  onToggle: (id: string) => void
-  onNavigate: (id: string) => void
 }
 
 const TocItem = ({
@@ -196,12 +195,6 @@ const TocItem = ({
       )}
     </div>
   )
-}
-
-interface TableOfContentsProps {
-  headings: HeadingItem[]
-  isDarkMode?: boolean
-  onNavigate: (id: string) => void
 }
 
 const TableOfContents = ({
@@ -273,11 +266,6 @@ const TableOfContents = ({
   )
 }
 
-interface MarkdownViewProps {
-  content: string
-  isDarkMode?: boolean
-}
-
 const MarkdownView = ({ content, isDarkMode = false }: MarkdownViewProps): React.ReactNode => {
   const contentRef = useRef<HTMLDivElement>(null)
   const headings = useMemo(() => parseHeadings(content), [content])
@@ -294,6 +282,137 @@ const MarkdownView = ({ content, isDarkMode = false }: MarkdownViewProps): React
     traverse(headings)
     return ids
   }, [headings])
+
+  // ─── Search functionality ───
+  const [searchVisible, setSearchVisible] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [matchCount, setMatchCount] = useState(0)
+  const [currentMatch, setCurrentMatch] = useState(0)
+  const searchInputRef = useRef<HTMLInputElement>(null)
+  const matchNodesRef = useRef<HTMLElement[]>([])
+  const currentMatchIndexRef = useRef(-1)
+
+  const clearHighlights = useCallback(() => {
+    if (!contentRef.current) return
+    const marks = contentRef.current.querySelectorAll('mark.search-highlight')
+    marks.forEach((mark) => {
+      const parent = mark.parentNode
+      if (parent) {
+        parent.replaceChild(document.createTextNode(mark.textContent || ''), mark)
+      }
+    })
+    contentRef.current.normalize()
+  }, [])
+
+  const highlightMatches = useCallback((query: string): HTMLElement[] => {
+    if (!contentRef.current || !query.trim()) return []
+
+    const container = contentRef.current
+    const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, {
+      acceptNode: (node) => {
+        const el = node.parentElement
+        if (!el) return NodeFilter.FILTER_ACCEPT
+        if (el.closest('.search-bar')) return NodeFilter.FILTER_REJECT
+        if (el.tagName === 'SCRIPT' || el.tagName === 'STYLE') return NodeFilter.FILTER_REJECT
+        return NodeFilter.FILTER_ACCEPT
+      }
+    })
+
+    const textNodes: Text[] = []
+    while (walker.nextNode()) {
+      textNodes.push(walker.currentNode as Text)
+    }
+
+    const marks: HTMLElement[] = []
+    const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const regex = new RegExp(`(${escapedQuery})`, 'gi')
+
+    for (const textNode of textNodes) {
+      const text = textNode.textContent || ''
+      regex.lastIndex = 0
+      if (!regex.test(text)) continue
+      regex.lastIndex = 0
+
+      const fragment = document.createDocumentFragment()
+      let lastIndex = 0
+      let match: RegExpExecArray | null
+      while ((match = regex.exec(text)) !== null) {
+        if (match.index > lastIndex) {
+          fragment.appendChild(document.createTextNode(text.slice(lastIndex, match.index)))
+        }
+        const mark = document.createElement('mark')
+        mark.className = 'search-highlight'
+        mark.textContent = match[0]
+        marks.push(mark)
+        fragment.appendChild(mark)
+        lastIndex = regex.lastIndex
+      }
+      if (lastIndex < text.length) {
+        fragment.appendChild(document.createTextNode(text.slice(lastIndex)))
+      }
+      textNode.parentNode?.replaceChild(fragment, textNode)
+    }
+
+    return marks
+  }, [])
+
+  const navigateMatch = useCallback((direction: 1 | -1) => {
+    const marks = matchNodesRef.current
+    if (marks.length === 0) return
+
+    marks.forEach((m) => m.classList.remove('search-highlight-current'))
+
+    const newIndex =
+      (((currentMatchIndexRef.current + direction) % marks.length) + marks.length) % marks.length
+    currentMatchIndexRef.current = newIndex
+
+    marks[newIndex].classList.add('search-highlight-current')
+    marks[newIndex].scrollIntoView({ behavior: 'smooth', block: 'center' })
+
+    setCurrentMatch(newIndex + 1)
+  }, [])
+
+  // Ctrl+F keyboard shortcut
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent): void => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+        e.preventDefault()
+        setSearchVisible(true)
+        setTimeout(() => {
+          searchInputRef.current?.focus()
+          searchInputRef.current?.select()
+        }, 0)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [])
+
+  // Apply highlights when search query, visibility or content changes
+  useEffect(() => {
+    if (!searchVisible || !searchQuery.trim()) {
+      clearHighlights()
+      matchNodesRef.current = []
+      setMatchCount(0)
+      setCurrentMatch(0)
+      currentMatchIndexRef.current = -1
+      return
+    }
+    const marks = highlightMatches(searchQuery)
+    matchNodesRef.current = marks
+    setMatchCount(marks.length)
+    currentMatchIndexRef.current = -1
+    setCurrentMatch(0)
+  }, [searchQuery, searchVisible, content, clearHighlights, highlightMatches])
+
+  const handleSearchKeyDown = (e: React.KeyboardEvent): void => {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      navigateMatch(e.shiftKey ? -1 : 1)
+    } else if (e.key === 'Escape') {
+      setSearchVisible(false)
+    }
+  }
 
   const dynamicStyles = `
     .markdown-body h1 { font-size: 2em; font-weight: 700; margin: 1em 0 0.5em; scroll-margin-top: 20px; }
@@ -331,6 +450,18 @@ const MarkdownView = ({ content, isDarkMode = false }: MarkdownViewProps): React
     }
     .markdown-body blockquote { border-color: ${isDarkMode ? '#4b5563' : '#d1d5db'}; }
     .markdown-body th, .markdown-body td { border-color: ${isDarkMode ? '#4b5563' : '#d1d5db'}; }
+    mark.search-highlight {
+      background-color: ${isDarkMode ? '#1e3a5f' : '#bfdbfe'};
+      color: ${isDarkMode ? '#93c5fd' : '#1e40af'};
+      border-radius: 2px;
+      padding: 0 1px;
+    }
+    mark.search-highlight-current {
+      background-color: ${isDarkMode ? '#2563eb' : '#3b82f6'};
+      color: #ffffff;
+      border-radius: 2px;
+      padding: 0 1px;
+    }
   `
 
   const handleNavigate = (id: string): void => {
@@ -356,86 +487,145 @@ const MarkdownView = ({ content, isDarkMode = false }: MarkdownViewProps): React
     <div className="flex h-full">
       <style>{dynamicStyles}</style>
       <TableOfContents headings={headings} isDarkMode={isDarkMode} onNavigate={handleNavigate} />
-      <div
-        ref={contentRef}
-        className={`flex-1 overflow-y-auto rounded-xl custom-scrollbar ${isDarkMode ? 'bg-gray-950' : 'bg-white'}`}
-      >
+      <div className="flex-1 flex flex-col min-w-0 relative">
+        {searchVisible && (
+          <div
+            className={`search-bar absolute top-2 right-2 z-10 w-[360px] flex items-center gap-2 px-3 py-2 rounded-lg shadow-lg ${
+              isDarkMode ? 'bg-gray-800 border border-gray-700' : 'bg-white border border-gray-200'
+            }`}
+          >
+            <RiSearchLine size={16} className={isDarkMode ? 'text-gray-400' : 'text-gray-500'} />
+            <input
+              ref={searchInputRef}
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={handleSearchKeyDown}
+              placeholder="搜索..."
+              className={`flex-1 bg-transparent outline-none text-sm ${
+                isDarkMode
+                  ? 'text-gray-200 placeholder-gray-500'
+                  : 'text-gray-700 placeholder-gray-400'
+              }`}
+            />
+            {matchCount > 0 && (
+              <span
+                className={`text-xs flex-shrink-0 ${
+                  isDarkMode ? 'text-gray-400' : 'text-gray-500'
+                }`}
+              >
+                {currentMatch}/{matchCount}
+              </span>
+            )}
+            <button
+              onClick={() => navigateMatch(-1)}
+              disabled={matchCount === 0}
+              className={`p-1 rounded hover:bg-opacity-20 hover:bg-gray-400 disabled:opacity-30 ${
+                isDarkMode ? 'text-gray-400' : 'text-gray-500'
+              }`}
+            >
+              <RiArrowUpSLine size={16} />
+            </button>
+            <button
+              onClick={() => navigateMatch(1)}
+              disabled={matchCount === 0}
+              className={`p-1 rounded hover:bg-opacity-20 hover:bg-gray-400 disabled:opacity-30 ${
+                isDarkMode ? 'text-gray-400' : 'text-gray-500'
+              }`}
+            >
+              <RiArrowDownSLine size={16} />
+            </button>
+            <button
+              onClick={() => setSearchVisible(false)}
+              className={`p-1 rounded hover:bg-opacity-20 hover:bg-gray-400 ${
+                isDarkMode ? 'text-gray-400 hover:text-white' : 'text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              <RiCloseLine size={16} />
+            </button>
+          </div>
+        )}
         <div
-          className={`markdown-body px-[13px] ${isDarkMode ? 'text-gray-100' : 'text-gray-700'}`}
+          ref={contentRef}
+          className={`flex-1 overflow-y-auto rounded-xl custom-scrollbar ${isDarkMode ? 'bg-gray-950' : 'bg-white'}`}
         >
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
-            rehypePlugins={[rehypeRaw, rehypeHighlight, rehypeSanitize]}
-            components={{
-              a: (props) => <a {...props} target="_blank" rel="noopener noreferrer" />,
-              code: ({ children, className, ...props }) => {
-                const text = extractTextFromChildren(children)
-                const isInline = !className?.includes('language-')
-                if (isInline) {
+          <div
+            className={`markdown-body px-[13px] ${isDarkMode ? 'text-gray-100' : 'text-gray-700'}`}
+          >
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              rehypePlugins={[rehypeRaw, rehypeHighlight, rehypeSanitize]}
+              components={{
+                a: (props) => <a {...props} target="_blank" rel="noopener noreferrer" />,
+                code: ({ children, className, ...props }) => {
+                  const text = extractTextFromChildren(children)
+                  const isInline = !className?.includes('language-')
+                  if (isInline) {
+                    return (
+                      <InlineCodeCopy text={text}>
+                        <code className={className} {...props}>
+                          {children}
+                        </code>
+                      </InlineCodeCopy>
+                    )
+                  }
                   return (
-                    <InlineCodeCopy text={text}>
-                      <code className={className} {...props}>
-                        {children}
-                      </code>
-                    </InlineCodeCopy>
+                    <code className={className} {...props}>
+                      {children}
+                    </code>
                   )
-                }
-                return (
-                  <code className={className} {...props}>
+                },
+                h1: ({ children, ...props }) => (
+                  <h1 {...props} id={getHeadingId()}>
                     {children}
-                  </code>
-                )
-              },
-              h1: ({ children, ...props }) => (
-                <h1 {...props} id={getHeadingId()}>
-                  {children}
-                </h1>
-              ),
-              h2: ({ children, ...props }) => (
-                <h2 {...props} id={getHeadingId()}>
-                  {children}
-                </h2>
-              ),
-              h3: ({ children, ...props }) => (
-                <h3 {...props} id={getHeadingId()}>
-                  {children}
-                </h3>
-              ),
-              h4: ({ children, ...props }) => (
-                <h4 {...props} id={getHeadingId()}>
-                  {children}
-                </h4>
-              ),
-              h5: ({ children, ...props }) => (
-                <h5 {...props} id={getHeadingId()}>
-                  {children}
-                </h5>
-              ),
-              h6: ({ children, ...props }) => (
-                <h6 {...props} id={getHeadingId()}>
-                  {children}
-                </h6>
-              ),
-              pre: ({ children, ...props }) => {
-                const codeText = extractTextFromChildren(children)
-                return (
-                  <div className="relative">
-                    <pre {...props}>{children}</pre>
-                    <CopyButton text={codeText} isDarkMode={isDarkMode} />
+                  </h1>
+                ),
+                h2: ({ children, ...props }) => (
+                  <h2 {...props} id={getHeadingId()}>
+                    {children}
+                  </h2>
+                ),
+                h3: ({ children, ...props }) => (
+                  <h3 {...props} id={getHeadingId()}>
+                    {children}
+                  </h3>
+                ),
+                h4: ({ children, ...props }) => (
+                  <h4 {...props} id={getHeadingId()}>
+                    {children}
+                  </h4>
+                ),
+                h5: ({ children, ...props }) => (
+                  <h5 {...props} id={getHeadingId()}>
+                    {children}
+                  </h5>
+                ),
+                h6: ({ children, ...props }) => (
+                  <h6 {...props} id={getHeadingId()}>
+                    {children}
+                  </h6>
+                ),
+                pre: ({ children, ...props }) => {
+                  const codeText = extractTextFromChildren(children)
+                  return (
+                    <div className="relative">
+                      <pre {...props}>{children}</pre>
+                      <CopyButton text={codeText} isDarkMode={isDarkMode} />
+                    </div>
+                  )
+                },
+                table: ({ children, ...props }) => (
+                  <div className="overflow-x-auto my-4">
+                    <table {...props} className="min-w-full">
+                      {children}
+                    </table>
                   </div>
                 )
-              },
-              table: ({ children, ...props }) => (
-                <div className="overflow-x-auto my-4">
-                  <table {...props} className="min-w-full">
-                    {children}
-                  </table>
-                </div>
-              )
-            }}
-          >
-            {content}
-          </ReactMarkdown>
+              }}
+            >
+              {content}
+            </ReactMarkdown>
+          </div>
         </div>
       </div>
     </div>

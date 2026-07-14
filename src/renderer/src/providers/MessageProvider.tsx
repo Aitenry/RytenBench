@@ -1,10 +1,7 @@
-import React, { ReactNode } from 'react'
+import React from 'react'
 import { message } from 'antd'
 import { MessageContext, MessageContextType } from '../contexts/MessageContext'
-
-interface MessageProviderProps {
-  children: ReactNode
-}
+import type { MessageProviderProps } from '@renderer/types/components'
 
 export const MessageProvider: React.FC<MessageProviderProps> = ({ children }) => {
   const [messageApi, contextHolder] = message.useMessage({ top: 20 })

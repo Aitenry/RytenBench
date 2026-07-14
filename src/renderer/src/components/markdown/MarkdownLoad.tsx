@@ -6,7 +6,8 @@ import rehypeSanitize from 'rehype-sanitize'
 import rehypeRaw from 'rehype-raw'
 import { RiCheckLine, RiFileCopyLine } from '@remixicon/react'
 import { extractTextFromChildren } from '@renderer/utils/markdown'
-import { InlineCodeCopy } from '@renderer/components/MarkdownView'
+import { InlineCodeCopy } from '@renderer/components/markdown/MarkdownView'
+import type { MarkdownViewProps } from '@renderer/types/components'
 
 // 复制按钮组件
 const CopyButton = ({
@@ -41,12 +42,6 @@ const CopyButton = ({
       {copied ? <RiCheckLine size={16} /> : <RiFileCopyLine size={16} />}
     </button>
   )
-}
-
-// 定义组件的 props 类型
-interface MarkdownViewProps {
-  content: string // Markdown 文本
-  isDarkMode?: boolean // 是否暗色模式（影响复制按钮和代码块样式）
 }
 
 const MarkdownLoad = ({ content, isDarkMode = false }: MarkdownViewProps): JSX.Element => {

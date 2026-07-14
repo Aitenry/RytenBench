@@ -22,46 +22,15 @@ import {
 } from '@remixicon/react'
 import { ChatDialogueRow, ChatTopicRow } from '../../../../main/database/mapper/chat'
 import { LlmProviderConfig } from '../../../../main/database/mapper/provider'
-import MarkdownLoad from '@renderer/components/MarkdownLoad'
+import MarkdownLoad from '@renderer/components/markdown/MarkdownLoad'
 import { Window, ToolInfo } from '../../../resource/types/window'
 import { Collapse } from 'antd'
 import { useTheme } from '@renderer/contexts/useTheme'
+import type { Message, Attachment } from '@renderer/types/chat'
 
 const toolIconMap: Record<string, React.ReactNode> = {
   RiSunCloudyLine: <RiSunCloudyLine size={16} />,
   RiTimeLine: <RiTimeLine size={16} />
-}
-
-interface ToolCall {
-  name: string
-  input: object
-  output: string
-}
-
-interface MessageBlock {
-  type: 'text' | 'tool' | 'reasoning' | 'image' | 'document'
-  text?: string
-  tool?: ToolCall
-  reasoning?: string
-  image_url?: string
-  fileName?: string
-}
-
-interface Message {
-  id: string
-  role: 'user' | 'assistant'
-  content: string
-  blocks: MessageBlock[]
-  timestamp: number
-  toolCalls?: ToolCall[]
-  loading?: boolean
-  reasoning_content?: string
-}
-
-interface Attachment {
-  dataUrl: string
-  fileName: string
-  isImage: boolean
 }
 
 const Index: React.FC = () => {

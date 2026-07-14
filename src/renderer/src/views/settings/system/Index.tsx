@@ -31,13 +31,7 @@ import type {
   ChatSettings,
   ThemeMode
 } from '@renderer/types/settings'
-
-interface ProviderOption {
-  id: number
-  name: string
-  model: string
-  tags: string[] | null
-}
+import type { ProviderOption } from '@renderer/types/components'
 
 const Index: React.FC = () => {
   const {

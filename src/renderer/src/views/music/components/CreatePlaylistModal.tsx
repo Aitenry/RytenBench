@@ -1,20 +1,9 @@
 import React, { useState } from 'react'
 import { theme, Modal, Input, Form } from 'antd'
 import { RiMusic2Line, RiCameraLine } from '@remixicon/react'
+import type { CreatePlaylistModalProps } from '@renderer/types/components'
 
-interface FolderData {
-  name: string
-  description: string
-  coverDataUrl: string | null
-}
-
-interface Props {
-  open: boolean
-  onClose: () => void
-  onCreated: (data: FolderData) => Promise<void>
-}
-
-const CreatePlaylistModal: React.FC<Props> = ({ open, onClose, onCreated }) => {
+const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({ open, onClose, onCreated }) => {
   const {
     token: { colorFillAlter, colorTextTertiary }
   } = theme.useToken()

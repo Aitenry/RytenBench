@@ -1,12 +1,7 @@
 import { createContext } from 'react'
-import type { ThemeMode } from '@renderer/types/settings'
+import type { ThemeContextType } from '@renderer/types/theme'
 
-export interface ThemeContextType {
-  themeMode: ThemeMode
-  effectiveTheme: 'light' | 'dark'
-  setThemeMode: (mode: ThemeMode) => Promise<void>
-  loading: boolean
-}
+export type { ThemeContextType }
 
 export const ThemeContext = createContext<ThemeContextType>({
   themeMode: 'auto',
