@@ -23,8 +23,12 @@ import {
   RiMedalLine
 } from '@remixicon/react'
 import { theme } from 'antd'
-import { Window } from '../../../../resource/types/window'
-import { ENTITY_TYPE_COLORS, ENTITY_TYPE_LABELS, RELATION_TYPE_LABELS } from './types'
+import { Window } from '../../../resource/types/window'
+import {
+  ENTITY_TYPE_COLORS,
+  ENTITY_TYPE_LABELS,
+  RELATION_TYPE_LABELS
+} from '@renderer/types/knowledge'
 import type { EntityDetailProps } from '@renderer/types/components'
 
 const ENTITY_ICONS: Record<string, React.ReactNode> = {

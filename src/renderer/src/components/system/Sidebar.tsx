@@ -5,15 +5,10 @@ import type { MenuProps } from 'antd'
 import type { SidebarProps } from '@renderer/types/components'
 import {
   RiDashboardLine,
-  RiQuillPenAiLine,
   RiCalendar2Line,
   RiSunCloudyLine,
   RiMusicLine,
-  RiBook2Line,
   RiToolsLine,
-  RiFileListLine,
-  RiDatabase2Line,
-  RiBubbleChartLine,
   RiCodeSSlashLine,
   RiAiGenerate3dLine,
   RiTodoLine,
@@ -42,21 +37,6 @@ const Sidebar: React.FC<SidebarProps> = ({ currentKey, setCurrentKey }) => {
   // 主菜单项
   const mainMenuItems: MenuProps['items'] = [
     { key: 'home', label: '首页', icon: <RiDashboardLine size={18} /> },
-    {
-      key: 'docs',
-      label: '文档',
-      icon: <RiQuillPenAiLine size={18} />,
-      children: [{ key: 'docs/manage', label: '文档管理', icon: <RiFileListLine size={18} /> }]
-    },
-    {
-      key: 'knowledge',
-      label: '知识',
-      icon: <RiBook2Line size={18} />,
-      children: [
-        { key: 'knowledge/manage', label: '知识库', icon: <RiDatabase2Line size={18} /> },
-        { key: 'knowledge/graph', label: '知识图谱', icon: <RiBubbleChartLine size={18} /> }
-      ]
-    },
     {
       key: 'planner',
       label: '计划',

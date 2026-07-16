@@ -18,6 +18,7 @@ import {
   getTodoItemByTitle,
   getTodoItemsByPriority,
   getAllTodoItems,
+  getTodoItemsPaginated,
   getTodoItemsByDueDate,
   deleteTodoItem,
   updateTodoItem,
@@ -98,6 +99,12 @@ import {
   getBuildJobByWikiId,
   getLatestBuildJob
 } from './database/mapper/graph'
+import {
+  getAllNodePositions,
+  saveNodePosition,
+  saveNodePositions,
+  deleteNodePosition
+} from './database/mapper/node_position'
 import {
   getAllTopics,
   getTopicById,
@@ -369,6 +376,15 @@ app.whenReady().then(async () => {
     }
   })
 
+  ipcMain.handle('todo-items-get-paginated', async (_event, page: number, pageSize: number) => {
+    try {
+      return await getTodoItemsPaginated(page, pageSize)
+    } catch (error) {
+      console.error('Error in todo-items-get-paginated:', error)
+      throw error
+    }
+  })
+
   ipcMain.handle('todo-items-get-by-due-date', async (_event, dueDate: string) => {
     try {
       return await getTodoItemsByDueDate(dueDate)
@@ -401,7 +417,11 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('todo-items-delete', async (_event, id: number) => {
     try {
-      return await deleteTodoItem(id)
+      const result = await deleteTodoItem(id)
+      deleteNodePosition(`todo-${id}`).catch((err) =>
+        logger.error('Failed to delete node position for todo:', err)
+      )
+      return result
     } catch (error) {
       console.error('Error in todo-items-delete:', error)
       throw error
@@ -461,6 +481,47 @@ app.whenReady().then(async () => {
       return true
     } catch (error) {
       logger.error('Error in system-settings-update:', error)
+      throw error
+    }
+  })
+
+  // Node Position IPC handlers
+
+  ipcMain.handle('node-positions-get-all', async () => {
+    try {
+      return await getAllNodePositions()
+    } catch (error) {
+      logger.error('Error in node-positions-get-all:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('node-position-save', async (_event, nodeId: string, x: number, y: number) => {
+    try {
+      await saveNodePosition(nodeId, x, y)
+    } catch (error) {
+      logger.error('Error in node-position-save:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle(
+    'node-positions-save-batch',
+    async (_event, positions: { node_id: string; x: number; y: number }[]) => {
+      try {
+        await saveNodePositions(positions)
+      } catch (error) {
+        logger.error('Error in node-positions-save-batch:', error)
+        throw error
+      }
+    }
+  )
+
+  ipcMain.handle('node-position-delete', async (_event, nodeId: string) => {
+    try {
+      return await deleteNodePosition(nodeId)
+    } catch (error) {
+      logger.error('Error in node-position-delete:', error)
       throw error
     }
   })
@@ -876,7 +937,11 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('doc-delete', async (_event, id: number) => {
     try {
-      return await deleteDoc(id)
+      const result = await deleteDoc(id)
+      deleteNodePosition(`doc-${id}`).catch((err) =>
+        logger.error('Failed to delete node position for doc:', err)
+      )
+      return result
     } catch (error) {
       console.error('Error in doc-delete:', error)
       throw error
@@ -885,7 +950,24 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('doc-delete-by-time-range', async (_event, startTime: string, endTime: string) => {
     try {
-      return await deleteDocsByTimeRange(startTime, endTime)
+      // 先查询将要被删除的文档 ID，用于清理节点位置
+      const db = (await getDatabaseInstance()).getDatabase()
+      const idsResult = await db.query<{ id: number }>(
+        'SELECT id FROM documents WHERE created_at >= $1 AND created_at <= $2',
+        [startTime, endTime]
+      )
+      const deletedIds = idsResult.rows.map((r) => r.id)
+
+      const result = await deleteDocsByTimeRange(startTime, endTime)
+
+      // 清理对应的节点位置
+      for (const id of deletedIds) {
+        deleteNodePosition(`doc-${id}`).catch((err) =>
+          logger.error('Failed to delete node position for doc:', err)
+        )
+      }
+
+      return result
     } catch (error) {
       console.error('Error in doc-delete-by-time-range:', error)
       throw error
@@ -1002,7 +1084,7 @@ app.whenReady().then(async () => {
 
   ipcMain.handle(
     'wiki-add',
-    async (_event, wiki: Omit<WikiRow, 'id' | 'created_at' | 'updated_at'>) => {
+    async (_event, wiki: Omit<WikiRow, 'id' | 'doc_count' | 'created_at' | 'updated_at'>) => {
       try {
         return await addWiki(wiki)
       } catch (error) {
@@ -1014,7 +1096,11 @@ app.whenReady().then(async () => {
 
   ipcMain.handle(
     'wiki-update',
-    async (_event, id: number, updates: Partial<Omit<WikiRow, 'id' | 'created_at'>>) => {
+    async (
+      _event,
+      id: number,
+      updates: Partial<Omit<WikiRow, 'id' | 'doc_count' | 'created_at'>>
+    ) => {
       try {
         return await updateWiki(id, updates)
       } catch (error) {
@@ -1026,7 +1112,11 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('wiki-delete', async (_event, id: number) => {
     try {
-      return await deleteWiki(id)
+      const result = await deleteWiki(id)
+      deleteNodePosition(`wiki-${id}`).catch((err) =>
+        logger.error('Failed to delete node position for wiki:', err)
+      )
+      return result
     } catch (error) {
       console.error('Error in wiki-delete:', error)
       throw error

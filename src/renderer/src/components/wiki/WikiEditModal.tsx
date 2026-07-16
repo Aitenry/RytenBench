@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react'
-import { Modal, Input, Button, Space, Typography } from 'antd'
+import React, { useState, useEffect, useCallback } from 'react'
+import { Modal, Input, Button, Space, Typography, Tag as AntTag } from 'antd'
 import { Window } from '../../../resource/types/window'
 import type { WikiEditModalProps } from '@renderer/types/components'
+import { getTagsArray } from '@renderer/utils/document'
 
 const { Text } = Typography
 
@@ -12,12 +13,15 @@ const WikiEditModal: React.FC<WikiEditModalProps> = ({
   isNew,
   initialTitle = '',
   initialSummary = '',
+  initialTags = '',
   initialImage = null,
   onSave,
   onCancel
 }) => {
   const [title, setTitle] = useState(initialTitle)
   const [summary, setSummary] = useState(initialSummary)
+  const [editTags, setEditTags] = useState<string[]>([])
+  const [tagInput, setTagInput] = useState('')
   const [image, setImage] = useState<string | null>(initialImage)
   const [saving, setSaving] = useState(false)
 
@@ -25,9 +29,31 @@ const WikiEditModal: React.FC<WikiEditModalProps> = ({
     if (open) {
       setTitle(initialTitle)
       setSummary(initialSummary)
+      setEditTags(getTagsArray(initialTags))
+      setTagInput('')
       setImage(initialImage)
     }
-  }, [open, initialTitle, initialSummary, initialImage])
+  }, [open, initialTitle, initialSummary, initialTags, initialImage])
+
+  const handleAddTag = useCallback(
+    (e: React.KeyboardEvent<HTMLInputElement>): void => {
+      if (e.key === 'Enter' && tagInput.trim()) {
+        e.preventDefault()
+        if (!editTags.includes(tagInput.trim())) {
+          setEditTags([...editTags, tagInput.trim()])
+        }
+        setTagInput('')
+      }
+    },
+    [tagInput, editTags]
+  )
+
+  const handleRemoveTag = useCallback(
+    (tagToRemove: string): void => {
+      setEditTags(editTags.filter((tag) => tag !== tagToRemove))
+    },
+    [editTags]
+  )
 
   const handleSelectImage = async (): Promise<void> => {
     try {
@@ -43,7 +69,12 @@ const WikiEditModal: React.FC<WikiEditModalProps> = ({
   const handleSave = async (): Promise<void> => {
     setSaving(true)
     try {
-      await onSave({ title, summary: summary || null, image })
+      await onSave({
+        title,
+        summary: summary || null,
+        tags: editTags.length > 0 ? JSON.stringify(editTags) : null,
+        image
+      })
     } finally {
       setSaving(false)
     }
@@ -58,6 +89,8 @@ const WikiEditModal: React.FC<WikiEditModalProps> = ({
       okText="保存"
       cancelText="取消"
       confirmLoading={saving}
+      styles={{ body: { maxHeight: 'calc(100vh - 300px)', padding: '0 6px', overflowY: 'auto' } }}
+      classNames={{ body: 'custom-scrollbar' }}
     >
       <Space vertical style={{ width: '100%' }}>
         <Text strong>标题</Text>
@@ -68,6 +101,23 @@ const WikiEditModal: React.FC<WikiEditModalProps> = ({
           value={summary}
           onChange={(e) => setSummary(e.target.value)}
           rows={4}
+        />
+        <Text strong>标签</Text>
+        {editTags.length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {editTags.map((tag, index) => (
+              <AntTag key={index} closable onClose={() => handleRemoveTag(tag)} color="processing">
+                {tag}
+              </AntTag>
+            ))}
+          </div>
+        )}
+        <Input
+          placeholder="输入标签后按回车添加"
+          value={tagInput}
+          onChange={(e) => setTagInput(e.target.value)}
+          onKeyDown={handleAddTag}
+          allowClear
         />
         <Text strong>封面图片</Text>
         <Space>
@@ -81,7 +131,7 @@ const WikiEditModal: React.FC<WikiEditModalProps> = ({
           )}
         </Space>
         {image && (
-          <div style={{ maxHeight: 200, overflow: 'hidden', borderRadius: 8 }}>
+          <div style={{ maxHeight: 300, overflow: 'hidden', borderRadius: 8 }}>
             <img
               src={image}
               alt="封面"

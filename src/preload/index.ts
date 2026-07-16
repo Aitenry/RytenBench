@@ -17,6 +17,8 @@ const api = {
     getByCompletedStatus: (status: number) =>
       ipcRenderer.invoke('todo-items-get-by-completed-status', status),
     getAll: () => ipcRenderer.invoke('todo-items-get-schedule'),
+    getAllPaginated: (page?: number, pageSize?: number) =>
+      ipcRenderer.invoke('todo-items-get-paginated', page, pageSize),
     getByDueDate: (dueDate: string) => ipcRenderer.invoke('todo-items-get-by-due-date', dueDate),
     add: (todoItem: Omit<TodoItemRow, 'id'>) => ipcRenderer.invoke('todo-items-add', todoItem),
     update: (id: number, updates: Partial<Omit<TodoItemRow, 'id'>>) =>
@@ -53,9 +55,9 @@ const api = {
     getById: (id: number) => ipcRenderer.invoke('wiki-get-by-id', id),
     getAll: (page?: number, pageSize?: number) =>
       ipcRenderer.invoke('wiki-get-all', page, pageSize),
-    add: (wiki: Omit<WikiRow, 'id' | 'created_at' | 'updated_at'>) =>
+    add: (wiki: Omit<WikiRow, 'id' | 'doc_count' | 'created_at' | 'updated_at'>) =>
       ipcRenderer.invoke('wiki-add', wiki),
-    update: (id: number, updates: Partial<Omit<WikiRow, 'id' | 'created_at'>>) =>
+    update: (id: number, updates: Partial<Omit<WikiRow, 'id' | 'doc_count' | 'created_at'>>) =>
       ipcRenderer.invoke('wiki-update', id, updates),
     delete: (id: number) => ipcRenderer.invoke('wiki-delete', id),
     getDirectories: (wikiId: number) => ipcRenderer.invoke('wiki-directories-get', wikiId),
@@ -245,6 +247,15 @@ const api = {
     getAll: () => ipcRenderer.invoke('system-settings-get-all') as Promise<SystemSettings>,
     update: (updates: Partial<SystemSettings>) =>
       ipcRenderer.invoke('system-settings-update', updates) as Promise<boolean>
+  },
+  nodePositions: {
+    getAll: (): Promise<{ node_id: string; x: number; y: number; updated_at: string }[]> =>
+      ipcRenderer.invoke('node-positions-get-all'),
+    save: (nodeId: string, x: number, y: number) =>
+      ipcRenderer.invoke('node-position-save', nodeId, x, y),
+    saveBatch: (positions: { node_id: string; x: number; y: number }[]) =>
+      ipcRenderer.invoke('node-positions-save-batch', positions),
+    delete: (nodeId: string) => ipcRenderer.invoke('node-position-delete', nodeId)
   },
   music: {
     selectDirectory: () => ipcRenderer.invoke('music-select-directory') as Promise<string | null>,

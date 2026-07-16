@@ -1,6 +1,5 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react'
-import { Spin, Tag, theme, Modal } from 'antd'
-import { RiBook2Line, RiFileTextLine, RiPencilLine, RiInboxArchiveLine } from '@remixicon/react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
+import { Spin, theme, Modal } from 'antd'
 import {
   ReactFlow,
   Background,
@@ -9,7 +8,7 @@ import {
   MiniMap,
   useNodesState,
   type Node,
-  type NodeProps
+  type OnNodeDrag
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { Window } from '../../../../resource/types/window'
@@ -25,494 +24,24 @@ import { useMessage } from '@renderer/hooks/useMessage'
 import { useTheme } from '@renderer/contexts/useTheme'
 import type {
   WikiRow,
+  WikiDirectoryRow,
   DocListItem,
   DocItem as DocItemType,
   TodoItem as TodoItemRow
 } from '@renderer/types/models'
-import type { StickyPalette, ThemePalette } from '@renderer/types/components'
 
-/* ──────────── Sticky note palettes ──────────── */
-
-const STICKY_LIGHT: StickyPalette[] = [
-  { bg: '#fff9c4', shadow: '#e6d88a80', tape: '#f5e79a' },
-  { bg: '#fce4ec', shadow: '#d4b8c080', tape: '#f8c8d4' },
-  { bg: '#e8f5e9', shadow: '#b8c8ba80', tape: '#c8e6c9' },
-  { bg: '#e3f2fd', shadow: '#b4c4d080', tape: '#bbdefb' },
-  { bg: '#f3e5f5', shadow: '#c4b8c880', tape: '#e1bee7' },
-  { bg: '#fff3e0', shadow: '#d4c4b080', tape: '#ffe0b2' }
-]
-
-const STICKY_DARK: StickyPalette[] = [
-  { bg: '#4a4520', shadow: '#35311880', tape: '#5c5628' },
-  { bg: '#4a2d36', shadow: '#35202680', tape: '#5c3642' },
-  { bg: '#2d3d30', shadow: '#202c2280', tape: '#364a3a' },
-  { bg: '#2d3648', shadow: '#1e243280', tape: '#364258' },
-  { bg: '#3d2d3d', shadow: '#2a202a80', tape: '#4a364a' },
-  { bg: '#4a3828', shadow: '#35261c80', tape: '#5c4430' }
-]
-
-/* ──────────── Node position presets (pixel coords) ──────────── */
-
-const WIKI_POSITIONS = [
-  { x: 150, y: 120 },
-  { x: 180, y: 520 },
-  { x: 140, y: 920 }
-]
-const TODO_POSITIONS = [
-  { x: 520, y: 100 },
-  { x: 550, y: 500 },
-  { x: 530, y: 900 }
-]
-const DOC_POSITIONS = [
-  { x: 950, y: 110 },
-  { x: 970, y: 510 },
-  { x: 940, y: 910 }
-]
-
-/* ──────────── React Flow node data types ──────────── */
-
-interface WikiNodeData extends Record<string, unknown> {
-  wiki: WikiRow
-  palette: ReturnType<typeof useThemePalette>
-  onOpen: (wiki: WikiRow) => void
-  onEdit: (wiki: WikiRow) => void
-  onArchive: (wiki: WikiRow) => void
-}
-
-interface TodoNodeData extends Record<string, unknown> {
-  todo: TodoItemRow
-  palette: ReturnType<typeof useThemePalette>
-  colorIndex: number
-  onOpen: (todo: TodoItemRow) => void
-  onEdit: (todo: TodoItemRow) => void
-}
-
-interface DocNodeData extends Record<string, unknown> {
-  doc: DocListItem
-  palette: ReturnType<typeof useThemePalette>
-  onOpen: (doc: DocListItem) => void
-  onEdit: (doc: DocListItem) => void
-}
-
-/* ──────────── Theme palette hook ──────────── */
-
-function useThemePalette(): ThemePalette {
-  const { effectiveTheme } = useTheme()
-  const { token } = theme.useToken()
-  const isDark = effectiveTheme === 'dark'
-
-  return useMemo(
-    () => ({
-      wikiStackOuter: isDark ? '#2a2a2a' : '#e8e8e8',
-      wikiStackInner: isDark ? '#333333' : '#eeeeee',
-      wikiStackShadow: '0 1px 3px rgba(0,0,0,0.08)',
-      wikiCardBg: isDark ? '#1a1a1a' : '#ffffff',
-      wikiCardShadow: isDark
-        ? '0 4px 16px rgba(0,0,0,0.35), 0 1px 3px rgba(0,0,0,0.20)'
-        : '0 4px 16px rgba(0,0,0,0.10), 0 1px 3px rgba(0,0,0,0.06)',
-      wikiIconColor: isDark ? '#a78bfa' : '#7c3aed',
-      stickyColors: isDark ? STICKY_DARK : STICKY_LIGHT,
-      docCardBg: isDark ? token.colorFillAlter : '#f0f0f0',
-      docCardBorder: isDark ? token.colorBorderSecondary : '#e5e5e5',
-      docCardShadow: isDark
-        ? '0 2px 10px rgba(0,0,0,0.30), 0 1px 3px rgba(0,0,0,0.15)'
-        : '0 2px 10px rgba(0,0,0,0.07), 0 1px 3px rgba(0,0,0,0.04)',
-      docIconColor: isDark ? '#999' : '#888',
-      todoDescColor: isDark ? '#bbb' : '#555',
-      textColor: isDark ? 'rgba(255,255,255,0.85)' : 'rgba(0,0,0,0.88)',
-      textSecondary: isDark ? '#999' : '#666'
-    }),
-    [isDark, token]
-  )
-}
-
-/* ──────────── Tag parser ──────────── */
-
-function parseTags(tagsStr: string | null): string[] {
-  if (!tagsStr) return []
-  try {
-    const allTags = new Set<string>()
-    const parsed = JSON.parse('[' + tagsStr + ']')
-    if (Array.isArray(parsed)) {
-      parsed.forEach((item) => {
-        if (Array.isArray(item)) item.forEach((tag: string) => allTags.add(tag))
-      })
-    }
-    return Array.from(allTags).slice(0, 3)
-  } catch {
-    return []
-  }
-}
-
-/* ──────────── Date formatter ──────────── */
-
-function formatDueDate(dateStr: string | null): string {
-  if (!dateStr) return ''
-  return new Date(dateStr).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })
-}
-
-/* ═══════════════════════════════════════════════════════════
-   Custom Node Components
-   ═══════════════════════════════════════════════════════════ */
-
-/** Type A: Wiki folder — stacked paper look */
-const WikiNode: React.FC<NodeProps<Node<WikiNodeData>>> = ({ data }) => {
-  const { wiki, palette } = data
-  const [hovered, setHovered] = useState(false)
-  const tags = parseTags(wiki.tags)
-
-  const iconBtnBase: React.CSSProperties = {
-    position: 'absolute',
-    width: 26,
-    height: 26,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 6,
-    border: 'none',
-    cursor: 'pointer',
-    background: 'rgba(128,128,128,0.10)',
-    color: palette.textSecondary,
-    opacity: hovered ? 1 : 0,
-    transition: 'opacity 0.15s ease, background 0.15s ease',
-    zIndex: 2
-  }
-
-  return (
-    <div
-      style={{ cursor: 'pointer', position: 'relative' }}
-      onClick={() => data.onOpen(wiki)}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-    >
-      {/* stacked paper layers behind */}
-      <div
-        style={{
-          position: 'absolute',
-          top: 6,
-          left: 4,
-          width: 240,
-          height: 200,
-          background: palette.wikiStackOuter,
-          borderRadius: 14,
-          transform: 'rotate(-1.5deg)',
-          boxShadow: palette.wikiStackShadow
-        }}
-      />
-      <div
-        style={{
-          position: 'absolute',
-          top: 3,
-          left: 2,
-          width: 240,
-          height: 200,
-          background: palette.wikiStackInner,
-          borderRadius: 14,
-          transform: 'rotate(0.8deg)',
-          boxShadow: palette.wikiStackShadow
-        }}
-      />
-      {/* main card */}
-      <div
-        style={{
-          position: 'relative',
-          width: 240,
-          minHeight: 200,
-          background: palette.wikiCardBg,
-          borderRadius: 14,
-          boxShadow: palette.wikiCardShadow,
-          padding: '16px 18px',
-          display: 'flex',
-          flexDirection: 'column',
-          transition: 'box-shadow 0.2s ease'
-        }}
-        className="hover:shadow-lg"
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-          <RiBook2Line size={20} style={{ color: palette.wikiIconColor }} />
-          <span
-            className="font-semibold truncate"
-            style={{ fontSize: 15, flex: 1, color: palette.textColor }}
-          >
-            {wiki.title}
-          </span>
-        </div>
-        {tags.length > 0 && (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 8 }}>
-            {tags.map((tag, i) => (
-              <Tag key={i} style={{ margin: 0, fontSize: 11 }}>
-                {tag}
-              </Tag>
-            ))}
-          </div>
-        )}
-        {wiki.summary && (
-          <div
-            className="line-clamp-3"
-            style={{
-              fontSize: 12,
-              lineHeight: 1.5,
-              marginBottom: 12,
-              fontStyle: 'italic',
-              color: palette.textSecondary
-            }}
-          >
-            {wiki.summary}
-          </div>
-        )}
-        <div style={{ flex: 1 }} />
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            marginTop: 'auto'
-          }}
-        >
-          <span style={{ fontSize: 11, color: palette.textSecondary }}>
-            {new Date(wiki.updated_at).toLocaleDateString('zh-CN')}
-          </span>
-          <Tag color="purple" style={{ margin: 0, fontSize: 11 }}>
-            {wiki.doc_count} 篇
-          </Tag>
-        </div>
-        {/* edit button */}
-        <button
-          style={{ ...iconBtnBase, top: 8, right: 8 }}
-          onClick={(e) => {
-            e.stopPropagation()
-            data.onEdit(wiki)
-          }}
-          title="编辑知识库"
-          onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(128,128,128,0.22)')}
-          onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(128,128,128,0.10)')}
-        >
-          <RiPencilLine size={14} />
-        </button>
-        {/* archive button */}
-        <button
-          style={{ ...iconBtnBase, top: 40, right: 8 }}
-          onClick={(e) => {
-            e.stopPropagation()
-            data.onArchive(wiki)
-          }}
-          title="归档文档到知识库"
-          onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(128,128,128,0.22)')}
-          onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(128,128,128,0.10)')}
-        >
-          <RiInboxArchiveLine size={14} />
-        </button>
-      </div>
-    </div>
-  )
-}
-
-/** Type B: Todo sticky note */
-const TodoNode: React.FC<NodeProps<Node<TodoNodeData>>> = ({ data }) => {
-  const { todo, palette, colorIndex } = data
-  const [hovered, setHovered] = useState(false)
-  const stickyPalette = palette.stickyColors[colorIndex % palette.stickyColors.length]
-
-  return (
-    <div
-      style={{ cursor: 'pointer' }}
-      onClick={() => data.onOpen(todo)}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-    >
-      <div
-        style={{
-          width: 220,
-          minHeight: 160,
-          background: stickyPalette.bg,
-          borderRadius: '2px 2px 14px 14px',
-          boxShadow: `0 3px 10px ${stickyPalette.shadow}, 0 1px 3px rgba(0,0,0,0.06)`,
-          padding: '20px 16px 16px',
-          display: 'flex',
-          flexDirection: 'column',
-          position: 'relative'
-        }}
-      >
-        {/* tape */}
-        <div
-          style={{
-            position: 'absolute',
-            top: -6,
-            left: '50%',
-            transform: 'translateX(-50%) rotate(-2deg)',
-            width: 56,
-            height: 18,
-            background: stickyPalette.tape,
-            borderRadius: 2,
-            opacity: 0.7
-          }}
-        />
-        <span
-          className="font-semibold truncate"
-          style={{ fontSize: 14, marginBottom: 6, lineHeight: 1.3, color: palette.textColor }}
-        >
-          {todo.title}
-        </span>
-        {todo.description && (
-          <div
-            className="line-clamp-3"
-            style={{
-              fontSize: 12,
-              color: palette.todoDescColor,
-              marginBottom: 10,
-              lineHeight: 1.4
-            }}
-          >
-            {todo.description}
-          </div>
-        )}
-        <div style={{ flex: 1 }} />
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          {todo.priority <= 1 ? (
-            <Tag color="red" style={{ margin: 0, fontSize: 10 }}>
-              P{todo.priority}
-            </Tag>
-          ) : todo.priority <= 3 ? (
-            <Tag color="orange" style={{ margin: 0, fontSize: 10 }}>
-              P{todo.priority}
-            </Tag>
-          ) : (
-            <Tag style={{ margin: 0, fontSize: 10 }}>P{todo.priority}</Tag>
-          )}
-          {todo.due_date && (
-            <span style={{ fontSize: 11, color: palette.textSecondary }}>
-              {formatDueDate(todo.due_date)}
-            </span>
-          )}
-        </div>
-        {/* edit button */}
-        <button
-          style={{
-            position: 'absolute',
-            top: 6,
-            right: 6,
-            width: 26,
-            height: 26,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            borderRadius: 6,
-            border: 'none',
-            cursor: 'pointer',
-            background: 'rgba(0,0,0,0.08)',
-            color: palette.textSecondary,
-            opacity: hovered ? 1 : 0,
-            transition: 'opacity 0.15s ease, background 0.15s ease',
-            zIndex: 2
-          }}
-          onClick={(e) => {
-            e.stopPropagation()
-            data.onEdit(todo)
-          }}
-          title="编辑待办事项"
-          onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(0,0,0,0.18)')}
-          onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(0,0,0,0.08)')}
-        >
-          <RiPencilLine size={14} />
-        </button>
-      </div>
-    </div>
-  )
-}
-
-/** Type D: Document card — plain paper */
-const DocNode: React.FC<NodeProps<Node<DocNodeData>>> = ({ data }) => {
-  const { doc, palette } = data
-  const [hovered, setHovered] = useState(false)
-
-  return (
-    <div
-      style={{ cursor: 'pointer' }}
-      onClick={() => data.onOpen(doc)}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-    >
-      <div
-        style={{
-          width: 220,
-          minHeight: 140,
-          background: palette.docCardBg,
-          borderRadius: 14,
-          boxShadow: palette.docCardShadow,
-          padding: '16px 18px',
-          display: 'flex',
-          flexDirection: 'column',
-          border: `1px solid ${palette.docCardBorder}`,
-          position: 'relative'
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-          <RiFileTextLine size={18} style={{ color: palette.docIconColor }} />
-          <span
-            className="font-semibold truncate"
-            style={{ fontSize: 14, flex: 1, color: palette.textColor }}
-          >
-            {doc.title}
-          </span>
-        </div>
-        {doc.summary && (
-          <div
-            className="line-clamp-3"
-            style={{ fontSize: 12, lineHeight: 1.5, marginBottom: 8, color: palette.textSecondary }}
-          >
-            {doc.summary}
-          </div>
-        )}
-        <div style={{ flex: 1 }} />
-        <span style={{ fontSize: 11, color: palette.textSecondary }}>
-          {doc.word_count} 字 · {new Date(doc.updated_at).toLocaleDateString('zh-CN')}
-        </span>
-        {/* edit button */}
-        <button
-          style={{
-            position: 'absolute',
-            top: 6,
-            right: 6,
-            width: 26,
-            height: 26,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            borderRadius: 6,
-            border: 'none',
-            cursor: 'pointer',
-            background: 'rgba(128,128,128,0.10)',
-            color: palette.textSecondary,
-            opacity: hovered ? 1 : 0,
-            transition: 'opacity 0.15s ease, background 0.15s ease',
-            zIndex: 2
-          }}
-          onClick={(e) => {
-            e.stopPropagation()
-            data.onEdit(doc)
-          }}
-          title="编辑文档"
-          onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(128,128,128,0.22)')}
-          onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(128,128,128,0.10)')}
-        >
-          <RiPencilLine size={14} />
-        </button>
-      </div>
-    </div>
-  )
-}
-
-/* ──────────── Memoized node types ──────────── */
-
-const nodeTypes = {
-  wiki: React.memo(WikiNode),
-  todo: React.memo(TodoNode),
-  doc: React.memo(DocNode)
-}
-
-/* ═══════════════════════════════════════════════════════════
-   MainContent — Infinite Canvas powered by React Flow
-   ═══════════════════════════════════════════════════════════ */
+import { useThemePalette } from '../hooks/useThemePalette'
+import {
+  WIKI_POSITIONS,
+  TODO_POSITIONS,
+  DOC_POSITIONS,
+  getPositionForIndex
+} from '../utils/canvasConstants'
+import { nodeTypes } from './nodeTypes'
+import CanvasContextMenu from './CanvasContextMenu'
+import type { WikiNodeData } from './nodes/WikiNode'
+import type { TodoNodeData } from './nodes/TodoNode'
+import type { DocNodeData } from './nodes/DocNode'
 
 const MainContent: React.FC = () => {
   const { effectiveTheme } = useTheme()
@@ -529,6 +58,19 @@ const MainContent: React.FC = () => {
 
   /* ── React Flow nodes ── */
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
+
+  /* ── saved node positions from DB ── */
+  const savedPositionsRef = useRef<Map<string, { x: number; y: number }>>(new Map())
+
+  /* ── pagination state ── */
+  const wikiPageRef = useRef(1)
+  const todoPageRef = useRef(1)
+  const docPageRef = useRef(1)
+  const wikiHasMoreRef = useRef(true)
+  const todoHasMoreRef = useRef(true)
+  const docHasMoreRef = useRef(true)
+  const loadingMoreRef = useRef(false)
+  const bottomNodeYRef = useRef(0)
 
   /* ── wiki preview modal state ── */
   const [isPreviewOpen, setIsPreviewOpen] = useState(false)
@@ -555,24 +97,59 @@ const MainContent: React.FC = () => {
   const [editingWiki, setEditingWiki] = useState<WikiRow | null>(null)
   const [wikiDetailOpen, setWikiDetailOpen] = useState(false)
   const [detailWikiId, setDetailWikiId] = useState<number | undefined>(undefined)
+  const [wikiDetailKey, setWikiDetailKey] = useState(0)
   const [editTodoOpen, setEditTodoOpen] = useState(false)
   const [editingTodo, setEditingTodo] = useState<TodoItemRow | null>(null)
   const [editDocOpen, setEditDocOpen] = useState(false)
   const [editingDoc, setEditingDoc] = useState<DocItemType | null>(null)
 
-  /* ── fetch data ── */
+  /* ── doc archive modal state ── */
+  const [docArchiveOpen, setDocArchiveOpen] = useState(false)
+  const [archivingDoc, setArchivingDoc] = useState<DocListItem | null>(null)
+  const [archiveWikis, setArchiveWikis] = useState<WikiRow[]>([])
+  const [archiveDirectories, setArchiveDirectories] = useState<WikiDirectoryRow[]>([])
+  const [archiveSelectedWikiId, setArchiveSelectedWikiId] = useState<number | null>(null)
 
-  const loadData = useCallback(async (showLoading = false) => {
+  /* ── doc removed from wiki → add back to canvas ── */
+  const handleDocRemovedFromWiki = useCallback(async (docId: number): Promise<void> => {
+    try {
+      const doc = await (window as unknown as Window).api.docs.getById(docId)
+      if (doc) {
+        setDocs((prev) => {
+          if (prev.some((d) => d.id === doc.id)) return prev
+          return [doc, ...prev]
+        })
+      }
+    } catch (error) {
+      console.error('Failed to load removed doc:', error)
+    }
+  }, [])
+
+  /* ── fetch initial data ── */
+  const loadInitialData = useCallback(async (showLoading = true) => {
     if (showLoading) setLoading(true)
     try {
-      const [wikiResult, todoResult, docResult] = await Promise.all([
-        (window as unknown as Window).api.wikis.getAll(1, 3),
-        (window as unknown as Window).api.todoItems.getAll(),
-        (window as unknown as Window).api.docs.getAll(1, 3, undefined, undefined)
+      const [wikiResult, todoResult, docResult, positionsResult] = await Promise.all([
+        (window as unknown as Window).api.wikis.getAll(1, 10),
+        (window as unknown as Window).api.todoItems.getAllPaginated(1, 10),
+        (window as unknown as Window).api.docs.getAll(1, 10, -1),
+        (window as unknown as Window).api.nodePositions.getAll()
       ])
-      setWikis(wikiResult.items.slice(0, 3))
-      setTodos(todoResult.filter((x: TodoItemRow) => x.status !== 2).slice(0, 3))
-      setDocs(docResult.items.slice(0, 3))
+      setWikis(wikiResult.items)
+      setTodos(todoResult.items)
+      setDocs(docResult.items)
+      wikiPageRef.current = 1
+      todoPageRef.current = 1
+      docPageRef.current = 1
+      wikiHasMoreRef.current = wikiResult.hasMore
+      todoHasMoreRef.current = todoResult.hasMore
+      docHasMoreRef.current = docResult.hasMore
+
+      const posMap = new Map<string, { x: number; y: number }>()
+      for (const p of positionsResult) {
+        posMap.set(p.node_id, { x: p.x, y: p.y })
+      }
+      savedPositionsRef.current = posMap
     } catch (error) {
       console.error('Failed to load canvas data:', error)
     } finally {
@@ -581,16 +158,83 @@ const MainContent: React.FC = () => {
   }, [])
 
   useEffect(() => {
-    loadData(true)
-  }, [loadData])
+    loadInitialData().then()
+  }, [loadInitialData])
+
+  /* ── load next page for all types that still have more ── */
+  const loadMoreData = useCallback(async () => {
+    if (loadingMoreRef.current) return
+    const hasMore = wikiHasMoreRef.current || todoHasMoreRef.current || docHasMoreRef.current
+    if (!hasMore) return
+
+    loadingMoreRef.current = true
+    try {
+      const promises: Promise<void>[] = []
+
+      if (wikiHasMoreRef.current) {
+        wikiPageRef.current++
+        promises.push(
+          (window as unknown as Window).api.wikis.getAll(wikiPageRef.current, 10).then((result) => {
+            wikiHasMoreRef.current = result.hasMore
+            setWikis((prev) => [...prev, ...result.items])
+          })
+        )
+      }
+      if (todoHasMoreRef.current) {
+        todoPageRef.current++
+        promises.push(
+          (window as unknown as Window).api.todoItems
+            .getAllPaginated(todoPageRef.current, 10)
+            .then((result) => {
+              todoHasMoreRef.current = result.hasMore
+              setTodos((prev) => [...prev, ...result.items])
+            })
+        )
+      }
+      if (docHasMoreRef.current) {
+        docPageRef.current++
+        promises.push(
+          (window as unknown as Window).api.docs
+            .getAll(docPageRef.current, 10, -1)
+            .then((result) => {
+              docHasMoreRef.current = result.hasMore
+              setDocs((prev) => [...prev, ...result.items])
+            })
+        )
+      }
+
+      await Promise.all(promises)
+    } catch (error) {
+      console.error('Failed to load more canvas data:', error)
+    } finally {
+      loadingMoreRef.current = false
+    }
+  }, [])
+
+  /* ── detect canvas pan approaching bottom edge → load more ── */
+  const handleMoveEnd = useCallback(
+    (
+      _event: React.MouseEvent | MouseEvent | TouchEvent | null,
+      viewport: { x: number; y: number; zoom: number }
+    ) => {
+      if (!viewport) return
+      const canvasBottomY = (-viewport.y + window.innerHeight) / viewport.zoom
+      if (canvasBottomY > bottomNodeYRef.current - 600) {
+        loadMoreData().then()
+      }
+    },
+    [loadMoreData]
+  )
 
   /* ── build nodes from data whenever data or palette changes ── */
 
   useEffect(() => {
+    const savedPositions = savedPositionsRef.current
+
     const wikiNodes: Node<WikiNodeData>[] = wikis.map((wiki, i) => ({
       id: `wiki-${wiki.id}`,
       type: 'wiki',
-      position: WIKI_POSITIONS[i] ?? WIKI_POSITIONS[0],
+      position: savedPositions.get(`wiki-${wiki.id}`) ?? getPositionForIndex(WIKI_POSITIONS, i),
       data: {
         wiki,
         palette,
@@ -603,18 +247,38 @@ const MainContent: React.FC = () => {
     const todoNodes: Node<TodoNodeData>[] = todos.map((todo, i) => ({
       id: `todo-${todo.id}`,
       type: 'todo',
-      position: TODO_POSITIONS[i] ?? TODO_POSITIONS[0],
-      data: { todo, palette, colorIndex: i, onOpen: handleOpenTodoPreview, onEdit: handleEditTodo }
+      position: savedPositions.get(`todo-${todo.id}`) ?? getPositionForIndex(TODO_POSITIONS, i),
+      data: {
+        todo,
+        palette,
+        colorIndex: i,
+        onOpen: handleOpenTodoPreview,
+        onEdit: handleEditTodo,
+        onToggleInProgress: handleToggleInProgress,
+        onToggleComplete: handleToggleComplete,
+        onDelete: handleDeleteTodo
+      }
     }))
 
     const docNodes: Node<DocNodeData>[] = docs.map((doc, i) => ({
       id: `doc-${doc.id}`,
       type: 'doc',
-      position: DOC_POSITIONS[i] ?? DOC_POSITIONS[0],
-      data: { doc, palette, onOpen: handleOpenDocPreview, onEdit: handleEditDoc }
+      position: savedPositions.get(`doc-${doc.id}`) ?? getPositionForIndex(DOC_POSITIONS, i),
+      data: {
+        doc,
+        palette,
+        onOpen: handleOpenDocPreview,
+        onEdit: handleEditDoc,
+        onDelete: handleDeleteDoc,
+        onArchive: handleOpenDocArchive
+      }
     }))
 
-    setNodes([...wikiNodes, ...todoNodes, ...docNodes])
+    const allNodes = [...wikiNodes, ...todoNodes, ...docNodes]
+    if (allNodes.length > 0) {
+      bottomNodeYRef.current = Math.max(...allNodes.map((n) => n.position.y)) + 200
+    }
+    setNodes(allNodes)
   }, [wikis, todos, docs, palette, setNodes])
 
   /* ── wiki preview handler ── */
@@ -673,6 +337,7 @@ const MainContent: React.FC = () => {
     async (data: {
       title: string
       summary: string | null
+      tags: string | null
       image: string | null
     }): Promise<void> => {
       const messageKey = 'canvas-new-wiki'
@@ -681,13 +346,13 @@ const MainContent: React.FC = () => {
         await (window as unknown as Window).api.wikis.add(data)
         viewMessage(messageKey, 'success', '知识库创建成功！', 2)
         setNewWikiOpen(false)
-        loadData()
+        await loadInitialData(false)
       } catch (error) {
         console.error('Failed to create wiki:', error)
         viewMessage(messageKey, 'error', '创建知识库失败')
       }
     },
-    [viewMessage, loadData]
+    [viewMessage, loadInitialData]
   )
 
   const handleNewDocSave = useCallback(
@@ -710,13 +375,13 @@ const MainContent: React.FC = () => {
         })
         viewMessage(messageKey, 'success', '文档创建成功！', 2)
         setNewDocOpen(false)
-        loadData()
+        await loadInitialData(false)
       } catch (error) {
         console.error('Failed to create doc:', error)
         viewMessage(messageKey, 'error', '创建文档失败')
       }
     },
-    [viewMessage, loadData]
+    [viewMessage, loadInitialData]
   )
 
   const handleNewTodoSave = useCallback(
@@ -734,13 +399,13 @@ const MainContent: React.FC = () => {
         await (window as unknown as Window).api.todoItems.add(newTodo)
         viewMessage(messageKey, 'success', '待办事项添加成功', 2)
         setNewTodoOpen(false)
-        loadData()
+        await loadInitialData(false)
       } catch (error) {
         console.error('Failed to create todo:', error)
         viewMessage(messageKey, 'error', '添加待办事项失败')
       }
     },
-    [viewMessage, loadData]
+    [viewMessage, loadInitialData]
   )
 
   /* ── edit wiki handlers ── */
@@ -754,6 +419,7 @@ const MainContent: React.FC = () => {
     async (data: {
       title: string
       summary: string | null
+      tags: string | null
       image: string | null
     }): Promise<void> => {
       if (!editingWiki) return
@@ -763,28 +429,26 @@ const MainContent: React.FC = () => {
         await (window as unknown as Window).api.wikis.update(editingWiki.id, {
           title: data.title,
           summary: data.summary,
+          tags: data.tags,
           image: data.image
         })
         viewMessage(messageKey, 'success', '知识库已更新', 2)
         setEditWikiOpen(false)
         setEditingWiki(null)
-        loadData()
+        await loadInitialData(false)
       } catch (error) {
         console.error('Failed to update wiki:', error)
         viewMessage(messageKey, 'error', '保存知识库失败')
       }
     },
-    [editingWiki, viewMessage, loadData]
+    [editingWiki, viewMessage, loadInitialData]
   )
-
-  /* ── wiki detail handler ── */
 
   const handleOpenWikiDetail = useCallback((wiki: WikiRow): void => {
     setDetailWikiId(wiki.id)
+    setWikiDetailKey((prev) => prev + 1)
     setWikiDetailOpen(true)
   }, [])
-
-  /* ── edit todo handlers ── */
 
   const handleEditTodo = useCallback(
     async (todo: TodoItemRow): Promise<void> => {
@@ -824,13 +488,13 @@ const MainContent: React.FC = () => {
         viewMessage(messageKey, 'success', '待办事项已更新', 2)
         setEditTodoOpen(false)
         setEditingTodo(null)
-        loadData()
+        await loadInitialData(false)
       } catch (error) {
         console.error('Failed to update todo:', error)
         viewMessage(messageKey, 'error', '保存待办事项失败')
       }
     },
-    [editingTodo, viewMessage, loadData]
+    [editingTodo, viewMessage, loadInitialData]
   )
 
   /* ── edit doc handlers ── */
@@ -878,18 +542,148 @@ const MainContent: React.FC = () => {
         viewMessage(messageKey, 'success', '文档已更新', 2)
         setEditDocOpen(false)
         setEditingDoc(null)
-        loadData()
+        await loadInitialData(false)
       } catch (error) {
         console.error('Failed to update doc:', error)
         viewMessage(messageKey, 'error', '保存文档失败')
       }
     },
-    [editingDoc, viewMessage, loadData]
+    [editingDoc, viewMessage, loadInitialData]
   )
 
-  /* ════════════════════════════════════════════════
-     Render
-     ════════════════════════════════════════════════ */
+  /* ── todo status & delete handlers ── */
+
+  const handleToggleInProgress = useCallback(
+    async (todo: TodoItemRow): Promise<void> => {
+      if (todo.status === 1) {
+        viewMessage('todo-in-progress', 'warning', '进行中的任务只能标记为完成，不能退回待办状态')
+        return
+      }
+      const messageKey = 'canvas-todo-progress'
+      try {
+        viewMessage(messageKey, 'loading', '正在更新状态...')
+        await (window as unknown as Window).api.todoItems.update(todo.id, { status: 1 })
+        viewMessage(messageKey, 'success', '已标记为进行中', 2)
+        await loadInitialData(false)
+      } catch (error) {
+        console.error('Failed to update todo progress:', error)
+        viewMessage(messageKey, 'error', '更新状态失败')
+      }
+    },
+    [viewMessage, loadInitialData]
+  )
+
+  const handleToggleComplete = useCallback(
+    async (todo: TodoItemRow): Promise<void> => {
+      const newStatus = todo.status === 2 ? 0 : 2
+      const messageKey = 'canvas-todo-complete'
+      try {
+        viewMessage(messageKey, 'loading', '正在更新状态...')
+        await (window as unknown as Window).api.todoItems.update(todo.id, { status: newStatus })
+        viewMessage(
+          messageKey,
+          'success',
+          `待办事项已${todo.status === 2 ? '重新激活' : '标记为完成'}`,
+          2
+        )
+        await loadInitialData(false)
+      } catch (error) {
+        console.error('Failed to update todo completion:', error)
+        viewMessage(messageKey, 'error', '更新状态失败')
+      }
+    },
+    [viewMessage, loadInitialData]
+  )
+
+  const handleDeleteTodo = useCallback(
+    async (todo: TodoItemRow): Promise<void> => {
+      const messageKey = 'canvas-todo-delete'
+      try {
+        viewMessage(messageKey, 'loading', '正在删除...')
+        await (window as unknown as Window).api.todoItems.delete(todo.id)
+        viewMessage(messageKey, 'success', '已删除', 2)
+        await loadInitialData(false)
+      } catch (error) {
+        console.error('Failed to delete todo:', error)
+        viewMessage(messageKey, 'error', '删除失败')
+      }
+    },
+    [viewMessage, loadInitialData]
+  )
+
+  /* ── doc delete & archive handlers ── */
+
+  const handleDeleteDoc = useCallback(
+    async (doc: DocListItem): Promise<void> => {
+      const messageKey = 'canvas-doc-delete'
+      try {
+        viewMessage(messageKey, 'loading', '正在删除文档...')
+        await (window as unknown as Window).api.docs.delete(doc.id)
+        viewMessage(messageKey, 'success', '文档已删除', 2)
+        setDocs((prev) => prev.filter((d) => d.id !== doc.id))
+      } catch (error) {
+        console.error('Failed to delete doc:', error)
+        viewMessage(messageKey, 'error', '删除文档失败')
+      }
+    },
+    [viewMessage]
+  )
+
+  const handleOpenDocArchive = useCallback(async (doc: DocListItem): Promise<void> => {
+    setArchivingDoc(doc)
+    setArchiveSelectedWikiId(null)
+    setArchiveDirectories([])
+    try {
+      const result = await (window as unknown as Window).api.wikis.getAll(1, 100)
+      setArchiveWikis(result.items)
+    } catch (error) {
+      console.error('Failed to load wikis:', error)
+    }
+    setDocArchiveOpen(true)
+  }, [])
+
+  const handleSelectArchiveWiki = useCallback(async (wikiId: number): Promise<void> => {
+    setArchiveSelectedWikiId(wikiId)
+    try {
+      const dirs = await (window as unknown as Window).api.wikis.getDirectories(wikiId)
+      setArchiveDirectories(dirs)
+    } catch (error) {
+      console.error('Failed to load directories:', error)
+    }
+  }, [])
+
+  const handleArchiveDocToDirectory = useCallback(
+    async (directoryId: number): Promise<void> => {
+      if (!archivingDoc) return
+      const messageKey = 'canvas-doc-archive'
+      try {
+        viewMessage(messageKey, 'loading', '正在归档文档...')
+        await (window as unknown as Window).api.wikis.addNoteToDirectory(
+          directoryId,
+          archivingDoc.id
+        )
+        viewMessage(messageKey, 'success', '文档归档成功！', 2)
+        setDocArchiveOpen(false)
+        setDocs((prev) => prev.filter((d) => d.id !== archivingDoc.id))
+        setArchivingDoc(null)
+      } catch (error) {
+        console.error('Failed to archive doc:', error)
+        viewMessage(messageKey, 'error', '归档文档失败')
+      }
+    },
+    [archivingDoc, viewMessage]
+  )
+
+  /* ── node drag stop: save position to DB ── */
+
+  const handleNodeDragStop: OnNodeDrag = useCallback((_event, node) => {
+    const nodeId = node.id
+    const x = node.position.x
+    const y = node.position.y
+    ;(window as unknown as Window).api.nodePositions
+      .save(nodeId, x, y)
+      .catch((err) => console.error('Failed to save node position:', err))
+  }, [])
 
   if (loading) {
     return (
@@ -914,12 +708,15 @@ const MainContent: React.FC = () => {
         nodes={nodes}
         nodeTypes={nodeTypes}
         onNodesChange={onNodesChange}
+        onNodeDragStop={handleNodeDragStop}
         onPaneContextMenu={handlePaneContextMenu}
+        onMoveEnd={handleMoveEnd}
         fitView
         fitViewOptions={{ padding: 0.2 }}
         minZoom={0.15}
         maxZoom={3}
         colorMode={isDark ? 'dark' : 'light'}
+        proOptions={{ hideAttribution: true }}
         style={{ background: token.colorBgLayout }}
         deleteKeyCode={['Backspace', 'Delete']}
       >
@@ -968,72 +765,14 @@ const MainContent: React.FC = () => {
 
       {/* Context menu overlay */}
       {contextMenu && (
-        <div
-          style={{
-            position: 'fixed',
-            top: contextMenu.y,
-            left: contextMenu.x,
-            zIndex: 1000,
-            background: token.colorBgElevated,
-            borderRadius: token.borderRadiusLG,
-            boxShadow: token.boxShadowSecondary,
-            padding: '4px 0',
-            minWidth: 180,
-            border: `1px solid ${token.colorBorderSecondary}`
-          }}
-        >
-          <div
-            onClick={() => {
-              setContextMenu(null)
-              setNewWikiOpen(true)
-            }}
-            style={{
-              padding: '8px 16px',
-              cursor: 'pointer',
-              fontSize: 14,
-              color: token.colorText,
-              transition: 'background 0.15s'
-            }}
-            onMouseEnter={(e) => (e.currentTarget.style.background = token.colorFillSecondary)}
-            onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-          >
-            新建知识库
-          </div>
-          <div
-            onClick={() => {
-              setContextMenu(null)
-              setNewDocOpen(true)
-            }}
-            style={{
-              padding: '8px 16px',
-              cursor: 'pointer',
-              fontSize: 14,
-              color: token.colorText,
-              transition: 'background 0.15s'
-            }}
-            onMouseEnter={(e) => (e.currentTarget.style.background = token.colorFillSecondary)}
-            onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-          >
-            新建文档
-          </div>
-          <div
-            onClick={() => {
-              setContextMenu(null)
-              setNewTodoOpen(true)
-            }}
-            style={{
-              padding: '8px 16px',
-              cursor: 'pointer',
-              fontSize: 14,
-              color: token.colorText,
-              transition: 'background 0.15s'
-            }}
-            onMouseEnter={(e) => (e.currentTarget.style.background = token.colorFillSecondary)}
-            onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-          >
-            新建待办事项
-          </div>
-        </div>
+        <CanvasContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          onClose={() => setContextMenu(null)}
+          onNewDoc={() => setNewDocOpen(true)}
+          onNewWiki={() => setNewWikiOpen(true)}
+          onNewTodo={() => setNewTodoOpen(true)}
+        />
       )}
 
       <WikiEditModal
@@ -1066,6 +805,7 @@ const MainContent: React.FC = () => {
         isNew={false}
         initialTitle={editingWiki?.title ?? ''}
         initialSummary={editingWiki?.summary ?? ''}
+        initialTags={editingWiki?.tags ?? ''}
         initialImage={editingWiki?.image ?? null}
         onSave={handleEditWikiSave}
         onCancel={() => {
@@ -1083,19 +823,16 @@ const MainContent: React.FC = () => {
           setDetailWikiId(undefined)
         }}
         footer={null}
-        width="90vw"
+        width="calc(100vw - 60px)"
         centered={true}
-        styles={{ body: { padding: 0, height: 'calc(90vh - 110px)' } }}
+        styles={{ body: { padding: 0, height: 'calc(100vh - 130px)' } }}
       >
         <div className="flex flex-row h-full" style={{ height: '100%' }}>
           <WikiDetail
+            key={`${detailWikiId}-${wikiDetailKey}`}
             wiki={wikis.find((w) => w.id === detailWikiId) ?? ({} as WikiRow)}
-            onBack={() => {
-              setWikiDetailOpen(false)
-              setDetailWikiId(undefined)
-            }}
             onEditWiki={handleEditWiki}
-            showBackButton={false}
+            onDocRemoved={handleDocRemovedFromWiki}
           />
         </div>
       </Modal>
@@ -1124,6 +861,72 @@ const MainContent: React.FC = () => {
         }}
         onSave={handleEditDocSave}
       />
+
+      {/* Doc Archive Modal */}
+      <Modal
+        title={`归档「${archivingDoc?.title ?? ''}」到知识库目录`}
+        open={docArchiveOpen}
+        onCancel={() => {
+          setDocArchiveOpen(false)
+          setArchivingDoc(null)
+        }}
+        footer={null}
+        width={420}
+      >
+        <div style={{ display: 'flex', gap: 12, height: 300 }}>
+          <div
+            style={{ flex: 1, overflow: 'auto', borderRight: '1px solid #f0f0f0', paddingRight: 8 }}
+          >
+            <div style={{ fontWeight: 600, marginBottom: 8 }}>选择知识库</div>
+            {archiveWikis.map((wiki) => (
+              <div
+                key={wiki.id}
+                onClick={() => handleSelectArchiveWiki(wiki.id)}
+                style={{
+                  padding: '6px 10px',
+                  borderRadius: 6,
+                  cursor: 'pointer',
+                  marginBottom: 4,
+                  background: archiveSelectedWikiId === wiki.id ? '#e6f4ff' : 'transparent',
+                  color: archiveSelectedWikiId === wiki.id ? '#1677ff' : 'inherit'
+                }}
+              >
+                {wiki.title}
+              </div>
+            ))}
+          </div>
+          <div style={{ flex: 1, overflow: 'auto' }}>
+            <div style={{ fontWeight: 600, marginBottom: 8 }}>选择目录</div>
+            {!archiveSelectedWikiId ? (
+              <div style={{ color: '#999', fontSize: 13 }}>请先选择知识库</div>
+            ) : archiveDirectories.length === 0 ? (
+              <div style={{ color: '#999', fontSize: 13 }}>该知识库暂无目录</div>
+            ) : (
+              archiveDirectories.map((dir) => (
+                <div
+                  key={dir.id}
+                  onClick={() => handleArchiveDocToDirectory(dir.id)}
+                  style={{
+                    padding: '6px 10px',
+                    borderRadius: 6,
+                    cursor: 'pointer',
+                    marginBottom: 4,
+                    background: 'transparent'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = '#f5f5f5'
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'transparent'
+                  }}
+                >
+                  {dir.name}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </Modal>
     </div>
   )
 }

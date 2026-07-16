@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react'
 import { Button, Space, Input, Flex, Typography, Select, Modal, Tag } from 'antd'
 import { SyncOutlined, SearchOutlined } from '@ant-design/icons'
-import { RiApps2AddLine, RiArrowLeftLine } from '@remixicon/react'
+import { RiApps2AddLine } from '@remixicon/react'
 import type { GraphToolbarProps } from '@renderer/types/components'
 
 const { Text } = Typography
@@ -19,8 +19,7 @@ const GraphToolbar: React.FC<GraphToolbarProps> = ({
   onSearchChange,
   onAppendDocs,
   onDocFilterChange,
-  onBuildGraph,
-  onBackToWikiList
+  onBuildGraph
 }) => {
   const [modalOpen, setModalOpen] = useState(false)
   const [selectedDocIds, setSelectedDocIds] = useState<number[]>([])
@@ -69,9 +68,6 @@ const GraphToolbar: React.FC<GraphToolbarProps> = ({
         }}
       >
         <Space wrap>
-          <Button size="small" onClick={onBackToWikiList}>
-            <RiArrowLeftLine size={12} />
-          </Button>
           <Text strong>{wikiTitle}</Text>
         </Space>
 

@@ -89,6 +89,7 @@ CREATE TABLE IF NOT EXISTS wiki (
     id         SERIAL PRIMARY KEY,
     title      TEXT      NOT NULL,
     summary    TEXT,
+    tags       TEXT,
     image_id   TEXT      REFERENCES images(id),
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW()
@@ -228,3 +229,11 @@ CREATE TABLE IF NOT EXISTS music_tracks (
 
 CREATE INDEX IF NOT EXISTS idx_music_tracks_folder ON music_tracks(folder_id);
 CREATE INDEX IF NOT EXISTS idx_music_tracks_file_hash ON music_tracks(file_hash);
+
+-- 画布节点位置表
+CREATE TABLE IF NOT EXISTS node_positions (
+    node_id    TEXT      NOT NULL PRIMARY KEY,
+    x          REAL      NOT NULL DEFAULT 0,
+    y          REAL      NOT NULL DEFAULT 0,
+    updated_at TIMESTAMP DEFAULT NOW()
+);

@@ -170,7 +170,7 @@ const DocumentEditModal: React.FC<DocumentEditModalProps> = ({
             )}
           </div>
           {editImage && (
-            <div style={{ width: '100%', maxHeight: 200, overflow: 'hidden', borderRadius: 8 }}>
+            <div style={{ width: '100%', maxHeight: 300, overflow: 'hidden', borderRadius: 8 }}>
               <img
                 src={editImage}
                 alt="文档封面"

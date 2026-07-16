@@ -1,26 +1,37 @@
 import React, { useState, useCallback, useEffect } from 'react'
 import { theme, Modal, Button, Empty, Flex, Typography, Spin, Space, Input } from 'antd'
-import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons'
+import {
+  PlusOutlined,
+  EditOutlined,
+  DeleteOutlined,
+  MinusCircleOutlined,
+  ImportOutlined
+} from '@ant-design/icons'
 import { RiBook2Line } from '@remixicon/react'
 import DocumentCard from '@renderer/components/document/DocumentCard'
 import DocumentPreviewModal from '@renderer/components/document/DocumentPreviewModal'
+import DocumentEditModal from '@renderer/components/document/DocumentEditModal'
 import WikiArchiveModal from '@renderer/components/wiki/WikiArchiveModal'
-import DirectoryTree from '@renderer/views/knowledge/manage/components/DirectoryTree'
+import DirectoryTree from '@renderer/components/wiki/WikiDirectoryTree'
 import { useMessage } from '@renderer/hooks/useMessage'
 import { Window } from '../../../resource/types/window'
-import type { WikiRow, WikiDirectoryRow, DirectoryDocWithDetail } from '@renderer/types/models'
+import type {
+  WikiRow,
+  WikiDirectoryRow,
+  DirectoryDocWithDetail,
+  DocItem
+} from '@renderer/types/models'
 import type { DirectoryWithChildren } from '@renderer/types/knowledge'
 
 const { Title, Text } = Typography
 
 export interface WikiDetailProps {
   wiki: WikiRow
-  onBack: () => void
   onEditWiki?: (wiki: WikiRow) => void
-  showBackButton?: boolean
+  onDocRemoved?: (docId: number) => void
 }
 
-const WikiDetail: React.FC<WikiDetailProps> = ({ wiki, onBack, onEditWiki, showBackButton = true }) => {
+const WikiDetail: React.FC<WikiDetailProps> = ({ wiki, onEditWiki, onDocRemoved }) => {
   const { token } = theme.useToken()
   const { colorBgContainer, borderRadiusLG, colorBorder } = token
   const { viewMessage } = useMessage()
@@ -46,6 +57,13 @@ const WikiDetail: React.FC<WikiDetailProps> = ({ wiki, onBack, onEditWiki, showB
   /* ── preview modal state ── */
   const [previewDoc, setPreviewDoc] = useState<DirectoryDocWithDetail | null>(null)
   const [previewOpen, setPreviewOpen] = useState(false)
+
+  /* ── edit doc modal state ── */
+  const [editDocModalOpen, setEditDocModalOpen] = useState(false)
+  const [editingDoc, setEditingDoc] = useState<DocItem | null>(null)
+
+  /* ── new doc modal state ── */
+  const [newDocOpen, setNewDocOpen] = useState(false)
 
   /* ── utility: build tree ── */
 
@@ -108,22 +126,25 @@ const WikiDetail: React.FC<WikiDetailProps> = ({ wiki, onBack, onEditWiki, showB
   }, [])
 
   useEffect(() => {
-    loadDirectories()
+    loadDirectories().then()
   }, [loadDirectories])
 
   /* ── directory handlers ── */
 
-  const handleSelectDirectory = useCallback((selectedKeys: React.Key[]): void => {
-    if (selectedKeys.length > 0) {
-      const dirId = selectedKeys[0] as number
-      const dir = directories.find((d) => d.id === dirId)
-      if (dir) {
-        setSelectedDirectory(dir)
-        setDirectoryDocs([])
-        loadDirectoryDocs(dir.id)
+  const handleSelectDirectory = useCallback(
+    (selectedKeys: React.Key[]): void => {
+      if (selectedKeys.length > 0) {
+        const dirId = selectedKeys[0] as number
+        const dir = directories.find((d) => d.id === dirId)
+        if (dir) {
+          setSelectedDirectory(dir)
+          setDirectoryDocs([])
+          loadDirectoryDocs(dir.id).then()
+        }
       }
-    }
-  }, [directories, loadDirectoryDocs])
+    },
+    [directories, loadDirectoryDocs]
+  )
 
   const handleCreateDirectory = useCallback((parentId: number | null = null): void => {
     setCurrentDirectoryItem(null)
@@ -170,22 +191,34 @@ const WikiDetail: React.FC<WikiDetailProps> = ({ wiki, onBack, onEditWiki, showB
       console.error('Failed to save directory:', error)
       viewMessage(messageKey, 'error', '保存目录失败')
     }
-  }, [wiki.id, isNewDirectory, creatingSubDirectoryFor, directories, currentDirectoryItem, editDirectoryName, viewMessage, loadDirectories])
+  }, [
+    wiki.id,
+    isNewDirectory,
+    creatingSubDirectoryFor,
+    directories,
+    currentDirectoryItem,
+    editDirectoryName,
+    viewMessage,
+    loadDirectories
+  ])
 
-  const handleDeleteDirectory = useCallback(async (dir: WikiDirectoryRow): Promise<void> => {
-    const messageKey = 'directory-delete'
-    try {
-      viewMessage(messageKey, 'loading', '正在删除目录...')
-      await (window as unknown as Window).api.wikis.deleteDirectory(dir.id)
-      viewMessage(messageKey, 'success', '目录删除成功！', 2)
-      setSelectedDirectory(null)
-      setDirectoryDocs([])
-      await loadDirectories()
-    } catch (error) {
-      console.error('Failed to delete directory:', error)
-      viewMessage(messageKey, 'error', '删除目录失败')
-    }
-  }, [viewMessage, loadDirectories])
+  const handleDeleteDirectory = useCallback(
+    async (dir: WikiDirectoryRow): Promise<void> => {
+      const messageKey = 'directory-delete'
+      try {
+        viewMessage(messageKey, 'loading', '正在删除目录...')
+        await (window as unknown as Window).api.wikis.deleteDirectory(dir.id)
+        viewMessage(messageKey, 'success', '目录删除成功！', 2)
+        setSelectedDirectory(null)
+        setDirectoryDocs([])
+        await loadDirectories()
+      } catch (error) {
+        console.error('Failed to delete directory:', error)
+        viewMessage(messageKey, 'error', '删除目录失败')
+      }
+    },
+    [viewMessage, loadDirectories]
+  )
 
   /* ── archive handlers ── */
 
@@ -193,58 +226,195 @@ const WikiDetail: React.FC<WikiDetailProps> = ({ wiki, onBack, onEditWiki, showB
     setArchiveModalOpen(true)
   }, [])
 
-  const handleArchiveDocs = useCallback(async (docIds: number[]): Promise<void> => {
-    if (!selectedDirectory) return
-    const messageKey = 'archive-docs'
-    try {
-      viewMessage(messageKey, 'loading', '正在归档文档...')
-      for (const docId of docIds) {
-        await (window as unknown as Window).api.wikis.addNoteToDirectory(selectedDirectory.id, docId)
+  const handleArchiveDocs = useCallback(
+    async (docIds: number[]): Promise<void> => {
+      if (!selectedDirectory) return
+      const messageKey = 'archive-docs'
+      try {
+        viewMessage(messageKey, 'loading', '正在归档文档...')
+        for (const docId of docIds) {
+          await (window as unknown as Window).api.wikis.addNoteToDirectory(
+            selectedDirectory.id,
+            docId
+          )
+        }
+        viewMessage(messageKey, 'success', '文档归档成功！', 2)
+        setArchiveModalOpen(false)
+        await loadDirectoryDocs(selectedDirectory.id)
+      } catch (error) {
+        console.error('Failed to archive docs:', error)
+        viewMessage(messageKey, 'error', '归档文档失败')
       }
-      viewMessage(messageKey, 'success', '文档归档成功！', 2)
-      setArchiveModalOpen(false)
-      await loadDirectoryDocs(selectedDirectory.id)
-    } catch (error) {
-      console.error('Failed to archive docs:', error)
-      viewMessage(messageKey, 'error', '归档文档失败')
-    }
-  }, [selectedDirectory, viewMessage, loadDirectoryDocs])
+    },
+    [selectedDirectory, viewMessage, loadDirectoryDocs]
+  )
 
   /* ── remove doc handler ── */
 
-  const handleRemoveDocFromDirectory = useCallback(async (docId: number): Promise<void> => {
+  const handleRemoveDocFromDirectory = useCallback(
+    async (docId: number): Promise<void> => {
+      if (!selectedDirectory) return
+      const messageKey = 'remove-doc'
+      try {
+        viewMessage(messageKey, 'loading', '正在移除文档...')
+        await (window as unknown as Window).api.wikis.removeNoteFromDirectory(
+          selectedDirectory.id,
+          docId
+        )
+        viewMessage(messageKey, 'success', '文档移除成功！', 2)
+        onDocRemoved?.(docId)
+        await loadDirectoryDocs(selectedDirectory.id)
+      } catch (error) {
+        console.error('Failed to remove doc:', error)
+        viewMessage(messageKey, 'error', '移除文档失败')
+      }
+    },
+    [selectedDirectory, viewMessage, loadDirectoryDocs, onDocRemoved]
+  )
+
+  /* ── permanent delete doc handler ── */
+
+  const handleDeleteDocPermanently = useCallback(
+    async (docId: number): Promise<void> => {
+      const messageKey = 'delete-doc-permanently'
+      try {
+        viewMessage(messageKey, 'loading', '正在删除文档...')
+        const success = await (window as unknown as Window).api.docs.delete(docId)
+        if (success) {
+          viewMessage(messageKey, 'success', '文档已彻底删除', 2)
+          if (selectedDirectory) await loadDirectoryDocs(selectedDirectory.id)
+        } else {
+          viewMessage(messageKey, 'error', '删除文档失败')
+        }
+      } catch (error) {
+        console.error('Failed to delete doc:', error)
+        viewMessage(messageKey, 'error', '删除文档失败')
+      }
+    },
+    [selectedDirectory, viewMessage, loadDirectoryDocs]
+  )
+
+  /* ── edit doc handler ── */
+
+  const handleEditDocClick = useCallback((doc: DirectoryDocWithDetail): void => {
+    setEditingDoc(doc as DocItem)
+    setEditDocModalOpen(true)
+  }, [])
+
+  const handleEditDocSave = useCallback(
+    async (data: {
+      title: string
+      image: string | null
+      summary: string | null
+      content: string
+      tags: string[]
+    }): Promise<void> => {
+      if (!editingDoc) return
+      const messageKey = 'edit-doc'
+      try {
+        viewMessage(messageKey, 'loading', '正在保存文档...')
+        await (window as unknown as Window).api.docs.update(editingDoc.id, {
+          title: data.title,
+          image: data.image,
+          summary: data.summary,
+          content: data.content,
+          tags: data.tags.length > 0 ? JSON.stringify(data.tags) : null
+        })
+        viewMessage(messageKey, 'success', '文档已更新', 2)
+        setEditDocModalOpen(false)
+        setEditingDoc(null)
+        if (selectedDirectory) await loadDirectoryDocs(selectedDirectory.id)
+      } catch (error) {
+        console.error('Failed to update doc:', error)
+        viewMessage(messageKey, 'error', '保存文档失败')
+      }
+    },
+    [editingDoc, viewMessage, selectedDirectory, loadDirectoryDocs]
+  )
+
+  /* ── new doc handler ── */
+
+  const handleNewDocSave = useCallback(
+    async (data: {
+      title: string
+      image: string | null
+      summary: string | null
+      content: string
+      tags: string[]
+    }): Promise<void> => {
+      if (!selectedDirectory) return
+      const messageKey = 'wiki-new-doc'
+      try {
+        viewMessage(messageKey, 'loading', '正在创建文档...')
+        const docId = await (window as unknown as Window).api.docs.add({
+          title: data.title || '新文档',
+          image: data.image,
+          summary: data.summary,
+          content: data.content,
+          tags: data.tags.length > 0 ? JSON.stringify(data.tags) : null
+        })
+        await (window as unknown as Window).api.wikis.addNoteToDirectory(
+          selectedDirectory.id,
+          docId
+        )
+        viewMessage(messageKey, 'success', '文档创建成功！', 2)
+        setNewDocOpen(false)
+        await loadDirectoryDocs(selectedDirectory.id)
+      } catch (error) {
+        console.error('Failed to create doc:', error)
+        viewMessage(messageKey, 'error', '创建文档失败')
+      }
+    },
+    [selectedDirectory, viewMessage, loadDirectoryDocs]
+  )
+
+  /* ── import doc handler ── */
+
+  const handleImportDoc = useCallback(async (): Promise<void> => {
     if (!selectedDirectory) return
-    const messageKey = 'remove-doc'
+    const messageKey = 'wiki-import-doc'
     try {
-      viewMessage(messageKey, 'loading', '正在移除文档...')
-      await (window as unknown as Window).api.wikis.removeNoteFromDirectory(selectedDirectory.id, docId)
-      viewMessage(messageKey, 'success', '文档移除成功！', 2)
+      const imported = await (window as unknown as Window).api.docs.importDocument()
+      if (!imported) return
+      viewMessage(messageKey, 'loading', '正在导入文档...')
+      const docId = await (window as unknown as Window).api.docs.add({
+        title: imported.title,
+        image: null,
+        summary: null,
+        content: imported.content,
+        tags: null
+      })
+      await (window as unknown as Window).api.wikis.addNoteToDirectory(selectedDirectory.id, docId)
+      viewMessage(messageKey, 'success', '文档导入成功！', 2)
       await loadDirectoryDocs(selectedDirectory.id)
     } catch (error) {
-      console.error('Failed to remove doc:', error)
-      viewMessage(messageKey, 'error', '移除文档失败')
+      console.error('Failed to import doc:', error)
+      viewMessage(messageKey, 'error', '导入文档失败')
     }
   }, [selectedDirectory, viewMessage, loadDirectoryDocs])
 
   /* ── preview handler ── */
 
-  const handlePreviewDoc = useCallback(async (doc: DirectoryDocWithDetail): Promise<void> => {
-    const messageKey = 'doc-preview-load'
-    try {
-      viewMessage(messageKey, 'loading', '正在加载文档内容...')
-      const fullDoc = await (window as unknown as Window).api.docs.getById(doc.id)
-      if (fullDoc) {
-        setPreviewDoc({ ...doc, content: fullDoc.content })
-        setPreviewOpen(true)
-        viewMessage(messageKey, 'success', '文档内容加载成功！', 2)
-      } else {
-        viewMessage(messageKey, 'error', '文档不存在')
+  const handlePreviewDoc = useCallback(
+    async (doc: DirectoryDocWithDetail): Promise<void> => {
+      const messageKey = 'doc-preview-load'
+      try {
+        viewMessage(messageKey, 'loading', '正在加载文档内容...')
+        const fullDoc = await (window as unknown as Window).api.docs.getById(doc.id)
+        if (fullDoc) {
+          setPreviewDoc({ ...doc, content: fullDoc.content })
+          setPreviewOpen(true)
+          viewMessage(messageKey, 'success', '文档内容加载成功！', 2)
+        } else {
+          viewMessage(messageKey, 'error', '文档不存在')
+        }
+      } catch (error) {
+        console.error('Failed to load doc content:', error)
+        viewMessage(messageKey, 'error', '加载文档内容失败')
       }
-    } catch (error) {
-      console.error('Failed to load doc content:', error)
-      viewMessage(messageKey, 'error', '加载文档内容失败')
-    }
-  }, [viewMessage])
+    },
+    [viewMessage]
+  )
 
   /* ── edit wiki handler ── */
 
@@ -315,12 +485,6 @@ const WikiDetail: React.FC<WikiDetailProps> = ({ wiki, onBack, onEditWiki, showB
             />
           )}
         </div>
-
-        {showBackButton && (
-          <Button style={{ marginTop: 8 }} onClick={onBack}>
-            返回知识库列表
-          </Button>
-        )}
       </aside>
 
       <main
@@ -340,9 +504,17 @@ const WikiDetail: React.FC<WikiDetailProps> = ({ wiki, onBack, onEditWiki, showB
             {selectedDirectory ? selectedDirectory.name : '请选择目录'}
           </Title>
           {selectedDirectory && (
-            <Button type="primary" icon={<PlusOutlined />} onClick={handleOpenArchiveModal}>
-              归档文档
-            </Button>
+            <Space>
+              <Button type="primary" icon={<PlusOutlined />} onClick={() => setNewDocOpen(true)}>
+                新建文档
+              </Button>
+              <Button type="primary" icon={<ImportOutlined />} onClick={handleImportDoc}>
+                导入文档
+              </Button>
+              <Button type="primary" icon={<PlusOutlined />} onClick={handleOpenArchiveModal}>
+                归档文档
+              </Button>
+            </Space>
           )}
         </div>
 
@@ -367,14 +539,36 @@ const WikiDetail: React.FC<WikiDetailProps> = ({ wiki, onBack, onEditWiki, showB
                     item={item}
                     onClick={() => handlePreviewDoc(item)}
                     actions={[
-                      <DeleteOutlined
+                      <EditOutlined
+                        key="edit"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleEditDocClick(item)
+                        }}
+                      />,
+                      <MinusCircleOutlined
                         key="remove"
                         onClick={(e) => {
                           e.stopPropagation()
                           Modal.confirm({
                             title: '确定要从目录中移除这篇文档吗？',
+                            content: '仅从当前目录移除，文档本身不会删除。',
                             onOk: () => handleRemoveDocFromDirectory(item.id),
                             okText: '确定',
+                            cancelText: '取消'
+                          })
+                        }}
+                      />,
+                      <DeleteOutlined
+                        key="delete"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          Modal.confirm({
+                            title: '确定要彻底删除这篇文档吗？',
+                            content: '删除后无法恢复，该文档将从所有目录中移除。',
+                            onOk: () => handleDeleteDocPermanently(item.id),
+                            okText: '彻底删除',
+                            okButtonProps: { danger: true },
                             cancelText: '取消'
                           })
                         }}
@@ -388,6 +582,25 @@ const WikiDetail: React.FC<WikiDetailProps> = ({ wiki, onBack, onEditWiki, showB
           )}
         </div>
       </main>
+
+      {/* Document Edit Modal */}
+      <DocumentEditModal
+        open={editDocModalOpen}
+        currentDoc={editingDoc}
+        onClose={() => {
+          setEditDocModalOpen(false)
+          setEditingDoc(null)
+        }}
+        onSave={handleEditDocSave}
+      />
+
+      {/* New Document Modal */}
+      <DocumentEditModal
+        open={newDocOpen}
+        currentDoc={null}
+        onClose={() => setNewDocOpen(false)}
+        onSave={handleNewDocSave}
+      />
 
       {/* Directory Edit Modal */}
       <Modal

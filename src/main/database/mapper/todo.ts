@@ -15,6 +15,12 @@ export interface TodoItemRow {
   started_at: string | null
 }
 
+export interface PaginatedResult<T> {
+  items: T[]
+  hasMore: boolean
+  total: number
+}
+
 // --- 根据 id 查询 ---
 async function getTodoItemById(id: number): Promise<TodoItemRow[]> {
   try {
@@ -81,6 +87,38 @@ async function getAllTodoItems(): Promise<TodoItemRow[]> {
     return result.rows
   } catch (error) {
     logger.error('Failed to get all todo items:', error)
+    throw error
+  }
+}
+
+// --- 分页获取待办事项（按 updated_at 降序） ---
+async function getTodoItemsPaginated(
+  page: number = 1,
+  pageSize: number = 10
+): Promise<PaginatedResult<TodoItemRow>> {
+  try {
+    const db = (await getDatabaseInstance()).getDatabase()
+    const offset = (page - 1) * pageSize
+
+    const countResult = await db.query<{ total: number }>(
+      'SELECT COUNT(*) as total FROM todo_items WHERE status != 2'
+    )
+    const total = Number(countResult.rows[0]?.total) || 0
+
+    const dataSql = `
+      SELECT * FROM todo_items
+      WHERE status != 2
+      ORDER BY updated_at DESC
+      LIMIT $1 OFFSET $2
+    `
+    const result = await db.query<TodoItemRow>(dataSql, [pageSize, offset])
+    const hasMore = offset + result.rows.length < total
+    logger.info(
+      `Paginated todo items page=${page} pageSize=${pageSize}: ${result.rows.length} rows, total=${total}, hasMore=${hasMore}`
+    )
+    return { items: result.rows, hasMore, total }
+  } catch (error) {
+    logger.error('Failed to get paginated todo items:', error)
     throw error
   }
 }
@@ -243,6 +281,7 @@ export {
   getTodoItemsByPriority,
   getTodoItemsByStatus,
   getAllTodoItems,
+  getTodoItemsPaginated,
   getTodoItemsByDueDate,
   getTodoItemsByCategory,
   addTodoItem,

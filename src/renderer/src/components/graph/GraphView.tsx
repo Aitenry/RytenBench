@@ -1,33 +1,29 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
-import { Button, Empty, Flex, Modal, Select, Spin, theme, Typography } from 'antd'
+import { Button, Empty, Flex, Modal, Spin, theme } from 'antd'
 import { PlayCircleOutlined } from '@ant-design/icons'
-import { Window } from '../../../../resource/types/window'
+import { Window } from '../../../resource/types/window'
 import { useMessage } from '@renderer/hooks/useMessage'
 import { useBuildProgress } from '@renderer/hooks/useBuildProgress'
+import type { GraphViewProps } from '@renderer/types/components'
+import type { GraphChartData, GraphEntity, GraphData } from '@renderer/types/knowledge'
+import {
+  ENTITY_TYPE_COLORS,
+  ENTITY_TYPE_LABELS,
+  RELATION_TYPE_LABELS
+} from '@renderer/types/knowledge'
 import GraphCanvas from './GraphCanvas'
-import type { GraphChartData } from '@renderer/types/knowledge'
 import EntityDetail from './EntityDetail'
 import GraphToolbar from './GraphToolbar'
 import DocumentPreviewModal from '@renderer/components/document/DocumentPreviewModal'
-import { ENTITY_TYPE_COLORS, ENTITY_TYPE_LABELS, RELATION_TYPE_LABELS } from './types'
-import type { GraphEntity, GraphData } from '@renderer/types/knowledge'
-import type { WikiRow } from '@renderer/types/models'
 
-const { Text } = Typography
-
-const Index: React.FC = () => {
+const GraphView: React.FC<GraphViewProps> = ({ selectedWiki }) => {
   const {
     token: { colorBgContainer, borderRadiusLG }
   } = theme.useToken()
 
   const { viewMessage } = useMessage()
   const { startBuild, subscribeToRefresh } = useBuildProgress()
-  const [searchParams] = useSearchParams()
   const [modal, contextHolder] = Modal.useModal()
-
-  const [wikis, setWikis] = useState<WikiRow[]>([])
-  const [selectedWiki, setSelectedWiki] = useState<WikiRow | null>(null)
 
   const [graphData, setGraphData] = useState<GraphData | null>(null)
   const [selectedEntity, setSelectedEntity] = useState<GraphEntity | null>(null)
@@ -38,6 +34,7 @@ const Index: React.FC = () => {
   const [addedDocIds, setAddedDocIds] = useState<Set<number>>(new Set())
   const [isAppending, setIsAppending] = useState(false)
   const [isGraphLoading, setIsGraphLoading] = useState(false)
+  const [docFilter, setDocFilter] = useState<number[]>([])
 
   const [previewDoc, setPreviewDoc] = useState<{
     id: number
@@ -51,17 +48,6 @@ const Index: React.FC = () => {
     content?: string | null
   } | null>(null)
   const [isDocPreviewOpen, setIsDocPreviewOpen] = useState(false)
-
-  const loadWikis = useCallback(async () => {
-    try {
-      const result = await (window as unknown as Window).api.wikis.getAll(1, 100)
-      setWikis(result.items)
-    } catch (error) {
-      console.error('Failed to load wikis:', error)
-    }
-  }, [])
-
-  const [docFilter, setDocFilter] = useState<number[]>([])
 
   const loadGraphData = useCallback(async (wikiId: number, docIds?: number[]) => {
     setIsGraphLoading(true)
@@ -153,39 +139,19 @@ const Index: React.FC = () => {
   }, [graphData])
 
   useEffect(() => {
-    loadWikis().then()
-  }, [loadWikis])
+    loadDocs(selectedWiki.id).then()
+    loadProcessedDocIds(selectedWiki.id).then()
+  }, [selectedWiki.id, loadDocs, loadProcessedDocIds])
 
   useEffect(() => {
-    const wikiIdParam = searchParams.get('wikiId')
-    if (wikiIdParam && wikis.length > 0) {
-      const wikiId = Number(wikiIdParam)
-      const wiki = wikis.find((w) => w.id === wikiId)
-      if (wiki) {
-        setSelectedWiki(wiki)
-      }
-    }
-  }, [wikis, searchParams])
+    loadGraphData(selectedWiki.id, docFilter.length > 0 ? docFilter : undefined).then()
+  }, [selectedWiki.id, docFilter, loadGraphData])
 
   useEffect(() => {
-    if (selectedWiki) {
-      loadDocs(selectedWiki.id).then()
-      loadProcessedDocIds(selectedWiki.id).then()
-    }
-  }, [selectedWiki, loadDocs, loadProcessedDocIds])
-
-  useEffect(() => {
-    if (selectedWiki) {
-      loadGraphData(selectedWiki.id, docFilter.length > 0 ? docFilter : undefined).then()
-    }
-  }, [selectedWiki, docFilter, loadGraphData])
-
-  useEffect(() => {
-    if (!selectedWiki) return
     return subscribeToRefresh(selectedWiki.id, () => {
       loadGraphData(selectedWiki.id).then()
     })
-  }, [selectedWiki, loadGraphData, subscribeToRefresh])
+  }, [selectedWiki.id, loadGraphData, subscribeToRefresh])
 
   useEffect(() => {
     return (window as unknown as Window).api.graph.onBuildComplete((result) => {
@@ -196,12 +162,12 @@ const Index: React.FC = () => {
         `图谱构建完成！实体 ${result.entityCount}，关系 ${result.relationCount}`,
         4
       )
-      if (selectedWiki && result.wikiId === selectedWiki.id) {
+      if (result.wikiId === selectedWiki.id) {
         loadGraphData(selectedWiki.id).then()
         loadProcessedDocIds(selectedWiki.id).then()
       }
     })
-  }, [selectedWiki, loadGraphData, loadProcessedDocIds, viewMessage])
+  }, [selectedWiki.id, loadGraphData, loadProcessedDocIds, viewMessage])
 
   useEffect(() => {
     return (window as unknown as Window).api.graph.onBuildError((error) => {
@@ -210,20 +176,11 @@ const Index: React.FC = () => {
     })
   }, [viewMessage])
 
-  const handleSelectWiki = (wiki: WikiRow): void => {
-    setSelectedWiki(wiki)
-    setSelectedEntity(null)
-    setSearchQuery('')
-    setTypeFilter(undefined)
-  }
-
   const handleEntityClick = useCallback((entity: GraphEntity): void => {
     setSelectedEntity(entity)
   }, [])
 
-  const handleBuildGraph = async (): Promise<void> => {
-    if (!selectedWiki) return
-
+  const handleBuildGraph = (): void => {
     modal.confirm({
       title: '确认构建图谱',
       content: `将为知识库「${selectedWiki.title}」重新构建知识图谱，已有图谱数据将被清除。确定继续吗？`,
@@ -246,17 +203,8 @@ const Index: React.FC = () => {
     })
   }
 
-  const handleBackToWikiList = (): void => {
-    setSelectedWiki(null)
-    setGraphData(null)
-    setSelectedEntity(null)
-    setSearchQuery('')
-    setTypeFilter(undefined)
-    setDocFilter([])
-  }
-
   const handleAppendDocs = async (docIds: number[]): Promise<void> => {
-    if (!selectedWiki || docIds.length === 0) return
+    if (docIds.length === 0) return
 
     setIsAppending(true)
     startBuild(selectedWiki.id, selectedWiki.title)
@@ -293,50 +241,6 @@ const Index: React.FC = () => {
     }
   }
 
-  if (!selectedWiki) {
-    return (
-      <>
-        {contextHolder}
-        <div className="h-full flex-1 flex flex-row gap-2.5">
-          <main
-            className="w-full"
-            style={{
-              background: colorBgContainer,
-              borderRadius: borderRadiusLG
-            }}
-          >
-            <div style={{ padding: '12px', height: '100%' }}>
-              <Flex vertical align="center" justify="center" style={{ height: '100%' }} gap={16}>
-                <Empty
-                  description="选择一个知识库来查看其知识图谱"
-                  image={Empty.PRESENTED_IMAGE_SIMPLE}
-                >
-                  <Select
-                    placeholder="选择知识库"
-                    style={{ width: 260 }}
-                    onChange={(value) => {
-                      const wiki = wikis.find((w) => w.id === value)
-                      if (wiki) handleSelectWiki(wiki)
-                    }}
-                    options={wikis.map((wiki) => ({ value: wiki.id, label: wiki.title }))}
-                    optionRender={(option) => (
-                      <Flex justify="space-between" align="center">
-                        <Text>{option.label}</Text>
-                        <Text type="secondary" style={{ fontSize: 12 }}>
-                          {wikis.find((w) => w.id === option.value)?.doc_count ?? 0} 篇文档
-                        </Text>
-                      </Flex>
-                    )}
-                  />
-                </Empty>
-              </Flex>
-            </div>
-          </main>
-        </div>
-      </>
-    )
-  }
-
   return (
     <>
       {contextHolder}
@@ -363,7 +267,6 @@ const Index: React.FC = () => {
             onAppendDocs={handleAppendDocs}
             onDocFilterChange={setDocFilter}
             onBuildGraph={handleBuildGraph}
-            onBackToWikiList={handleBackToWikiList}
           />
         </div>
 
@@ -426,4 +329,4 @@ const Index: React.FC = () => {
   )
 }
 
-export default Index
+export default GraphView

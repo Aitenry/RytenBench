@@ -4,7 +4,7 @@ import type { EChartsOption } from 'echarts'
 import { Button, theme } from 'antd'
 import { RiEyeLine, RiEyeOffLine } from '@remixicon/react'
 import { useTheme } from '@renderer/contexts/useTheme'
-import { GraphEntity } from './types'
+import { GraphEntity } from '@renderer/types/knowledge'
 import type { GraphCanvasProps } from '@renderer/types/components'
 
 let _chart: echarts.ECharts | null = null
@@ -283,6 +283,7 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({ data, onEntityClick, onEntity
       {/* Custom legend — hover to highlight category entities & relationships */}
       {data.categories.length > 0 && (
         <div
+          className="custom-scrollbar"
           style={{
             position: 'absolute',
             left: 8,
@@ -295,12 +296,12 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({ data, onEntityClick, onEntity
             background: isDarkMode ? 'rgba(0,0,0,0.55)' : 'rgba(255,255,255,0.85)',
             borderRadius: 6,
             fontSize: 12,
-            maxHeight: '60%',
+            maxHeight: 'calc(100% - 46px)',
             overflowY: 'auto'
           }}
         >
           {data.categories.map((cat) => {
-            const isHidden = hiddenCats[cat.name] === true
+            const isHidden = hiddenCats[cat.name]
             return (
               <div
                 key={cat.name}

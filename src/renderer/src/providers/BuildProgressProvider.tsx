@@ -5,7 +5,7 @@ import { CheckCircleOutlined, LoadingOutlined } from '@ant-design/icons'
 import { RiBubbleChartLine } from '@remixicon/react'
 import { useNavigate } from 'react-router-dom'
 import { Window } from '../../resource/types/window'
-import BuildProgress from '../views/knowledge/graph/BuildProgress'
+import BuildProgress from '@renderer/components/graph/BuildProgress'
 import { BuildProgressContext } from './BuildProgressContext'
 import type { BuildProgressState } from '@renderer/types/build-progress'
 import type { BuildProgressProviderProps } from '@renderer/types/components'
@@ -218,7 +218,7 @@ export const BuildProgressProvider: React.FC<BuildProgressProviderProps> = ({ ch
           <FloatButton
             icon={allCompleted ? <RiBubbleChartLine /> : <LoadingOutlined spin />}
             badge={allCompleted ? { dot: true } : { count: incompleteCount }}
-            style={{ right: 24, bottom: 24 }}
+            style={{ right: 10, bottom: 10 }}
           />
         </Dropdown>
       )}

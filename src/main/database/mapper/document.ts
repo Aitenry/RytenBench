@@ -77,41 +77,45 @@ async function getAllDocs(
     const db = (await getDatabaseInstance()).getDatabase()
     const offset = (page - 1) * pageSize
 
-    const excludeWhere = excludeWikiId ? 'AND dd.doc_id IS NULL' : ''
+    // excludeWikiId = -1 means exclude docs linked to ANY wiki
+    const excludeAllWiki = excludeWikiId === -1
+    const excludeSpecificWiki = excludeWikiId != null && excludeWikiId > 0
+
+    const hasExclude = excludeAllWiki || excludeSpecificWiki
+    const excludeWhere = hasExclude ? 'AND dd.doc_id IS NULL' : ''
+
+    // Parameter index for search in count query: $2 if has exclude param, else $1
+    const countSearchParamIdx = hasExclude ? 2 : 1
     const searchWhereCount = search
-      ? 'AND (d.title ILIKE $' +
-        (excludeWikiId ? 2 : 1) +
-        ' OR d.summary ILIKE $' +
-        (excludeWikiId ? 2 : 1) +
-        ' OR d.tags ILIKE $' +
-        (excludeWikiId ? 2 : 1) +
-        ')'
-      : ''
-    const searchWhereData = search
-      ? 'AND (d.title ILIKE $' +
-        (excludeWikiId ? 4 : 3) +
-        ' OR d.summary ILIKE $' +
-        (excludeWikiId ? 4 : 3) +
-        ' OR d.tags ILIKE $' +
-        (excludeWikiId ? 4 : 3) +
-        ')'
+      ? `AND (d.title ILIKE $${countSearchParamIdx} OR d.summary ILIKE $${countSearchParamIdx} OR d.tags ILIKE $${countSearchParamIdx})`
       : ''
 
-    const countJoin = excludeWikiId
-      ? 'LEFT JOIN directory_documents dd ON d.id = dd.doc_id LEFT JOIN wiki_directories wd ON dd.directory_id = wd.id AND wd.wiki_id = $1'
+    // Parameter index for search in data query: $4 if has exclude param, else $3
+    const dataSearchParamIdx = hasExclude ? 4 : 3
+    const searchWhereData = search
+      ? `AND (d.title ILIKE $${dataSearchParamIdx} OR d.summary ILIKE $${dataSearchParamIdx} OR d.tags ILIKE $${dataSearchParamIdx})`
+      : ''
+
+    const countJoin = hasExclude
+      ? excludeSpecificWiki
+        ? 'LEFT JOIN directory_documents dd ON d.id = dd.doc_id LEFT JOIN wiki_directories wd ON dd.directory_id = wd.id AND wd.wiki_id = $1'
+        : 'LEFT JOIN directory_documents dd ON d.id = dd.doc_id LEFT JOIN wiki_directories wd ON dd.directory_id = wd.id'
       : ''
     const countSql = `
       SELECT COUNT(*) as total FROM documents d
       ${countJoin}
       WHERE 1=1 ${excludeWhere} ${searchWhereCount}
     `
-    const countParams: (string | number)[] = excludeWikiId ? [excludeWikiId] : []
+    const countParams: (string | number)[] = []
+    if (excludeSpecificWiki) countParams.push(excludeWikiId)
     if (search) countParams.push(`%${search}%`)
     const countResult = await db.query<{ total: number }>(countSql, countParams)
     const total = Number(countResult.rows[0]?.total) || 0
 
-    const dataJoin = excludeWikiId
-      ? 'LEFT JOIN directory_documents dd ON d.id = dd.doc_id LEFT JOIN wiki_directories wd ON dd.directory_id = wd.id AND wd.wiki_id = $3'
+    const dataJoin = hasExclude
+      ? excludeSpecificWiki
+        ? 'LEFT JOIN directory_documents dd ON d.id = dd.doc_id LEFT JOIN wiki_directories wd ON dd.directory_id = wd.id AND wd.wiki_id = $3'
+        : 'LEFT JOIN directory_documents dd ON d.id = dd.doc_id LEFT JOIN wiki_directories wd ON dd.directory_id = wd.id'
       : ''
     const dataSql = `
       SELECT
@@ -128,7 +132,7 @@ async function getAllDocs(
     `
 
     const dataParams: (string | number)[] = [pageSize, offset]
-    if (excludeWikiId) dataParams.push(excludeWikiId)
+    if (excludeSpecificWiki) dataParams.push(excludeWikiId)
     if (search) dataParams.push(`%${search}%`)
     const result = await db.query<DocListItem>(dataSql, dataParams)
 

@@ -25,6 +25,7 @@ interface Api {
     getByPriority: (priority: number) => Promise<TodoItemRow[]>
     getByCompletedStatus: (status: number) => Promise<TodoItemRow[]>
     getAll: () => Promise<TodoItemRow[]>
+    getAllPaginated: (page?: number, pageSize?: number) => Promise<PaginatedResult<TodoItemRow>>
     getByDueDate: (dueDate: string) => Promise<TodoItemRow[]>
     add: (todoItem: Omit<TodoItemRow, 'id'>) => Promise<number>
     update: (id: number, updates: Partial<Omit<TodoItemRow, 'id'>>) => Promise<boolean>
@@ -65,9 +66,9 @@ interface Api {
     getById: (id: number) => Promise<WikiRow | null>
     getAll: (page?: number, pageSize?: number) => Promise<PaginatedResult<WikiRow>>
     add: (
-      wiki: Omit<WikiRow, 'id' | 'doc_count' | 'tags' | 'created_at' | 'updated_at'>
+      wiki: Omit<WikiRow, 'id' | 'doc_count' | 'created_at' | 'updated_at'>
     ) => Promise<number>
-    update: (id: number, updates: Partial<Omit<WikiRow, 'id' | 'created_at'>>) => Promise<boolean>
+    update: (id: number, updates: Partial<Omit<WikiRow, 'id' | 'doc_count' | 'created_at'>>) => Promise<boolean>
     delete: (id: number) => Promise<boolean>
     getDirectories: (wikiId: number) => Promise<WikiDirectoryRow[]>
     addDirectory: (
@@ -132,6 +133,12 @@ interface Api {
   systemSettings: {
     getAll: () => Promise<SystemSettings>
     update: (updates: Partial<SystemSettings>) => Promise<boolean>
+  }
+  nodePositions: {
+    getAll: () => Promise<{ node_id: string; x: number; y: number; updated_at: string }[]>
+    save: (nodeId: string, x: number, y: number) => Promise<void>
+    saveBatch: (positions: { node_id: string; x: number; y: number }[]) => Promise<void>
+    delete: (nodeId: string) => Promise<boolean>
   }
   music: {
     selectDirectory: () => Promise<string | null>

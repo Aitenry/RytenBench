@@ -97,6 +97,7 @@ export interface DirectoryWithChildren {
 export interface WikiEditData {
   title: string
   summary: string | null
+  tags: string | null
   image: string | null
 }
 

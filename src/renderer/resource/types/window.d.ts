@@ -57,6 +57,7 @@ export interface Window {
       getByPriority: (priority: number) => Promise<TodoItemRow[]>
       getByCompletedStatus: (completed: boolean) => Promise<TodoItemRow[]>
       getAll: () => Promise<TodoItemRow[]>
+      getAllPaginated: (page?: number, pageSize?: number) => Promise<PaginatedResult<TodoItemRow>>
       getByDueDate: (dueDate: string) => Promise<TodoItemRow[]>
       add: (
         todoItem: Omit<
@@ -228,6 +229,12 @@ export interface Window {
     systemSettings: {
       getAll: () => Promise<SystemSettings>
       update: (updates: Partial<SystemSettings>) => Promise<boolean>
+    }
+    nodePositions: {
+      getAll: () => Promise<{ node_id: string; x: number; y: number; updated_at: string }[]>
+      save: (nodeId: string, x: number, y: number) => Promise<void>
+      saveBatch: (positions: { node_id: string; x: number; y: number }[]) => Promise<void>
+      delete: (nodeId: string) => Promise<boolean>
     }
     music: {
       selectDirectory: () => Promise<string | null>

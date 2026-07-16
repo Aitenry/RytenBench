@@ -1,11 +1,10 @@
 import React from 'react'
 import { Tree, Space, Modal } from 'antd'
 import { FolderOutlined, PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons'
-import { DirectoryWithChildren } from '../types'
 import type { DirectoryTreeProps } from '@renderer/types/components'
-import type { TreeNodeData } from '@renderer/types/knowledge'
+import type { TreeNodeData, DirectoryWithChildren } from '@renderer/types/knowledge'
 
-const DirectoryTree: React.FC<DirectoryTreeProps> = ({
+const WikiDirectoryTree: React.FC<DirectoryTreeProps> = ({
   directoryTree,
   expandedKeys,
   onExpand,
@@ -65,4 +64,4 @@ const DirectoryTree: React.FC<DirectoryTreeProps> = ({
   )
 }
 
-export default DirectoryTree
+export default WikiDirectoryTree

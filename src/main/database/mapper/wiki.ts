@@ -6,6 +6,7 @@ export interface WikiBaseRow {
   id: number
   title: string
   summary: string | null
+  tags: string | null
   image: string | null
   created_at: string
   updated_at: string
@@ -13,7 +14,6 @@ export interface WikiBaseRow {
 
 export interface WikiRow extends WikiBaseRow {
   doc_count: number
-  tags: string | null
 }
 
 export interface WikiDirectoryRow {
@@ -38,15 +38,8 @@ async function getWikiById(id: number): Promise<WikiRow | null> {
     const db = (await getDatabaseInstance()).getDatabase()
     const sql = `
       SELECT
-        w.id, w.title, w.summary, img.data as image, w.created_at, w.updated_at,
-        COUNT(DISTINCT dd.doc_id) as doc_count,
-        (
-          SELECT STRING_AGG(DISTINCT d.tags, ',')
-          FROM documents d
-          INNER JOIN directory_documents dd2 ON d.id = dd2.doc_id
-          INNER JOIN wiki_directories wd2 ON dd2.directory_id = wd2.id
-          WHERE wd2.wiki_id = w.id AND d.tags IS NOT NULL AND d.tags != ''
-        ) as tags
+        w.id, w.title, w.summary, w.tags, img.data as image, w.created_at, w.updated_at,
+        COUNT(DISTINCT dd.doc_id) as doc_count
       FROM wiki w
       LEFT JOIN images img ON w.image_id = img.id
       LEFT JOIN wiki_directories wd ON w.id = wd.wiki_id
@@ -58,8 +51,7 @@ async function getWikiById(id: number): Promise<WikiRow | null> {
     if (result.rows.length > 0) {
       return {
         ...result.rows[0],
-        doc_count: result.rows[0].doc_count || 0,
-        tags: result.rows[0].tags || null
+        doc_count: result.rows[0].doc_count || 0
       }
     }
     return null
@@ -82,15 +74,8 @@ async function getAllWikis(
 
     const dataSql = `
       SELECT
-        w.id, w.title, w.summary, img.data as image, w.created_at, w.updated_at,
-        COUNT(DISTINCT dd.doc_id) as doc_count,
-        (
-          SELECT STRING_AGG(DISTINCT d.tags, ',')
-          FROM documents d
-          INNER JOIN directory_documents dd2 ON d.id = dd2.doc_id
-          INNER JOIN wiki_directories wd2 ON dd2.directory_id = wd2.id
-          WHERE wd2.wiki_id = w.id AND d.tags IS NOT NULL AND d.tags != ''
-        ) as tags
+        w.id, w.title, w.summary, w.tags, img.data as image, w.created_at, w.updated_at,
+        COUNT(DISTINCT dd.doc_id) as doc_count
       FROM wiki w
       LEFT JOIN images img ON w.image_id = img.id
       LEFT JOIN wiki_directories wd ON w.id = wd.wiki_id
@@ -104,8 +89,7 @@ async function getAllWikis(
 
     const items = result.rows.map((row) => ({
       ...row,
-      doc_count: row.doc_count || 0,
-      tags: row.tags || null
+      doc_count: row.doc_count || 0
     }))
     const hasMore = offset + items.length < total
     return { items, hasMore, total }
@@ -120,13 +104,13 @@ async function addWiki(
 ): Promise<number> {
   try {
     const db = (await getDatabaseInstance()).getDatabase()
-    const { title, summary, image } = wiki
+    const { title, summary, tags, image } = wiki
 
     const imageId = await saveImage(image ?? null)
 
     const result = await db.query<{ id: number }>(
-      'INSERT INTO wiki (title, summary, image_id) VALUES ($1, $2, $3) RETURNING id',
-      [title, summary || null, imageId]
+      'INSERT INTO wiki (title, summary, tags, image_id) VALUES ($1, $2, $3, $4) RETURNING id',
+      [title, summary || null, tags || null, imageId]
     )
     logger.info(`Inserted new wiki with ID: ${result.rows[0].id}`)
     return result.rows[0].id
@@ -154,6 +138,10 @@ async function updateWiki(
     if (updates.summary !== undefined) {
       updateFields.push(`summary = $${paramIndex++}`)
       updateValues.push(updates.summary)
+    }
+    if (updates.tags !== undefined) {
+      updateFields.push(`tags = $${paramIndex++}`)
+      updateValues.push(updates.tags)
     }
     if (updates.image !== undefined) {
       const imageId = await saveImage(updates.image ?? null)

@@ -66,6 +66,7 @@ export interface WikiEditModalProps {
   isNew: boolean
   initialTitle?: string
   initialSummary?: string
+  initialTags?: string
   initialImage?: string | null
   onSave: (data: WikiEditData) => Promise<void>
   onCancel: () => void
@@ -175,7 +176,6 @@ export interface GraphToolbarProps {
   onAppendDocs: (docIds: number[]) => void
   onDocFilterChange: (docIds: number[]) => void
   onBuildGraph: () => void
-  onBackToWikiList: () => void
 }
 
 export interface EntityDetailProps {
@@ -185,6 +185,10 @@ export interface EntityDetailProps {
   onRelationClick?: (entityId: number) => void
   onDocClick?: (docId: number) => void
   onClose?: () => void
+}
+
+export interface GraphViewProps {
+  selectedWiki: WikiRow
 }
 
 /* ── Directory Tree ── */
