@@ -15,6 +15,7 @@ import {
 } from '@remixicon/react'
 import { extractTextFromChildren } from '@renderer/utils/markdown'
 import { useMessage } from '@renderer/hooks/useMessage'
+import './markdown-body.css'
 import type {
   HeadingItem,
   TocItemProps,
@@ -414,56 +415,6 @@ const MarkdownView = ({ content, isDarkMode = false }: MarkdownViewProps): React
     }
   }
 
-  const dynamicStyles = `
-    .markdown-body h1 { font-size: 2em; font-weight: 700; margin: 1em 0 0.5em; scroll-margin-top: 20px; }
-    .markdown-body h2 { font-size: 1.5em; font-weight: 600; margin: 1em 0 0.5em; scroll-margin-top: 20px; }
-    .markdown-body h3 { font-size: 1.25em; font-weight: 600; margin: 1em 0 0.5em; scroll-margin-top: 20px; }
-    .markdown-body h4 { font-size: 1.125em; font-weight: 600; margin: 1em 0 0.5em; scroll-margin-top: 20px; }
-    .markdown-body h5 { font-size: 1em; font-weight: 600; margin: 1em 0 0.5em; scroll-margin-top: 20px; }
-    .markdown-body h6 { font-size: 0.875em; font-weight: 600; margin: 1em 0 0.5em; scroll-margin-top: 20px; }
-    .markdown-body p { margin: 1em 0; line-height: 1.7; }
-    .markdown-body ul { margin: 1em 0; padding-left: 1.75em; list-style-type: disc; }
-    .markdown-body ol { margin: 1em 0; padding-left: 1.75em; list-style-type: decimal; }
-    .markdown-body li { margin: 0.375em 0; line-height: 1.7; }
-    .markdown-body ul ul, .markdown-body ul ol,
-    .markdown-body ol ul, .markdown-body ol ol { margin: 0.5em 0; padding-left: 1.5em; }
-    .markdown-body ul ul { list-style-type: circle; }
-    .markdown-body ul ul ul { list-style-type: square; }
-    .markdown-body ol ol { list-style-type: lower-alpha; }
-    .markdown-body ol ol ol { list-style-type: lower-roman; }
-    .markdown-body code { padding: 0.2em 0.4em; border-radius: 4px; font-size: 0.9em; }
-    .markdown-body pre { padding: 1em; border-radius: 8px; overflow-x: auto; margin: 1em 0; }
-    .markdown-body pre code { padding: 0; background: transparent; }
-    .markdown-body blockquote { border-left: 4px solid; padding-left: 1em; margin: 1em 0; font-style: italic; }
-    .markdown-body table { width: 100%; border-collapse: collapse; margin: 1em 0; }
-    .markdown-body th, .markdown-body td { padding: 0.75em; border: 1px solid; text-align: left; }
-    .markdown-body code {
-      background: ${isDarkMode ? '#374151' : '#f3f4f6'};
-      color: ${isDarkMode ? '#e5e7eb' : '#374151'};
-    }
-    .markdown-body pre {
-      background: ${isDarkMode ? '#1f2937' : '#f8f8f8'};
-    }
-    .markdown-body pre code {
-      background: transparent;
-      color: ${isDarkMode ? '#f3f4f6' : '#1f2937'};
-    }
-    .markdown-body blockquote { border-color: ${isDarkMode ? '#4b5563' : '#d1d5db'}; }
-    .markdown-body th, .markdown-body td { border-color: ${isDarkMode ? '#4b5563' : '#d1d5db'}; }
-    mark.search-highlight {
-      background-color: ${isDarkMode ? '#1e3a5f' : '#bfdbfe'};
-      color: ${isDarkMode ? '#93c5fd' : '#1e40af'};
-      border-radius: 2px;
-      padding: 0 1px;
-    }
-    mark.search-highlight-current {
-      background-color: ${isDarkMode ? '#2563eb' : '#3b82f6'};
-      color: #ffffff;
-      border-radius: 2px;
-      padding: 0 1px;
-    }
-  `
-
   const handleNavigate = (id: string): void => {
     // id 格式为 "h-{index}"，直接按 DOM 中标题元素的索引定位，不依赖 DOM id 属性
     const index = parseInt(id.split('-')[1], 10)
@@ -485,7 +436,6 @@ const MarkdownView = ({ content, isDarkMode = false }: MarkdownViewProps): React
 
   return (
     <div className="flex h-full">
-      <style>{dynamicStyles}</style>
       <TableOfContents headings={headings} isDarkMode={isDarkMode} onNavigate={handleNavigate} />
       <div className="flex-1 flex flex-col min-w-0 relative">
         {searchVisible && (
@@ -550,7 +500,7 @@ const MarkdownView = ({ content, isDarkMode = false }: MarkdownViewProps): React
           className={`flex-1 overflow-y-auto rounded-xl custom-scrollbar ${isDarkMode ? 'bg-gray-950' : 'bg-white'}`}
         >
           <div
-            className={`markdown-body px-[13px] ${isDarkMode ? 'text-gray-100' : 'text-gray-700'}`}
+            className={`markdown-body px-[13px] ${isDarkMode ? 'dark text-gray-100' : 'text-gray-700'}`}
           >
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}

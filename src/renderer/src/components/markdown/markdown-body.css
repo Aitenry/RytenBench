@@ -1,0 +1,200 @@
+/* ── Markdown 正文公共样式 ── */
+/* 使用 CSS 自定义属性实现亮色/暗色切换，默认值为亮色 */
+
+.markdown-body {
+  --md-code-bg: #f3f4f6;
+  --md-code-color: #374151;
+  --md-pre-bg: #f8f8f8;
+  --md-pre-code-color: #1f2937;
+  --md-blockquote-border: #d1d5db;
+  --md-th-td-border: #d1d5db;
+  --md-search-highlight-bg: #bfdbfe;
+  --md-search-highlight-color: #1e40af;
+  --md-search-highlight-current-bg: #3b82f6;
+  --md-search-highlight-current-color: #ffffff;
+}
+
+/* 暗色模式变量覆盖 */
+.markdown-body.dark {
+  --md-code-bg: #374151;
+  --md-code-color: #e5e7eb;
+  --md-pre-bg: #1f2937;
+  --md-pre-code-color: #f3f4f6;
+  --md-blockquote-border: #4b5563;
+  --md-th-td-border: #4b5563;
+  --md-search-highlight-bg: #1e3a5f;
+  --md-search-highlight-color: #93c5fd;
+  --md-search-highlight-current-bg: #2563eb;
+  --md-search-highlight-current-color: #ffffff;
+}
+
+.markdown-body h1 {
+  font-size: 2em;
+  font-weight: 700;
+  margin: 1em 0 0.5em;
+  scroll-margin-top: 20px;
+}
+
+.markdown-body h2 {
+  font-size: 1.5em;
+  font-weight: 600;
+  margin: 1em 0 0.5em;
+  scroll-margin-top: 20px;
+}
+
+.markdown-body h3 {
+  font-size: 1.25em;
+  font-weight: 600;
+  margin: 1em 0 0.5em;
+  scroll-margin-top: 20px;
+}
+
+.markdown-body h4 {
+  font-size: 1.125em;
+  font-weight: 600;
+  margin: 1em 0 0.5em;
+  scroll-margin-top: 20px;
+}
+
+.markdown-body h5 {
+  font-size: 1em;
+  font-weight: 600;
+  margin: 1em 0 0.5em;
+  scroll-margin-top: 20px;
+}
+
+.markdown-body h6 {
+  font-size: 0.875em;
+  font-weight: 600;
+  margin: 1em 0 0.5em;
+  scroll-margin-top: 20px;
+}
+
+/* 首个元素为标题或段落时移除顶部 margin，末尾元素移除底部 margin */
+.markdown-body > :first-child:is(h1, h2, h3, h4, h5, h6, p) {
+  margin-top: 0;
+}
+
+.markdown-body > :last-child:is(h1, h2, h3, h4, h5, h6, p) {
+  margin-bottom: 0;
+}
+
+.markdown-body p {
+  margin: 1em 0;
+  line-height: 1.7;
+}
+
+.markdown-body ul {
+  margin: 1em 0;
+  padding-left: 1.75em;
+  list-style-type: disc;
+}
+
+.markdown-body ol {
+  margin: 1em 0;
+  padding-left: 1.75em;
+  list-style-type: decimal;
+}
+
+.markdown-body li {
+  margin: 0.375em 0;
+  line-height: 1.7;
+}
+
+.markdown-body ul ul,
+.markdown-body ul ol,
+.markdown-body ol ul,
+.markdown-body ol ol {
+  margin: 0.5em 0;
+  padding-left: 1.5em;
+}
+
+.markdown-body ul ul {
+  list-style-type: circle;
+}
+
+.markdown-body ul ul ul {
+  list-style-type: square;
+}
+
+.markdown-body ol ol {
+  list-style-type: lower-alpha;
+}
+
+.markdown-body ol ol ol {
+  list-style-type: lower-roman;
+}
+
+.markdown-body code {
+  padding: 0.2em 0.4em;
+  border-radius: 4px;
+  font-size: 0.9em;
+}
+
+.markdown-body code {
+  background: var(--md-code-bg);
+  color: var(--md-code-color);
+}
+
+.markdown-body pre {
+  padding: 1em;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin: 1em 0;
+}
+
+.markdown-body pre {
+  background: var(--md-pre-bg);
+}
+
+.markdown-body pre code {
+  padding: 0;
+  background: transparent;
+}
+
+.markdown-body pre code {
+  color: var(--md-pre-code-color);
+}
+
+.markdown-body blockquote {
+  border-left: 4px solid;
+  padding-left: 1em;
+  margin: 1em 0;
+  font-style: italic;
+}
+
+.markdown-body blockquote {
+  border-color: var(--md-blockquote-border);
+}
+
+.markdown-body table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1em 0;
+}
+
+.markdown-body th,
+.markdown-body td {
+  padding: 0.75em;
+  border: 1px solid;
+  text-align: left;
+}
+
+.markdown-body th,
+.markdown-body td {
+  border-color: var(--md-th-td-border);
+}
+
+mark.search-highlight {
+  background-color: var(--md-search-highlight-bg);
+  color: var(--md-search-highlight-color);
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+mark.search-highlight-current {
+  background-color: var(--md-search-highlight-current-bg);
+  color: var(--md-search-highlight-current-color);
+  border-radius: 2px;
+  padding: 0 1px;
+}

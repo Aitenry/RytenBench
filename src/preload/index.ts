@@ -25,6 +25,32 @@ const api = {
       ipcRenderer.invoke('todo-items-update', id, updates),
     delete: (id: number) => ipcRenderer.invoke('todo-items-delete', id)
   },
+  taskDependencies: {
+    add: (taskId: number, dependsOnTaskId: number) =>
+      ipcRenderer.invoke('task-deps-add', taskId, dependsOnTaskId),
+    delete: (taskId: number, dependsOnTaskId: number) =>
+      ipcRenderer.invoke('task-deps-delete', taskId, dependsOnTaskId),
+    getAll: () => ipcRenderer.invoke('task-deps-get-all'),
+    getTasksWithDeps: () => ipcRenderer.invoke('task-deps-get-with-tasks')
+  },
+  planner: {
+    tasks: {
+      getAll: () => ipcRenderer.invoke('planner-tasks-get-all'),
+      getById: (id: number) => ipcRenderer.invoke('planner-tasks-get-by-id', id),
+      getTree: () => ipcRenderer.invoke('planner-tasks-get-tree'),
+      add: (task) => ipcRenderer.invoke('planner-tasks-add', task),
+      update: (id: number, updates) => ipcRenderer.invoke('planner-tasks-update', id, updates),
+      delete: (id: number) => ipcRenderer.invoke('planner-tasks-delete', id),
+      reorder: (orderList) => ipcRenderer.invoke('planner-tasks-reorder', orderList)
+    },
+    deps: {
+      add: (taskId: number, dependsOnTaskId: number) =>
+        ipcRenderer.invoke('planner-deps-add', taskId, dependsOnTaskId),
+      delete: (taskId: number, dependsOnTaskId: number) =>
+        ipcRenderer.invoke('planner-deps-delete', taskId, dependsOnTaskId),
+      getAll: () => ipcRenderer.invoke('planner-deps-get-all')
+    }
+  },
   docs: {
     getById: (id: number) => ipcRenderer.invoke('doc-get-by-id', id),
     getAll: (page?: number, pageSize?: number, excludeWikiId?: number, search?: string) =>

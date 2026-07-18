@@ -1,33 +1,39 @@
-import React, { useState, useEffect, useCallback } from 'react'
-import { Input } from 'antd'
+import React, { useEffect, useCallback, useRef } from 'react'
+import {
+  MDXEditor,
+  headingsPlugin,
+  listsPlugin,
+  quotePlugin,
+  thematicBreakPlugin,
+  markdownShortcutPlugin,
+  type MDXEditorMethods
+} from '@mdxeditor/editor'
+import '@mdxeditor/editor/style.css'
+import './markdown-body.css'
 import type { MarkdownEditorProps } from '@renderer/types/components'
 
-const { TextArea } = Input
-
 const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialValue = '', onSave }) => {
-  const [value, setValue] = useState(initialValue)
+  const editorRef = useRef<MDXEditorMethods>(null)
 
+  // 当 initialValue 变化时同步更新编辑器内容
   useEffect(() => {
-    setValue(initialValue)
+    if (editorRef.current) {
+      editorRef.current.setMarkdown(initialValue)
+    }
   }, [initialValue])
 
   const handleSave = useCallback((): void => {
-    if (onSave) {
-      onSave(value)
+    if (onSave && editorRef.current) {
+      const markdown = editorRef.current.getMarkdown()
+      onSave(markdown)
     }
-  }, [onSave, value])
-
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>): void => {
-    const newValue = e.target.value
-    setValue(newValue)
-  }
+  }, [onSave])
 
   // 监听快捷键 Ctrl+S / Command+S
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent): void => {
-      // 检查是否按下 Ctrl (或 Cmd) 且键为 's'，且没有其他修饰键（Shift/Alt）
       if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key === 's') {
-        e.preventDefault() // 阻止浏览器默认保存行为
+        e.preventDefault()
         handleSave()
       }
     }
@@ -36,29 +42,40 @@ const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialValue = '', onSa
     return () => {
       window.removeEventListener('keydown', handleKeyDown)
     }
-  }, [handleSave]) // 依赖 handleSave，确保它始终是最新的
+  }, [handleSave])
 
   return (
-    <div
-      style={{
-        height: '100%',
-        display: 'grid',
-        gridTemplateRows: '1fr',
-        // 自定义滚动条样式
-        scrollbarWidth: 'thin',
-        scrollbarColor: 'rgba(128,128,128,0.3) transparent'
-      }}
-    >
-      <TextArea
-        showCount
-        onChange={handleChange}
-        value={value}
-        placeholder="请输入内容..."
-        style={{
-          height: '100%',
-          resize: 'none'
-        }}
+    <div className="mdxeditor-wrapper h-full flex flex-col custom-scrollbar rounded-lg border border-gray-200">
+      <MDXEditor
+        ref={editorRef}
+        markdown={initialValue}
+        plugins={[
+          headingsPlugin(),
+          listsPlugin(),
+          quotePlugin(),
+          thematicBreakPlugin(),
+          markdownShortcutPlugin()
+        ]}
+        contentEditableClassName="markdown-body"
       />
+      <style>{`
+        .mdxeditor-wrapper > .mdxeditor {
+          height: 100% !important;
+          display: flex !important;
+          flex-direction: column !important;
+        }
+        .mdxeditor-wrapper .mdxeditor-root-contenteditable {
+          flex: 1 !important;
+          min-height: 0 !important;
+          overflow-y: auto !important;
+        }
+        .mdxeditor-wrapper .mdxeditor-root-contenteditable > div {
+          height: 100% !important;
+        }
+        .mdxeditor-wrapper .mdxeditor-root-contenteditable .markdown-body {
+          height: 100% !important;
+        }
+      `}</style>
     </div>
   )
 }

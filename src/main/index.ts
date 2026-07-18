@@ -26,6 +26,25 @@ import {
   TodoItemRow
 } from './database/mapper/todo'
 import {
+  addDependency,
+  deleteDependency,
+  deleteAllDependenciesForTask,
+  getAllDependencies,
+  getAllTasksWithDependencies
+} from './database/mapper/todo_dependencies'
+import {
+  getAllTasks as getAllPlannerTasks,
+  getTaskById as getPlannerTaskById,
+  getTaskTree as getPlannerTaskTree,
+  addTask as addPlannerTask,
+  updateTask as updatePlannerTask,
+  deleteTask as deletePlannerTask,
+  reorderTasks as reorderPlannerTasks,
+  addDependency as addPlannerDependency,
+  deleteDependency as deletePlannerDependency,
+  getAllDependencies as getAllPlannerDependencies
+} from './database/mapper/planner'
+import {
   getDocById,
   getAllDocs,
   getDocPage,
@@ -418,12 +437,144 @@ app.whenReady().then(async () => {
   ipcMain.handle('todo-items-delete', async (_event, id: number) => {
     try {
       const result = await deleteTodoItem(id)
+      // 同时清理该任务的所有依赖关系
+      deleteAllDependenciesForTask(id).catch((err) =>
+        logger.error('Failed to delete dependencies for todo:', err)
+      )
       deleteNodePosition(`todo-${id}`).catch((err) =>
         logger.error('Failed to delete node position for todo:', err)
       )
       return result
     } catch (error) {
       console.error('Error in todo-items-delete:', error)
+      throw error
+    }
+  })
+
+  // --- 任务依赖关系 IPC handlers ---
+  ipcMain.handle('task-deps-add', async (_event, taskId: number, dependsOnTaskId: number) => {
+    try {
+      return await addDependency(taskId, dependsOnTaskId)
+    } catch (error) {
+      console.error('Error in task-deps-add:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('task-deps-delete', async (_event, taskId: number, dependsOnTaskId: number) => {
+    try {
+      return await deleteDependency(taskId, dependsOnTaskId)
+    } catch (error) {
+      console.error('Error in task-deps-delete:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('task-deps-get-all', async () => {
+    try {
+      return await getAllDependencies()
+    } catch (error) {
+      console.error('Error in task-deps-get-all:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('task-deps-get-with-tasks', async () => {
+    try {
+      return await getAllTasksWithDependencies()
+    } catch (error) {
+      console.error('Error in task-deps-get-with-tasks:', error)
+      throw error
+    }
+  })
+
+  // --- Planner (甘特图) IPC handlers ---
+  ipcMain.handle('planner-tasks-get-all', async () => {
+    try {
+      return await getAllPlannerTasks()
+    } catch (error) {
+      console.error('Error in planner-tasks-get-all:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('planner-tasks-get-by-id', async (_event, id: number) => {
+    try {
+      return await getPlannerTaskById(id)
+    } catch (error) {
+      console.error('Error in planner-tasks-get-by-id:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('planner-tasks-get-tree', async () => {
+    try {
+      return await getPlannerTaskTree()
+    } catch (error) {
+      console.error('Error in planner-tasks-get-tree:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('planner-tasks-add', async (_event, task) => {
+    try {
+      return await addPlannerTask(task)
+    } catch (error) {
+      console.error('Error in planner-tasks-add:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('planner-tasks-update', async (_event, id: number, updates) => {
+    try {
+      return await updatePlannerTask(id, updates)
+    } catch (error) {
+      console.error('Error in planner-tasks-update:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('planner-tasks-delete', async (_event, id: number) => {
+    try {
+      return await deletePlannerTask(id)
+    } catch (error) {
+      console.error('Error in planner-tasks-delete:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('planner-tasks-reorder', async (_event, orderList) => {
+    try {
+      return await reorderPlannerTasks(orderList)
+    } catch (error) {
+      console.error('Error in planner-tasks-reorder:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('planner-deps-add', async (_event, taskId: number, dependsOnTaskId: number) => {
+    try {
+      return await addPlannerDependency(taskId, dependsOnTaskId)
+    } catch (error) {
+      console.error('Error in planner-deps-add:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('planner-deps-delete', async (_event, taskId: number, dependsOnTaskId: number) => {
+    try {
+      return await deletePlannerDependency(taskId, dependsOnTaskId)
+    } catch (error) {
+      console.error('Error in planner-deps-delete:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('planner-deps-get-all', async () => {
+    try {
+      return await getAllPlannerDependencies()
+    } catch (error) {
+      console.error('Error in planner-deps-get-all:', error)
       throw error
     }
   })
