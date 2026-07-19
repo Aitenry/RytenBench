@@ -263,6 +263,31 @@ interface Api {
         coverDataUrl: string | null
       }[]
     >
+    /** 监听来自 AI 对话的播放请求，返回取消监听的函数 */
+    onMusicPlay: (callback: (data: {
+      track: {
+        id: string
+        filePath: string
+        title: string
+        artist: string
+        album: string
+        duration: number
+        liked: boolean
+        coverDataUrl: string | null
+      }
+      folderTracks: {
+        id: string
+        filePath: string
+        title: string
+        artist: string
+        album: string
+        duration: number
+        liked: boolean
+        coverDataUrl: string | null
+      }[]
+      folderId: string
+      targetIndex: number
+    }) => void) => () => void
   }
 }
 

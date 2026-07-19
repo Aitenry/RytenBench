@@ -2,6 +2,8 @@ export interface ChatOptions {
   tools?: string[]
   images?: string[]
   documents?: { fileName: string; filePath: string }[]
+  /** 话题 ID，ChatService 内部会根据此 ID 从数据库加载历史对话 */
+  topicId?: number
 }
 
 export interface ChatMessage {

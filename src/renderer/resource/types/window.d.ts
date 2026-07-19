@@ -176,6 +176,7 @@ export interface Window {
       getDialoguesByTopic: (topicId: number) => Promise<ChatDialogueRow[]>
       addDialogue: (dialogue: Omit<ChatDialogueRow, 'id' | 'created_at'>) => Promise<number>
       deleteDialoguesByTopic: (topicId: number) => Promise<boolean>
+      deleteDialogue: (id: number) => Promise<boolean>
     }
     graph: {
       getData: (wikiId: number, typeFilter?: string, docIds?: number[]) => Promise<GraphData>

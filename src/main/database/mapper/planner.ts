@@ -5,15 +5,12 @@ export interface PlannerTaskRow {
   id: number
   parent_id: number | null
   title: string
-  type: string // 'project' | 'phase' | 'task' | 'milestone'
+  type: string // 'project' | 'phase' | 'task'
   progress: number // 0-100
   work_hours: number
-  color_tag: number // 1=blue, 2=pink, 3=purple
   priority: number // P0-P7, 0=highest
-  assignee: string | null
   start_date: string | null
   end_date: string | null
-  milestone_date: string | null
   sort_order: number
   created_at: string
   updated_at: string
@@ -66,7 +63,7 @@ async function getTaskTree(): Promise<PlannerTreeNode[]> {
     const db = (await getDatabaseInstance()).getDatabase()
 
     const tasksResult = await db.query<PlannerTaskRow>(
-      'SELECT * FROM planner_tasks ORDER BY sort_order ASC'
+      'SELECT * FROM planner_tasks ORDER BY start_date ASC NULLS LAST, sort_order ASC'
     )
     const tasks = tasksResult.rows
 
@@ -117,6 +114,21 @@ async function getTaskTree(): Promise<PlannerTreeNode[]> {
 
     setDepth(roots, 0)
 
+    // 按 start_date 递归排序子节点
+    function sortChildren(nodes: PlannerTreeNode[]): void {
+      nodes.sort((a, b) => {
+        const aDate = typeof a.start_date === 'string' ? a.start_date : ''
+        const bDate = typeof b.start_date === 'string' ? b.start_date : ''
+        if (aDate !== bDate) return aDate.localeCompare(bDate)
+        return a.sort_order - b.sort_order
+      })
+      for (const node of nodes) {
+        sortChildren(node.children)
+      }
+    }
+
+    sortChildren(roots)
+
     logger.info(`planner: built tree with ${tasks.length} nodes, ${roots.length} roots`)
     return roots
   } catch (error) {
@@ -137,12 +149,9 @@ async function addTask(
       'type',
       'progress',
       'work_hours',
-      'color_tag',
       'priority',
-      'assignee',
       'start_date',
       'end_date',
-      'milestone_date',
       'sort_order'
     ]
     const placeholders = fields.map((_, i) => `$${i + 1}`)
@@ -153,12 +162,9 @@ async function addTask(
       task.type,
       task.progress,
       task.work_hours,
-      task.color_tag,
       task.priority,
-      task.assignee,
       task.start_date,
       task.end_date,
-      task.milestone_date,
       task.sort_order
     ]
     const result = await db.query<{ id: number }>(sql, values)
@@ -183,12 +189,9 @@ async function updateTask(
       'type',
       'progress',
       'work_hours',
-      'color_tag',
       'priority',
-      'assignee',
       'start_date',
       'end_date',
-      'milestone_date',
       'sort_order'
     ]
 

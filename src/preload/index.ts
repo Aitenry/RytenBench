@@ -162,7 +162,8 @@ const api = {
     addDialogue: (dialogue: Omit<ChatDialogueRow, 'id' | 'created_at'>) =>
       ipcRenderer.invoke('chat-dialogue-add', dialogue),
     deleteDialoguesByTopic: (topicId: number) =>
-      ipcRenderer.invoke('chat-dialogue-delete-by-topic', topicId)
+      ipcRenderer.invoke('chat-dialogue-delete-by-topic', topicId),
+    deleteDialogue: (id: number) => ipcRenderer.invoke('chat-dialogue-delete', id)
   },
   graph: {
     getData: (wikiId: number, typeFilter?: string, docIds?: number[]) =>
@@ -381,7 +382,38 @@ const api = {
           liked: boolean
           coverDataUrl: string | null
         }[]
-      >
+      >,
+    onMusicPlay: (
+      callback: (data: {
+        track: {
+          id: string
+          filePath: string
+          title: string
+          artist: string
+          album: string
+          duration: number
+          liked: boolean
+          coverDataUrl: string | null
+        }
+        folderTracks: {
+          id: string
+          filePath: string
+          title: string
+          artist: string
+          album: string
+          duration: number
+          liked: boolean
+          coverDataUrl: string | null
+        }[]
+        folderId: string
+        targetIndex: number
+      }) => void
+    ) => {
+      const handler = (_event: Electron.IpcRendererEvent, data: Parameters<typeof callback>[0]) =>
+        callback(data)
+      ipcRenderer.on('music-play-track', handler)
+      return () => ipcRenderer.removeListener('music-play-track', handler)
+    }
   }
 }
 

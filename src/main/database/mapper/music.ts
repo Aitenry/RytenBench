@@ -218,6 +218,22 @@ export async function updateFolder(
   }
 }
 
+export async function getTrackById(
+  trackId: number
+): Promise<(MusicTrackRow & { cover_data_url: string | null }) | null> {
+  try {
+    const db = (await getDatabaseInstance()).getDatabase()
+    const result = await db.query<MusicTrackRow & { cover_data_url: string | null }>(
+      `${TRACK_SELECT} WHERE t.id = $1`,
+      [trackId]
+    )
+    return result.rows.length > 0 ? result.rows[0] : null
+  } catch (error) {
+    logger.error('Failed to get track by id:', error)
+    throw error
+  }
+}
+
 export async function getTracksByFolder(folderId: string): Promise<
   (MusicTrackRow & {
     cover_data_url: string | null

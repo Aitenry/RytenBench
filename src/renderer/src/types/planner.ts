@@ -5,12 +5,9 @@ export interface PlannerTaskRow {
   type: string
   progress: number
   work_hours: number
-  color_tag: number
   priority: number
-  assignee: string | null
   start_date: string | null
   end_date: string | null
-  milestone_date: string | null
   sort_order: number
   created_at: string
   updated_at: string

@@ -1,4 +1,5 @@
 import React, { useRef, useEffect, useMemo, useCallback } from 'react'
+import { theme } from 'antd'
 import { PRIORITY_MAP, DAY_COL_WIDTH, ROW_HEIGHT } from '@renderer/types/planner'
 import type { PlannerTreeNode } from '@renderer/types/planner'
 
@@ -54,13 +55,12 @@ function computeDateRange(flatRows: FlatRow[]): { start: Date; end: Date } {
     return { start, end }
   }
 
-  // 前后各留3天余量
   const start = new Date(minTime)
-  start.setDate(start.getDate() - 3)
+  start.setDate(start.getDate())
   start.setHours(0, 0, 0, 0)
 
   const end = new Date(maxTime)
-  end.setDate(end.getDate() + 3)
+  end.setDate(end.getDate())
   end.setHours(23, 59, 59, 999)
 
   return { start, end }
@@ -106,6 +106,7 @@ const GanttChart: React.FC<Props> = ({
   ganttRef,
   treeScrollRef
 }) => {
+  const { token } = theme.useToken()
   const colWidth = DAY_COL_WIDTH
   const headerRef = useRef<HTMLDivElement>(null)
   const bodyRef = useRef<HTMLDivElement>(null)
@@ -241,13 +242,13 @@ const GanttChart: React.FC<Props> = ({
           <polyline
             points={`${fromX},${fromY} ${midX},${fromY} ${midX},${toY} ${toX - arrowSize},${toY}`}
             fill="none"
-            stroke="#bbb"
+            stroke={token.colorTextQuaternary}
             strokeWidth={1.2}
             strokeDasharray="4,2"
           />
           <polygon
             points={`${toX},${toY} ${toX - arrowSize},${toY - arrowSize / 2} ${toX - arrowSize},${toY + arrowSize / 2}`}
-            fill="#bbb"
+            fill={token.colorTextQuaternary}
           />
         </g>
       )
@@ -261,13 +262,13 @@ const GanttChart: React.FC<Props> = ({
     <div
       ref={ganttRef}
       className="flex-1 flex flex-col overflow-hidden"
-      style={{ background: '#fff' }}
+      style={{ background: token.colorBgContainer }}
     >
       {/* 时间轴表头 */}
       <div
         ref={headerRef}
         className="shrink-0 overflow-hidden"
-        style={{ height: 36, borderBottom: '2px solid #e8e8e8' }}
+        style={{ height: 36, borderBottom: `2px solid ${token.colorBorderSecondary}` }}
       >
         <div className="flex" style={{ width: totalWidth, height: 36 }}>
           {dates.map((d, i) => (
@@ -277,8 +278,9 @@ const GanttChart: React.FC<Props> = ({
               style={{
                 width: colWidth,
                 height: 36,
-                color: '#888',
-                borderRight: i < dates.length - 1 ? '1px solid #f0f0f0' : 'none'
+                color: token.colorTextTertiary,
+                borderRight:
+                  i < dates.length - 1 ? `1px solid ${token.colorBorderSecondary}` : 'none'
               }}
             >
               {d.getMonth() + 1}月{d.getDate()}
@@ -306,7 +308,7 @@ const GanttChart: React.FC<Props> = ({
                 top: 0,
                 width: 1,
                 height: '100%',
-                background: '#f5f5f5'
+                background: token.colorFillQuaternary
               }}
             />
           ))}
@@ -327,11 +329,11 @@ const GanttChart: React.FC<Props> = ({
                   width: totalWidth,
                   height: ROW_HEIGHT,
                   background: isSelected
-                    ? 'rgba(230,240,255,0.5)'
+                    ? token.colorPrimaryBg
                     : idx % 2 === 0
-                      ? '#fafbfc'
-                      : '#fff',
-                  borderBottom: '1px solid #f0f0f0'
+                      ? token.colorFillAlter
+                      : token.colorBgContainer,
+                  borderBottom: `1px solid ${token.colorBorderSecondary}`
                 }}
                 onClick={() => onSelect(row.id)}
               >
@@ -351,35 +353,37 @@ const GanttChart: React.FC<Props> = ({
                     }}
                   >
                     {/* 已完成部分 */}
-                    <div
-                      style={{
-                        position: 'absolute',
-                        left: 0,
-                        top: 0,
-                        height: '100%',
-                        width: `${barStyle.progressPct * 100}%`,
-                        background: barStyle.priorityInfo.hex,
-                        borderRadius: '3px 0 0 3px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'flex-start',
-                        paddingLeft: 4
-                      }}
-                    >
-                      {barStyle.progressPct > 0.15 && (
-                        <span
-                          style={{
-                            color: '#fff',
-                            fontSize: 7,
-                            fontWeight: 600,
-                            lineHeight: 1,
-                            whiteSpace: 'nowrap'
-                          }}
-                        >
-                          {row.progress}%
-                        </span>
-                      )}
-                    </div>
+                    {barStyle.progressPct > 0 && (
+                      <div
+                        style={{
+                          position: 'absolute',
+                          left: 0,
+                          top: 0,
+                          height: '100%',
+                          width: `${barStyle.progressPct * 100}%`,
+                          background: barStyle.priorityInfo.hex,
+                          borderRadius: '3px 0 0 3px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'flex-start',
+                          paddingLeft: 4
+                        }}
+                      >
+                        {barStyle.progressPct > 0.15 && (
+                          <span
+                            style={{
+                              color: '#fff',
+                              fontSize: 7,
+                              fontWeight: 600,
+                              lineHeight: 1,
+                              whiteSpace: 'nowrap'
+                            }}
+                          >
+                            {row.progress}%
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

@@ -168,6 +168,20 @@ async function deleteDialoguesByTopicId(topicId: number): Promise<boolean> {
   }
 }
 
+async function deleteDialogueById(id: number): Promise<boolean> {
+  try {
+    const db = (await getDatabaseInstance()).getDatabase()
+    const sql = 'DELETE FROM chat_dialogue WHERE id = $1'
+    const result = await db.query(sql, [id])
+    const changes = result.affectedRows ?? 0
+    logger.info(`Deleted dialogue ID=${id}, ${changes} row(s) affected.`)
+    return changes > 0
+  } catch (error) {
+    logger.error('Failed to delete dialogue by id:', error)
+    throw error
+  }
+}
+
 export {
   getAllTopics,
   getTopicById,
@@ -176,5 +190,6 @@ export {
   deleteTopic,
   getDialoguesByTopicId,
   addDialogue,
-  deleteDialoguesByTopicId
+  deleteDialoguesByTopicId,
+  deleteDialogueById
 }

@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react'
-import { Button, Modal, Tooltip } from 'antd'
+import { Button, Modal, Tooltip, theme } from 'antd'
 import {
   RiArrowDownSLine,
   RiArrowRightSLine,
@@ -33,6 +33,7 @@ const TaskTree: React.FC<Props> = ({
   onEditTask
 }) => {
   const [hoveredId, setHoveredId] = useState<number | null>(null)
+  const { token } = theme.useToken()
 
   const renderRow = useCallback(
     (node: PlannerTreeNode, numberPath: number[]): React.ReactNode => {
@@ -52,9 +53,10 @@ const TaskTree: React.FC<Props> = ({
           style={{
             height: 36,
             paddingLeft: 8 + indent,
-            paddingRight: 8,
-            background: isSelected ? '#e6f0ff' : 'transparent',
-            borderBottom: '1px solid #f0f0f0'
+            paddingRight: 2,
+            color: token.colorText,
+            background: isSelected ? token.colorPrimaryBg : 'transparent',
+            borderBottom: `1px solid ${token.colorBorderSecondary}`
           }}
           onClick={() => onSelect(node.id)}
           onMouseEnter={() => setHoveredId(node.id)}
@@ -73,16 +75,16 @@ const TaskTree: React.FC<Props> = ({
           >
             {hasChildren &&
               (isCollapsed ? (
-                <RiArrowRightSLine size={14} color="#999" />
+                <RiArrowRightSLine size={14} color={token.colorTextTertiary} />
               ) : (
-                <RiArrowDownSLine size={14} color="#999" />
+                <RiArrowDownSLine size={14} color={token.colorTextTertiary} />
               ))}
           </span>
 
           {/* 序号 */}
           <span
             className="shrink-0 text-xs mr-2"
-            style={{ color: '#999', textAlign: 'right', flexShrink: 0 }}
+            style={{ color: token.colorTextTertiary, textAlign: 'right', flexShrink: 0 }}
           >
             {numberStr}
           </span>
@@ -112,19 +114,21 @@ const TaskTree: React.FC<Props> = ({
           </div>
 
           {/* 工时 */}
-          <span
-            className="shrink-0 text-xs ml-auto mr-2"
-            style={{ width: 48, textAlign: 'right', color: '#666' }}
-          >
-            {node.work_hours}h
-          </span>
+          {!isHovered && (
+            <span
+              className="shrink-0 text-xs ml-auto"
+              style={{ width: 48, textAlign: 'right', color: token.colorTextSecondary }}
+            >
+              {node.work_hours}h
+            </span>
+          )}
 
           {/* hover 时显示操作按钮 */}
           {isHovered && (
             <span
               className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5 shrink-0"
               style={{
-                background: isSelected ? '#e6f0ff' : '#fff',
+                background: isSelected ? token.colorPrimaryBg : token.colorBgContainer,
                 paddingLeft: 4,
                 borderRadius: 4
               }}
@@ -192,6 +196,7 @@ const TaskTree: React.FC<Props> = ({
       collapsedIds,
       selectedId,
       hoveredId,
+      token,
       onSelect,
       onToggleCollapse,
       onAddTask,
@@ -213,12 +218,20 @@ const TaskTree: React.FC<Props> = ({
   return (
     <div
       className="flex flex-col shrink-0 overflow-hidden"
-      style={{ width: 300, borderRight: '1px solid #e8e8e8', background: '#fafafa' }}
+      style={{
+        width: 300,
+        borderRight: `1px solid ${token.colorBorderSecondary}`,
+        background: token.colorBgLayout
+      }}
     >
       {/* 表头 + 添加按钮 */}
       <div
         className="flex items-center shrink-0 px-2 text-xs font-semibold"
-        style={{ height: 36, borderBottom: '2px solid #e8e8e8', color: '#666' }}
+        style={{
+          height: 36,
+          borderBottom: `2px solid ${token.colorBorderSecondary}`,
+          color: token.colorTextSecondary
+        }}
       >
         <span style={{ width: 18 }} />
         <span className="shrink-0" style={{ textAlign: 'right' }}>
@@ -235,7 +248,7 @@ const TaskTree: React.FC<Props> = ({
         {allRows.length === 0 ? (
           <div
             className="flex flex-col items-center justify-center h-full gap-2"
-            style={{ color: '#999' }}
+            style={{ color: token.colorTextTertiary }}
           >
             <span className="text-sm">暂无任务</span>
             <Button type="link" size="small" onClick={() => onAddTask(null)}>

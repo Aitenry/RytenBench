@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useState, useEffect, useMemo, useCallback } from 'react'
 import { Modal, Input, Select, Slider, InputNumber, DatePicker, Form, Alert } from 'antd'
 import dayjs, { type Dayjs } from 'dayjs'
 import type { PlannerTreeNode } from '@renderer/types/planner'
@@ -10,7 +10,6 @@ interface TaskValues {
   type: string
   progress: number
   work_hours: number
-  color_tag: number
   priority: number
   start_date: string | null
   end_date: string | null
@@ -79,6 +78,36 @@ const AddTaskModal: React.FC<Props> = ({ open, parentId, editTask, tree, onOk, o
     return sumDescendantWorkHours(editTask)
   }, [editTask])
 
+  // 获取编辑节点的父节点（编辑时需要从 editTask.parent_id 查找）
+  const editParentNode = useMemo(() => {
+    if (!editTask || editTask.parent_id === null) return null
+    return findNode(tree, editTask.parent_id)
+  }, [tree, editTask])
+
+  // 时间范围的约束节点：新建时用 parentNode，编辑时用 editParentNode
+  const constrainingNode = editTask ? editParentNode : parentNode
+
+  // RangePicker disabledDate：只能在约束节点的时间范围内选择
+  const disabledDate = useCallback(
+    (current: Dayjs): boolean => {
+      if (!constrainingNode || !constrainingNode.start_date || !constrainingNode.end_date) {
+        return false
+      }
+      const start = dayjs(constrainingNode.start_date).startOf('day')
+      const end = dayjs(constrainingNode.end_date).endOf('day')
+      return current.isBefore(start) || current.isAfter(end)
+    },
+    [constrainingNode]
+  )
+
+  // RangePicker 打开时默认定位到约束区间起点
+  const defaultPickerValue = useMemo<[Dayjs, Dayjs] | undefined>(() => {
+    if (!constrainingNode || !constrainingNode.start_date || !constrainingNode.end_date) {
+      return undefined
+    }
+    return [dayjs(constrainingNode.start_date), dayjs(constrainingNode.end_date)]
+  }, [constrainingNode])
+
   // 根据时间范围计算工时上限
   const maxWorkHours = useMemo(() => {
     if (!dateRange) return undefined
@@ -111,28 +140,34 @@ const AddTaskModal: React.FC<Props> = ({ open, parentId, editTask, tree, onOk, o
     }
   }, [open, editTask])
 
-  /** 验证工时与时间范围约束，返回错误信息或 null */
+  /** 验证必填项与约束，返回错误信息或 null */
   const validate = (): string | null => {
-    const startDate = dateRange?.[0] ?? null
-    const endDate = dateRange?.[1] ?? null
+    // 0. 必填校验
+    if (!title.trim()) return '名称不能为空。'
+    if (!type) return '类型不能为空。'
+    if (workHours === undefined || workHours === null || workHours <= 0)
+      return '工时不能为空或为 0。'
+    if (priority === undefined || priority === null) return '优先级不能为空。'
+    if (!dateRange || !dateRange[0] || !dateRange[1]) return '时间范围不能为空。'
+
+    const startDate = dateRange[0]
+    const endDate = dateRange[1]
 
     // 1. 工时上限规则：基于时间范围天数，每天最大 8 小时
-    if (startDate && endDate) {
-      const days = endDate.startOf('day').diff(startDate.startOf('day'), 'day') + 1
-      const maxHours = days * 8
-      if (workHours > maxHours) {
-        return `时间范围跨越 ${days} 天，工时最大仅允许 ${maxHours} 小时`
-      }
+    const days = endDate.startOf('day').diff(startDate.startOf('day'), 'day') + 1
+    const maxHours = days * 8
+    if (workHours > maxHours) {
+      return `时间范围跨越 ${days} 天，工时最大仅允许 ${maxHours} 小时`
     }
 
     // 2. 时间范围层级约束：子级必须在父级时间范围内
-    if (parentNode && parentNode.start_date && parentNode.end_date) {
-      const pStart = dayjs(parentNode.start_date)
-      const pEnd = dayjs(parentNode.end_date)
-      if (startDate && startDate.isBefore(pStart, 'day')) {
+    if (constrainingNode && constrainingNode.start_date && constrainingNode.end_date) {
+      const pStart = dayjs(constrainingNode.start_date)
+      const pEnd = dayjs(constrainingNode.end_date)
+      if (startDate.isBefore(pStart, 'day')) {
         return `开始日期不能早于父级开始日期（${pStart.format('YYYY-MM-DD')}）`
       }
-      if (endDate && endDate.isAfter(pEnd, 'day')) {
+      if (endDate.isAfter(pEnd, 'day')) {
         return `结束日期不能晚于父级结束日期（${pEnd.format('YYYY-MM-DD')}）`
       }
     }
@@ -178,8 +213,6 @@ const AddTaskModal: React.FC<Props> = ({ open, parentId, editTask, tree, onOk, o
   }
 
   const handleOk = (): void => {
-    if (!title.trim()) return
-
     const error = validate()
     if (error) {
       setValidationError(error)
@@ -193,10 +226,9 @@ const AddTaskModal: React.FC<Props> = ({ open, parentId, editTask, tree, onOk, o
         type,
         progress,
         work_hours: workHours,
-        color_tag: editTask?.color_tag ?? 1,
         priority,
-        start_date: dateRange?.[0] ? dateRange[0].format('YYYY-MM-DDTHH:mm:ss') : null,
-        end_date: dateRange?.[1] ? dateRange[1].format('YYYY-MM-DDTHH:mm:ss') : null
+        start_date: dateRange![0].format('YYYY-MM-DDTHH:mm:ss'),
+        end_date: dateRange![1].format('YYYY-MM-DDTHH:mm:ss')
       },
       isEdit ? editTask!.id : null
     )
@@ -274,11 +306,7 @@ const AddTaskModal: React.FC<Props> = ({ open, parentId, editTask, tree, onOk, o
 
         {(isEdit || parentId !== null) && (
           <Form.Item label="类型">
-            <Select
-              value={type}
-              onChange={(v) => setType(v)}
-              disabled={isEdit}
-            >
+            <Select value={type} onChange={(v) => setType(v)} disabled={isEdit}>
               {typeOptions.map((opt) => (
                 <Select.Option key={opt.value} value={opt.value}>
                   {opt.label}
@@ -323,12 +351,14 @@ const AddTaskModal: React.FC<Props> = ({ open, parentId, editTask, tree, onOk, o
           </Form.Item>
         </div>
 
-        <Form.Item label="时间范围">
+        <Form.Item label="时间范围" required>
           <RangePicker
             className="w-full"
             showTime
             value={dateRange}
             onChange={(v) => setDateRange(v as [Dayjs, Dayjs] | null)}
+            disabledDate={disabledDate}
+            defaultPickerValue={defaultPickerValue}
             placeholder={['开始时间', '结束时间']}
           />
         </Form.Item>

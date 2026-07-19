@@ -1,16 +1,20 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react'
-import { theme, Input, Button, Tooltip, Select, Tag, Dropdown } from 'antd'
+import { theme, Input, Button, Tooltip, Select, Tag, Dropdown, Collapse, Modal } from 'antd'
 import type { TextAreaRef } from 'antd/es/input/TextArea'
 import {
   RiArrowUpLine,
   RiLoader4Line,
   RiFileCopyLine,
   RiCheckLine,
-  RiThumbUpLine,
-  RiThumbDownLine,
   RiRefreshLine,
   RiSunCloudyLine,
   RiTimeLine,
+  RiListCheck3,
+  RiFileSearchLine,
+  RiBook2Line,
+  RiMindMap,
+  RiBarChartHorizontalLine,
+  RiPlayListLine,
   RiAddLine,
   RiHistoryLine,
   RiDeleteBin6Line,
@@ -24,13 +28,18 @@ import { ChatDialogueRow, ChatTopicRow } from '../../../../main/database/mapper/
 import { LlmProviderConfig } from '../../../../main/database/mapper/provider'
 import MarkdownLoad from '@renderer/components/markdown/MarkdownLoad'
 import { Window, ToolInfo } from '../../../resource/types/window'
-import { Collapse } from 'antd'
 import { useTheme } from '@renderer/contexts/useTheme'
 import type { Message, Attachment } from '@renderer/types/chat'
 
 const toolIconMap: Record<string, React.ReactNode> = {
   RiSunCloudyLine: <RiSunCloudyLine size={16} />,
-  RiTimeLine: <RiTimeLine size={16} />
+  RiTimeLine: <RiTimeLine size={16} />,
+  RiListCheck3: <RiListCheck3 size={16} />,
+  RiFileSearchLine: <RiFileSearchLine size={16} />,
+  RiBook2Line: <RiBook2Line size={16} />,
+  RiMindMap: <RiMindMap size={16} />,
+  RiBarChartHorizontalLine: <RiBarChartHorizontalLine size={16} />,
+  RiPlayListLine: <RiPlayListLine size={16} />
 }
 
 const Index: React.FC = () => {
@@ -355,6 +364,52 @@ const Index: React.FC = () => {
     setAttachments([])
   }
 
+  const handleDeleteMessagePair = async (msgIndex: number): Promise<void> => {
+    // 找到该消息所在的 user+assistant 对，并删除两条
+    const msgs = [...messages]
+    const current = msgs[msgIndex]
+    if (!current) return
+
+    const indicesToDelete: number[] = []
+
+    if (current.role === 'user') {
+      // user 消息：删除自己和后面的 assistant（如果存在）
+      indicesToDelete.push(msgIndex)
+      if (msgIndex + 1 < msgs.length && msgs[msgIndex + 1].role === 'assistant') {
+        indicesToDelete.push(msgIndex + 1)
+      }
+    } else if (current.role === 'assistant') {
+      // assistant 消息：删除自己和前面的 user
+      if (msgIndex - 1 >= 0 && msgs[msgIndex - 1].role === 'user') {
+        indicesToDelete.push(msgIndex - 1)
+      }
+      indicesToDelete.push(msgIndex)
+    }
+
+    // 从 DB 中删除
+    try {
+      for (const idx of indicesToDelete) {
+        const msg = msgs[idx]
+        if (msg.id && !isNaN(Number(msg.id))) {
+          await (window as unknown as Window).api.chat.deleteDialogue(Number(msg.id))
+        }
+      }
+    } catch (err) {
+      console.error('Failed to delete dialogue:', err)
+    }
+
+    // 从 state 中移除
+    const toDelete = new Set(indicesToDelete)
+    const newMsgs = msgs.filter((_, i) => !toDelete.has(i))
+    setMessages(newMsgs)
+
+    // 如果删除后没有消息了，重置 topic
+    if (newMsgs.length === 0) {
+      currentTopicIdRef.current = null
+      setCurrentTopicId(null)
+    }
+  }
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
@@ -407,7 +462,13 @@ const Index: React.FC = () => {
     )
   }
 
-  const AssistantMessage = ({ message }: { message: Message }): React.ReactNode => {
+  const AssistantMessage = ({
+    message,
+    index
+  }: {
+    message: Message
+    index: number
+  }): React.ReactNode => {
     const isCopied = copiedId === message.id
 
     if (
@@ -541,38 +602,6 @@ const Index: React.FC = () => {
                 {isCopied ? <RiCheckLine size={16} /> : <RiFileCopyLine size={16} />}
               </button>
             </Tooltip>
-            <Tooltip title="点赞">
-              <button
-                className="p-1.5 rounded-lg transition-colors"
-                style={{ color: colorTextTertiary, background: 'transparent' }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = colorFillAlter
-                  e.currentTarget.style.color = colorTextSecondary
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'transparent'
-                  e.currentTarget.style.color = colorTextTertiary
-                }}
-              >
-                <RiThumbUpLine size={16} />
-              </button>
-            </Tooltip>
-            <Tooltip title="不喜欢">
-              <button
-                className="p-1.5 rounded-lg transition-colors"
-                style={{ color: colorTextTertiary, background: 'transparent' }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = colorFillAlter
-                  e.currentTarget.style.color = colorTextSecondary
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'transparent'
-                  e.currentTarget.style.color = colorTextTertiary
-                }}
-              >
-                <RiThumbDownLine size={16} />
-              </button>
-            </Tooltip>
             <Tooltip title="重新生成">
               <button
                 className="p-1.5 rounded-lg transition-colors"
@@ -587,6 +616,32 @@ const Index: React.FC = () => {
                 }}
               >
                 <RiRefreshLine size={16} />
+              </button>
+            </Tooltip>
+            <Tooltip title="删除此轮对话">
+              <button
+                onClick={() =>
+                  Modal.confirm({
+                    title: '确认删除',
+                    content: '将删除这一轮对话，删除后不可恢复。',
+                    okText: '删除',
+                    cancelText: '取消',
+                    okButtonProps: { danger: true },
+                    onOk: () => handleDeleteMessagePair(index)
+                  })
+                }
+                className="p-1.5 rounded-lg transition-colors"
+                style={{ color: colorTextTertiary, background: 'transparent' }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = colorFillAlter
+                  e.currentTarget.style.color = '#ef4444'
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'transparent'
+                  e.currentTarget.style.color = colorTextTertiary
+                }}
+              >
+                <RiDeleteBin6Line size={16} />
               </button>
             </Tooltip>
           </div>
@@ -802,11 +857,11 @@ const Index: React.FC = () => {
             </div>
           ) : (
             <div className="max-w-4xl mx-auto">
-              {messages.map((message) =>
+              {messages.map((message, idx) =>
                 message.role === 'user' ? (
                   <UserMessage key={message.id} message={message} />
                 ) : (
-                  <AssistantMessage key={message.id} message={message} />
+                  <AssistantMessage key={message.id} message={message} index={idx} />
                 )
               )}
               <div ref={messagesEndRef} />

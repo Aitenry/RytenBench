@@ -12,6 +12,10 @@ export interface GraphSettings {
 
 export interface ChatSettings {
   maxIterations: number
+  /** 历史对话上下文窗口大小（轮次），0 表示不限制 */
+  historyWindowSize: number
+  /** 工具调用上下文窗口大小（条数），0 表示不限制 */
+  toolCallWindowSize: number
 }
 
 export type ThemeMode = 'light' | 'dark' | 'auto'

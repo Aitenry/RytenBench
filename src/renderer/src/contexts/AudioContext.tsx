@@ -491,6 +491,8 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const setPlaylist = useCallback(
     (tracks: Track[], startIndex?: number) => {
       setPlaylistState(tracks)
+      // 立即同步 ref，避免 loadAndPlay 读到旧 playlist（React 尚未提交 state）
+      playlistRef.current = tracks
       if (startIndex !== undefined && startIndex >= 0 && startIndex < tracks.length) {
         loadAndPlay(startIndex)
       } else {
@@ -622,6 +624,15 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     () => ({ progress, duration, isBuffering }),
     [progress, duration, isBuffering]
   )
+
+  // 监听来自 AI 对话的播放请求
+  useEffect(() => {
+    if (!window.api?.music?.onMusicPlay) return
+    return window.api.music.onMusicPlay(({ folderTracks, folderId, targetIndex }) => {
+      setSelectedFolderId(folderId)
+      setPlaylist(folderTracks, targetIndex)
+    })
+  }, [setPlaylist])
 
   return (
     <AudioStateContext.Provider value={stateValue}>

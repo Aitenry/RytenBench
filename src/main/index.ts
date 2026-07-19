@@ -93,6 +93,7 @@ import {
 import { ChatService } from './chat/service'
 import { buildTools, availableTools } from './chat/tools'
 import type { ToolCallDetail } from './chat/types'
+// BaseMessage 等 LangChain 类型已移入 ChatService 内部使用
 import { KnowledgeGraphService, BuildConfig } from './graph'
 import { getProviderService } from './provider/service'
 import {
@@ -133,6 +134,7 @@ import {
   getDialoguesByTopicId,
   addDialogue,
   deleteDialoguesByTopicId,
+  deleteDialogueById,
   ChatTopicRow,
   ChatDialogueRow
 } from './database/mapper/chat'
@@ -236,7 +238,11 @@ async function loadConfig(): Promise<void> {
   if (!chatConfig) {
     configPromises.push(
       Promise.resolve().then(() => {
-        settingsStore.set('chat', { maxIterations: 5 } as ChatSettings)
+        settingsStore.set('chat', {
+          maxIterations: 5,
+          historyWindowSize: 10,
+          toolCallWindowSize: 20
+        } as ChatSettings)
       })
     )
   }
@@ -1444,7 +1450,14 @@ app.whenReady().then(async () => {
       logger.info(`[Chat] Creating model with providerId: ${options?.providerId ?? 'default'}`)
       const model = await getProviderService().createModel(options?.providerId)
       const chatSettings = settingsStore.get('chat') as ChatSettings | undefined
-      const chatService = new ChatService(model, tools, chatSettings?.maxIterations ?? 5)
+      const chatService = new ChatService(
+        model,
+        tools,
+        chatSettings?.maxIterations ?? 5,
+        getDialoguesByTopicId,
+        chatSettings?.historyWindowSize ?? 10,
+        chatSettings?.toolCallWindowSize ?? 20
+      )
       return await chatService.sendMessage(question, options)
     }
   )
@@ -1506,9 +1519,23 @@ app.whenReady().then(async () => {
         logger.error('Failed to save user message:', err)
       }
 
+      // 2.5. 历史对话上下文由 ChatService 内部从数据库加载
+
       // 3. 流式输出 + 累积完整内容
-      const chatService = new ChatService(model, tools, chatSettings?.maxIterations ?? 5)
-      const stream = chatService.sendMessageStream(question, options)
+      const historyWindowSize = chatSettings?.historyWindowSize ?? 10
+      const toolCallWindowSize = chatSettings?.toolCallWindowSize ?? 20
+      const chatService = new ChatService(
+        model,
+        tools,
+        chatSettings?.maxIterations ?? 5,
+        getDialoguesByTopicId,
+        historyWindowSize,
+        toolCallWindowSize
+      )
+      const stream = chatService.sendMessageStream(question, {
+        ...options,
+        topicId
+      })
       const accumulatedBlocks: {
         type: string
         text?: string
@@ -1656,6 +1683,15 @@ app.whenReady().then(async () => {
       return await deleteDialoguesByTopicId(topicId)
     } catch (error) {
       logger.error('Error in chat-dialogue-delete-by-topic:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('chat-dialogue-delete', async (_event, id: number) => {
+    try {
+      return await deleteDialogueById(id)
+    } catch (error) {
+      logger.error('Error in chat-dialogue-delete:', error)
       throw error
     }
   })

@@ -1,5 +1,5 @@
 import React from 'react'
-import { Button, Space, Tooltip } from 'antd'
+import { Button, Space, Tooltip, theme } from 'antd'
 import { RiListCheck2, RiBarChartHorizontalLine, RiAddLine } from '@remixicon/react'
 
 interface Props {
@@ -9,6 +9,7 @@ interface Props {
 }
 
 const Toolbar: React.FC<Props> = ({ viewMode, onViewModeChange, onAddTask }) => {
+  const { token } = theme.useToken()
   const btnStyle: React.CSSProperties = {
     display: 'inline-flex',
     alignItems: 'center',
@@ -21,7 +22,11 @@ const Toolbar: React.FC<Props> = ({ viewMode, onViewModeChange, onAddTask }) => 
   return (
     <div
       className="flex items-center px-3 shrink-0"
-      style={{ height: 44, borderBottom: '1px solid #e8e8e8', background: '#fff' }}
+      style={{
+        height: 44,
+        borderBottom: `1px solid ${token.colorBorderSecondary}`,
+        background: token.colorBgContainer
+      }}
     >
       <Space size={0}>
         <Tooltip title="列表视图">

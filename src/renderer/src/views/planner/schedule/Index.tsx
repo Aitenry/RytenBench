@@ -71,7 +71,6 @@ const Index: React.FC = () => {
         type: string
         progress: number
         work_hours: number
-        color_tag: number
         priority: number
         start_date: string | null
         end_date: string | null
@@ -84,7 +83,6 @@ const Index: React.FC = () => {
         await window.api.planner.tasks.add({
           ...values,
           parent_id: addParentId,
-          assignee: null,
           sort_order: 0
         })
       }
