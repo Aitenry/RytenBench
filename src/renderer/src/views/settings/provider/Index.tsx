@@ -24,6 +24,7 @@ import {
 import { useMessage } from '@renderer/hooks/useMessage'
 import { Window } from '../../../../resource/types/window'
 import type { LlmProviderConfig, LlmProviderInput } from '@renderer/types/provider'
+import type { ChatSettings } from '@renderer/types/settings'
 
 // 供应商类型与 @langchain 包名映射，直接复用 mapper 中的 CHECK 约束值
 const PROVIDER_TYPES = [
@@ -59,7 +60,14 @@ const TAG_COLOR_MAP: Record<string, string> = Object.fromEntries(
 
 const Index: React.FC = () => {
   const {
-    token: { colorBgContainer, borderRadiusLG, colorText, colorTextSecondary, colorTextTertiary }
+    token: {
+      colorBgContainer,
+      borderRadiusLG,
+      colorText,
+      colorTextSecondary,
+      colorTextTertiary,
+      colorBorderSecondary
+    }
   } = theme.useToken()
 
   const { viewMessage } = useMessage()
@@ -69,6 +77,12 @@ const Index: React.FC = () => {
   const [modalOpen, setModalOpen] = useState(false)
   const [editingProvider, setEditingProvider] = useState<LlmProviderConfig | null>(null)
   const [form] = Form.useForm()
+
+  // 技能（Skills）存储目录配置
+  const [chatSettings, setChatSettings] = useState<ChatSettings | null>(null)
+  const [skillsPath, setSkillsPath] = useState('')
+  const [savedSkillsPath, setSavedSkillsPath] = useState('')
+  const [savingSkills, setSavingSkills] = useState(false)
 
   // 监听 tags 字段变化，用于动态禁用选项
   const watchedTags: string[] = (Form.useWatch('tags', form) as string[]) || []
@@ -91,6 +105,57 @@ const Index: React.FC = () => {
   useEffect(() => {
     loadProviders().then()
   }, [loadProviders])
+
+  // --- 技能（Skills）存储目录 ---
+
+  useEffect(() => {
+    ;(window as unknown as Window).api.systemSettings
+      .getAll()
+      .then((settings) => {
+        const chat = settings.chat ?? null
+        setChatSettings(chat)
+        const path = chat?.skillsPath ?? ''
+        setSkillsPath(path)
+        setSavedSkillsPath(path)
+      })
+      .catch((error) => console.error('Failed to load chat settings:', error))
+  }, [])
+
+  const handleBrowseSkillsPath = async (): Promise<void> => {
+    try {
+      const path = await (window as unknown as Window).api.chat.selectSkillsDirectory()
+      if (path) setSkillsPath(path)
+    } catch (error) {
+      viewMessage('skills-path', 'error', `选择目录失败: ${error}`)
+    }
+  }
+
+  const handleSaveSkillsPath = async (): Promise<void> => {
+    const msgKey = 'skills-path'
+    try {
+      setSavingSkills(true)
+      const trimmed = skillsPath.trim()
+      // chat 设置整体替换存储，需合并原有字段；空路径以 undefined 落库即不启用
+      const nextChat: ChatSettings = {
+        ...(chatSettings ?? { maxIterations: 5, historyWindowSize: 10, toolCallWindowSize: 20 }),
+        skillsPath: trimmed || undefined
+      }
+      await (window as unknown as Window).api.systemSettings.update({ chat: nextChat })
+      setChatSettings(nextChat)
+      setSkillsPath(trimmed)
+      setSavedSkillsPath(trimmed)
+      viewMessage(
+        msgKey,
+        'success',
+        trimmed ? '技能目录已保存' : '已清空技能目录，技能功能已停用',
+        2
+      )
+    } catch (error) {
+      viewMessage(msgKey, 'error', `保存失败: ${error}`)
+    } finally {
+      setSavingSkills(false)
+    }
+  }
 
   // --- 增/改 ---
 
@@ -211,7 +276,7 @@ const Index: React.FC = () => {
 
   const columns = [
     {
-      title: '名称',
+      title: '模型名称',
       dataIndex: 'name',
       key: 'name',
       width: 140,
@@ -230,21 +295,14 @@ const Index: React.FC = () => {
       title: '类型',
       dataIndex: 'provider',
       key: 'provider',
-      width: 130,
+      width: 90,
       render: (type: string) => <Tag color="blue">{providerTypeLabel(type)}</Tag>
-    },
-    {
-      title: '模型',
-      dataIndex: 'model',
-      key: 'model',
-      width: 180,
-      ellipsis: true
     },
     {
       title: '标签',
       dataIndex: 'tags',
       key: 'tags',
-      width: 160,
+      width: 130,
       render: (tags: string[] | null) =>
         tags && tags.length > 0 ? (
           <Space size={4} wrap>
@@ -262,7 +320,7 @@ const Index: React.FC = () => {
       title: 'API 地址',
       dataIndex: 'base_url',
       key: 'base_url',
-      width: 240,
+      width: 100,
       ellipsis: true,
       render: (url: string | null) => url || <span style={{ color: colorTextTertiary }}>—</span>
     },
@@ -270,7 +328,7 @@ const Index: React.FC = () => {
       title: '启用',
       dataIndex: 'is_enabled',
       key: 'is_enabled',
-      width: 60,
+      width: 30,
       align: 'center' as const,
       render: (_: boolean, record: LlmProviderConfig) => (
         <Tooltip title={record.is_enabled ? '已启用' : '已禁用'}>
@@ -283,7 +341,7 @@ const Index: React.FC = () => {
     {
       title: '操作',
       key: 'actions',
-      width: 160,
+      width: 120,
       align: 'center' as const,
       render: (_: unknown, record: LlmProviderConfig) => (
         <Space size={4}>
@@ -362,9 +420,42 @@ const Index: React.FC = () => {
           pagination={false}
           size="middle"
           locale={{ emptyText: '暂无供应商，点击上方按钮添加' }}
-          scroll={{ x: 1100 }}
+          scroll={{ x: 1000 }}
           className="flex-1"
         />
+
+        {/* 技能（Skills）存储目录 */}
+        <div className="mt-4 pt-4" style={{ borderTop: `1px solid ${colorBorderSecondary}` }}>
+          <h3 className="text-base font-semibold m-0" style={{ color: colorText }}>
+            技能（Skills）
+          </h3>
+          <p className="text-sm mt-1 mb-3" style={{ color: colorTextSecondary }}>
+            配置技能存储目录后，对话时将自动加载其中的技能。每个技能为一个子目录，内含带
+            name/description 前置信息的 SKILL.md 文件；留空则不启用。
+          </p>
+          <Space.Compact style={{ width: 560, maxWidth: '100%' }}>
+            <Input
+              value={skillsPath}
+              onChange={(e) => setSkillsPath(e.target.value)}
+              placeholder="例如：D:\skills（留空不启用）"
+              allowClear
+            />
+            <Button onClick={handleBrowseSkillsPath}>浏览…</Button>
+            <Button
+              type="primary"
+              loading={savingSkills}
+              disabled={skillsPath.trim() === savedSkillsPath}
+              onClick={handleSaveSkillsPath}
+            >
+              保存
+            </Button>
+          </Space.Compact>
+          {savedSkillsPath && (
+            <p className="text-xs mt-2 m-0" style={{ color: colorTextTertiary }}>
+              当前已生效：{savedSkillsPath}
+            </p>
+          )}
+        </div>
 
         {/* 新增/编辑弹窗 */}
         <Modal
@@ -398,7 +489,7 @@ const Index: React.FC = () => {
           >
             <Form.Item
               name="name"
-              label="供应商名称"
+              label="模型名称"
               rules={[{ required: true, message: '请输入名称' }]}
             >
               <Input placeholder="例如：DeepSeek、本地 Ollama" />
@@ -406,24 +497,24 @@ const Index: React.FC = () => {
 
             <Form.Item
               name="provider"
-              label="供应商类型"
+              label="接口协议"
               rules={[{ required: true, message: '请选择类型' }]}
             >
               <Select
                 options={PROVIDER_TYPES}
                 onChange={handleProviderTypeChange}
                 placeholder="选择供应商类型"
-                showSearch
-                filterOption={(input, option) =>
-                  (option?.label as string)?.toLowerCase().includes(input.toLowerCase())
-                }
+                showSearch={{
+                  filterOption: (input, option) =>
+                    (option?.label as string)?.toLowerCase().includes(input.toLowerCase())
+                }}
               />
             </Form.Item>
 
             <Form.Item
               name="model"
-              label="模型名称"
-              rules={[{ required: true, message: '请输入模型名' }]}
+              label="模型ID"
+              rules={[{ required: true, message: '请输入模型ID' }]}
             >
               <Input placeholder="例如：gpt-4o、deepseek-v4-flash、llama3.1" />
             </Form.Item>

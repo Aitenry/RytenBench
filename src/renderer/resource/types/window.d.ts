@@ -17,6 +17,8 @@ export interface ToolCallDetail {
   name: string
   input: Record<string, unknown>
   output: string
+  status?: 'preparing' | 'executing' | 'completed'
+  id?: string
 }
 
 export interface StructuredMessage {
@@ -154,6 +156,7 @@ export interface Window {
       ) => Promise<StructuredMessage[]>
       onStreamChunk: (callback: (chunk: StructuredMessage) => void) => () => void
       onStreamDone: (callback: (result: { topicId: number }) => void) => () => void
+      cancelStream: () => void
       startMessageStream: (
         message: string,
         options?: {
@@ -165,6 +168,7 @@ export interface Window {
         }
       ) => void
       getTools: () => Promise<ToolInfo[]>
+      selectSkillsDirectory: () => Promise<string | null>
       getAllTopics: () => Promise<ChatTopicRow[]>
       getTopicById: (id: number) => Promise<ChatTopicRow[]>
       createTopic: (title: string, model?: string, selectedTools?: string) => Promise<number>

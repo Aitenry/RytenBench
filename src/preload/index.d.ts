@@ -135,6 +135,7 @@ interface Api {
       options?: ChatOptions & { topicId?: number; providerId?: number }
     ) => void
     getTools: () => Promise<ToolInfo[]>
+    selectSkillsDirectory: () => Promise<string | null>
     onStreamChunk: (callback: (chunk: StructuredMessage) => void) => () => void
     onStreamDone: (callback: (result: { topicId: number }) => void) => () => void
     // 话题管理

@@ -174,13 +174,26 @@ async function updateWiki(
 async function deleteWiki(id: number): Promise<boolean> {
   try {
     const db = (await getDatabaseInstance()).getDatabase()
-    const sql = 'DELETE FROM wiki WHERE id = $1'
-    const result = await db.query(sql, [id])
-    const changes = result.affectedRows ?? 0
-    if (changes > 0) {
-      logger.info(`Deleted wiki with ID: ${id}, ${changes} row(s) affected.`)
-    }
-    return changes > 0
+
+    // 1. 查找知识库下所有文档 ID（通过目录关联）
+    const docIdsResult = await db.query<{ doc_id: number }>(
+      `SELECT DISTINCT dd.doc_id FROM directory_documents dd
+       INNER JOIN wiki_directories wd ON wd.id = dd.directory_id
+       WHERE wd.wiki_id = $1`,
+      [id]
+    )
+    const docIds = docIdsResult.rows.map((r) => r.doc_id)
+
+    // 2. 在事务中删除文档及知识库
+    await db.transaction(async (tx) => {
+      if (docIds.length > 0) {
+        await tx.query(`DELETE FROM documents WHERE id = ANY($1)`, [docIds])
+      }
+      await tx.query('DELETE FROM wiki WHERE id = $1', [id])
+    })
+
+    logger.info(`Deleted wiki ${id} along with ${docIds.length} associated document(s).`)
+    return true
   } catch (error) {
     logger.error('Failed to delete wiki:', error)
     throw error

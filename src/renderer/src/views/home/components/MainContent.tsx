@@ -240,7 +240,8 @@ const MainContent: React.FC = () => {
         palette,
         onOpen: handleOpenPreview,
         onEdit: handleEditWiki,
-        onArchive: handleOpenWikiDetail
+        onArchive: handleOpenWikiDetail,
+        onDelete: handleDeleteWiki
       }
     }))
 
@@ -442,6 +443,26 @@ const MainContent: React.FC = () => {
       }
     },
     [editingWiki, viewMessage, loadInitialData]
+  )
+
+  const handleDeleteWiki = useCallback(
+    async (wiki: WikiRow): Promise<void> => {
+      const messageKey = 'canvas-delete-wiki'
+      try {
+        viewMessage(messageKey, 'loading', '正在删除知识库...')
+        await (window as unknown as Window).api.wikis.delete(wiki.id)
+        viewMessage(messageKey, 'success', '知识库已删除', 2)
+        // 关闭可能打开的详情窗
+        if (detailWikiId === wiki.id) {
+          setDetailWikiId(undefined)
+        }
+        await loadInitialData(false)
+      } catch (error) {
+        console.error('Failed to delete wiki:', error)
+        viewMessage(messageKey, 'error', '删除知识库失败')
+      }
+    },
+    [viewMessage, loadInitialData, detailWikiId]
   )
 
   const handleOpenWikiDetail = useCallback((wiki: WikiRow): void => {

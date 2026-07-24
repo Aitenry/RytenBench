@@ -165,8 +165,7 @@ const GraphToolbar: React.FC<GraphToolbarProps> = ({
           value={selectedDocIds}
           onChange={setSelectedDocIds}
           options={appendOptions}
-          showSearch
-          optionFilterProp="label"
+          showSearch={{ optionFilterProp: 'label' }}
           notFoundContent={docs.length === 0 ? '暂无文档' : '所有文档均已加入图谱'}
           tagRender={(props) => {
             const { label, closable, onClose } = props

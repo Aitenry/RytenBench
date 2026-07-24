@@ -146,6 +146,10 @@ const api = {
         ipcRenderer.removeAllListeners('chat-stream-done')
       }
     },
+    cancelStream: () => {
+      ipcRenderer.send('chat-cancel-stream')
+    },
+    selectSkillsDirectory: () => ipcRenderer.invoke('chat-select-skills-directory'),
     // 话题管理
     getAllTopics: () => ipcRenderer.invoke('chat-topic-get-all'),
     getTopicById: (id: number) => ipcRenderer.invoke('chat-topic-get-by-id', id),

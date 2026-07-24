@@ -3,6 +3,8 @@ export interface ToolCall {
   name: string
   input: object
   output: string
+  status?: 'preparing' | 'executing' | 'completed'
+  id?: string
 }
 
 /** 消息块 */

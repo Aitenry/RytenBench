@@ -103,9 +103,10 @@ const WikiArchiveModal: React.FC<WikiArchiveModalProps> = ({
         value={selectedIds}
         onChange={setSelectedIds}
         optionLabelProp="label"
-        showSearch
-        onSearch={handleSearch}
-        filterOption={false}
+        showSearch={{
+          onSearch: handleSearch,
+          filterOption: false
+        }}
         onPopupScroll={(e) => {
           const target = e.target as HTMLElement
           if (

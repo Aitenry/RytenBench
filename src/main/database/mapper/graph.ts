@@ -58,21 +58,31 @@ async function getEntitiesByWikiId(
 ): Promise<GraphEntity[]> {
   try {
     const db = (await getDatabaseInstance()).getDatabase()
-    let query = 'SELECT * FROM graph_entities WHERE wiki_id = $1'
+    // Always filter to only show entities whose source docs are still in this wiki
+    let query = `SELECT ge.* FROM graph_entities ge
+                 WHERE ge.wiki_id = $1
+                 AND EXISTS (
+                   SELECT 1 FROM jsonb_array_elements(ge.source_note_ids::jsonb) src
+                   WHERE (src)::int IN (
+                     SELECT dd.doc_id FROM directory_documents dd
+                     JOIN wiki_directories wd ON wd.id = dd.directory_id
+                     WHERE wd.wiki_id = $1
+                   )
+                 )`
     const params: unknown[] = [wikiId]
     let idx = 2
 
     if (typeFilter) {
-      query += ` AND type = $${idx++}`
+      query += ` AND ge.type = $${idx++}`
       params.push(typeFilter)
     }
 
     if (noteIds && noteIds.length > 0) {
-      query += ` AND EXISTS (SELECT 1 FROM jsonb_array_elements(source_note_ids::jsonb) a CROSS JOIN jsonb_array_elements($${idx++}::jsonb) b WHERE a = b)`
+      query += ` AND EXISTS (SELECT 1 FROM jsonb_array_elements(ge.source_note_ids::jsonb) a CROSS JOIN jsonb_array_elements($${idx++}::jsonb) b WHERE a = b)`
       params.push(JSON.stringify(noteIds))
     }
 
-    query += ' ORDER BY name'
+    query += ' ORDER BY ge.name'
     const result = await db.query<GraphEntity>(query, params)
     return result.rows
   } catch (error) {
@@ -244,12 +254,22 @@ async function deleteEntitiesByWikiId(wikiId: number): Promise<number> {
 async function getRelationsByWikiId(wikiId: number, noteIds?: number[]): Promise<GraphRelation[]> {
   try {
     const db = (await getDatabaseInstance()).getDatabase()
-    let query = 'SELECT * FROM graph_relations WHERE wiki_id = $1'
+    // Always filter to only show relations whose source docs are still in this wiki
+    let query = `SELECT gr.* FROM graph_relations gr
+                 WHERE gr.wiki_id = $1
+                 AND EXISTS (
+                   SELECT 1 FROM jsonb_array_elements(gr.source_note_ids::jsonb) src
+                   WHERE (src)::int IN (
+                     SELECT dd.doc_id FROM directory_documents dd
+                     JOIN wiki_directories wd ON wd.id = dd.directory_id
+                     WHERE wd.wiki_id = $1
+                   )
+                 )`
     const params: unknown[] = [wikiId]
 
     if (noteIds && noteIds.length > 0) {
       query +=
-        ' AND EXISTS (SELECT 1 FROM jsonb_array_elements(source_note_ids::jsonb) a CROSS JOIN jsonb_array_elements($2::jsonb) b WHERE a = b)'
+        ' AND EXISTS (SELECT 1 FROM jsonb_array_elements(gr.source_note_ids::jsonb) a CROSS JOIN jsonb_array_elements($2::jsonb) b WHERE a = b)'
       params.push(JSON.stringify(noteIds))
     }
 

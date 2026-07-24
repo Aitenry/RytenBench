@@ -146,6 +146,8 @@ const Store = _Store['default'] || _Store
 const settingsStore = new Store({ name: 'settings' })
 let loadingWindow: BrowserWindow | null = null
 let database: Database | null = null // 保持模块级变量
+const streamAbortControllers = new Map<number, AbortController>() // 流式输出取消控制器
+const activeChatStreams = new Set<Promise<void>>() // 进行中的对话流（退出前需等待其保存数据）
 
 // --- 获取数据库实例的函数 ---
 let initializationPromise: Promise<void> | null = null // 用于追踪初始化过程
@@ -1456,7 +1458,8 @@ app.whenReady().then(async () => {
         chatSettings?.maxIterations ?? 5,
         getDialoguesByTopicId,
         chatSettings?.historyWindowSize ?? 10,
-        chatSettings?.toolCallWindowSize ?? 20
+        chatSettings?.toolCallWindowSize ?? 20,
+        chatSettings?.skillsPath || undefined
       )
       return await chatService.sendMessage(question, options)
     }
@@ -1464,7 +1467,7 @@ app.whenReady().then(async () => {
 
   ipcMain.on(
     'chat-start-stream',
-    async (
+    (
       event,
       question: string,
       options?: {
@@ -1475,128 +1478,223 @@ app.whenReady().then(async () => {
         documents?: { fileName: string; filePath: string }[]
       }
     ) => {
-      const tools = buildTools(options?.tools || [])
-      logger.info(`[Chat] Creating model with providerId: ${options?.providerId ?? 'default'}`)
-      const model = await getProviderService().createModel(options?.providerId)
-      const chatSettings = settingsStore.get('chat') as ChatSettings | undefined
+      // 跟踪进行中的流：应用退出时统一中止并等待数据保存完成
+      const streamPromise = (async () => {
+        const tools = buildTools(options?.tools || [])
+        logger.info(`[Chat] Creating model with providerId: ${options?.providerId ?? 'default'}`)
+        const model = await getProviderService().createModel(options?.providerId)
+        const chatSettings = settingsStore.get('chat') as ChatSettings | undefined
 
-      // 1. 确保话题存在
-      let topicId = options?.topicId
-      if (!topicId) {
-        const title = question.slice(0, 50)
+        // 创建 AbortController 用于取消流式输出
+        const abortController = new AbortController()
+        streamAbortControllers.set(event.sender.id, abortController)
+
+        // 1. 确保话题存在
+        let topicId = options?.topicId
+        if (!topicId) {
+          const title = question.slice(0, 50)
+          try {
+            topicId = await createTopic(
+              title,
+              undefined,
+              options?.tools ? JSON.stringify(options.tools) : undefined
+            )
+          } catch (err) {
+            logger.error('Failed to create topic:', err)
+            topicId = 0
+          }
+        }
+
+        // 2. 保存用户消息（含图片和文档）
         try {
-          topicId = await createTopic(
-            title,
-            undefined,
-            options?.tools ? JSON.stringify(options.tools) : undefined
-          )
+          const userBlocks: { type: string; image_url?: string; fileName?: string }[] = []
+          if (options?.images?.length) {
+            for (const img of options.images) {
+              userBlocks.push({ type: 'image', image_url: img })
+            }
+          }
+          if (options?.documents?.length) {
+            for (const doc of options.documents) {
+              userBlocks.push({ type: 'document', fileName: doc.fileName })
+            }
+          }
+          await addDialogue({
+            topic_id: topicId,
+            role: 'user',
+            content: question,
+            blocks: JSON.stringify(userBlocks)
+          })
         } catch (err) {
-          logger.error('Failed to create topic:', err)
-          topicId = 0
+          logger.error('Failed to save user message:', err)
         }
-      }
 
-      // 2. 保存用户消息（含图片和文档）
-      try {
-        const userBlocks: { type: string; image_url?: string; fileName?: string }[] = []
-        if (options?.images?.length) {
-          for (const img of options.images) {
-            userBlocks.push({ type: 'image', image_url: img })
-          }
-        }
-        if (options?.documents?.length) {
-          for (const doc of options.documents) {
-            userBlocks.push({ type: 'document', fileName: doc.fileName })
-          }
-        }
-        await addDialogue({
-          topic_id: topicId,
-          role: 'user',
-          content: question,
-          blocks: JSON.stringify(userBlocks)
+        // 2.5. 历史对话上下文由 ChatService 内部从数据库加载
+
+        // 3. 流式输出 + 累积完整内容
+        const historyWindowSize = chatSettings?.historyWindowSize ?? 10
+        const toolCallWindowSize = chatSettings?.toolCallWindowSize ?? 20
+        const chatService = new ChatService(
+          model,
+          tools,
+          chatSettings?.maxIterations ?? 5,
+          getDialoguesByTopicId,
+          historyWindowSize,
+          toolCallWindowSize,
+          chatSettings?.skillsPath || undefined
+        )
+        const stream = chatService.sendMessageStream(question, {
+          ...options,
+          topicId,
+          signal: abortController.signal
         })
-      } catch (err) {
-        logger.error('Failed to save user message:', err)
-      }
+        const accumulatedBlocks: {
+          type: string
+          text?: string
+          tool?: ToolCallDetail
+          reasoning?: string
+        }[] = []
+        let fullContent = ''
 
-      // 2.5. 历史对话上下文由 ChatService 内部从数据库加载
-
-      // 3. 流式输出 + 累积完整内容
-      const historyWindowSize = chatSettings?.historyWindowSize ?? 10
-      const toolCallWindowSize = chatSettings?.toolCallWindowSize ?? 20
-      const chatService = new ChatService(
-        model,
-        tools,
-        chatSettings?.maxIterations ?? 5,
-        getDialoguesByTopicId,
-        historyWindowSize,
-        toolCallWindowSize
-      )
-      const stream = chatService.sendMessageStream(question, {
-        ...options,
-        topicId
-      })
-      const accumulatedBlocks: {
-        type: string
-        text?: string
-        tool?: ToolCallDetail
-        reasoning?: string
-      }[] = []
-      let fullContent = ''
-
-      try {
-        for await (const chunk of stream) {
-          if (chunk.reasoning_content) {
-            // 合并连续 reasoning block
-            const lastBlock = accumulatedBlocks[accumulatedBlocks.length - 1]
-            if (lastBlock && lastBlock.type === 'reasoning') {
-              lastBlock.reasoning = (lastBlock.reasoning || '') + chunk.reasoning_content
-            } else {
-              accumulatedBlocks.push({ type: 'reasoning', reasoning: chunk.reasoning_content })
+        try {
+          for await (const chunk of stream) {
+            if (abortController.signal.aborted) {
+              logger.info('[Chat] Stream cancelled by user')
+              break
             }
-          }
-          if (chunk.content) {
-            fullContent += chunk.content
-            // 合并连续 text block，避免每个 chunk 独立成块导致渲染间距
-            const lastBlock = accumulatedBlocks[accumulatedBlocks.length - 1]
-            if (lastBlock && lastBlock.type === 'text') {
-              lastBlock.text = (lastBlock.text || '') + chunk.content
-            } else {
-              accumulatedBlocks.push({ type: 'text', text: chunk.content })
-            }
-          }
-          if (chunk.tool) {
-            accumulatedBlocks.push({
-              type: 'tool',
-              tool: {
-                name: chunk.tool.name,
-                input: chunk.tool.input,
-                output: chunk.tool.output
+            if (chunk.reasoning_content) {
+              // 合并连续 reasoning block
+              const lastBlock = accumulatedBlocks[accumulatedBlocks.length - 1]
+              if (lastBlock && lastBlock.type === 'reasoning') {
+                lastBlock.reasoning = (lastBlock.reasoning || '') + chunk.reasoning_content
+              } else {
+                accumulatedBlocks.push({ type: 'reasoning', reasoning: chunk.reasoning_content })
               }
-            })
+            }
+            if (chunk.content) {
+              fullContent += chunk.content
+              // 合并连续 text block，避免每个 chunk 独立成块导致渲染间距
+              const lastBlock = accumulatedBlocks[accumulatedBlocks.length - 1]
+              if (lastBlock && lastBlock.type === 'text') {
+                lastBlock.text = (lastBlock.text || '') + chunk.content
+              } else {
+                accumulatedBlocks.push({ type: 'text', text: chunk.content })
+              }
+            }
+            if (chunk.tool) {
+              // 优先按 callId 精确匹配同一次调用，缺 ID 时回退按名称（兼容同名工具重复调用）
+              const matchesTool = (t: ToolCallDetail): boolean => {
+                if (t.id && chunk.tool!.id) return t.id === chunk.tool!.id
+                return t.name === chunk.tool!.name || t.name === ''
+              }
+              if (chunk.tool.status === 'completed') {
+                // 匹配同一次调用的未完成工具块并更新
+                for (let i = accumulatedBlocks.length - 1; i >= 0; i--) {
+                  const b = accumulatedBlocks[i]
+                  if (
+                    b.type === 'tool' &&
+                    b.tool &&
+                    b.tool.status !== 'completed' &&
+                    matchesTool(b.tool)
+                  ) {
+                    b.tool.output = chunk.tool.output
+                    b.tool.status = chunk.tool.status
+                    break
+                  }
+                }
+              } else if (chunk.tool.status === 'preparing') {
+                // 模型开始构建工具参数；后续进度 chunk 仅用于保活，已存在则跳过
+                const exists = accumulatedBlocks.some(
+                  (b) => b.type === 'tool' && b.tool?.status === 'preparing' && matchesTool(b.tool)
+                )
+                if (!exists) {
+                  accumulatedBlocks.push({
+                    type: 'tool',
+                    tool: {
+                      name: chunk.tool.name,
+                      input: {},
+                      output: '',
+                      status: 'preparing',
+                      id: chunk.tool.id
+                    }
+                  })
+                }
+              } else {
+                // executing：优先合并到同一次调用的 preparing 块
+                let merged = false
+                for (let i = accumulatedBlocks.length - 1; i >= 0; i--) {
+                  const b = accumulatedBlocks[i]
+                  if (b.type === 'tool' && b.tool?.status === 'preparing' && matchesTool(b.tool)) {
+                    b.tool.name = chunk.tool.name
+                    b.tool.input = chunk.tool.input
+                    b.tool.status = 'executing'
+                    b.tool.id = b.tool.id ?? chunk.tool.id
+                    merged = true
+                    break
+                  }
+                }
+                if (!merged) {
+                  accumulatedBlocks.push({
+                    type: 'tool',
+                    tool: {
+                      name: chunk.tool.name,
+                      input: chunk.tool.input,
+                      output: chunk.tool.output,
+                      status: 'executing',
+                      id: chunk.tool.id
+                    }
+                  })
+                }
+              }
+            }
+            event.sender.send('chat-stream-chunk', chunk)
           }
-          event.sender.send('chat-stream-chunk', chunk)
+        } catch (error) {
+          if ((error as Error)?.name !== 'AbortError') {
+            logger.error('Error in chat stream:', error)
+          }
         }
-      } catch (error) {
-        logger.error('Error in chat stream:', error)
-      }
 
-      // 4. 保存完整的 AI 回复
-      try {
-        await addDialogue({
-          topic_id: topicId,
-          role: 'assistant',
-          content: fullContent,
-          blocks: JSON.stringify(accumulatedBlocks)
-        })
-      } catch (err) {
-        logger.error('Failed to save AI message:', err)
-      }
+        // 4. 保存完整的 AI 回复
+        try {
+          await addDialogue({
+            topic_id: topicId,
+            role: 'assistant',
+            content: fullContent,
+            blocks: JSON.stringify(accumulatedBlocks)
+          })
+        } catch (err) {
+          logger.error('Failed to save AI message:', err)
+        }
 
-      // 5. 通知渲染进程流式输出已完成
-      event.sender.send('chat-stream-done', { topicId })
+        // 5. 清理并通知渲染进程流式输出已完成
+        streamAbortControllers.delete(event.sender.id)
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('chat-stream-done', { topicId })
+        }
+      })()
+      activeChatStreams.add(streamPromise)
+      streamPromise.finally(() => activeChatStreams.delete(streamPromise))
     }
   )
+
+  // 取消流式输出
+  ipcMain.on('chat-cancel-stream', (event) => {
+    const controller = streamAbortControllers.get(event.sender.id)
+    if (controller) {
+      controller.abort()
+      streamAbortControllers.delete(event.sender.id)
+    }
+  })
+
+  // 选择技能（Skills）存储目录
+  ipcMain.handle('chat-select-skills-directory', async () => {
+    const result = await dialog.showOpenDialog({
+      properties: ['openDirectory', 'createDirectory'],
+      title: '选择技能存储目录'
+    })
+    if (result.canceled || result.filePaths.length === 0) return null
+    return result.filePaths[0]
+  })
 
   // --- Chat Topic IPC handlers ---
 
@@ -1938,15 +2036,32 @@ app.whenReady().then(async () => {
   })
 })
 
-app.on('before-quit', async () => {
-  try {
-    // 在退出前关闭数据库
-    if (database) {
-      await database.close()
+let quitPrepared = false
+app.on('before-quit', (event) => {
+  if (quitPrepared) return
+  // 拦截首次退出：先完成清理（中止流、保存数据、关闭数据库）再真正退出
+  event.preventDefault()
+  quitPrepared = true
+  ;(async () => {
+    try {
+      // 中止进行中的对话流，等待其保存对话数据（最多等待 5 秒兜底）
+      if (activeChatStreams.size > 0) {
+        for (const controller of streamAbortControllers.values()) {
+          controller.abort()
+        }
+        await Promise.race([
+          Promise.allSettled([...activeChatStreams]),
+          new Promise((resolve) => setTimeout(resolve, 5000))
+        ])
+      }
+      if (database) {
+        await database.close()
+      }
+    } catch (error) {
+      logger.error('Error during app shutdown:', error)
     }
-  } catch (error) {
-    logger.error('Error during app shutdown:', error)
-  }
+    app.quit()
+  })()
 })
 
 app.on('window-all-closed', () => {

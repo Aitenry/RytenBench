@@ -55,14 +55,14 @@ export const availableTools: ToolInfo[] = [
   {
     name: 'manage_docs',
     label: '文档管理',
-    description: '搜索和查看文档内容',
+    description: '搜索、查看、创建、编辑和删除文档',
     icon: 'RiFileSearchLine',
     color: '#722ed1'
   },
   {
     name: 'manage_wikis',
     label: '知识库',
-    description: '浏览知识库、目录和文档',
+    description: '浏览和管理知识库、目录、文档归档',
     icon: 'RiBook2Line',
     color: '#13c2c2'
   },

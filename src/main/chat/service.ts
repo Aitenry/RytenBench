@@ -1,7 +1,7 @@
 import type { StructuredToolInterface } from '@langchain/core/tools'
 import { BaseChatModel } from '@langchain/core/language_models/chat_models'
 import { BaseMessage, HumanMessage, AIMessage, ToolMessage } from '@langchain/core/messages'
-import { createDeepAgent } from 'deepagents'
+import { createDeepAgent, FilesystemBackend } from 'deepagents'
 import * as fs from 'fs'
 import logger from 'electron-log'
 import { ChatOptions, StructuredMessage, ToolCallDetail } from './types'
@@ -34,6 +34,7 @@ class ChatService {
   private readonly loadHistory?: LoadHistoryFn
   private readonly historyWindowSize: number
   private readonly toolCallWindowSize: number
+  private readonly skillsPath?: string
 
   /**
    * @param model 已创建的 BaseChatModel 实例（由外部 ProviderService 提供）
@@ -42,6 +43,7 @@ class ChatService {
    * @param loadHistory 从数据库加载历史对话的回调（由主进程注入，避免循环依赖）
    * @param historyWindowSize 历史对话轮次上限（0 = 不限制），默认 10
    * @param toolCallWindowSize 历史工具调用条数上限（0 = 不限制），默认 20
+   * @param skillsPath 技能存储目录（deepagents skills），空表示不启用
    */
   constructor(
     model: BaseChatModel,
@@ -49,7 +51,8 @@ class ChatService {
     maxIterations = 5,
     loadHistory?: LoadHistoryFn,
     historyWindowSize = 10,
-    toolCallWindowSize = 20
+    toolCallWindowSize = 20,
+    skillsPath?: string
   ) {
     this.model = model
     this.tools = tools
@@ -57,9 +60,33 @@ class ChatService {
     this.loadHistory = loadHistory
     this.historyWindowSize = historyWindowSize
     this.toolCallWindowSize = toolCallWindowSize
+    this.skillsPath = skillsPath
     logger.info(
-      `ChatService initialized with DeepAgents (maxIterations=${this._maxIterations}, historyWindow=${this.historyWindowSize}, toolCallWindow=${this.toolCallWindowSize})`
+      `ChatService initialized with DeepAgents (maxIterations=${this._maxIterations}, historyWindow=${this.historyWindowSize}, toolCallWindow=${this.toolCallWindowSize}, skillsPath=${this.skillsPath ?? 'disabled'})`
     )
+  }
+
+  /**
+   * 创建 DeepAgent 实例；配置技能目录时挂载 FilesystemBackend 并启用 skills 加载。
+   * 路径需转换为 POSIX 正斜杠（deepagents 内部使用 path.resolve，Windows 反斜杠会被误解析）。
+   */
+  private createAgent() {
+    if (this.skillsPath) {
+      // Windows 反斜杠转为 POSIX 正斜杠，确保 ls/read_file 等内部路径解析正确
+      const posixPath = this.skillsPath.replace(/\\/g, '/')
+      return createDeepAgent({
+        model: this.model,
+        tools: this.tools,
+        systemPrompt: 'You are a helpful assistant.',
+        backend: new FilesystemBackend({ rootDir: posixPath }),
+        skills: ['./']
+      })
+    }
+    return createDeepAgent({
+      model: this.model,
+      tools: this.tools,
+      systemPrompt: 'You are a helpful assistant.'
+    })
   }
 
   /**
@@ -97,11 +124,7 @@ class ChatService {
    */
   async sendMessage(message: string, options?: ChatOptions): Promise<StructuredMessage[]> {
     try {
-      const agent = createDeepAgent({
-        model: this.model,
-        tools: this.tools,
-        systemPrompt: 'You are a helpful assistant.'
-      })
+      const agent = this.createAgent()
 
       const userMessage = buildHumanMessage(message, options?.images, options?.documents)
       const contextMessages = options?.topicId
@@ -131,13 +154,10 @@ class ChatService {
     options?: ChatOptions
   ): AsyncGenerator<StructuredMessage> {
     logger.info(`options: ${JSON.stringify(options)}`)
+    const signal = options?.signal
 
     try {
-      const agent = createDeepAgent({
-        model: this.model,
-        tools: this.tools,
-        systemPrompt: 'You are a helpful assistant.'
-      })
+      const agent = this.createAgent()
 
       const userMessage = buildHumanMessage(message, options?.images, options?.documents)
       const contextMessages = options?.topicId
@@ -145,7 +165,7 @@ class ChatService {
         : []
       const run = await agent.streamEvents(
         { messages: [...contextMessages, userMessage] },
-        { version: 'v3' }
+        { version: 'v3', signal }
       )
 
       // 使用队列实现消息和工具调用的并发流式输出
@@ -173,42 +193,119 @@ class ChatService {
       const msgProducer = (async (): Promise<void> => {
         try {
           for await (const msg of run.messages) {
-            // 流式输出推理内容（DeepSeek-R1 等模型的思考过程）
-            if (msg.reasoning) {
-              for await (const token of msg.reasoning) {
-                enqueue({ reasoning_content: token })
-              }
+            if (signal?.aborted) break
+            // 推理流和文本流必须并发消费：对部分只发 delta 事件的 provider，
+            // reasoning 流要到整条消息结束才关闭，顺序消费会把正文扣留到消息完成后才下发
+            const reasoning = msg.reasoning
+            const text = msg.text
+            const drains: Promise<void>[] = []
+            if (reasoning) {
+              drains.push(
+                (async () => {
+                  for await (const token of reasoning) {
+                    if (signal?.aborted) break
+                    enqueue({ reasoning_content: token })
+                  }
+                })()
+              )
             }
-            // 流式输出文本内容
-            if (msg.text) {
-              for await (const token of msg.text) {
-                enqueue({ content: token })
-              }
+            if (text) {
+              drains.push(
+                (async () => {
+                  for await (const token of text) {
+                    if (signal?.aborted) break
+                    enqueue({ content: token })
+                  }
+                })()
+              )
             }
+            // 监听工具调用块事件：模型一开始构建工具参数就下发反馈，
+            // 避免长参数（如 create_doc 的 content）构建期间页面看起来像卡住；
+            // 参数增量按 500ms 节流转发，保持流活跃（防止前端闲置超时误判结束）
+            drains.push(
+              (async () => {
+                const toolBlocks = new Map<number, { id?: string; name: string }>()
+                let lastProgressAt = 0
+                for await (const event of msg) {
+                  if (signal?.aborted) break
+                  if (event.event === 'content-block-start') {
+                    const block = event.content as { type?: string; name?: unknown; id?: unknown }
+                    if (block.type === 'tool_call_chunk' || block.type === 'tool_call') {
+                      const name = typeof block.name === 'string' ? block.name : ''
+                      const id = typeof block.id === 'string' && block.id ? block.id : undefined
+                      toolBlocks.set(event.index, { id, name })
+                      lastProgressAt = Date.now()
+                      enqueue({ tool: { name, input: {}, output: '', status: 'preparing', id } })
+                    }
+                  } else if (event.event === 'content-block-delta') {
+                    const delta = event.delta as { type?: string; fields?: { type?: string } }
+                    if (delta?.type !== 'block-delta' || delta.fields?.type !== 'tool_call_chunk') {
+                      continue
+                    }
+                    const now = Date.now()
+                    if (now - lastProgressAt < 500) continue
+                    lastProgressAt = now
+                    const info = toolBlocks.get(event.index)
+                    enqueue({
+                      tool: {
+                        name: info?.name ?? '',
+                        input: {},
+                        output: '',
+                        status: 'preparing',
+                        id: info?.id
+                      }
+                    })
+                  }
+                }
+              })()
+            )
+            await Promise.all(drains)
           }
         } catch (err) {
-          logger.error('Stream message error:', err)
+          if ((err as Error)?.name !== 'AbortError') {
+            logger.error('Stream message error:', err)
+          }
         } finally {
           markDone()
         }
       })()
 
-      // 生产者2：工具调用
+      // 生产者2：工具调用 — 同一源发 executing 和 completed，callId 天然一致
       const toolProducer = (async (): Promise<void> => {
         try {
           for await (const call of run.toolCalls) {
+            if (signal?.aborted) break
             const input = call.input
-            const output = await call.output
+            // 先发"执行中"状态
             enqueue({
               tool: {
                 name: call.name,
                 input,
-                output
+                output: '',
+                status: 'executing',
+                id: call.callId
+              }
+            })
+            // 延迟 100ms 确保渲染进程有时间渲染 loading 状态
+            await new Promise<void>((resolve) => setTimeout(resolve, 100))
+            if (signal?.aborted) break
+            const raw = await call.output
+            const output = typeof raw === 'string' ? raw : JSON.stringify(raw)
+            // 再发"已完成"状态
+            enqueue({
+              tool: {
+                name: call.name,
+                input,
+                output,
+                status: 'completed',
+                id: call.callId
               }
             })
           }
         } catch (err) {
-          logger.error('Stream tool call error:', err)
+          if ((err as Error)?.name !== 'AbortError') {
+            logger.error('Stream tool call error:', err)
+          }
         } finally {
           markDone()
         }
@@ -216,6 +313,9 @@ class ChatService {
 
       // 主消费者循环：从队列中取出并 yield
       while (producersAlive > 0 || queue.length > 0) {
+        if (signal?.aborted) {
+          break
+        }
         if (queue.length > 0) {
           yield queue.shift()!
         } else if (producersAlive > 0) {
@@ -248,8 +348,10 @@ function extractStructuredMessages(messages: BaseMessage[]): StructuredMessage[]
   // 第一遍：收集所有工具输出
   for (const msg of messages) {
     if (msg.type === 'tool') {
-      const tm = msg as unknown as { tool_call_id: string; content: string }
-      toolOutputs.set(tm.tool_call_id, tm.content)
+      const tm = msg as unknown as { tool_call_id: string; content: unknown }
+      const rawContent = tm.content
+      const content = typeof rawContent === 'string' ? rawContent : JSON.stringify(rawContent)
+      toolOutputs.set(tm.tool_call_id, content)
     }
   }
 
@@ -358,7 +460,8 @@ function convertDialoguesToMessages(
           // 每个工具调用后跟一个 ToolMessage
           for (let ti = 0; ti < toolCalls.length; ti++) {
             const tb = toolBlocks[ti]
-            const output = tb.tool!.output
+            const rawOutput = tb.tool!.output
+            const output = typeof rawOutput === 'string' ? rawOutput : JSON.stringify(rawOutput)
             messages.push(
               new ToolMessage({
                 content: output,

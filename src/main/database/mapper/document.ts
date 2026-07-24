@@ -355,18 +355,60 @@ async function deleteDoc(id: number): Promise<boolean> {
   try {
     const db = (await getDatabaseInstance()).getDatabase()
 
-    await db.query('DELETE FROM documents_content WHERE doc_id = $1', [id])
+    await db.transaction(async (tx) => {
+      // 1. 删除文档内容
+      await tx.query('DELETE FROM documents_content WHERE doc_id = $1', [id])
 
-    const result = await db.query('DELETE FROM documents WHERE id = $1', [id])
-    const changes = result.affectedRows ?? 0
+      // 2. 删除文档本身
+      const result = await tx.query('DELETE FROM documents WHERE id = $1', [id])
+      const changes = result.affectedRows ?? 0
 
-    if (changes > 0) {
-      logger.info(`Deleted doc with ID: ${id}, ${changes} row(s) affected.`)
-      return true
-    }
+      // 3. 清理图谱实体：移除该文档 ID，若 source_note_ids 变空则删除实体
+      await tx.query(
+        `UPDATE graph_entities
+         SET source_note_ids = COALESCE((
+           SELECT jsonb_agg(elem)::text
+           FROM jsonb_array_elements(source_note_ids::jsonb) AS elem
+           WHERE (elem)::int != CAST($1 AS int)
+         ), '[]')
+         WHERE EXISTS (
+           SELECT 1 FROM jsonb_array_elements(source_note_ids::jsonb) a
+           WHERE (a)::int = CAST($1 AS int)
+         )`,
+        [id]
+      )
+      await tx.query(
+        `DELETE FROM graph_entities
+         WHERE source_note_ids = '[]' OR source_note_ids IS NULL OR source_note_ids = ''`
+      )
 
-    logger.warn(`No rows deleted for doc with ID: ${id}`)
-    return false
+      // 4. 清理图谱关系：移除该文档 ID，若 source_note_ids 变空则删除关系
+      await tx.query(
+        `UPDATE graph_relations
+         SET source_note_ids = COALESCE((
+           SELECT jsonb_agg(elem)::text
+           FROM jsonb_array_elements(source_note_ids::jsonb) AS elem
+           WHERE (elem)::int != CAST($1 AS int)
+         ), '[]')
+         WHERE EXISTS (
+           SELECT 1 FROM jsonb_array_elements(source_note_ids::jsonb) a
+           WHERE (a)::int = CAST($1 AS int)
+         )`,
+        [id]
+      )
+      await tx.query(
+        `DELETE FROM graph_relations
+         WHERE source_note_ids = '[]' OR source_note_ids IS NULL OR source_note_ids = ''`
+      )
+
+      if (changes > 0) {
+        logger.info(`Deleted doc with ID: ${id}, ${changes} row(s) affected.`)
+      } else {
+        logger.warn(`No rows deleted for doc with ID: ${id}`)
+      }
+    })
+
+    return true
   } catch (error) {
     logger.error('Failed to delete doc:', error)
     throw error

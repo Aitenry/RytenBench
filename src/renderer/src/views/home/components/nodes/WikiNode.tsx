@@ -1,6 +1,12 @@
 import React, { useState } from 'react'
 import { Tag, Modal } from 'antd'
-import { RiBook2Line, RiPencilLine, RiInboxArchiveLine, RiBubbleChartLine } from '@remixicon/react'
+import {
+  RiBook2Line,
+  RiPencilLine,
+  RiInboxArchiveLine,
+  RiBubbleChartLine,
+  RiDeleteBinLine
+} from '@remixicon/react'
 import type { NodeProps, Node } from '@xyflow/react'
 import GraphView from '@renderer/components/graph/GraphView'
 import type { WikiRow } from '@renderer/types/models'
@@ -15,6 +21,7 @@ export interface WikiNodeData extends Record<string, unknown> {
   onOpen: (wiki: WikiRow) => void
   onEdit: (wiki: WikiRow) => void
   onArchive: (wiki: WikiRow) => void
+  onDelete: (wiki: WikiRow) => void
 }
 
 /** Type A: Wiki folder — stacked paper look */
@@ -22,6 +29,7 @@ const WikiNode: React.FC<NodeProps<Node<WikiNodeData>>> = ({ data }) => {
   const { wiki, palette } = data
   const [hovered, setHovered] = useState(false)
   const [graphModalOpen, setGraphModalOpen] = useState(false)
+  const [graphModalKey, setGraphModalKey] = useState(0)
   const tags = parseTags(wiki.tags)
 
   const arcBtnBase: React.CSSProperties = {
@@ -198,6 +206,7 @@ const WikiNode: React.FC<NodeProps<Node<WikiNodeData>>> = ({ data }) => {
             }}
             onClick={(e) => {
               e.stopPropagation()
+              setGraphModalKey((k) => k + 1)
               setGraphModalOpen(true)
             }}
             title="查看知识图谱"
@@ -214,6 +223,36 @@ const WikiNode: React.FC<NodeProps<Node<WikiNodeData>>> = ({ data }) => {
           >
             <RiBubbleChartLine size={14} />
           </button>
+          <button
+            style={{
+              ...arcBtnBase,
+              transform: hovered ? 'translate(6px, 41px)' : 'translate(6px, 41px) scale(0.6)'
+            }}
+            onClick={(e) => {
+              e.stopPropagation()
+              Modal.confirm({
+                title: '确定要删除该知识库吗？',
+                content: '知识库及其下所有文档将被删除，且无法恢复。',
+                onOk: () => data.onDelete(wiki),
+                okText: '确定删除',
+                cancelText: '取消',
+                okButtonProps: { danger: true }
+              })
+            }}
+            title="删除知识库"
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = '#ef4444'
+              e.currentTarget.style.color = '#fff'
+              e.currentTarget.style.boxShadow = '0 4px 14px rgba(239,68,68,0.4)'
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = palette.wikiCardBg
+              e.currentTarget.style.color = palette.textSecondary
+              e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.10)'
+            }}
+          >
+            <RiDeleteBinLine size={14} />
+          </button>
         </div>
       </div>
       <Modal
@@ -225,7 +264,7 @@ const WikiNode: React.FC<NodeProps<Node<WikiNodeData>>> = ({ data }) => {
         styles={{ body: { height: 'calc(100vh - 130px)', overflow: 'hidden', padding: 0 } }}
         footer={null}
       >
-        <GraphView selectedWiki={wiki} />
+        <GraphView key={graphModalKey} selectedWiki={wiki} />
       </Modal>
     </>
   )
