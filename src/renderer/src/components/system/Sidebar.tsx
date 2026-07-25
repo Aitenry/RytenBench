@@ -8,14 +8,8 @@ import {
   RiCalendar2Line,
   RiSunCloudyLine,
   RiMusicLine,
-  RiToolsLine,
-  RiCodeSSlashLine,
-  RiAiGenerate3dLine,
-  RiTodoLine,
-  RiCalendarTodoLine,
   RiChatAiLine,
-  RiSettings3Line,
-  RiComputerLine
+  RiSettings3Line
 } from '@remixicon/react'
 import LogoLight from '@renderer/assets/logo-light.png'
 import LogoNight from '@renderer/assets/logo-night.png'
@@ -40,29 +34,12 @@ const Sidebar: React.FC<SidebarProps> = ({ currentKey, setCurrentKey }) => {
     {
       key: 'planner',
       label: '计划',
-      icon: <RiCalendar2Line size={18} />,
-      children: [
-        { key: 'planner/schedule', label: '计划总览', icon: <RiCalendarTodoLine size={18} /> },
-        { key: 'planner/matters', label: '待办事项', icon: <RiTodoLine size={18} /> }
-      ]
-    },
-    {
-      key: 'tools',
-      label: '工具',
-      icon: <RiToolsLine size={18} />,
-      children: [
-        { key: 'tools/mcp', label: 'MCP 仓库', icon: <RiAiGenerate3dLine size={18} /> },
-        { key: 'tools/api', label: 'API 调用', icon: <RiCodeSSlashLine size={18} /> }
-      ]
+      icon: <RiCalendar2Line size={18} />
     },
     {
       key: 'settings',
       label: '设置',
-      icon: <RiSettings3Line size={18} />,
-      children: [
-        { key: 'settings/provider', label: '模型配置', icon: <RiAiGenerate3dLine size={18} /> },
-        { key: 'settings/system', label: '系统设置', icon: <RiComputerLine size={18} /> }
-      ]
+      icon: <RiSettings3Line size={18} />
     },
     { key: 'chat', label: '助手', icon: <RiChatAiLine size={18} /> },
     { key: 'weather', label: '天气', icon: <RiSunCloudyLine size={18} /> },
