@@ -91,8 +91,8 @@ import {
   deleteTrackById
 } from './database/mapper/music'
 import { ChatService } from './chat/service'
-import { buildTools, availableTools } from './chat/tools'
-import type { ToolCallDetail } from './chat/types'
+import { buildTools, subAgentDefinitions, availableTools } from './chat/tools'
+import type { ToolCallDetail, SubAgentEvent } from './chat/types'
 // BaseMessage 等 LangChain 类型已移入 ChatService 内部使用
 import { KnowledgeGraphService, BuildConfig } from './graph'
 import { getProviderService } from './provider/service'
@@ -1455,6 +1455,7 @@ app.whenReady().then(async () => {
       const chatService = new ChatService(
         model,
         tools,
+        subAgentDefinitions,
         chatSettings?.maxIterations ?? 5,
         getDialoguesByTopicId,
         chatSettings?.historyWindowSize ?? 10,
@@ -1536,6 +1537,7 @@ app.whenReady().then(async () => {
         const chatService = new ChatService(
           model,
           tools,
+          subAgentDefinitions,
           chatSettings?.maxIterations ?? 5,
           getDialoguesByTopicId,
           historyWindowSize,
@@ -1552,8 +1554,16 @@ app.whenReady().then(async () => {
           text?: string
           tool?: ToolCallDetail
           reasoning?: string
+          subagent?: SubAgentEvent
+          children?: {
+            type: string
+            text?: string
+            tool?: ToolCallDetail
+            reasoning?: string
+          }[]
         }[] = []
         let fullContent = ''
+        let lastReasoning = ''
 
         try {
           for await (const chunk of stream) {
@@ -1562,87 +1572,281 @@ app.whenReady().then(async () => {
               break
             }
             if (chunk.reasoning_content) {
-              // 合并连续 reasoning block
-              const lastBlock = accumulatedBlocks[accumulatedBlocks.length - 1]
-              if (lastBlock && lastBlock.type === 'reasoning') {
-                lastBlock.reasoning = (lastBlock.reasoning || '') + chunk.reasoning_content
+              const rc = String(chunk.reasoning_content)
+              // 兼容 provider 可能下发完整文本而非增量：若新内容是已有内容的前缀/后缀，则替换/忽略
+              if (
+                lastReasoning &&
+                rc.startsWith(lastReasoning) &&
+                rc.length > lastReasoning.length
+              ) {
+                const delta = rc.slice(lastReasoning.length)
+                const lastBlock = accumulatedBlocks[accumulatedBlocks.length - 1]
+                if (lastBlock && lastBlock.type === 'reasoning') {
+                  lastBlock.reasoning = (lastBlock.reasoning || '') + delta
+                } else {
+                  accumulatedBlocks.push({ type: 'reasoning', reasoning: delta })
+                }
+                lastReasoning = rc
+              } else if (lastReasoning && lastReasoning.endsWith(rc)) {
+                // 重复内容，忽略
               } else {
-                accumulatedBlocks.push({ type: 'reasoning', reasoning: chunk.reasoning_content })
+                lastReasoning = rc
+                const lastBlock = accumulatedBlocks[accumulatedBlocks.length - 1]
+                if (lastBlock && lastBlock.type === 'reasoning') {
+                  lastBlock.reasoning = (lastBlock.reasoning || '') + rc
+                } else {
+                  accumulatedBlocks.push({ type: 'reasoning', reasoning: rc })
+                }
               }
             }
             if (chunk.content) {
-              fullContent += chunk.content
-              // 合并连续 text block，避免每个 chunk 独立成块导致渲染间距
-              const lastBlock = accumulatedBlocks[accumulatedBlocks.length - 1]
-              if (lastBlock && lastBlock.type === 'text') {
-                lastBlock.text = (lastBlock.text || '') + chunk.content
+              const c = String(chunk.content)
+              // 兼容 provider 可能下发完整文本而非增量：若新内容是已有内容的前缀/后缀，则替换/忽略
+              if (fullContent && c.startsWith(fullContent) && c.length > fullContent.length) {
+                const delta = c.slice(fullContent.length)
+                fullContent = c
+                const lastBlock = accumulatedBlocks[accumulatedBlocks.length - 1]
+                if (lastBlock && lastBlock.type === 'text') {
+                  lastBlock.text = (lastBlock.text || '') + delta
+                } else {
+                  accumulatedBlocks.push({ type: 'text', text: c })
+                }
+              } else if (fullContent && fullContent.endsWith(c)) {
+                // 重复内容，忽略
               } else {
-                accumulatedBlocks.push({ type: 'text', text: chunk.content })
+                fullContent += c
+                const lastBlock = accumulatedBlocks[accumulatedBlocks.length - 1]
+                if (lastBlock && lastBlock.type === 'text') {
+                  lastBlock.text = (lastBlock.text || '') + c
+                } else {
+                  accumulatedBlocks.push({ type: 'text', text: c })
+                }
               }
             }
             if (chunk.tool) {
-              // 优先按 callId 精确匹配同一次调用，缺 ID 时回退按名称（兼容同名工具重复调用）
-              const matchesTool = (t: ToolCallDetail): boolean => {
-                if (t.id && chunk.tool!.id) return t.id === chunk.tool!.id
-                return t.name === chunk.tool!.name || t.name === ''
-              }
-              if (chunk.tool.status === 'completed') {
-                // 匹配同一次调用的未完成工具块并更新
-                for (let i = accumulatedBlocks.length - 1; i >= 0; i--) {
-                  const b = accumulatedBlocks[i]
-                  if (
-                    b.type === 'tool' &&
-                    b.tool &&
-                    b.tool.status !== 'completed' &&
-                    matchesTool(b.tool)
-                  ) {
-                    b.tool.output = chunk.tool.output
-                    b.tool.status = chunk.tool.status
-                    break
-                  }
-                }
-              } else if (chunk.tool.status === 'preparing') {
-                // 模型开始构建工具参数；后续进度 chunk 仅用于保活，已存在则跳过
-                const exists = accumulatedBlocks.some(
-                  (b) => b.type === 'tool' && b.tool?.status === 'preparing' && matchesTool(b.tool)
-                )
-                if (!exists) {
-                  accumulatedBlocks.push({
-                    type: 'tool',
-                    tool: {
-                      name: chunk.tool.name,
-                      input: {},
-                      output: '',
-                      status: 'preparing',
-                      id: chunk.tool.id
-                    }
-                  })
-                }
+              if (chunk.tool.name === 'task') {
+                // task 工具已由 service.ts 转换为 subagent 事件下发，此处跳过
               } else {
-                // executing：优先合并到同一次调用的 preparing 块
-                let merged = false
-                for (let i = accumulatedBlocks.length - 1; i >= 0; i--) {
-                  const b = accumulatedBlocks[i]
-                  if (b.type === 'tool' && b.tool?.status === 'preparing' && matchesTool(b.tool)) {
-                    b.tool.name = chunk.tool.name
-                    b.tool.input = chunk.tool.input
-                    b.tool.status = 'executing'
-                    b.tool.id = b.tool.id ?? chunk.tool.id
-                    merged = true
-                    break
+                // 优先按 callId 精确匹配同一次调用；preparing 阶段没有 id 时按名称回退；
+                // ID 来自不同来源可能不一致，同名未完成时也按名称回退
+                const matchesTool = (t: ToolCallDetail): boolean => {
+                  if (chunk.tool!.id) {
+                    if (t.id === chunk.tool!.id) return true
+                    if (!t.id && t.status === 'preparing' && t.name === chunk.tool!.name)
+                      return true
+                    if (t.id && t.status && t.status !== 'completed' && t.name === chunk.tool!.name)
+                      return true
+                    return false
+                  }
+                  return t.name === chunk.tool!.name || t.name === ''
+                }
+                if (chunk.tool.status === 'completed') {
+                  // 匹配同一次调用的未完成工具块并更新
+                  for (let i = accumulatedBlocks.length - 1; i >= 0; i--) {
+                    const b = accumulatedBlocks[i]
+                    if (
+                      b.type === 'tool' &&
+                      b.tool &&
+                      b.tool.status !== 'completed' &&
+                      matchesTool(b.tool)
+                    ) {
+                      b.tool.output = chunk.tool.output
+                      b.tool.status = chunk.tool.status
+                      break
+                    }
+                  }
+                } else if (chunk.tool.status === 'preparing') {
+                  // 模型开始构建工具参数；后续进度 chunk 仅用于保活，已存在则跳过。
+                  // 若同一次调用已处于 executing/completed（事件乱序），也跳过，避免重复块。
+                  const exists = accumulatedBlocks.some(
+                    (b) => b.type === 'tool' && matchesTool(b.tool as ToolCallDetail)
+                  )
+                  if (!exists) {
+                    accumulatedBlocks.push({
+                      type: 'tool',
+                      tool: {
+                        name: chunk.tool.name,
+                        input: {},
+                        output: '',
+                        status: 'preparing',
+                        id: chunk.tool.id
+                      }
+                    })
+                  }
+                } else {
+                  // executing：优先合并到同一次调用的 preparing 块
+                  let merged = false
+                  for (let i = accumulatedBlocks.length - 1; i >= 0; i--) {
+                    const b = accumulatedBlocks[i]
+                    if (
+                      b.type === 'tool' &&
+                      b.tool?.status === 'preparing' &&
+                      matchesTool(b.tool)
+                    ) {
+                      b.tool.name = chunk.tool.name
+                      b.tool.input = chunk.tool.input
+                      b.tool.status = 'executing'
+                      b.tool.id = b.tool.id ?? chunk.tool.id
+                      merged = true
+                      break
+                    }
+                  }
+                  if (!merged) {
+                    accumulatedBlocks.push({
+                      type: 'tool',
+                      tool: {
+                        name: chunk.tool.name,
+                        input: chunk.tool.input,
+                        output: chunk.tool.output,
+                        status: 'executing',
+                        id: chunk.tool.id
+                      }
+                    })
                   }
                 }
-                if (!merged) {
-                  accumulatedBlocks.push({
-                    type: 'tool',
-                    tool: {
-                      name: chunk.tool.name,
-                      input: chunk.tool.input,
-                      output: chunk.tool.output,
-                      status: 'executing',
-                      id: chunk.tool.id
+              }
+            }
+            if (chunk.subagent) {
+              const sa = chunk.subagent
+
+              // 累积子代理最终输出到完整内容，避免历史记录重载时丢失子代理详情
+              // 只取 output 作为持久化文本，避免与 blocks 中的流式 text 重复拼接
+              if (sa.status === 'completed' && sa.output && !fullContent.includes(sa.output)) {
+                fullContent += sa.output
+              }
+
+              // 匹配子代理累积块：优先 causeId，回退 name
+              const matchesSa = (b: (typeof accumulatedBlocks)[number]): boolean => {
+                if (b.type !== 'subagent' || !b.subagent) return false
+                if (sa.causeId && b.subagent.causeId) return b.subagent.causeId === sa.causeId
+                return b.subagent.name === sa.name
+              }
+
+              // 查找或创建同名子代理累积块
+              let saBlock = accumulatedBlocks.find(matchesSa)
+              if (!saBlock) {
+                saBlock = {
+                  type: 'subagent',
+                  subagent: {
+                    name: sa.name,
+                    causeId: sa.causeId,
+                    status: sa.status,
+                    taskDescription: sa.taskDescription
+                  },
+                  children: []
+                }
+                accumulatedBlocks.push(saBlock)
+              }
+
+              if (sa.status === 'started') {
+                saBlock.subagent!.status = sa.status
+                saBlock.subagent!.taskDescription =
+                  saBlock.subagent!.taskDescription || sa.taskDescription
+              } else if (sa.status === 'completed' || sa.status === 'error') {
+                saBlock.subagent!.status = sa.status
+                saBlock.subagent!.output = sa.output
+                saBlock.subagent!.error = sa.error
+              } else if (sa.content || sa.reasoning_content || sa.tool) {
+                if (
+                  saBlock.subagent!.status !== 'completed' &&
+                  saBlock.subagent!.status !== 'error'
+                ) {
+                  saBlock.subagent!.status = 'running'
+                }
+                if (!saBlock.children) saBlock.children = []
+
+                if (sa.reasoning_content) {
+                  const lastChild = saBlock.children[saBlock.children.length - 1]
+                  if (lastChild && lastChild.type === 'reasoning') {
+                    lastChild.reasoning = (lastChild.reasoning || '') + sa.reasoning_content
+                  } else {
+                    saBlock.children.push({ type: 'reasoning', reasoning: sa.reasoning_content })
+                  }
+                }
+
+                if (sa.content) {
+                  const lastChild = saBlock.children[saBlock.children.length - 1]
+                  if (lastChild && lastChild.type === 'text') {
+                    lastChild.text = (lastChild.text || '') + sa.content
+                  } else {
+                    saBlock.children.push({ type: 'text', text: sa.content })
+                  }
+                }
+
+                if (sa.tool) {
+                  // 优先按 callId 精确匹配同一次调用；preparing 阶段没有 id 时按名称回退；
+                  // ID 来自不同来源可能不一致，同名未完成时也按名称回退
+                  const matchesTool = (t: ToolCallDetail): boolean => {
+                    if (sa.tool!.id) {
+                      if (t.id === sa.tool!.id) return true
+                      if (!t.id && t.status === 'preparing' && t.name === sa.tool!.name) return true
+                      if (t.id && t.status && t.status !== 'completed' && t.name === sa.tool!.name)
+                        return true
+                      return false
                     }
-                  })
+                    return t.name === sa.tool!.name || t.name === ''
+                  }
+                  if (sa.tool.status === 'completed') {
+                    for (let i = saBlock.children.length - 1; i >= 0; i--) {
+                      const c = saBlock.children[i]
+                      if (
+                        c.type === 'tool' &&
+                        c.tool &&
+                        c.tool.status !== 'completed' &&
+                        matchesTool(c.tool)
+                      ) {
+                        c.tool.output = sa.tool.output
+                        c.tool.status = 'completed'
+                        break
+                      }
+                    }
+                  } else if (sa.tool.status === 'preparing') {
+                    const exists = saBlock.children.some(
+                      (c) =>
+                        c.type === 'tool' && c.tool?.status === 'preparing' && matchesTool(c.tool)
+                    )
+                    if (!exists) {
+                      saBlock.children.push({
+                        type: 'tool',
+                        tool: {
+                          name: sa.tool.name,
+                          input: {},
+                          output: '',
+                          status: 'preparing',
+                          id: sa.tool.id
+                        }
+                      })
+                    }
+                  } else {
+                    let merged = false
+                    for (let i = saBlock.children.length - 1; i >= 0; i--) {
+                      const c = saBlock.children[i]
+                      if (
+                        c.type === 'tool' &&
+                        c.tool?.status === 'preparing' &&
+                        matchesTool(c.tool)
+                      ) {
+                        c.tool.name = sa.tool.name
+                        c.tool.input = sa.tool.input
+                        c.tool.status = 'executing'
+                        c.tool.id = c.tool.id ?? sa.tool.id
+                        merged = true
+                        break
+                      }
+                    }
+                    if (!merged) {
+                      saBlock.children.push({
+                        type: 'tool',
+                        tool: {
+                          name: sa.tool.name,
+                          input: sa.tool.input,
+                          output: sa.tool.output || '',
+                          status: 'executing',
+                          id: sa.tool.id
+                        }
+                      })
+                    }
+                  }
                 }
               }
             }

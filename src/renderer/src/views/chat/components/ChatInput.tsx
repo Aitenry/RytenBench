@@ -64,7 +64,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
           value={inputValue}
           onChange={(e) => onInputChange(e.target.value)}
           onKeyDown={onKeyDown}
-          placeholder="给 RytenBench 发送消息"
+          placeholder="给 Rita 发送消息"
           autoSize={{ minRows: 1, maxRows: 8 }}
           style={{ color: colorText }}
           styles={{

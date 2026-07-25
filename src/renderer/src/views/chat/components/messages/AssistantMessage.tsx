@@ -5,11 +5,12 @@ import {
   RiCheckLine,
   RiRefreshLine,
   RiDeleteBin6Line,
-  RiLoader4Line
+  RiLoader4Line,
+  RiAiAgentLine
 } from '@remixicon/react'
 import MarkdownLoad from '@renderer/components/markdown/MarkdownLoad'
 import LoadingMessage from './LoadingMessage'
-import type { Message } from '@renderer/types/chat'
+import type { Message, MessageBlock } from '@renderer/types/chat'
 
 interface AssistantMessageProps {
   message: Message
@@ -64,10 +65,23 @@ const AssistantMessage: React.FC<AssistantMessageProps> = ({
       return null
     }
 
-    return message.blocks.map((block, blockIndex) => {
+    // 合并相邻的 reasoning 块：防止模型把思考过程拆成 token 级事件，导致满屏"思考过程"
+    const mergedBlocks: MessageBlock[] = []
+    for (const block of message.blocks) {
+      if (block.type === 'reasoning') {
+        const last = mergedBlocks[mergedBlocks.length - 1]
+        if (last && last.type === 'reasoning') {
+          last.reasoning = (last.reasoning || '') + (block.reasoning || '')
+          continue
+        }
+      }
+      mergedBlocks.push(block)
+    }
+
+    return mergedBlocks.map((block, blockIndex) => {
       if (block.type === 'reasoning' && block.reasoning) {
         // 后续出现任意非推理块（正文/工具），或消息已结束（完成/中止/出错），都视为思考完成
-        const hasContentAfter = message.blocks
+        const hasContentAfter = mergedBlocks
           .slice(blockIndex + 1)
           .some((b) => b.type !== 'reasoning')
         const thinkingDone = hasContentAfter || !message.loading
@@ -186,6 +200,276 @@ const AssistantMessage: React.FC<AssistantMessageProps> = ({
                 : undefined
             }
             defaultActiveKey={[]}
+            size="small"
+            style={{ marginBottom: '6px', background: collapseBg }}
+            className="rounded-lg border-0"
+          />
+        )
+      }
+      if (block.type === 'subagent' && block.subagent) {
+        const sa = block.subagent
+        const isActive = sa.status === 'started' || sa.status === 'running'
+        const isError = sa.status === 'error'
+        const saLabel = isActive
+          ? `${sa.name} · 执行中…`
+          : isError
+            ? `${sa.name} · 出错`
+            : `${sa.name} · 已完成`
+        const saIconColor = isError ? '#ef4444' : isActive ? '#1677ff' : '#52c41a'
+
+        // 递归渲染子代理的嵌套子块（text / tool / reasoning / subagent）
+        const renderChildren = (children: MessageBlock[], depth = 0): React.ReactNode => {
+          // 合并相邻的 reasoning 块：防止模型把 reasoning 拆成 token 级事件，导致满屏"思考过程"
+          // 合并相邻的 text 块：避免流式输出把正文拆成 "Good" / "," / "found" 等碎片
+          const mergedChildren: MessageBlock[] = []
+          for (const child of children) {
+            if (child.type === 'reasoning') {
+              const last = mergedChildren[mergedChildren.length - 1]
+              if (last && last.type === 'reasoning') {
+                last.reasoning = (last.reasoning || '') + (child.reasoning || '')
+                continue
+              }
+            }
+            if (child.type === 'text') {
+              const last = mergedChildren[mergedChildren.length - 1]
+              if (last && last.type === 'text') {
+                last.text = (last.text || '') + (child.text || '')
+                continue
+              }
+            }
+            mergedChildren.push(child)
+          }
+          return mergedChildren.map((child, ci) => {
+            if (child.type === 'reasoning' && child.reasoning) {
+              return (
+                <Collapse
+                  key={ci}
+                  items={[
+                    {
+                      key: ci,
+                      label: (
+                        <span style={{ color: colorTextTertiary }} className="text-xs">
+                          思考过程
+                        </span>
+                      ),
+                      children: (
+                        <div
+                          style={{ color: colorTextSecondary, borderColor: colorBorderSecondary }}
+                          className="text-sm whitespace-pre-wrap border-l-2 pl-3"
+                        >
+                          {child.reasoning}
+                        </div>
+                      )
+                    }
+                  ]}
+                  size="small"
+                  style={{ marginBottom: '6px', background: collapseBg }}
+                  className="rounded-lg border-0"
+                />
+              )
+            }
+            if (child.type === 'text' && child.text) {
+              return (
+                <div key={ci} style={{ color: colorText }} className="mb-1">
+                  <MarkdownLoad content={child.text} isDarkMode={isDarkMode} />
+                </div>
+              )
+            }
+            if (child.type === 'tool' && child.tool) {
+              const isPreparing = child.tool.status === 'preparing'
+              const isExecuting =
+                child.tool.status === 'executing' || (!child.tool.status && !child.tool.output)
+              const inProgress = Boolean(message.loading) && (isPreparing || isExecuting)
+              const toolName = child.tool.name || '工具调用'
+              const toolLabel = inProgress
+                ? `${toolName}${isPreparing ? ' · 生成中…' : ' · 执行中…'}`
+                : toolName
+              return (
+                <Collapse
+                  key={ci}
+                  items={[
+                    {
+                      key: ci,
+                      label: (
+                        <span style={{ color: colorTextSecondary }} className="text-xs">
+                          {toolLabel}
+                        </span>
+                      ),
+                      collapsible: inProgress ? 'disabled' : undefined,
+                      children: (
+                        <div className="ml-2">
+                          <div
+                            style={{ color: colorTextSecondary }}
+                            className="font-medium mb-1 text-xs"
+                          >
+                            输入：
+                          </div>
+                          <pre
+                            style={{ background: codeBg }}
+                            className="p-2 rounded text-xs overflow-x-auto"
+                          >
+                            {JSON.stringify(child.tool.input, null, 2)}
+                          </pre>
+                          {child.tool.output ? (
+                            <>
+                              <div
+                                style={{ color: colorTextSecondary }}
+                                className="font-medium mt-2 mb-1 text-xs"
+                              >
+                                输出：
+                              </div>
+                              <pre
+                                style={{ background: codeBg }}
+                                className="p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap"
+                              >
+                                {typeof child.tool.output === 'string'
+                                  ? child.tool.output
+                                  : JSON.stringify(child.tool.output, null, 2)}
+                              </pre>
+                            </>
+                          ) : null}
+                        </div>
+                      )
+                    }
+                  ]}
+                  expandIcon={
+                    inProgress
+                      ? () => (
+                          <RiLoader4Line
+                            size={12}
+                            className="animate-spin"
+                            style={{ color: colorTextTertiary }}
+                          />
+                        )
+                      : undefined
+                  }
+                  defaultActiveKey={[]}
+                  size="small"
+                  style={{ marginBottom: '4px', background: collapseBg }}
+                  className="rounded-lg border-0"
+                />
+              )
+            }
+            if (child.type === 'subagent' && child.subagent) {
+              const childSa = child.subagent
+              const childIsActive = childSa.status === 'started' || childSa.status === 'running'
+              const childIsError = childSa.status === 'error'
+              const childSaLabel = childIsActive
+                ? `${childSa.name} · 执行中…`
+                : childIsError
+                  ? `${childSa.name} · 出错`
+                  : `${childSa.name} · 已完成`
+              const childSaIconColor = childIsError
+                ? '#ef4444'
+                : childIsActive
+                  ? '#1677ff'
+                  : '#52c41a'
+              return (
+                <Collapse
+                  key={`${child.subagent?.causeId || child.subagent?.name || ci}-${childIsActive ? 'a' : 'd'}`}
+                  items={[
+                    {
+                      key: ci,
+                      label: (
+                        <span className="flex items-center gap-2">
+                          <RiAiAgentLine size={12} style={{ color: childSaIconColor }} />
+                          <span style={{ color: colorTextSecondary }} className="text-xs">
+                            {childSaLabel}
+                          </span>
+                        </span>
+                      ),
+                      collapsible: childIsActive ? 'disabled' : undefined,
+                      children: (
+                        <div className="pl-2">
+                          {childSa.taskDescription ? (
+                            <div style={{ color: colorTextSecondary }} className="text-xs mb-1">
+                              {childSa.taskDescription}
+                            </div>
+                          ) : null}
+                          {child.children && child.children.length > 0 ? (
+                            renderChildren(child.children, depth + 1)
+                          ) : childSa.error ? (
+                            <div style={{ color: '#ef4444' }} className="text-xs">
+                              {childSa.error}
+                            </div>
+                          ) : null}
+                        </div>
+                      )
+                    }
+                  ]}
+                  expandIcon={
+                    childIsActive
+                      ? () => (
+                          <RiLoader4Line
+                            size={12}
+                            className="animate-spin"
+                            style={{ color: colorTextTertiary }}
+                          />
+                        )
+                      : undefined
+                  }
+                  defaultActiveKey={childIsActive ? [ci] : []}
+                  size="small"
+                  style={{
+                    marginBottom: '4px',
+                    background: collapseBg,
+                    marginLeft: 8 + depth * 8
+                  }}
+                  className="rounded-lg border-0"
+                />
+              )
+            }
+            return null
+          })
+        }
+
+        return (
+          <Collapse
+            key={`${block.subagent?.causeId || block.subagent?.name || blockIndex}-${isActive ? 'a' : 'd'}`}
+            items={[
+              {
+                key: blockIndex,
+                label: (
+                  <span className="flex items-center gap-2">
+                    <RiAiAgentLine size={14} style={{ color: saIconColor }} />
+                    <span style={{ color: colorTextSecondary }}>{saLabel}</span>
+                  </span>
+                ),
+                collapsible: isActive ? 'disabled' : undefined,
+                children: (
+                  <div className="pl-2">
+                    {sa.taskDescription ? (
+                      <div style={{ color: colorTextSecondary }} className="text-sm mb-2">
+                        <MarkdownLoad content={sa.taskDescription} isDarkMode={isDarkMode} />
+                      </div>
+                    ) : null}
+                    {block.children && block.children.length > 0 ? (
+                      renderChildren(block.children)
+                    ) : isActive ? (
+                      <div style={{ color: colorTextTertiary }} className="text-sm italic">
+                        子代理正在执行中…
+                      </div>
+                    ) : sa.error ? (
+                      <div style={{ color: '#ef4444' }} className="text-sm">
+                        {sa.error}
+                      </div>
+                    ) : null}
+                  </div>
+                )
+              }
+            ]}
+            expandIcon={
+              isActive
+                ? () => (
+                    <RiLoader4Line
+                      size={14}
+                      className="animate-spin"
+                      style={{ color: colorTextTertiary }}
+                    />
+                  )
+                : undefined
+            }
+            defaultActiveKey={isActive ? [blockIndex] : []}
             size="small"
             style={{ marginBottom: '6px', background: collapseBg }}
             className="rounded-lg border-0"

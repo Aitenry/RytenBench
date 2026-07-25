@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import type { IpcRendererEvent } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import { TodoItemRow } from '../main/database/mapper/todo'
 import { DocRow } from '../main/database/mapper/document'
@@ -6,6 +7,12 @@ import { WikiRow, WikiDirectoryRow } from '../main/database/mapper/wiki'
 import { ChatTopicRow, ChatDialogueRow } from '../main/database/mapper/chat'
 import type { LlmProviderInput, LlmProviderConfig } from '../main/database/mapper/provider'
 import type { SystemSettings } from '../main/types/settings'
+
+// 使用命名 handler + ipcRenderer.off() 精确管理监听器，避免 removeAllListeners 误删其他组件监听
+let streamChunkHandler: ((event: IpcRendererEvent, chunk: Record<string, unknown>) => void) | null =
+  null
+let streamDoneHandler: ((event: IpcRendererEvent, result: { topicId: number }) => void) | null =
+  null
 
 // Custom APIs for renderer
 const api = {
@@ -133,17 +140,29 @@ const api = {
     },
     getTools: () => ipcRenderer.invoke('chat-get-tools'),
     onStreamChunk: (callback: (chunk: Record<string, unknown>) => void) => {
-      ipcRenderer.removeAllListeners('chat-stream-chunk')
-      ipcRenderer.on('chat-stream-chunk', (_event, chunk) => callback(chunk))
+      if (streamChunkHandler) {
+        ipcRenderer.off('chat-stream-chunk', streamChunkHandler)
+      }
+      streamChunkHandler = (_event, chunk) => callback(chunk)
+      ipcRenderer.on('chat-stream-chunk', streamChunkHandler)
       return () => {
-        ipcRenderer.removeAllListeners('chat-stream-chunk')
+        if (streamChunkHandler) {
+          ipcRenderer.off('chat-stream-chunk', streamChunkHandler)
+          streamChunkHandler = null
+        }
       }
     },
     onStreamDone: (callback: (result: { topicId: number }) => void) => {
-      ipcRenderer.removeAllListeners('chat-stream-done')
-      ipcRenderer.on('chat-stream-done', (_event, result) => callback(result))
+      if (streamDoneHandler) {
+        ipcRenderer.off('chat-stream-done', streamDoneHandler)
+      }
+      streamDoneHandler = (_event, result) => callback(result)
+      ipcRenderer.on('chat-stream-done', streamDoneHandler)
       return () => {
-        ipcRenderer.removeAllListeners('chat-stream-done')
+        if (streamDoneHandler) {
+          ipcRenderer.off('chat-stream-done', streamDoneHandler)
+          streamDoneHandler = null
+        }
       }
     },
     cancelStream: () => {

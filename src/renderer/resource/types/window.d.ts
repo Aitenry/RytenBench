@@ -25,6 +25,22 @@ export interface StructuredMessage {
   tool?: ToolCallDetail
   content?: string
   reasoning_content?: string
+  subagent?: SubAgentEvent
+}
+
+export interface SubAgentEvent {
+  name: string
+  /** 派遣此子代理的 task 工具调用唯一 ID */
+  causeId?: string
+  status: 'started' | 'running' | 'completed' | 'error'
+  output?: string
+  message?: string
+  error?: string
+  content?: string
+  reasoning_content?: string
+  tool?: ToolCallDetail
+  /** task 工具调用时携带的任务描述 */
+  taskDescription?: string
 }
 
 export interface ToolInfo {

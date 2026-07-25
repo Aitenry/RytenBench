@@ -2,9 +2,11 @@ import type { StructuredToolInterface } from '@langchain/core/tools'
 import { BaseChatModel } from '@langchain/core/language_models/chat_models'
 import { BaseMessage, HumanMessage, AIMessage, ToolMessage } from '@langchain/core/messages'
 import { createDeepAgent, FilesystemBackend } from 'deepagents'
+import type { SubAgent } from 'deepagents'
 import * as fs from 'fs'
 import logger from 'electron-log'
-import { ChatOptions, StructuredMessage, ToolCallDetail } from './types'
+import { ChatOptions, StructuredMessage, ToolCallDetail, SubAgentConfig } from './types'
+import { buildSubAgentTools } from './tools'
 
 /** 适配 DeepSeek-R1 等模型在 additional_kwargs 中返回的推理内容 */
 interface ReasoningMessage {
@@ -30,6 +32,7 @@ export type LoadHistoryFn = (topicId: number) => Promise<HistoryDialogue[]>
 class ChatService {
   private readonly model: BaseChatModel
   private readonly tools: StructuredToolInterface[]
+  private readonly subagents: SubAgentConfig[]
   private readonly _maxIterations: number
   private readonly loadHistory?: LoadHistoryFn
   private readonly historyWindowSize: number
@@ -39,6 +42,7 @@ class ChatService {
   /**
    * @param model 已创建的 BaseChatModel 实例（由外部 ProviderService 提供）
    * @param tools 工具列表
+   * @param subagents 子代理定义列表
    * @param maxIterations 工具调用最大轮次（保留兼容性，deepagents 内部自动管理）
    * @param loadHistory 从数据库加载历史对话的回调（由主进程注入，避免循环依赖）
    * @param historyWindowSize 历史对话轮次上限（0 = 不限制），默认 10
@@ -48,6 +52,7 @@ class ChatService {
   constructor(
     model: BaseChatModel,
     tools: StructuredToolInterface[] = [],
+    subagents: SubAgentConfig[] = [],
     maxIterations = 5,
     loadHistory?: LoadHistoryFn,
     historyWindowSize = 10,
@@ -56,37 +61,48 @@ class ChatService {
   ) {
     this.model = model
     this.tools = tools
+    this.subagents = subagents
     this._maxIterations = maxIterations
     this.loadHistory = loadHistory
     this.historyWindowSize = historyWindowSize
     this.toolCallWindowSize = toolCallWindowSize
     this.skillsPath = skillsPath
     logger.info(
-      `ChatService initialized with DeepAgents (maxIterations=${this._maxIterations}, historyWindow=${this.historyWindowSize}, toolCallWindow=${this.toolCallWindowSize}, skillsPath=${this.skillsPath ?? 'disabled'})`
+      `ChatService initialized with DeepAgents (maxIterations=${this._maxIterations}, historyWindow=${this.historyWindowSize}, toolCallWindow=${this.toolCallWindowSize}, skillsPath=${this.skillsPath ?? 'disabled'}, subagents=${this.subagents.length})`
     )
   }
 
   /**
    * 创建 DeepAgent 实例；配置技能目录时挂载 FilesystemBackend 并启用 skills 加载。
    * 路径需转换为 POSIX 正斜杠（deepagents 内部使用 path.resolve，Windows 反斜杠会被误解析）。
+   * 子代理将工具组合为专用子代理，主代理通过 task() 工具委托任务。
    */
   private createAgent() {
-    if (this.skillsPath) {
-      // Windows 反斜杠转为 POSIX 正斜杠，确保 ls/read_file 等内部路径解析正确
-      const posixPath = this.skillsPath.replace(/\\/g, '/')
-      return createDeepAgent({
-        model: this.model,
-        tools: this.tools,
-        systemPrompt: 'You are a helpful assistant.',
-        backend: new FilesystemBackend({ rootDir: posixPath }),
-        skills: ['./']
-      })
-    }
-    return createDeepAgent({
+    // 构建 deepagents SubAgent 字典，解析工具名称为实际工具实例
+    const deepSubAgents: SubAgent[] = this.subagents.map((sa) => ({
+      name: sa.name,
+      description: sa.description,
+      systemPrompt: sa.systemPrompt,
+      model: sa.model,
+      tools: buildSubAgentTools(sa) as SubAgent['tools']
+    }))
+
+    const baseConfig = {
       model: this.model,
       tools: this.tools,
-      systemPrompt: 'You are a helpful assistant.'
-    })
+      systemPrompt: 'You are a helpful assistant.',
+      subagents: deepSubAgents.length > 0 ? deepSubAgents : undefined
+    }
+
+    if (this.skillsPath) {
+      const posixPath = this.skillsPath.replace(/\\/g, '/')
+      return createDeepAgent({
+        ...baseConfig,
+        backend: new FilesystemBackend({ rootDir: posixPath }),
+        skills: ['/']
+      })
+    }
+    return createDeepAgent(baseConfig)
   }
 
   /**
@@ -171,7 +187,7 @@ class ChatService {
       // 使用队列实现消息和工具调用的并发流式输出
       const queue: StructuredMessage[] = []
       let waiting: (() => void) | null = null
-      let producersAlive = 2
+      let producersAlive = 3
 
       const enqueue = (item: StructuredMessage): void => {
         queue.push(item)
@@ -191,74 +207,97 @@ class ChatService {
 
       // 生产者1：流式输出文本和推理内容
       const msgProducer = (async (): Promise<void> => {
+        // lastSent 提升到跨所有 msg 共享：某些 provider / deepagents 会把整段文本拆成多个 msg 重复发送
+        let lastSentReasoning = ''
+        let lastSentContent = ''
         try {
           for await (const msg of run.messages) {
             if (signal?.aborted) break
             // 推理流和文本流必须并发消费：对部分只发 delta 事件的 provider，
             // reasoning 流要到整条消息结束才关闭，顺序消费会把正文扣留到消息完成后才下发
             const reasoning = msg.reasoning
-            const text = msg.text
             const drains: Promise<void>[] = []
             if (reasoning) {
               drains.push(
                 (async () => {
+                  let acc = ''
                   for await (const token of reasoning) {
                     if (signal?.aborted) break
-                    enqueue({ reasoning_content: token })
+                    const tokenText = typeof token === 'string' ? token : String(token ?? '')
+                    if (!tokenText) continue
+                    if (
+                      tokenText.startsWith(lastSentReasoning) &&
+                      tokenText.length > lastSentReasoning.length
+                    ) {
+                      acc += tokenText.slice(lastSentReasoning.length)
+                    } else if (tokenText !== lastSentReasoning) {
+                      acc += tokenText
+                    }
+                    lastSentReasoning = tokenText
+                  }
+                  // 批量发送：避免与 text 流 token 级交替造成 reasoning 块的碎片化
+                  if (acc) {
+                    enqueue({ reasoning_content: acc })
                   }
                 })()
               )
             }
-            if (text) {
-              drains.push(
-                (async () => {
-                  for await (const token of text) {
-                    if (signal?.aborted) break
-                    enqueue({ content: token })
+            // text + tool 统一迭代：单次遍历 msg 事件，按时间顺序产出 text 和 tool preparing
+            // 不再使用独立的 msg.text / msg[Symbol.asyncIterator] 两路消费
+            {
+              const toolBlocks = new Map<number, { id?: string; name: string }>()
+              let lastProgressAt = 0
+              for await (const event of msg) {
+                if (signal?.aborted) break
+                if (event.event === 'content-block-delta') {
+                  const d = event.delta as unknown as Record<string, unknown>
+                  // 文本增量：检测 text 属性（兼容 delta.type 为 text_delta / text 等）
+                  if (typeof d.text === 'string' && d.text) {
+                    const tokenText = d.text
+                    if (
+                      tokenText.startsWith(lastSentContent) &&
+                      tokenText.length > lastSentContent.length
+                    ) {
+                      const delta = tokenText.slice(lastSentContent.length)
+                      enqueue({ content: delta })
+                    } else if (tokenText !== lastSentContent) {
+                      enqueue({ content: tokenText })
+                    }
+                    lastSentContent = tokenText
                   }
-                })()
-              )
-            }
-            // 监听工具调用块事件：模型一开始构建工具参数就下发反馈，
-            // 避免长参数（如 create_doc 的 content）构建期间页面看起来像卡住；
-            // 参数增量按 500ms 节流转发，保持流活跃（防止前端闲置超时误判结束）
-            drains.push(
-              (async () => {
-                const toolBlocks = new Map<number, { id?: string; name: string }>()
-                let lastProgressAt = 0
-                for await (const event of msg) {
-                  if (signal?.aborted) break
-                  if (event.event === 'content-block-start') {
-                    const block = event.content as { type?: string; name?: unknown; id?: unknown }
-                    if (block.type === 'tool_call_chunk' || block.type === 'tool_call') {
-                      const name = typeof block.name === 'string' ? block.name : ''
-                      const id = typeof block.id === 'string' && block.id ? block.id : undefined
-                      toolBlocks.set(event.index, { id, name })
-                      lastProgressAt = Date.now()
-                      enqueue({ tool: { name, input: {}, output: '', status: 'preparing', id } })
-                    }
-                  } else if (event.event === 'content-block-delta') {
-                    const delta = event.delta as { type?: string; fields?: { type?: string } }
-                    if (delta?.type !== 'block-delta' || delta.fields?.type !== 'tool_call_chunk') {
-                      continue
-                    }
+                  // 工具参数增量
+                  else if (
+                    d.type === 'block-delta' &&
+                    (d.fields as Record<string, unknown>)?.type === 'tool_call_chunk'
+                  ) {
                     const now = Date.now()
                     if (now - lastProgressAt < 500) continue
                     lastProgressAt = now
                     const info = toolBlocks.get(event.index)
+                    if (!info || info.name === 'task') continue
                     enqueue({
                       tool: {
-                        name: info?.name ?? '',
+                        name: info.name,
                         input: {},
                         output: '',
                         status: 'preparing',
-                        id: info?.id
+                        id: info.id
                       }
                     })
                   }
+                } else if (event.event === 'content-block-start') {
+                  const block = event.content as { type?: string; name?: unknown; id?: unknown }
+                  if (block.type === 'tool_call_chunk' || block.type === 'tool_call') {
+                    const name = typeof block.name === 'string' ? block.name : ''
+                    if (name === 'task') continue
+                    const id = typeof block.id === 'string' && block.id ? block.id : undefined
+                    toolBlocks.set(event.index, { id, name })
+                    lastProgressAt = Date.now()
+                    enqueue({ tool: { name, input: {}, output: '', status: 'preparing', id } })
+                  }
                 }
-              })()
-            )
+              }
+            }
             await Promise.all(drains)
           }
         } catch (err) {
@@ -275,7 +314,33 @@ class ChatService {
         try {
           for await (const call of run.toolCalls) {
             if (signal?.aborted) break
-            const input = call.input
+            const input = call.input as Record<string, unknown>
+            // task 工具是子代理派遣器：转换为 subagent 事件下发，前端只看到子代理块
+            if (call.name === 'task') {
+              const saName =
+                (typeof input?.subagent_type === 'string' && input.subagent_type) || 'subagent'
+              const taskDesc = (typeof input?.description === 'string' && input.description) || ''
+              const causeId = call.callId
+              // executing → 下发 started 子代理事件（携带任务描述）
+              enqueue({
+                subagent: { name: saName, causeId, status: 'started', taskDescription: taskDesc }
+              })
+              await new Promise<void>((resolve) => setTimeout(resolve, 100))
+              if (signal?.aborted) break
+              const raw = await call.output
+              const output = typeof raw === 'string' ? raw : JSON.stringify(raw)
+              // completed → 下发 completed 子代理事件
+              enqueue({
+                subagent: {
+                  name: saName,
+                  causeId,
+                  status: 'completed',
+                  output,
+                  taskDescription: taskDesc
+                }
+              })
+              continue
+            }
             // 先发"执行中"状态
             enqueue({
               tool: {
@@ -311,6 +376,219 @@ class ChatService {
         }
       })()
 
+      // 生产者3：子代理流式输出 — 消费 run.subagents，逐 token / tool call 下发
+      // 注意：生命周期事件（started/completed）由 toolProducer 统一发送，此处只发内容事件。
+      //
+      // 关键同步策略：逐条消息处理，每条消息中统计工具调用数量，处理完后
+      // 立即从 sa.toolCalls 中消费等量的 executing/completed 事件，再处理下一条消息。
+      // 这保证 thinking → context → tool → context 的自然交替顺序不被打破。
+      const subagentProducer = (async (): Promise<void> => {
+        try {
+          if (run.subagents) {
+            for await (const sa of run.subagents) {
+              if (signal?.aborted) break
+              const causeId: string | undefined =
+                sa.cause?.type === 'toolCall' ? sa.cause.tool_call_id : undefined
+              try {
+                let lastSentReasoning = ''
+                let lastSentContent = ''
+
+                // 手动迭代器：逐条处理消息，工具调用按需消费
+                const toolIter = sa.toolCalls?.[Symbol.asyncIterator]()
+                if (sa.messages) {
+                  for await (const msg of sa.messages) {
+                    if (signal?.aborted) break
+                    const drains: Promise<void>[] = []
+                    let pendingToolCount = 0
+
+                    // 推理 drain：独立运行，批量发送
+                    if (msg.reasoning) {
+                      drains.push(
+                        (async () => {
+                          let acc = ''
+                          for await (const token of msg.reasoning) {
+                            if (signal?.aborted) return
+                            const tokenText =
+                              typeof token === 'string' ? token : String(token ?? '')
+                            if (!tokenText) continue
+                            if (
+                              tokenText.startsWith(lastSentReasoning) &&
+                              tokenText.length > lastSentReasoning.length
+                            ) {
+                              acc += tokenText.slice(lastSentReasoning.length)
+                            } else if (tokenText !== lastSentReasoning) {
+                              acc += tokenText
+                            }
+                            lastSentReasoning = tokenText
+                          }
+                          if (acc) {
+                            enqueue({
+                              subagent: {
+                                name: sa.name,
+                                causeId,
+                                status: 'running',
+                                reasoning_content: acc
+                              }
+                            })
+                          }
+                        })()
+                      )
+                    }
+
+                    // 统一迭代 msg 内容块：按时间顺序产出 text 和 tool preparing
+                    {
+                      const toolBlocks = new Map<number, { id?: string; name: string }>()
+                      let lastProgressAt = 0
+                      for await (const event of msg) {
+                        if (signal?.aborted) break
+                        if (event.event === 'content-block-delta') {
+                          const d = event.delta as unknown as Record<string, unknown>
+                          if (typeof d.text === 'string' && d.text) {
+                            const tokenText = d.text
+                            if (
+                              tokenText.startsWith(lastSentContent) &&
+                              tokenText.length > lastSentContent.length
+                            ) {
+                              const delta = tokenText.slice(lastSentContent.length)
+                              enqueue({
+                                subagent: {
+                                  name: sa.name,
+                                  causeId,
+                                  status: 'running',
+                                  content: delta
+                                }
+                              })
+                            } else if (tokenText !== lastSentContent) {
+                              enqueue({
+                                subagent: {
+                                  name: sa.name,
+                                  causeId,
+                                  status: 'running',
+                                  content: tokenText
+                                }
+                              })
+                            }
+                            lastSentContent = tokenText
+                          } else if (
+                            d.type === 'block-delta' &&
+                            (d.fields as Record<string, unknown>)?.type === 'tool_call_chunk'
+                          ) {
+                            const now = Date.now()
+                            if (now - lastProgressAt < 500) continue
+                            lastProgressAt = now
+                            const info = toolBlocks.get(event.index)
+                            if (!info || info.name === 'task') continue
+                            enqueue({
+                              subagent: {
+                                name: sa.name,
+                                causeId,
+                                status: 'running',
+                                tool: {
+                                  name: info.name,
+                                  input: {},
+                                  output: '',
+                                  status: 'preparing',
+                                  id: info.id
+                                }
+                              }
+                            })
+                          }
+                        } else if (event.event === 'content-block-start') {
+                          const block = event.content as {
+                            type?: string
+                            name?: unknown
+                            id?: unknown
+                          }
+                          if (block.type === 'tool_call_chunk' || block.type === 'tool_call') {
+                            const name = typeof block.name === 'string' ? block.name : ''
+                            if (name === 'task') continue
+                            const id =
+                              typeof block.id === 'string' && block.id ? block.id : undefined
+                            toolBlocks.set(event.index, { id, name })
+                            lastProgressAt = Date.now()
+                            pendingToolCount++
+                            enqueue({
+                              subagent: {
+                                name: sa.name,
+                                causeId,
+                                status: 'running',
+                                tool: { name, input: {}, output: '', status: 'preparing', id }
+                              }
+                            })
+                          }
+                        }
+                      }
+                    }
+
+                    await Promise.all(drains)
+
+                    // 本消息中的工具调用全部就绪后，立即从 toolCalls 消费相应数量的
+                    // executing/completed 事件，再处理下一条消息
+                    if (toolIter && pendingToolCount > 0) {
+                      for (let i = 0; i < pendingToolCount; i++) {
+                        if (signal?.aborted) break
+                        const callResult = await toolIter.next()
+                        if (callResult.done) break
+                        const call = callResult.value
+                        const input = call.input
+                        enqueue({
+                          subagent: {
+                            name: sa.name,
+                            causeId,
+                            status: 'running',
+                            tool: {
+                              name: call.name,
+                              input,
+                              output: '',
+                              status: 'executing',
+                              id: call.callId
+                            }
+                          }
+                        })
+                        await new Promise<void>((resolve) => setTimeout(resolve, 100))
+                        if (signal?.aborted) break
+                        const raw = await call.output
+                        const output = typeof raw === 'string' ? raw : JSON.stringify(raw)
+                        enqueue({
+                          subagent: {
+                            name: sa.name,
+                            causeId,
+                            status: 'running',
+                            tool: {
+                              name: call.name,
+                              input,
+                              output,
+                              status: 'completed',
+                              id: call.callId
+                            }
+                          }
+                        })
+                      }
+                    }
+                  }
+                }
+              } catch (err) {
+                if ((err as Error)?.name !== 'AbortError') {
+                  logger.warn(`Subagent ${sa.name} stream ended:`, err)
+                }
+              }
+
+              // 内容流已结束（messages + toolCalls 全处理完），立即发送 early completed
+              // 避免 toolProducer 的 call.output 延迟导致前端 spinner 一直转
+              enqueue({
+                subagent: { name: sa.name, causeId, status: 'completed' }
+              })
+            }
+          }
+        } catch (err) {
+          if ((err as Error)?.name !== 'AbortError') {
+            logger.error('Stream subagent error:', err)
+          }
+        } finally {
+          markDone()
+        }
+      })()
+
       // 主消费者循环：从队列中取出并 yield
       while (producersAlive > 0 || queue.length > 0) {
         if (signal?.aborted) {
@@ -325,8 +603,8 @@ class ChatService {
         }
       }
 
-      // 等待两个生产者完成（捕获潜在错误）
-      await Promise.allSettled([msgProducer, toolProducer])
+      // 等待所有生产者完成（捕获潜在错误）
+      await Promise.allSettled([msgProducer, toolProducer, subagentProducer])
     } catch (error) {
       logger.error('Error in sendMessageStream:', error)
       yield {
