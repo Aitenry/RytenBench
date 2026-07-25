@@ -32,7 +32,7 @@ export type LoadHistoryFn = (topicId: number) => Promise<HistoryDialogue[]>
 class ChatService {
   private readonly model: BaseChatModel
   private readonly tools: StructuredToolInterface[]
-  private readonly subagents: SubAgentConfig[]
+  private readonly subAgents: SubAgentConfig[]
   private readonly _maxIterations: number
   private readonly loadHistory?: LoadHistoryFn
   private readonly historyWindowSize: number
@@ -42,17 +42,17 @@ class ChatService {
   /**
    * @param model 已创建的 BaseChatModel 实例（由外部 ProviderService 提供）
    * @param tools 工具列表
-   * @param subagents 子代理定义列表
-   * @param maxIterations 工具调用最大轮次（保留兼容性，deepagents 内部自动管理）
+   * @param subAgents 子代理定义列表
+   * @param maxIterations 工具调用最大轮次（保留兼容性，deepAgents 内部自动管理）
    * @param loadHistory 从数据库加载历史对话的回调（由主进程注入，避免循环依赖）
    * @param historyWindowSize 历史对话轮次上限（0 = 不限制），默认 10
    * @param toolCallWindowSize 历史工具调用条数上限（0 = 不限制），默认 20
-   * @param skillsPath 技能存储目录（deepagents skills），空表示不启用
+   * @param skillsPath 技能存储目录（deepAgents skills），空表示不启用
    */
   constructor(
     model: BaseChatModel,
     tools: StructuredToolInterface[] = [],
-    subagents: SubAgentConfig[] = [],
+    subAgents: SubAgentConfig[] = [],
     maxIterations = 5,
     loadHistory?: LoadHistoryFn,
     historyWindowSize = 10,
@@ -61,25 +61,25 @@ class ChatService {
   ) {
     this.model = model
     this.tools = tools
-    this.subagents = subagents
+    this.subAgents = subAgents
     this._maxIterations = maxIterations
     this.loadHistory = loadHistory
     this.historyWindowSize = historyWindowSize
     this.toolCallWindowSize = toolCallWindowSize
     this.skillsPath = skillsPath
     logger.info(
-      `ChatService initialized with DeepAgents (maxIterations=${this._maxIterations}, historyWindow=${this.historyWindowSize}, toolCallWindow=${this.toolCallWindowSize}, skillsPath=${this.skillsPath ?? 'disabled'}, subagents=${this.subagents.length})`
+      `ChatService initialized with DeepAgents (maxIterations=${this._maxIterations}, historyWindow=${this.historyWindowSize}, toolCallWindow=${this.toolCallWindowSize}, skillsPath=${this.skillsPath ?? 'disabled'}, subAgents=${this.subAgents.length})`
     )
   }
 
   /**
    * 创建 DeepAgent 实例；配置技能目录时挂载 FilesystemBackend 并启用 skills 加载。
-   * 路径需转换为 POSIX 正斜杠（deepagents 内部使用 path.resolve，Windows 反斜杠会被误解析）。
+   * 路径需转换为 POSIX 正斜杠（deepAgents 内部使用 path.resolve，Windows 反斜杠会被误解析）。
    * 子代理将工具组合为专用子代理，主代理通过 task() 工具委托任务。
    */
-  private createAgent() {
-    // 构建 deepagents SubAgent 字典，解析工具名称为实际工具实例
-    const deepSubAgents: SubAgent[] = this.subagents.map((sa) => ({
+  private createAgent(): ReturnType<typeof createDeepAgent> {
+    // 构建 deepAgents SubAgent 字典，解析工具名称为实际工具实例
+    const deepSubAgents: SubAgent[] = this.subAgents.map((sa) => ({
       name: sa.name,
       description: sa.description,
       systemPrompt: sa.systemPrompt,
@@ -207,7 +207,7 @@ class ChatService {
 
       // 生产者1：流式输出文本和推理内容
       const msgProducer = (async (): Promise<void> => {
-        // lastSent 提升到跨所有 msg 共享：某些 provider / deepagents 会把整段文本拆成多个 msg 重复发送
+        // lastSent 提升到跨所有 msg 共享：某些 provider / deepAgents 会把整段文本拆成多个 msg 重复发送
         let lastSentReasoning = ''
         let lastSentContent = ''
         try {
@@ -223,7 +223,7 @@ class ChatService {
                   let acc = ''
                   for await (const token of reasoning) {
                     if (signal?.aborted) break
-                    const tokenText = typeof token === 'string' ? token : String(token ?? '')
+                    const tokenText = String(token ?? '')
                     if (!tokenText) continue
                     if (
                       tokenText.startsWith(lastSentReasoning) &&
@@ -315,15 +315,15 @@ class ChatService {
           for await (const call of run.toolCalls) {
             if (signal?.aborted) break
             const input = call.input as Record<string, unknown>
-            // task 工具是子代理派遣器：转换为 subagent 事件下发，前端只看到子代理块
+            // task 工具是子代理派遣器：转换为 subAgent 事件下发，前端只看到子代理块
             if (call.name === 'task') {
               const saName =
-                (typeof input?.subagent_type === 'string' && input.subagent_type) || 'subagent'
+                (typeof input?.subagent_type === 'string' && input.subagent_type) || 'subAgent'
               const taskDesc = (typeof input?.description === 'string' && input.description) || ''
               const causeId = call.callId
               // executing → 下发 started 子代理事件（携带任务描述）
               enqueue({
-                subagent: { name: saName, causeId, status: 'started', taskDescription: taskDesc }
+                subAgent: { name: saName, causeId, status: 'started', taskDescription: taskDesc }
               })
               await new Promise<void>((resolve) => setTimeout(resolve, 100))
               if (signal?.aborted) break
@@ -331,7 +331,7 @@ class ChatService {
               const output = typeof raw === 'string' ? raw : JSON.stringify(raw)
               // completed → 下发 completed 子代理事件
               enqueue({
-                subagent: {
+                subAgent: {
                   name: saName,
                   causeId,
                   status: 'completed',
@@ -382,7 +382,7 @@ class ChatService {
       // 关键同步策略：逐条消息处理，每条消息中统计工具调用数量，处理完后
       // 立即从 sa.toolCalls 中消费等量的 executing/completed 事件，再处理下一条消息。
       // 这保证 thinking → context → tool → context 的自然交替顺序不被打破。
-      const subagentProducer = (async (): Promise<void> => {
+      const subAgentProducer = (async (): Promise<void> => {
         try {
           if (run.subagents) {
             for await (const sa of run.subagents) {
@@ -408,8 +408,7 @@ class ChatService {
                           let acc = ''
                           for await (const token of msg.reasoning) {
                             if (signal?.aborted) return
-                            const tokenText =
-                              typeof token === 'string' ? token : String(token ?? '')
+                            const tokenText = String(token ?? '')
                             if (!tokenText) continue
                             if (
                               tokenText.startsWith(lastSentReasoning) &&
@@ -423,7 +422,7 @@ class ChatService {
                           }
                           if (acc) {
                             enqueue({
-                              subagent: {
+                              subAgent: {
                                 name: sa.name,
                                 causeId,
                                 status: 'running',
@@ -451,7 +450,7 @@ class ChatService {
                             ) {
                               const delta = tokenText.slice(lastSentContent.length)
                               enqueue({
-                                subagent: {
+                                subAgent: {
                                   name: sa.name,
                                   causeId,
                                   status: 'running',
@@ -460,7 +459,7 @@ class ChatService {
                               })
                             } else if (tokenText !== lastSentContent) {
                               enqueue({
-                                subagent: {
+                                subAgent: {
                                   name: sa.name,
                                   causeId,
                                   status: 'running',
@@ -479,7 +478,7 @@ class ChatService {
                             const info = toolBlocks.get(event.index)
                             if (!info || info.name === 'task') continue
                             enqueue({
-                              subagent: {
+                              subAgent: {
                                 name: sa.name,
                                 causeId,
                                 status: 'running',
@@ -508,7 +507,7 @@ class ChatService {
                             lastProgressAt = Date.now()
                             pendingToolCount++
                             enqueue({
-                              subagent: {
+                              subAgent: {
                                 name: sa.name,
                                 causeId,
                                 status: 'running',
@@ -532,7 +531,7 @@ class ChatService {
                         const call = callResult.value
                         const input = call.input
                         enqueue({
-                          subagent: {
+                          subAgent: {
                             name: sa.name,
                             causeId,
                             status: 'running',
@@ -550,7 +549,7 @@ class ChatService {
                         const raw = await call.output
                         const output = typeof raw === 'string' ? raw : JSON.stringify(raw)
                         enqueue({
-                          subagent: {
+                          subAgent: {
                             name: sa.name,
                             causeId,
                             status: 'running',
@@ -569,20 +568,20 @@ class ChatService {
                 }
               } catch (err) {
                 if ((err as Error)?.name !== 'AbortError') {
-                  logger.warn(`Subagent ${sa.name} stream ended:`, err)
+                  logger.warn(`SubAgent ${sa.name} stream ended:`, err)
                 }
               }
 
               // 内容流已结束（messages + toolCalls 全处理完），立即发送 early completed
               // 避免 toolProducer 的 call.output 延迟导致前端 spinner 一直转
               enqueue({
-                subagent: { name: sa.name, causeId, status: 'completed' }
+                subAgent: { name: sa.name, causeId, status: 'completed' }
               })
             }
           }
         } catch (err) {
           if ((err as Error)?.name !== 'AbortError') {
-            logger.error('Stream subagent error:', err)
+            logger.error('Stream subAgent error:', err)
           }
         } finally {
           markDone()
@@ -604,7 +603,7 @@ class ChatService {
       }
 
       // 等待所有生产者完成（捕获潜在错误）
-      await Promise.allSettled([msgProducer, toolProducer, subagentProducer])
+      await Promise.allSettled([msgProducer, toolProducer, subAgentProducer])
     } catch (error) {
       logger.error('Error in sendMessageStream:', error)
       yield {
@@ -739,10 +738,9 @@ function convertDialoguesToMessages(
           for (let ti = 0; ti < toolCalls.length; ti++) {
             const tb = toolBlocks[ti]
             const rawOutput = tb.tool!.output
-            const output = typeof rawOutput === 'string' ? rawOutput : JSON.stringify(rawOutput)
             messages.push(
               new ToolMessage({
-                content: output,
+                content: rawOutput,
                 tool_call_id: toolCalls[ti].id
               })
             )

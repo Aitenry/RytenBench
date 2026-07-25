@@ -184,7 +184,7 @@ const Index: React.FC = () => {
   const cleanupChunkRef = useRef<(() => void) | null>(null)
   const cleanupDoneRef = useRef<(() => void) | null>(null)
   /** 当前活跃的子代理 causeId 集合：用于把子代理事件路由到正确块 */
-  const activeSubagentCauseIdsRef = useRef<Set<string>>(new Set())
+  const activeSubAgentCauseIdsRef = useRef<Set<string>>(new Set())
   const [currentTopicId, setCurrentTopicId] = useState<number | null>(null)
   const [topics, setTopics] = useState<ChatTopicRow[]>([])
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -353,7 +353,7 @@ const Index: React.FC = () => {
 
     const aiMessageId = (Date.now() + 1).toString()
     currentSessionIdRef.current = aiMessageId
-    activeSubagentCauseIdsRef.current = new Set()
+    activeSubAgentCauseIdsRef.current = new Set()
 
     const initialAiMessage: Message = {
       id: aiMessageId,
@@ -447,7 +447,7 @@ const Index: React.FC = () => {
 
             if (chunk.tool) {
               if (chunk.tool.name === 'task') {
-                // task 工具已由 service.ts 转换为 subagent 事件下发，此处跳过
+                // task 工具已由 service.ts 转换为 subAgent 事件下发，此处跳过
               } else {
                 if (chunk.tool.status === 'completed') {
                   // 匹配同一次调用的未完成工具块并更新（优先 callId，兼容同名工具重复调用）
@@ -528,22 +528,22 @@ const Index: React.FC = () => {
               }
             }
 
-            if (chunk.subagent) {
-              const sa = chunk.subagent
+            if (chunk.subAgent) {
+              const sa = chunk.subAgent
 
               // 查找子代理块：按 causeId 精确匹配（每次 task 调用唯一），回退按名称
               const findSaBlock = (): number => {
                 for (let i = updatedBlocks.length - 1; i >= 0; i--) {
                   const block = updatedBlocks[i]
-                  if (block.type !== 'subagent' || !block.subagent) continue
+                  if (block.type !== 'subAgent' || !block.subAgent) continue
                   if (
                     sa.causeId &&
-                    block.subagent.causeId &&
-                    block.subagent.causeId === sa.causeId
+                    block.subAgent.causeId &&
+                    block.subAgent.causeId === sa.causeId
                   ) {
                     return i
                   }
-                  if (block.subagent.name === sa.name && (!sa.causeId || !block.subagent.causeId)) {
+                  if (block.subAgent.name === sa.name && (!sa.causeId || !block.subAgent.causeId)) {
                     return i
                   }
                 }
@@ -554,8 +554,8 @@ const Index: React.FC = () => {
                 const idx = findSaBlock()
                 if (idx < 0) {
                   pushBlock(updatedBlocks, {
-                    type: 'subagent',
-                    subagent: {
+                    type: 'subAgent',
+                    subAgent: {
                       name: sa.name,
                       causeId: sa.causeId,
                       status: 'started',
@@ -564,24 +564,24 @@ const Index: React.FC = () => {
                     children: []
                   })
                 } else {
-                  const existing = updatedBlocks[idx].subagent!
+                  const existing = updatedBlocks[idx].subAgent!
                   existing.status = 'started'
                   existing.taskDescription = existing.taskDescription || sa.taskDescription
                 }
                 if (sa.causeId) {
-                  activeSubagentCauseIdsRef.current.add(sa.causeId)
+                  activeSubAgentCauseIdsRef.current.add(sa.causeId)
                 }
               } else if (sa.status === 'completed' || sa.status === 'error') {
                 const idx = findSaBlock()
                 if (idx >= 0) {
-                  const existing = updatedBlocks[idx].subagent!
+                  const existing = updatedBlocks[idx].subAgent!
                   existing.status = sa.status
                   existing.output = sa.output
                   existing.error = sa.error
                   existing.taskDescription = existing.taskDescription || sa.taskDescription
                 }
                 if (sa.causeId) {
-                  activeSubagentCauseIdsRef.current.delete(sa.causeId)
+                  activeSubAgentCauseIdsRef.current.delete(sa.causeId)
                 }
               } else if (sa.content || sa.reasoning_content || sa.tool) {
                 const idx = findSaBlock()
@@ -590,8 +590,8 @@ const Index: React.FC = () => {
                   block = updatedBlocks[idx]
                 } else {
                   block = {
-                    type: 'subagent',
-                    subagent: {
+                    type: 'subAgent',
+                    subAgent: {
                       name: sa.name,
                       causeId: sa.causeId,
                       status: 'running',
@@ -601,11 +601,11 @@ const Index: React.FC = () => {
                   }
                   pushBlock(updatedBlocks, block)
                 }
-                if (block.subagent!.status !== 'completed' && block.subagent!.status !== 'error') {
-                  block.subagent!.status = 'running'
+                if (block.subAgent!.status !== 'completed' && block.subAgent!.status !== 'error') {
+                  block.subAgent!.status = 'running'
                 }
-                block.subagent!.taskDescription =
-                  block.subagent!.taskDescription || sa.taskDescription
+                block.subAgent!.taskDescription =
+                  block.subAgent!.taskDescription || sa.taskDescription
                 if (!block.children) block.children = []
 
                 if (sa.reasoning_content) {
@@ -651,7 +651,7 @@ const Index: React.FC = () => {
 
                 if (sa.tool) {
                   if (sa.tool.name === 'task') {
-                    // task 工具已由 service.ts 转换为 subagent 事件下发，此处跳过
+                    // task 工具已由 service.ts 转换为 subAgent 事件下发，此处跳过
                   } else {
                     if (sa.tool.status === 'completed') {
                       for (let i = block.children.length - 1; i >= 0; i--) {

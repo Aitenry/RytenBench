@@ -25,7 +25,7 @@ export interface StructuredMessage {
   tool?: ToolCallDetail
   content?: string
   reasoning_content?: string
-  subagent?: SubAgentEvent
+  subAgent?: SubAgentEvent
 }
 
 export interface SubAgentEvent {

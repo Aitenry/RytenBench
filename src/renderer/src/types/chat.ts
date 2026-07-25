@@ -25,14 +25,14 @@ export interface SubAgentEvent {
 
 /** 消息块 */
 export interface MessageBlock {
-  type: 'text' | 'tool' | 'reasoning' | 'image' | 'document' | 'subagent'
+  type: 'text' | 'tool' | 'reasoning' | 'image' | 'document' | 'subAgent'
   text?: string
   tool?: ToolCall
   reasoning?: string
   image_url?: string
   fileName?: string
-  subagent?: SubAgentEvent
-  /** 子代理嵌套的子块（仅 subagent 类型使用，用于流式构建子代理的 text/tool/reasoning） */
+  subAgent?: SubAgentEvent
+  /** 子代理嵌套的子块（仅 subAgent 类型使用，用于流式构建子代理的 text/tool/reasoning） */
   children?: MessageBlock[]
 }
 

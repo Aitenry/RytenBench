@@ -26,7 +26,7 @@ export interface StructuredMessage {
   content?: string
   reasoning_content?: string
   /** 子代理活动事件 */
-  subagent?: SubAgentEvent
+  subAgent?: SubAgentEvent
 }
 
 /** 子代理定义 */

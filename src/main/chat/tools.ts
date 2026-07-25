@@ -99,8 +99,8 @@ export function buildTools(toolNames: string[]): StructuredToolInterface[] {
 }
 
 /** 为子代理构建实际的工具实例 */
-export function buildSubAgentTools(subagent: SubAgentConfig): StructuredToolInterface[] {
-  return (subagent.tools || [])
+export function buildSubAgentTools(subAgent: SubAgentConfig): StructuredToolInterface[] {
+  return (subAgent.tools || [])
     .filter((name) => name in toolBuilders)
     .map((name) => toolBuilders[name]())
 }

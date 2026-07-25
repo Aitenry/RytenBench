@@ -1554,7 +1554,7 @@ app.whenReady().then(async () => {
           text?: string
           tool?: ToolCallDetail
           reasoning?: string
-          subagent?: SubAgentEvent
+          subAgent?: SubAgentEvent
           children?: {
             type: string
             text?: string
@@ -1625,7 +1625,7 @@ app.whenReady().then(async () => {
             }
             if (chunk.tool) {
               if (chunk.tool.name === 'task') {
-                // task 工具已由 service.ts 转换为 subagent 事件下发，此处跳过
+                // task 工具已由 service.ts 转换为 subAgent 事件下发，此处跳过
               } else {
                 // 优先按 callId 精确匹配同一次调用；preparing 阶段没有 id 时按名称回退；
                 // ID 来自不同来源可能不一致，同名未完成时也按名称回退
@@ -1706,8 +1706,8 @@ app.whenReady().then(async () => {
                 }
               }
             }
-            if (chunk.subagent) {
-              const sa = chunk.subagent
+            if (chunk.subAgent) {
+              const sa = chunk.subAgent
 
               // 累积子代理最终输出到完整内容，避免历史记录重载时丢失子代理详情
               // 只取 output 作为持久化文本，避免与 blocks 中的流式 text 重复拼接
@@ -1717,17 +1717,17 @@ app.whenReady().then(async () => {
 
               // 匹配子代理累积块：优先 causeId，回退 name
               const matchesSa = (b: (typeof accumulatedBlocks)[number]): boolean => {
-                if (b.type !== 'subagent' || !b.subagent) return false
-                if (sa.causeId && b.subagent.causeId) return b.subagent.causeId === sa.causeId
-                return b.subagent.name === sa.name
+                if (b.type !== 'subAgent' || !b.subAgent) return false
+                if (sa.causeId && b.subAgent.causeId) return b.subAgent.causeId === sa.causeId
+                return b.subAgent.name === sa.name
               }
 
               // 查找或创建同名子代理累积块
               let saBlock = accumulatedBlocks.find(matchesSa)
               if (!saBlock) {
                 saBlock = {
-                  type: 'subagent',
-                  subagent: {
+                  type: 'subAgent',
+                  subAgent: {
                     name: sa.name,
                     causeId: sa.causeId,
                     status: sa.status,
@@ -1739,19 +1739,19 @@ app.whenReady().then(async () => {
               }
 
               if (sa.status === 'started') {
-                saBlock.subagent!.status = sa.status
-                saBlock.subagent!.taskDescription =
-                  saBlock.subagent!.taskDescription || sa.taskDescription
+                saBlock.subAgent!.status = sa.status
+                saBlock.subAgent!.taskDescription =
+                  saBlock.subAgent!.taskDescription || sa.taskDescription
               } else if (sa.status === 'completed' || sa.status === 'error') {
-                saBlock.subagent!.status = sa.status
-                saBlock.subagent!.output = sa.output
-                saBlock.subagent!.error = sa.error
+                saBlock.subAgent!.status = sa.status
+                saBlock.subAgent!.output = sa.output
+                saBlock.subAgent!.error = sa.error
               } else if (sa.content || sa.reasoning_content || sa.tool) {
                 if (
-                  saBlock.subagent!.status !== 'completed' &&
-                  saBlock.subagent!.status !== 'error'
+                  saBlock.subAgent!.status !== 'completed' &&
+                  saBlock.subAgent!.status !== 'error'
                 ) {
-                  saBlock.subagent!.status = 'running'
+                  saBlock.subAgent!.status = 'running'
                 }
                 if (!saBlock.children) saBlock.children = []
 

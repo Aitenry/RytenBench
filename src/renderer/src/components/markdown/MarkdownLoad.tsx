@@ -1,5 +1,6 @@
-import React, { useState, JSX } from 'react'
+import React, { useState, useMemo, JSX } from 'react'
 import ReactMarkdown from 'react-markdown'
+import type { Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
 import rehypeSanitize from 'rehype-sanitize'
@@ -8,6 +9,13 @@ import { RiCheckLine, RiFileCopyLine } from '@remixicon/react'
 import { extractTextFromChildren } from '@renderer/utils/markdown'
 import { InlineCodeCopy } from '@renderer/components/markdown/MarkdownView'
 import type { MarkdownViewProps } from '@renderer/types/components'
+
+// Stable references — prevent ReactMarkdown from re-rendering the entire DOM tree
+const remarkPlugins = [remarkGfm]
+const rehypePlugins = [rehypeRaw, rehypeHighlight, rehypeSanitize]
+
+// Context to tell code component whether it's inside a <pre> (code block) or standalone (inline)
+const IsPreContext = React.createContext(false)
 
 // 复制按钮组件
 const CopyButton = ({
@@ -44,9 +52,11 @@ const CopyButton = ({
   )
 }
 
-const MarkdownLoad = ({ content, isDarkMode = false }: MarkdownViewProps): JSX.Element => {
-  // 动态样式（基于 isDarkMode）
-  const dynamicStyles = `
+const MarkdownLoad = React.memo(
+  ({ content, isDarkMode = false }: MarkdownViewProps): JSX.Element => {
+    // Memoize dynamic styles — only recompute when isDarkMode changes
+    const dynamicStyles = useMemo(
+      () => `
     .markdown-body > *:first-child { margin-top: 0; }
     .markdown-body h1 { font-size: 2em; font-weight: 700; margin: 1em 0 0.5em; }
     .markdown-body h2 { font-size: 1.5em; font-weight: 600; margin: 1em 0 0.5em; }
@@ -83,61 +93,93 @@ const MarkdownLoad = ({ content, isDarkMode = false }: MarkdownViewProps): JSX.E
     }
     .markdown-body blockquote { border-color: ${isDarkMode ? '#4b5563' : '#d1d5db'}; }
     .markdown-body th, .markdown-body td { border-color: ${isDarkMode ? '#4b5563' : '#d1d5db'}; }
-  `
+  `,
+      [isDarkMode]
+    )
 
-  return (
-    <>
-      <style>{dynamicStyles}</style>
-      <div className={`markdown-body ${isDarkMode ? 'text-gray-100' : 'text-gray-700'}`}>
-        <ReactMarkdown
-          remarkPlugins={[remarkGfm]}
-          rehypePlugins={[rehypeRaw, rehypeHighlight, rehypeSanitize]}
-          components={{
-            // 链接在新窗口打开
-            a: (props) => <a {...props} target="_blank" rel="noopener noreferrer" />,
-            code: ({ children, className, ...props }) => {
-              const text = extractTextFromChildren(children)
-              const isInline = !className?.includes('language-')
-              if (isInline) {
-                return (
-                  <InlineCodeCopy text={text}>
-                    <code className={className} {...props}>
-                      {children}
-                    </code>
-                  </InlineCodeCopy>
-                )
-              }
-              return (
-                <code className={className} {...props}>
-                  {children}
-                </code>
-              )
-            },
-            // 代码块添加复制按钮
-            pre: ({ children, ...props }) => {
-              const codeText = extractTextFromChildren(children)
-              return (
-                <div className="relative">
-                  <pre {...props}>{children}</pre>
-                  <CopyButton text={codeText} isDarkMode={isDarkMode} />
-                </div>
-              )
-            },
-            // 表格添加滚动容器
-            table: ({ children, ...props }) => (
-              <div className="overflow-x-auto my-4">
-                <table {...props} className="min-w-full">
-                  {children}
-                </table>
-              </div>
-            )
-          }}
-        >
-          {content}
-        </ReactMarkdown>
-      </div>
-    </>
-  )
-}
+    // Memoize components — prevent ReactMarkdown from full re-render when only isDarkMode is stable
+    const components: Components = useMemo(() => {
+      function ABlock(props: React.ComponentPropsWithoutRef<'a'>): React.ReactNode {
+        return <a {...props} target="_blank" rel="noopener noreferrer" />
+      }
+
+      function CodeBlock({
+        children,
+        className,
+        ...props
+      }: React.ComponentPropsWithoutRef<'code'>): React.ReactNode {
+        const insidePre = React.useContext(IsPreContext)
+        const text = extractTextFromChildren(children)
+        const isInline = !insidePre && !className?.includes('language-')
+        if (isInline) {
+          return (
+            <InlineCodeCopy text={text}>
+              <code className={className} {...props}>
+                {children}
+              </code>
+            </InlineCodeCopy>
+          )
+        }
+        return (
+          <code className={className} {...props}>
+            {children}
+          </code>
+        )
+      }
+
+      function PreBlock({
+        children,
+        ...props
+      }: React.ComponentPropsWithoutRef<'pre'>): React.ReactNode {
+        const codeText = extractTextFromChildren(children)
+        return (
+          <div className="relative">
+            <IsPreContext.Provider value={true}>
+              <pre {...props}>{children}</pre>
+            </IsPreContext.Provider>
+            <CopyButton text={codeText} isDarkMode={isDarkMode} />
+          </div>
+        )
+      }
+
+      function TableBlock({
+        children,
+        ...props
+      }: React.ComponentPropsWithoutRef<'table'>): React.ReactNode {
+        return (
+          <div className="overflow-x-auto my-4">
+            <table {...props} className="min-w-full">
+              {children}
+            </table>
+          </div>
+        )
+      }
+
+      return {
+        a: ABlock,
+        code: CodeBlock,
+        pre: PreBlock,
+        table: TableBlock
+      }
+    }, [isDarkMode])
+
+    return (
+      <>
+        <style>{dynamicStyles}</style>
+        <div className={`markdown-body ${isDarkMode ? 'text-gray-100' : 'text-gray-700'}`}>
+          <ReactMarkdown
+            remarkPlugins={remarkPlugins}
+            rehypePlugins={rehypePlugins}
+            components={components}
+          >
+            {content}
+          </ReactMarkdown>
+        </div>
+      </>
+    )
+  }
+)
+
+MarkdownLoad.displayName = 'MarkdownLoad'
 
 export default MarkdownLoad
