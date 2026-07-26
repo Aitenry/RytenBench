@@ -1,8 +1,6 @@
 // AppContent.tsx
 import React, { useState, useEffect, useCallback } from 'react'
-import { type MenuProps } from 'antd'
-import Sidebar from '@renderer/components/system/Sidebar'
-import MainRoutes from '@renderer/route/MainRoutes'
+import CustomFrame from '@renderer/components/system/CustomFrame'
 import LockScreen from '@renderer/components/system/LockScreen'
 import CryptoJS from 'crypto-js'
 import { Window } from '../../../resource/types/window'
@@ -68,13 +66,6 @@ const AppContent: React.FC = () => {
     }
   }
 
-  // Handle user menu clicks
-  const handleUserMenuClick: MenuProps['onClick'] = (e) => {
-    if (e.key === 'lock') {
-      handleLockScreen()
-    }
-  }
-
   useEffect(() => {
     const handleKeyPress = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') {
@@ -92,17 +83,8 @@ const AppContent: React.FC = () => {
 
   return (
     <MessageProvider>
+      <CustomFrame currentKey={current} setCurrentKey={setCurrent} />
       {isLocked && <LockScreen onUnlock={handleUnlock} />}
-      <div className="flex h-screen">
-        <Sidebar
-          currentKey={current}
-          setCurrentKey={setCurrent}
-          onUserMenuClick={handleUserMenuClick}
-        />
-        <div className="flex-1 overflow-auto py-2.5 pr-2.5">
-          <MainRoutes />
-        </div>
-      </div>
     </MessageProvider>
   )
 }

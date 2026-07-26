@@ -1,8 +1,8 @@
 import React, { useState } from 'react'
 import { Button, Select } from 'antd'
 import {
+  RiListSettingsLine,
   RiMessageAi3Line,
-  RiSettings4Line,
   RiSidebarFoldLine,
   RiSidebarUnfoldLine
 } from '@remixicon/react'
@@ -34,7 +34,7 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
 
   return (
     <div
-      className="flex items-center justify-between px-4 py-2"
+      className="flex items-center justify-between px-4 py-1.5"
       style={{ borderBottom: `1px solid ${colorBorderSecondary}` }}
     >
       <div className="flex items-center gap-2">
@@ -69,7 +69,7 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
         <Button
           type="text"
           size="small"
-          icon={<RiSettings4Line size={16} />}
+          icon={<RiListSettingsLine size={16} />}
           onClick={() => setSettingsOpen(true)}
         />
       </div>

@@ -99,8 +99,8 @@ const MusicSidebar: React.FC<MusicSidebarProps> = ({
       className="flex-shrink-0 w-60 flex flex-col rounded-lg overflow-hidden"
       style={{ background: colorBgContainer, borderRadius: borderRadiusLG }}
     >
-      <div className="p-3 border-b" style={{ borderColor: colorBorderSecondary }}>
-        <div className="flex items-center justify-between mb-2">
+      <div className="py-1.5 px-3 border-b" style={{ borderColor: colorBorderSecondary }}>
+        <div className="flex items-center justify-between">
           <span className="text-sm font-medium" style={{ color: colorTextSecondary }}>
             歌单
           </span>

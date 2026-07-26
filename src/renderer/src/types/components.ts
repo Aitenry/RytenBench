@@ -331,5 +331,6 @@ export interface ProviderOption {
   id: number
   name: string
   model: string
+  provider: string
   tags: string[] | null
 }

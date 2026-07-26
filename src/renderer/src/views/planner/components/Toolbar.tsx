@@ -15,15 +15,14 @@ const Toolbar: React.FC<Props> = ({ viewMode, onViewModeChange, onAddTask }) => 
     alignItems: 'center',
     gap: 4,
     fontSize: 13,
-    padding: '4px 10px',
-    height: 32
+    padding: '4px 10px'
   }
 
   return (
     <div
       className="flex items-center px-3 shrink-0"
       style={{
-        height: 44,
+        height: 36,
         borderBottom: `1px solid ${token.colorBorderSecondary}`,
         background: token.colorBgContainer
       }}
@@ -58,9 +57,7 @@ const Toolbar: React.FC<Props> = ({ viewMode, onViewModeChange, onAddTask }) => 
           icon={<RiAddLine size={16} />}
           style={btnStyle}
           onClick={onAddTask}
-        >
-          新建项目
-        </Button>
+        />
       </Tooltip>
     </div>
   )

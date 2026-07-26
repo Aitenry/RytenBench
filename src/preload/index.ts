@@ -307,6 +307,21 @@ const api = {
       ipcRenderer.invoke('node-positions-save-batch', positions),
     delete: (nodeId: string) => ipcRenderer.invoke('node-position-delete', nodeId)
   },
+  window: {
+    minimize: () => ipcRenderer.send('window-minimize'),
+    maximize: () => ipcRenderer.send('window-maximize'),
+    close: () => ipcRenderer.send('window-close'),
+    isMaximized: () => ipcRenderer.invoke('window-is-maximized') as Promise<boolean>,
+    onMaximized: (callback: (maximized: boolean) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, maximized: boolean): void => {
+        callback(maximized)
+      }
+      ipcRenderer.on('window-maximized', handler)
+      return () => {
+        ipcRenderer.off('window-maximized', handler)
+      }
+    }
+  },
   music: {
     selectDirectory: () => ipcRenderer.invoke('music-select-directory') as Promise<string | null>,
     getFolders: () =>

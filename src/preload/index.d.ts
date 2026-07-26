@@ -172,6 +172,13 @@ interface Api {
     saveBatch: (positions: { node_id: string; x: number; y: number }[]) => Promise<void>
     delete: (nodeId: string) => Promise<boolean>
   }
+  window: {
+    minimize: () => void
+    maximize: () => void
+    close: () => void
+    isMaximized: () => Promise<boolean>
+    onMaximized: (callback: (maximized: boolean) => void) => () => void
+  }
   music: {
     selectDirectory: () => Promise<string | null>
     getFolders: () => Promise<

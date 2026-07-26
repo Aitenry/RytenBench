@@ -1,6 +1,148 @@
 @import "tailwindcss";
 @import "animate.css";
 
+/* ======== 自定义窗口框架 ======== */
+
+/* 最外层：占满视口，圆角裁剪 */
+.custom-frame-outer {
+  width: 100vw;
+  height: 100vh;
+  border-radius: 12px;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+/* 框架容器：圆角 + 阴影 + 内容裁剪 */
+.custom-frame {
+  width: 100%;
+  height: 100%;
+  border-radius: 12px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06), 0 4px 24px rgba(0, 0, 0, 0.10);
+}
+
+/* 暗色模式：外层更暗，边框用白色半透明 */
+.dark .custom-frame {
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 4px 24px rgba(0, 0, 0, 0.25);
+}
+
+/* ======== 标题栏 ======== */
+.frame-titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 7px 0 9px;
+  -webkit-app-region: drag;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.frame-titlebar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  -webkit-app-region: drag;
+}
+
+.frame-titlebar-icon {
+  width: 18px;
+  height: 18px;
+  -webkit-app-region: drag;
+}
+
+.frame-titlebar-title {
+  font-size: 13px;
+  font-weight: 500;
+  -webkit-app-region: drag;
+}
+
+.frame-titlebar-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  -webkit-app-region: no-drag;
+}
+
+.frame-titlebar-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  color: inherit;
+  transition: background 0.15s;
+}
+
+.frame-titlebar-btn:hover {
+  background: rgba(128, 128, 128, 0.15);
+}
+
+.frame-titlebar-btn-close:hover {
+  background: #e81123;
+  color: #fff;
+}
+
+/* ======== 主体区域 ======== */
+.frame-body {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.frame-body-left,
+.frame-body-right {
+  display: flex;
+  align-items: flex-start;
+  flex-shrink: 0;
+}
+
+.frame-body-center {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+  border-radius: 6px;
+}
+
+/* ======== 两边栏菜单 ======== */
+.frame-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 6px 6px;
+  height: 100%;
+}
+
+.frame-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 25px;
+  height: 25px;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.frame-menu-item:hover {
+  background: rgba(128, 128, 128, 0.12);
+}
+
+.frame-menu-item-active {
+  background: rgba(22, 119, 255, 0.1);
+  color: #1677ff;
+}
+
+/* ======== 滚动条 ======== */
+
 .custom-scrollbar::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -23,19 +165,18 @@
 
 /* 毛玻璃效果的蒙层 */
 .lock-screen-modal .ant-modal-mask {
-  background-color: rgba(255, 255, 255, 0.3) !important; /* 半透明白色背景 */
-  backdrop-filter: blur(10px); /* 模糊效果 */
-  -webkit-backdrop-filter: blur(10px); /* Safari 兼容 */
+  background-color: rgba(255, 255, 255, 0.3) !important;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
 }
 
-/* 可选：如果也需要模态框本身有毛玻璃效果 */
 .lock-screen-modal .ant-modal-content {
   background-color: rgba(255, 255, 255, 0.85);
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
 }
 
-/* 自定义滚动条样式 - 更现代化的版本 */
+/* 自定义滚动条样式 */
 .custom-container-scrollbar::-webkit-scrollbar {
   width: 6px;
   height: 6px;

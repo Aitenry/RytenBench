@@ -1,16 +1,11 @@
 import React from 'react'
 import { HashRouter } from 'react-router-dom'
-import { theme } from 'antd'
 import { MessageContext } from '@renderer/contexts/MessageContext'
 import { AudioProvider } from '@renderer/contexts/AudioContext'
 import { BuildProgressProvider } from '@renderer/providers/BuildProgressProvider'
 import AppContent from '@renderer/components/system/AppContent'
 
 const App: React.FC = () => {
-  const {
-    token: { colorBgLayout }
-  } = theme.useToken()
-
   return (
     <HashRouter>
       <MessageContext.Provider
@@ -20,9 +15,7 @@ const App: React.FC = () => {
       >
         <AudioProvider>
           <BuildProgressProvider>
-            <div className="min-h-screen flex flex-col" style={{ background: colorBgLayout }}>
-              <AppContent />
-            </div>
+            <AppContent />
           </BuildProgressProvider>
         </AudioProvider>
       </MessageContext.Provider>

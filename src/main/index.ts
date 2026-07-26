@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, dialog, screen } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
@@ -312,6 +312,9 @@ function createMainWindow(): void {
     minWidth: 1390,
     minHeight: 827,
     show: false,
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
     autoHideMenuBar: true,
     ...{ icon },
     webPreferences: {
@@ -337,6 +340,47 @@ function createMainWindow(): void {
 
   mainWindow.webContents.once('dom-ready', () => {
     mainWindow.webContents.send('main-window-ready')
+  })
+
+  // 窗口控制 IPC
+  let isMaximized = false
+  let normalBounds: { x: number; y: number; width: number; height: number } | null = null
+
+  ipcMain.on('window-minimize', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.minimize()
+    }
+  })
+  ipcMain.on('window-maximize', () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    if (isMaximized) {
+      // 还原到之前的尺寸和位置
+      if (normalBounds) {
+        mainWindow.setBounds(normalBounds)
+      }
+      isMaximized = false
+      mainWindow.webContents.send('window-maximized', false)
+    } else {
+      // 保存当前尺寸，然后最大化到可用工作区
+      normalBounds = mainWindow.getBounds()
+      const { workArea } = screen.getPrimaryDisplay()
+      mainWindow.setBounds({
+        x: workArea.x,
+        y: workArea.y,
+        width: workArea.width,
+        height: workArea.height
+      })
+      isMaximized = true
+      mainWindow.webContents.send('window-maximized', true)
+    }
+  })
+  ipcMain.on('window-close', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.close()
+    }
+  })
+  ipcMain.handle('window-is-maximized', () => {
+    return isMaximized
   })
 }
 

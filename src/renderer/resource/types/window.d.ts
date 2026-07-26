@@ -349,5 +349,12 @@ export interface Window {
         }[]
       >
     }
+    window: {
+      minimize: () => void
+      maximize: () => void
+      close: () => void
+      isMaximized: () => Promise<boolean>
+      onMaximized: (callback: (maximized: boolean) => void) => () => void
+    }
   }
 }

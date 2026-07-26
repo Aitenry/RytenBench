@@ -281,7 +281,7 @@ const AddTaskModal: React.FC<Props> = ({ open, parentId, editTask, tree, onOk, o
       okText="确定"
       cancelText="取消"
       width={420}
-      destroyOnClose
+      destroyOnHidden
     >
       <Form layout="vertical" size="small">
         {validationError && (
