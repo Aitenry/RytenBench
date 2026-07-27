@@ -136,6 +136,7 @@ interface Api {
     ) => void
     getTools: () => Promise<ToolInfo[]>
     selectSkillsDirectory: () => Promise<string | null>
+    listSkills: () => Promise<{ id: string; name: string; description: string }[]>
     onStreamChunk: (callback: (chunk: StructuredMessage) => void) => () => void
     onStreamDone: (callback: (result: { topicId: number }) => void) => () => void
     // 话题管理
@@ -297,6 +298,29 @@ interface Api {
       targetIndex: number
     }) => void) => () => void
   }
+  weather: {
+    getCurrent: (force?: boolean) => Promise<WeatherData>
+    onUpdate: (callback: (data: WeatherData) => void) => () => void
+  }
+}
+
+interface WeatherData {
+  location: string
+  current: {
+    temp: string
+    weatherCode: number
+    weatherDesc: string
+    windSpeed: string
+    humidity: number
+    apparentTemp: string
+  }
+  daily: {
+    label: string
+    weatherDesc: string
+    tempMax: string
+    tempMin: string
+    precipProb: number
+  }[]
 }
 
 declare global {

@@ -6,7 +6,7 @@ import {
   RiSidebarFoldLine,
   RiSidebarUnfoldLine
 } from '@remixicon/react'
-import ChatSettingsModal from './settings/Index'
+import ChatSettingsModal from './settings/ChatSettingsModal'
 
 interface ChatHeaderProps {
   sidebarOpen: boolean

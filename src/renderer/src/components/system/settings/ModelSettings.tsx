@@ -28,7 +28,7 @@ import {
   GeminiFilled
 } from '@ant-design/icons'
 import { useMessage } from '@renderer/hooks/useMessage'
-import { Window } from '../../../../../resource/types/window'
+import { Window } from '../../../../resource/types/window'
 import type { LlmProviderConfig, LlmProviderInput } from '@renderer/types/provider'
 
 const PROVIDER_TYPES = [

@@ -8,6 +8,25 @@ import { ChatTopicRow, ChatDialogueRow } from '../main/database/mapper/chat'
 import type { LlmProviderInput, LlmProviderConfig } from '../main/database/mapper/provider'
 import type { SystemSettings } from '../main/types/settings'
 
+interface WeatherData {
+  location: string
+  current: {
+    temp: string
+    weatherCode: number
+    weatherDesc: string
+    windSpeed: string
+    humidity: number
+    apparentTemp: string
+  }
+  daily: {
+    label: string
+    weatherDesc: string
+    tempMax: string
+    tempMin: string
+    precipProb: number
+  }[]
+}
+
 // 使用命名 handler + ipcRenderer.off() 精确管理监听器，避免 removeAllListeners 误删其他组件监听
 let streamChunkHandler: ((event: IpcRendererEvent, chunk: Record<string, unknown>) => void) | null =
   null
@@ -169,6 +188,7 @@ const api = {
       ipcRenderer.send('chat-cancel-stream')
     },
     selectSkillsDirectory: () => ipcRenderer.invoke('chat-select-skills-directory'),
+    listSkills: () => ipcRenderer.invoke('chat-list-skills'),
     // 话题管理
     getAllTopics: () => ipcRenderer.invoke('chat-topic-get-all'),
     getTopicById: (id: number) => ipcRenderer.invoke('chat-topic-get-by-id', id),
@@ -451,6 +471,17 @@ const api = {
         callback(data)
       ipcRenderer.on('music-play-track', handler)
       return () => ipcRenderer.removeListener('music-play-track', handler)
+    }
+  },
+  weather: {
+    getCurrent: (force?: boolean) =>
+      ipcRenderer.invoke('weather-get', force) as Promise<WeatherData>,
+    onUpdate: (callback: (data: WeatherData) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, data: WeatherData): void => callback(data)
+      ipcRenderer.on('weather-update', handler)
+      return () => {
+        ipcRenderer.off('weather-update', handler)
+      }
     }
   }
 }

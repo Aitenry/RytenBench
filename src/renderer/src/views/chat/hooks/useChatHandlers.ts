@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo } from 'react'
+import React, { useState, useRef, useEffect, useMemo } from 'react'
 import type { TextAreaRef } from 'antd/es/input/TextArea'
 import { ChatDialogueRow, ChatTopicRow } from '../../../../../main/database/mapper/chat'
 import { LlmProviderConfig } from '../../../../../main/database/mapper/provider'
@@ -7,7 +7,49 @@ import type { Message, Attachment, ToolCall, MessageBlock } from '@renderer/type
 import { useTypewriter, useCyclingTypewriter } from './useTypewriter'
 import { isSameToolCall, computeTextDelta, pushBlock } from '../utils/chatHelpers'
 
-export const useChatHandlers = () => {
+interface UseChatHandlersReturn {
+  messages: Message[]
+  inputValue: string
+  setInputValue: React.Dispatch<React.SetStateAction<string>>
+  selectedTools: string[]
+  setSelectedTools: React.Dispatch<React.SetStateAction<string[]>>
+  availableTools: ToolInfo[]
+  copiedId: string | null
+  currentTopicId: number | null
+  topics: ChatTopicRow[]
+  sidebarOpen: boolean
+  setSidebarOpen: React.Dispatch<React.SetStateAction<boolean>>
+  providers: LlmProviderConfig[]
+  selectedProviderId: number | null
+  setSelectedProviderId: React.Dispatch<React.SetStateAction<number | null>>
+  attachments: Attachment[]
+  setAttachments: React.Dispatch<React.SetStateAction<Attachment[]>>
+  messagesEndRef: React.RefObject<HTMLDivElement | null>
+  textareaRef: React.RefObject<TextAreaRef | null>
+  currentSessionIdRef: React.RefObject<string | null>
+  currentTopicIdRef: React.RefObject<number | null>
+  selectedProvider: LlmProviderConfig | null
+  modelSupportsTools: boolean
+  modelSupportsVision: boolean
+  groupedProviderOptions: {
+    label: string
+    options: { value: number; label: string; providerType: string }[]
+  }[]
+  titleDisplayed: string
+  titleDone: boolean
+  subtitleDisplayed: string
+  subtitleDone: boolean
+  handleSelectTopic: (topic: ChatTopicRow) => Promise<void>
+  handleDeleteTopic: (topicId: number, e?: React.MouseEvent) => Promise<void>
+  handleCopy: (text: string, id: string) => Promise<void>
+  handleSend: () => Promise<void>
+  handleNewChat: () => void
+  handleDeleteMessagePair: (msgIndex: number) => Promise<void>
+  handleKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void
+  handleStop: () => void
+}
+
+export const useChatHandlers = (): UseChatHandlersReturn => {
   const [messages, setMessages] = useState<Message[]>([])
   const [inputValue, setInputValue] = useState('')
   const [selectedTools, setSelectedTools] = useState<string[]>([])
@@ -32,9 +74,8 @@ export const useChatHandlers = () => {
   const subtitleTexts = [
     '今天天气怎么样？要是还不错，我帮你把明天的日程也排了～',
     '我可以帮你分析文档，提取关键信息，理清它们之间的关系。',
-    '有什么重要的事尽管说，我帮你记着，排得妥妥的。',
-    '我可以帮你整理零散的文档，构建成知识库~',
-    '要不要放首歌？我顺便帮你把任务理一理。'
+    '有什么重要的事尽管说，我帮你记着，并形成代办事项。',
+    '我可以帮你整理零散的文档，构建相应的知识库。'
   ]
   const { displayedText: titleDisplayed, isDone: titleDone } = useTypewriter(titleText, 100)
   const { displayedText: subtitleDisplayed, isDone: subtitleDone } = useCyclingTypewriter(

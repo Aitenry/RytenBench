@@ -185,6 +185,7 @@ export interface Window {
       ) => void
       getTools: () => Promise<ToolInfo[]>
       selectSkillsDirectory: () => Promise<string | null>
+      listSkills: () => Promise<{ id: string; name: string; description: string }[]>
       getAllTopics: () => Promise<ChatTopicRow[]>
       getTopicById: (id: number) => Promise<ChatTopicRow[]>
       createTopic: (title: string, model?: string, selectedTools?: string) => Promise<number>
@@ -356,5 +357,28 @@ export interface Window {
       isMaximized: () => Promise<boolean>
       onMaximized: (callback: (maximized: boolean) => void) => () => void
     }
+    weather: {
+      getCurrent: (force?: boolean) => Promise<WeatherData>
+      onUpdate: (callback: (data: WeatherData) => void) => () => void
+    }
   }
+}
+
+interface WeatherData {
+  location: string
+  current: {
+    temp: string
+    weatherCode: number
+    weatherDesc: string
+    windSpeed: string
+    humidity: number
+    apparentTemp: string
+  }
+  daily: {
+    label: string
+    weatherDesc: string
+    tempMax: string
+    tempMin: string
+    precipProb: number
+  }[]
 }

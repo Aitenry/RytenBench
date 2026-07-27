@@ -3,13 +3,11 @@
 
 /* ======== 自定义窗口框架 ======== */
 
-/* 最外层：占满视口，圆角裁剪 */
+/* 最外层：占满视口，仅做背景层，不裁剪内容（让 antd 浮层可挂载到 body 不受遮挡） */
 .custom-frame-outer {
   width: 100vw;
   height: 100vh;
-  border-radius: 12px;
   box-sizing: border-box;
-  overflow: hidden;
 }
 
 /* 框架容器：圆角 + 阴影 + 内容裁剪 */
@@ -139,6 +137,73 @@
 .frame-menu-item-active {
   background: rgba(22, 119, 255, 0.1);
   color: #1677ff;
+}
+
+/* ======== 底部信息栏 ======== */
+.frame-bottombar {
+  flex-shrink: 0;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  position: relative;
+}
+
+.frame-bottombar-inner {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 12px;
+  position: relative;
+}
+
+/* 弹出详情卡片 */
+.frame-bottombar-popup {
+  position: absolute;
+  bottom: 100%;
+  right: 48px;
+  width: 280px;
+  padding: 16px;
+  border-radius: 12px;
+  z-index: 10;
+  animation: popupSlideUp 0.2s ease-out;
+}
+
+@keyframes popupSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.frame-bottombar-track {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.frame-bottombar-item {
+  font-size: 12px;
+  cursor: default;
+  user-select: none;
+}
+
+.frame-bottombar-dots {
+  display: flex;
+  gap: 4px;
+}
+
+.frame-bottombar-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: rgba(128, 128, 128, 0.3);
+  transition: background 0.3s, width 0.3s;
 }
 
 /* ======== 滚动条 ======== */

@@ -18,6 +18,8 @@ export interface ChatSettings {
   toolCallWindowSize: number
   /** 技能（Skills）存储目录，空/未设置表示不启用；目录下每个含 SKILL.md 的子目录即一个技能 */
   skillsPath?: string
+  /** 启用的技能 ID 列表，undefined 表示全部启用，[] 表示全部禁用 */
+  enabledSkills?: string[]
 }
 
 export type ThemeMode = 'light' | 'dark' | 'auto'
@@ -31,4 +33,10 @@ export interface SystemSettings {
   defaultEmbeddingModelId?: number
   musicDirectory?: string
   theme?: ThemeMode
+  /** 天气缓存数据 */
+  weatherData?: Record<string, unknown>
+  /** 天气自动刷新间隔（分钟），默认 60 */
+  weatherRefreshInterval?: number
+  /** 上次天气数据获取时间戳 */
+  weatherLastFetched?: number
 }

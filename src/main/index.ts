@@ -2,12 +2,13 @@ import { app, shell, BrowserWindow, ipcMain, dialog, screen } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
-import { createDatabase, Database } from './database/loading' // 确保导入 Database 类型
+import { createDatabase, Database } from './database/loading'
 import { getIp } from './address'
 import _Store from 'electron-store'
 import logger from 'electron-log'
 import * as fs from 'fs'
 import crypto from 'crypto'
+import { fetchWeatherApi } from 'openmeteo'
 import mammoth from 'mammoth'
 import TurndownService from 'turndown'
 import { JSDOM } from 'jsdom'
@@ -382,10 +383,164 @@ function createMainWindow(): void {
   ipcMain.handle('window-is-maximized', () => {
     return isMaximized
   })
+
+  // --- Weather ---
+  const weatherCodeMap: Record<number, string> = {
+    0: '晴天',
+    1: '大部晴朗',
+    2: '局部多云',
+    3: '多云',
+    45: '有雾',
+    48: '雾凇',
+    51: '小毛毛雨',
+    53: '大毛毛雨',
+    61: '小雨',
+    63: '中雨',
+    65: '大雨',
+    71: '小雪',
+    73: '中雪',
+    75: '大雪',
+    80: '小阵雨',
+    81: '中阵雨',
+    82: '大阵雨',
+    95: '雷暴'
+  }
+
+  async function fetchWeatherData(
+    lat: number,
+    lon: number,
+    locationName: string
+  ): Promise<Record<string, unknown>> {
+    const params = {
+      latitude: [lat],
+      longitude: [lon],
+      current:
+        'temperature_2m,weather_code,wind_speed_10m,wind_direction_10m,relative_humidity_2m,apparent_temperature',
+      daily: 'weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max',
+      forecast_days: 3,
+      timezone: 'auto'
+    }
+    const responses = await fetchWeatherApi('https://api.open-meteo.com/v1/forecast', params)
+    const response = responses[0]
+
+    const current = response.current()
+    const daily = response.daily()
+
+    const result: Record<string, unknown> = {
+      location: locationName,
+      current: {},
+      daily: [] as Record<string, unknown>[]
+    }
+
+    if (current) {
+      result.current = {
+        temp: current.variables(0)!.value().toFixed(2),
+        weatherCode: Math.round(current.variables(1)!.value()),
+        weatherDesc: weatherCodeMap[Math.round(current.variables(1)!.value())] ?? '未知',
+        windSpeed: current.variables(2)!.value().toFixed(2),
+        humidity: Math.round(current.variables(4)!.value()),
+        apparentTemp: current.variables(5)!.value().toFixed(2)
+      }
+    }
+
+    if (daily) {
+      const wc = daily.variables(0)!.valuesArray()!
+      const tMax = daily.variables(1)!.valuesArray()!
+      const tMin = daily.variables(2)!.valuesArray()!
+      const pProb = daily.variables(3)!.valuesArray()!
+      const startTime = Number(daily.time())
+      const dayInterval = daily.interval()
+      const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+      const todayStr = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(new Date().getDate()).padStart(2, '0')}`
+
+      for (let i = 0; i < wc.length; i++) {
+        const dayTime = new Date((startTime + i * dayInterval) * 1000)
+        const dateStr = `${dayTime.getFullYear()}-${String(dayTime.getMonth() + 1).padStart(2, '0')}-${String(dayTime.getDate()).padStart(2, '0')}`
+        ;(result.daily as Record<string, unknown>[]).push({
+          label: dateStr === todayStr ? '今天' : weekdays[dayTime.getDay()],
+          weatherDesc: weatherCodeMap[Math.round(wc[i])] ?? '未知',
+          tempMax: tMax[i].toFixed(0),
+          tempMin: tMin[i].toFixed(0),
+          precipProb: pProb[i] ?? 0
+        })
+      }
+    }
+
+    settingsStore.set('weatherLastFetched', Date.now())
+    settingsStore.set('weatherData', result)
+    return result
+  }
+
+  // 天气自动刷新
+  let weatherTimer: ReturnType<typeof setInterval> | null = null
+  const DEFAULT_REFRESH_MIN = 60
+
+  function startWeatherAutoRefresh(): void {
+    const ip = settingsStore.get('ip') as Record<string, unknown> | undefined
+    if (!ip) return
+
+    const lat = ip.lat as number | undefined
+    const lon = ip.lon as number | undefined
+    const city = (ip.city as string) || (ip.regionName as string) || ''
+    if (!lat || !lon) return
+
+    const refreshMin =
+      (settingsStore.get('weatherRefreshInterval') as number) || DEFAULT_REFRESH_MIN
+    const lastFetched = settingsStore.get('weatherLastFetched') as number | undefined
+
+    // 先推送缓存数据
+    const cached = settingsStore.get('weatherData') as Record<string, unknown> | undefined
+    if (cached && mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('weather-update', cached)
+    }
+
+    const doFetch = async (): Promise<void> => {
+      try {
+        const data = await fetchWeatherData(lat, lon, city)
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('weather-update', data)
+        }
+      } catch (err) {
+        logger.error('Weather auto-refresh failed:', err)
+      }
+    }
+
+    // 启动时检查是否需要立即拉取
+    const shouldFetchNow = !lastFetched || Date.now() - lastFetched > 3 * 60 * 60 * 1000
+    if (shouldFetchNow) {
+      doFetch()
+    }
+
+    // 定时器
+    if (weatherTimer) clearInterval(weatherTimer)
+    weatherTimer = setInterval(doFetch, refreshMin * 60 * 1000)
+  }
+
+  // 手动刷新 IPC — force=true 强制拉取最新数据
+  ipcMain.handle(
+    'weather-get',
+    async (_event, force?: boolean): Promise<Record<string, unknown>> => {
+      if (!force) {
+        const cached = settingsStore.get('weatherData') as Record<string, unknown> | undefined
+        if (cached) return cached
+      }
+
+      const ip = settingsStore.get('ip') as Record<string, unknown> | undefined
+      if (!ip) throw new Error('No location data')
+      const lat = ip.lat as number | undefined
+      const lon = ip.lon as number | undefined
+      const city = (ip.city as string) || (ip.regionName as string) || ''
+      if (!lat || !lon) throw new Error('No coordinates')
+      return await fetchWeatherData(lat, lon, city)
+    }
+  )
+
+  // 启动天气自动刷新
+  startWeatherAutoRefresh()
 }
 
 app.whenReady().then(async () => {
-  electronApp.setAppUserModelId('cn.toryu.ryten.bench')
+  electronApp.setAppUserModelId('com.ryten.bench')
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
@@ -665,7 +820,10 @@ app.whenReady().then(async () => {
         defaultModelId: all.defaultModelId,
         defaultEmbeddingModelId: all.defaultEmbeddingModelId,
         musicDirectory: all.musicDirectory,
-        theme: all.theme
+        theme: all.theme,
+        weatherRefreshInterval: all.weatherRefreshInterval,
+        weatherLastFetched: all.weatherLastFetched,
+        weatherData: all.weatherData
       } as SystemSettings
     } catch (error) {
       logger.error('Error in system-settings-get-all:', error)
@@ -1504,7 +1662,8 @@ app.whenReady().then(async () => {
         getDialoguesByTopicId,
         chatSettings?.historyWindowSize ?? 10,
         chatSettings?.toolCallWindowSize ?? 20,
-        chatSettings?.skillsPath || undefined
+        chatSettings?.skillsPath || undefined,
+        chatSettings?.enabledSkills
       )
       return await chatService.sendMessage(question, options)
     }
@@ -1942,6 +2101,44 @@ app.whenReady().then(async () => {
     })
     if (result.canceled || result.filePaths.length === 0) return null
     return result.filePaths[0]
+  })
+
+  // 列出技能目录中的所有技能
+  ipcMain.handle('chat-list-skills', async () => {
+    try {
+      const settings = settingsStore.store
+      const skillsPath = (settings.chat as ChatSettings)?.skillsPath
+      if (!skillsPath) return []
+
+      const path = await import('path')
+      const entries = fs.readdirSync(skillsPath, { withFileTypes: true })
+      const skills: { id: string; name: string; description: string }[] = []
+
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue
+        const skillMdPath = path.join(skillsPath, entry.name, 'SKILL.md')
+        try {
+          fs.accessSync(skillMdPath, fs.constants.R_OK)
+          const content = fs.readFileSync(skillMdPath, 'utf-8')
+          const fm = content.match(/^---\s*\n([\s\S]*?)\n---/)
+          let name = entry.name
+          let description = ''
+          if (fm) {
+            const n = fm[1].match(/^name:\s*(.+)$/m)
+            const d = fm[1].match(/^description:\s*(.+)$/m)
+            if (n) name = n[1].trim()
+            if (d) description = d[1].trim()
+          }
+          skills.push({ id: entry.name, name, description })
+        } catch {
+          // 目录中没有 SKILL.md，跳过
+        }
+      }
+      return skills
+    } catch (error) {
+      logger.error('Error listing skills:', error)
+      return []
+    }
   })
 
   // --- Chat Topic IPC handlers ---

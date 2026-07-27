@@ -13,14 +13,12 @@ export const isSameToolCall = (
     if (!blockTool.id && blockTool.status === 'preparing' && blockTool.name === incoming.name)
       return true
     // ID 不同但名称相同且块未完成：content-block-start 与 call.callId 来源不同，回退按名称
-    if (
+    return !!(
       blockTool.id &&
       blockTool.status &&
       blockTool.status !== 'completed' &&
       blockTool.name === incoming.name
     )
-      return true
-    return false
   }
   return blockTool.name === incoming.name || blockTool.name === ''
 }

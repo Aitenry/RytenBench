@@ -93,6 +93,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       <ConfigProvider
         locale={zhCN}
         theme={{ algorithm: isDark ? darkAlgorithm : defaultAlgorithm }}
+        getPopupContainer={() => document.body}
       >
         {children}
       </ConfigProvider>

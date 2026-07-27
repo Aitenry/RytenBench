@@ -4,7 +4,7 @@ import { MessageContext, MessageContextType } from '../contexts/MessageContext'
 import type { MessageProviderProps } from '@renderer/types/components'
 
 export const MessageProvider: React.FC<MessageProviderProps> = ({ children }) => {
-  const [messageApi, contextHolder] = message.useMessage({ top: 20 })
+  const [messageApi, contextHolder] = message.useMessage({ top: 44 })
 
   const viewMessage = (
     key: string,

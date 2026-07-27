@@ -38,6 +38,7 @@ class ChatService {
   private readonly historyWindowSize: number
   private readonly toolCallWindowSize: number
   private readonly skillsPath?: string
+  private readonly enabledSkills?: string[]
 
   /**
    * @param model 已创建的 BaseChatModel 实例（由外部 ProviderService 提供）
@@ -48,6 +49,7 @@ class ChatService {
    * @param historyWindowSize 历史对话轮次上限（0 = 不限制），默认 10
    * @param toolCallWindowSize 历史工具调用条数上限（0 = 不限制），默认 20
    * @param skillsPath 技能存储目录（deepAgents skills），空表示不启用
+   * @param enabledSkills 启用的技能 ID 列表，undefined 表示全部启用
    */
   constructor(
     model: BaseChatModel,
@@ -57,7 +59,8 @@ class ChatService {
     loadHistory?: LoadHistoryFn,
     historyWindowSize = 10,
     toolCallWindowSize = 20,
-    skillsPath?: string
+    skillsPath?: string,
+    enabledSkills?: string[]
   ) {
     this.model = model
     this.tools = tools
@@ -67,6 +70,7 @@ class ChatService {
     this.historyWindowSize = historyWindowSize
     this.toolCallWindowSize = toolCallWindowSize
     this.skillsPath = skillsPath
+    this.enabledSkills = enabledSkills
     logger.info(
       `ChatService initialized with DeepAgents (maxIterations=${this._maxIterations}, historyWindow=${this.historyWindowSize}, toolCallWindow=${this.toolCallWindowSize}, skillsPath=${this.skillsPath ?? 'disabled'}, subAgents=${this.subAgents.length})`
     )
@@ -96,10 +100,11 @@ class ChatService {
 
     if (this.skillsPath) {
       const posixPath = this.skillsPath.replace(/\\/g, '/')
+      const skillPaths = this.enabledSkills ? this.enabledSkills.map((s) => '/' + s) : ['/']
       return createDeepAgent({
         ...baseConfig,
         backend: new FilesystemBackend({ rootDir: posixPath }),
-        skills: ['/']
+        skills: skillPaths.length > 0 ? skillPaths : undefined
       })
     }
     return createDeepAgent(baseConfig)

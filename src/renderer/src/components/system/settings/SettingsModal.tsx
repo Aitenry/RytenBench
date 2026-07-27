@@ -1,37 +1,48 @@
 import React, { useState } from 'react'
 import { Modal, theme } from 'antd'
 import {
-  RiSettings4Line,
-  RiFileAi2Line,
-  RiBrainAi3Line,
-  RiServerLine,
-  RiListIndefinite
+  RiSettings3Line,
+  RiMusicLine,
+  RiMindMap,
+  RiComputerLine,
+  RiBrainAi3Line
 } from '@remixicon/react'
-import ModelSettings from './ModelSettings'
-import SkillsSettings from './SkillsSettings'
 import GeneralSettings from './GeneralSettings'
+import MusicSettings from './MusicSettings'
+import GraphSettings from './GraphSettings'
+import SystemInfo from './SystemInfo'
+import ModelSettings from './ModelSettings'
 
-type SettingsTab = 'general' | 'model' | 'skills' | 'mcp'
+type SettingsTab = 'general' | 'music' | 'graph' | 'model' | 'system'
 
 const TAB_ITEMS: {
   key: SettingsTab
   label: string
   icon: React.ReactNode
 }[] = [
-  { key: 'general', label: '通用', icon: <RiListIndefinite size={18} /> },
+  { key: 'general', label: '通用', icon: <RiSettings3Line size={18} /> },
+  { key: 'music', label: '音乐', icon: <RiMusicLine size={18} /> },
+  { key: 'graph', label: '图谱', icon: <RiMindMap size={18} /> },
   { key: 'model', label: '模型', icon: <RiBrainAi3Line size={18} /> },
-  { key: 'skills', label: '技能', icon: <RiFileAi2Line size={18} /> },
-  { key: 'mcp', label: 'MCP', icon: <RiServerLine size={18} /> }
+  { key: 'system', label: '系统', icon: <RiComputerLine size={18} /> }
 ]
 
-interface ChatSettingsModalProps {
+interface SettingsModalProps {
   open: boolean
   onClose: () => void
 }
 
-const ChatSettingsModal: React.FC<ChatSettingsModalProps> = ({ open, onClose }) => {
+const SettingsModal: React.FC<SettingsModalProps> = ({ open, onClose }) => {
   const {
-    token: { colorText, colorTextSecondary, colorBgContainer, colorFillAlter, colorBorderSecondary }
+    token: {
+      colorTextSecondary,
+      colorBgContainer,
+      colorFillAlter,
+      colorBorderSecondary,
+      borderRadiusLG,
+      borderRadius,
+      colorPrimary
+    }
   } = theme.useToken()
 
   const [activeTab, setActiveTab] = useState<SettingsTab>('general')
@@ -40,19 +51,14 @@ const ChatSettingsModal: React.FC<ChatSettingsModalProps> = ({ open, onClose }) 
     switch (activeTab) {
       case 'general':
         return <GeneralSettings />
+      case 'music':
+        return <MusicSettings />
+      case 'graph':
+        return <GraphSettings />
       case 'model':
         return <ModelSettings />
-      case 'skills':
-        return <SkillsSettings />
-      case 'mcp':
-        return (
-          <div
-            className="flex items-center justify-center h-full"
-            style={{ color: colorTextSecondary }}
-          >
-            MCP 设置（即将上线）
-          </div>
-        )
+      case 'system':
+        return <SystemInfo />
       default:
         return null
     }
@@ -62,7 +68,7 @@ const ChatSettingsModal: React.FC<ChatSettingsModalProps> = ({ open, onClose }) 
     <Modal
       title={
         <div className="flex items-center gap-2">
-          <RiSettings4Line size={18} />
+          <RiSettings3Line size={18} />
           <span>设置</span>
         </div>
       }
@@ -75,10 +81,13 @@ const ChatSettingsModal: React.FC<ChatSettingsModalProps> = ({ open, onClose }) 
       }}
       destroyOnHidden
     >
-      <div className="flex" style={{ minHeight: 460 }}>
+      <div
+        className="flex"
+        style={{ minHeight: 460, overflow: 'hidden', borderRadius: borderRadiusLG }}
+      >
         {/* 左侧菜单 */}
         <div
-          className="flex-shrink-0 py-3"
+          className="flex-shrink-0 flex flex-col py-3"
           style={{
             width: 140,
             borderRight: `1px solid ${colorBorderSecondary}`,
@@ -91,12 +100,13 @@ const ChatSettingsModal: React.FC<ChatSettingsModalProps> = ({ open, onClose }) 
               <button
                 key={item.key}
                 onClick={() => setActiveTab(item.key)}
-                className="w-full flex items-center gap-2 px-4 py-2.5 text-sm border-none cursor-pointer transition-colors"
+                className="flex items-center gap-2 mx-2 px-3 py-2 text-sm border-none cursor-pointer transition-all"
                 style={{
                   background: isActive ? colorBgContainer : 'transparent',
-                  color: isActive ? colorText : colorTextSecondary,
+                  color: isActive ? colorPrimary : colorTextSecondary,
                   fontWeight: isActive ? 600 : 400,
-                  borderRight: isActive ? `2px solid #1677ff` : '2px solid transparent'
+                  borderRadius: borderRadius,
+                  boxShadow: isActive ? '0 1px 3px rgba(0,0,0,0.08)' : 'none'
                 }}
               >
                 {item.icon}
@@ -122,4 +132,4 @@ const ChatSettingsModal: React.FC<ChatSettingsModalProps> = ({ open, onClose }) 
   )
 }
 
-export default ChatSettingsModal
+export default SettingsModal

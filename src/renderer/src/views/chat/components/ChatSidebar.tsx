@@ -42,13 +42,13 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
         minWidth: sidebarOpen ? 260 : 0,
         background: colorBgContainer,
         borderRadius: borderRadiusLG,
-        marginRight: sidebarOpen ? '6px' : '0',
+        marginRight: sidebarOpen ? '6px' : '-1px',
         borderRight: `1px solid ${colorBorderSecondary}`
       }}
     >
       <div
         style={{ display: sidebarOpen ? 'flex' : 'none' }}
-        className="items-center justify-between px-4 py-3"
+        className="items-center justify-between px-4 py-2"
       >
         <span className="text-sm font-medium" style={{ color: colorTextSecondary }}>
           历史记录
