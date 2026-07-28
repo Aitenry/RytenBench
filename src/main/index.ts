@@ -9,6 +9,7 @@ import logger from 'electron-log'
 import * as fs from 'fs'
 import crypto from 'crypto'
 import { fetchWeatherApi } from 'openmeteo'
+import { weatherCodeMap, formatDate, weekdayLabel } from './shared/weather-utils'
 import mammoth from 'mammoth'
 import TurndownService from 'turndown'
 import { JSDOM } from 'jsdom'
@@ -139,6 +140,20 @@ import {
   ChatTopicRow,
   ChatDialogueRow
 } from './database/mapper/chat'
+
+// 单实例锁：防止多开，同时确保安装程序能正确检测和关闭进程
+const gotTheLock = app.requestSingleInstanceLock()
+if (!gotTheLock) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    const win = BrowserWindow.getAllWindows().find((w) => !w.isDestroyed())
+    if (win) {
+      if (win.isMinimized()) win.restore()
+      win.focus()
+    }
+  })
+}
 
 logger.transports.file.format = '[{y}-{m}-{d} {h}:{i}:{s}.{ms}] [{level}] {text}'
 logger.transports.file.fileName = 'main.log'
@@ -385,26 +400,6 @@ function createMainWindow(): void {
   })
 
   // --- Weather ---
-  const weatherCodeMap: Record<number, string> = {
-    0: '晴天',
-    1: '大部晴朗',
-    2: '局部多云',
-    3: '多云',
-    45: '有雾',
-    48: '雾凇',
-    51: '小毛毛雨',
-    53: '大毛毛雨',
-    61: '小雨',
-    63: '中雨',
-    65: '大雨',
-    71: '小雪',
-    73: '中雪',
-    75: '大雪',
-    80: '小阵雨',
-    81: '中阵雨',
-    82: '大阵雨',
-    95: '雷暴'
-  }
 
   async function fetchWeatherData(
     lat: number,
@@ -450,14 +445,13 @@ function createMainWindow(): void {
       const pProb = daily.variables(3)!.valuesArray()!
       const startTime = Number(daily.time())
       const dayInterval = daily.interval()
-      const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
-      const todayStr = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(new Date().getDate()).padStart(2, '0')}`
+      const todayStr = formatDate(new Date())
 
       for (let i = 0; i < wc.length; i++) {
         const dayTime = new Date((startTime + i * dayInterval) * 1000)
-        const dateStr = `${dayTime.getFullYear()}-${String(dayTime.getMonth() + 1).padStart(2, '0')}-${String(dayTime.getDate()).padStart(2, '0')}`
+        const dateStr = formatDate(dayTime)
         ;(result.daily as Record<string, unknown>[]).push({
-          label: dateStr === todayStr ? '今天' : weekdays[dayTime.getDay()],
+          label: dateStr === todayStr ? '今天' : weekdayLabel(dayTime),
           weatherDesc: weatherCodeMap[Math.round(wc[i])] ?? '未知',
           tempMax: tMax[i].toFixed(0),
           tempMin: tMin[i].toFixed(0),
@@ -2481,31 +2475,39 @@ app.whenReady().then(async () => {
   })
 })
 
-let quitPrepared = false
+let isQuitting = false
+
 app.on('before-quit', (event) => {
-  if (quitPrepared) return
-  // 拦截首次退出：先完成清理（中止流、保存数据、关闭数据库）再真正退出
+  if (isQuitting) return
+  isQuitting = true
+
+  // 没有活跃流时直接退出，不阻塞进程终止
+  if (activeChatStreams.size === 0) {
+    return
+  }
+
+  // 有活跃流时拦截退出，先保存数据再退出
   event.preventDefault()
-  quitPrepared = true
   ;(async () => {
     try {
-      // 中止进行中的对话流，等待其保存对话数据（最多等待 5 秒兜底）
-      if (activeChatStreams.size > 0) {
-        for (const controller of streamAbortControllers.values()) {
-          controller.abort()
-        }
-        await Promise.race([
-          Promise.allSettled([...activeChatStreams]),
-          new Promise((resolve) => setTimeout(resolve, 5000))
-        ])
+      for (const controller of streamAbortControllers.values()) {
+        controller.abort()
       }
-      if (database) {
-        await database.close()
-      }
+      await Promise.race([
+        Promise.allSettled([...activeChatStreams]),
+        new Promise((resolve) => setTimeout(resolve, 5000))
+      ])
     } catch (error) {
-      logger.error('Error during app shutdown:', error)
+      logger.error('Error during stream abort:', error)
+    } finally {
+      try {
+        if (database) {
+          await database.close()
+        }
+      } finally {
+        app.quit()
+      }
     }
-    app.quit()
   })()
 })
 

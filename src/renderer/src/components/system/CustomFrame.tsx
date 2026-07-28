@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react'
+import logo from '@renderer/assets/logo.png'
 import { useNavigate } from 'react-router-dom'
 import { theme, Badge, Popover, List, Progress, Tag, Typography } from 'antd'
 import {
@@ -261,7 +262,7 @@ const CustomFrame: React.FC<CustomFrameProps> = ({ currentKey, setCurrentKey }) 
         >
           {/* 左侧：图标 + 项目名 */}
           <div className="frame-titlebar-left">
-            <img src="./image/logo.png" alt="RytenBench" className="frame-titlebar-icon" />
+            <img src={logo} alt="RytenBench" className="frame-titlebar-icon" />
             <span className="frame-titlebar-title" style={{ color: colorTextSecondary }}>
               RytenBench
             </span>

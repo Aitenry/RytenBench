@@ -11,13 +11,22 @@ files:
   - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
 asarUnpack:
   - resources/**
+extraResources:
+  - from: src/main/database/sql
+    to: database/sql
 win:
   executableName: RytenBench
+  target: nsis
+  icon: resources/icon.ico
 nsis:
+  oneClick: false
+  perMachine: true
+  allowToChangeInstallationDirectory: true
+  runAfterFinish: false
+  createDesktopShortcut: always
   artifactName: ${name}-${version}-setup.${ext}
   shortcutName: ${productName}
   uninstallDisplayName: ${productName}
-  createDesktopShortcut: always
 mac:
   entitlementsInherit: build/entitlements.mac.plist
   extendInfo:

@@ -11,7 +11,9 @@ logger.transports.file.fileName = 'database.log'
 const dbDir = path.join(app.getPath('userData'), 'RytenBenchDB')
 
 // 定义 SQL 文件路径
-const sqlDir = path.join(app.getAppPath(), 'src', 'main', 'database', 'sql')
+const sqlDir = app.isPackaged
+  ? path.join(process.resourcesPath, 'database', 'sql')
+  : path.join(app.getAppPath(), 'src', 'main', 'database', 'sql')
 const createTablesSqlPath = path.join(sqlDir, 'create_tables.sql')
 const graphTablesSqlPath = path.join(sqlDir, 'graph_tables.sql')
 const cityCodeSqlPath = path.join(sqlDir, 'urban_resource.sql')
