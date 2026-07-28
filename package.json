@@ -1,7 +1,7 @@
 {
   "name": "ryten-bench",
   "version": "1.0.0",
-  "description": "An Electron application with React and TypeScript",
+  "description": "RytenBench - AI-Powered Desktop Workspace",
   "main": "./out/main/index.js",
   "author": "https://github.com/Aitenry",
   "homepage": "https://github.com/Aitenry",

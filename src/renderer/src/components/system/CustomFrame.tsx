@@ -46,7 +46,6 @@ const CustomFrame: React.FC<CustomFrameProps> = ({ currentKey, setCurrentKey }) 
   const {
     token: {
       colorBgContainer,
-      colorBgLayout,
       borderRadiusLG,
       colorFillAlter,
       colorPrimary,
@@ -241,10 +240,7 @@ const CustomFrame: React.FC<CustomFrameProps> = ({ currentKey, setCurrentKey }) 
   }
 
   return (
-    <div
-      className="custom-frame-outer"
-      style={{ background: isDark ? colorBgLayout : colorBgContainer }}
-    >
+    <div className="custom-frame-outer" style={{ background: 'transparent' }}>
       <div
         className="custom-frame"
         style={{

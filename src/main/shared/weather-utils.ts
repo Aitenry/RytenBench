@@ -42,14 +42,40 @@ export const weatherCodeMap: Record<number, string> = {
 /** 度数 → 中文风向描述 */
 export function windDirectionLabel(degrees: number): string {
   const codes = [
-    'N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE',
-    'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'
+    'N',
+    'NNE',
+    'NE',
+    'ENE',
+    'E',
+    'ESE',
+    'SE',
+    'SSE',
+    'S',
+    'SSW',
+    'SW',
+    'WSW',
+    'W',
+    'WNW',
+    'NW',
+    'NNW'
   ]
   const map: Record<string, string> = {
-    N: '北风', NNE: '北东北风', NE: '东北风', ENE: '东东北风',
-    E: '东风', ESE: '东东南风', SE: '东南风', SSE: '南东南风',
-    S: '南风', SSW: '南西南风', SW: '西南风', WSW: '西西南风',
-    W: '西风', WNW: '西西北风', NW: '西北风', NNW: '北西北风'
+    N: '北风',
+    NNE: '北东北风',
+    NE: '东北风',
+    ENE: '东东北风',
+    E: '东风',
+    ESE: '东东南风',
+    SE: '东南风',
+    SSE: '南东南风',
+    S: '南风',
+    SSW: '南西南风',
+    SW: '西南风',
+    WSW: '西西南风',
+    W: '西风',
+    WNW: '西西北风',
+    NW: '西北风',
+    NNW: '北西北风'
   }
   return map[codes[Math.round(degrees / 22.5) % 16]] ?? `${degrees.toFixed(0)}°`
 }
