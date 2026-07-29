@@ -29,6 +29,11 @@ export interface StructuredMessage {
   subAgent?: SubAgentEvent
 }
 
+/** IPC 发送的流式 chunk（StructuredMessage + 主进程注入的 topicId） */
+export interface StreamChunk extends StructuredMessage {
+  __topicId?: number
+}
+
 /** 子代理定义 */
 export interface SubAgentConfig {
   /** 唯一标识符，主代理通过 task() 工具调用时使用 */

@@ -185,6 +185,7 @@ export interface Window {
       ) => void
       getTools: () => Promise<ToolInfo[]>
       selectSkillsDirectory: () => Promise<string | null>
+      selectWorkspace: () => Promise<string | null>
       listSkills: () => Promise<{ id: string; name: string; description: string }[]>
       getAllTopics: () => Promise<ChatTopicRow[]>
       getTopicById: (id: number) => Promise<ChatTopicRow[]>

@@ -1,12 +1,77 @@
 import type { StructuredToolInterface } from '@langchain/core/tools'
 import { BaseChatModel } from '@langchain/core/language_models/chat_models'
 import { BaseMessage, HumanMessage, AIMessage, ToolMessage } from '@langchain/core/messages'
-import { createDeepAgent, FilesystemBackend } from 'deepagents'
+import { createDeepAgent, FilesystemBackend, type GlobResult, type GrepResult } from 'deepagents'
 import type { SubAgent } from 'deepagents'
 import * as fs from 'fs'
+import * as path from 'path'
 import logger from 'electron-log'
 import { ChatOptions, StructuredMessage, ToolCallDetail, SubAgentConfig } from './types'
 import { buildSubAgentTools } from './tools'
+
+/** EPERM / EACCES - 无权限访问的错误码 */
+const ACCESS_DENIED_CODES = new Set(['EPERM', 'EACCES'])
+
+/**
+ * 安全包装 FilesystemBackend，防止访问系统保护目录（如 Windows 的 System Volume Information）
+ * 时抛出 EPERM 错误导致流式输出终止。
+ * 注意：resolvePath 在父类是 private，无法重写；通过拦截 grep / glob 的虚拟路径参数来限界。
+ */
+class SafeFilesystemBackend extends FilesystemBackend {
+  /** 检查虚拟路径解析后是否在 cwd 内，防止 LLM 传入 '/' 或 'E:\' 扫描整个驱动器 */
+  private isPathSafe(searchPath: string): boolean {
+    // virtualMode 下 '/' 就是 cwd 的虚拟根，总是安全
+    if (this.virtualMode) return true
+    const rootDir = path.resolve(this.cwd)
+    const resolved = path.resolve(rootDir, searchPath)
+    const relative = path.relative(rootDir, resolved)
+    return !relative.startsWith('..') && !path.isAbsolute(relative)
+  }
+
+  /**
+   * 安全版 grep 回退搜索：限界 + 捕获 EPERM。
+   */
+  async grep(
+    pattern: string,
+    dirPath: string = '/',
+    glob: string | null = null
+  ): Promise<GrepResult> {
+    if (!this.isPathSafe(dirPath)) {
+      logger.warn(`[SafeBackend] grep "${pattern}" blocked: path "${dirPath}" outside cwd`)
+      return { matches: [] }
+    }
+    try {
+      return await super.grep(pattern, dirPath, glob)
+    } catch (err: unknown) {
+      const code = (err as NodeJS.ErrnoException)?.code
+      if (typeof code === 'string' && ACCESS_DENIED_CODES.has(code)) {
+        logger.warn(`[SafeBackend] grep "${pattern}" blocked by ${code}: ${(err as Error).message}`)
+        return { matches: [] }
+      }
+      throw err
+    }
+  }
+
+  /**
+   * 安全版 glob：限界 + 捕获 EPERM。
+   */
+  async glob(pattern: string, searchPath: string = '/'): Promise<GlobResult> {
+    if (!this.isPathSafe(searchPath)) {
+      logger.warn(`[SafeBackend] glob "${pattern}" blocked: path "${searchPath}" outside cwd`)
+      return { files: [] }
+    }
+    try {
+      return await super.glob(pattern, searchPath)
+    } catch (err: unknown) {
+      const code = (err as NodeJS.ErrnoException)?.code
+      if (typeof code === 'string' && ACCESS_DENIED_CODES.has(code)) {
+        logger.warn(`[SafeBackend] glob "${pattern}" blocked by ${code}: ${(err as Error).message}`)
+        return { files: [] }
+      }
+      throw err
+    }
+  }
+}
 
 /** 适配 DeepSeek-R1 等模型在 additional_kwargs 中返回的推理内容 */
 interface ReasoningMessage {
@@ -39,6 +104,7 @@ class ChatService {
   private readonly toolCallWindowSize: number
   private readonly skillsPath?: string
   private readonly enabledSkills?: string[]
+  private readonly workspacePath?: string
 
   /**
    * @param model 已创建的 BaseChatModel 实例（由外部 ProviderService 提供）
@@ -50,6 +116,7 @@ class ChatService {
    * @param toolCallWindowSize 历史工具调用条数上限（0 = 不限制），默认 20
    * @param skillsPath 技能存储目录（deepAgents skills），空表示不启用
    * @param enabledSkills 启用的技能 ID 列表，undefined 表示全部启用
+   * @param workspacePath AI 工作区目录，挂载为 FilesystemBackend 根目录（虚拟 /）
    */
   constructor(
     model: BaseChatModel,
@@ -60,7 +127,8 @@ class ChatService {
     historyWindowSize = 10,
     toolCallWindowSize = 20,
     skillsPath?: string,
-    enabledSkills?: string[]
+    enabledSkills?: string[],
+    workspacePath?: string
   ) {
     this.model = model
     this.tools = tools
@@ -71,13 +139,14 @@ class ChatService {
     this.toolCallWindowSize = toolCallWindowSize
     this.skillsPath = skillsPath
     this.enabledSkills = enabledSkills
+    this.workspacePath = workspacePath
     logger.info(
-      `ChatService initialized with DeepAgents (maxIterations=${this._maxIterations}, historyWindow=${this.historyWindowSize}, toolCallWindow=${this.toolCallWindowSize}, skillsPath=${this.skillsPath ?? 'disabled'}, subAgents=${this.subAgents.length})`
+      `ChatService initialized with DeepAgents (maxIterations=${this._maxIterations}, historyWindow=${this.historyWindowSize}, toolCallWindow=${this.toolCallWindowSize}, skillsPath=${this.skillsPath ?? 'disabled'}, workspacePath=${this.workspacePath ?? 'disabled'}, subAgents=${this.subAgents.length})`
     )
   }
 
   /**
-   * 创建 DeepAgent 实例；配置技能目录时挂载 FilesystemBackend 并启用 skills 加载。
+   * 创建 DeepAgent 实例；配置工作区目录时挂载 FilesystemBackend，配置技能目录时启用 skills 加载。
    * 路径需转换为 POSIX 正斜杠（deepAgents 内部使用 path.resolve，Windows 反斜杠会被误解析）。
    * 子代理将工具组合为专用子代理，主代理通过 task() 工具委托任务。
    */
@@ -98,16 +167,23 @@ class ChatService {
       subagents: deepSubAgents.length > 0 ? deepSubAgents : undefined
     }
 
-    if (this.skillsPath) {
-      const posixPath = this.skillsPath.replace(/\\/g, '/')
-      const skillPaths = this.enabledSkills ? this.enabledSkills.map((s) => '/' + s) : ['/']
-      return createDeepAgent({
-        ...baseConfig,
-        backend: new FilesystemBackend({ rootDir: posixPath }),
-        skills: skillPaths.length > 0 ? skillPaths : undefined
-      })
+    // 确定 FilesystemBackend 的根目录：优先 workspacePath，回退到 skillsPath
+    const backendRoot = this.workspacePath || this.skillsPath
+    const config: Record<string, unknown> = { ...baseConfig }
+
+    if (backendRoot) {
+      const posixPath = backendRoot.replace(/\\/g, '/')
+      config.backend = new SafeFilesystemBackend({ rootDir: posixPath, virtualMode: true })
     }
-    return createDeepAgent(baseConfig)
+
+    if (this.skillsPath) {
+      const skillPaths = this.enabledSkills ? this.enabledSkills.map((s) => '/' + s) : ['/']
+      if (skillPaths.length > 0) {
+        config.skills = skillPaths
+      }
+    }
+
+    return createDeepAgent(config as Parameters<typeof createDeepAgent>[0])
   }
 
   /**
@@ -207,6 +283,20 @@ class ChatService {
         if (waiting) {
           waiting()
           waiting = null
+        }
+      }
+
+      /** 安全获取 tool call output，捕获 abort 触发的 rejection */
+      const safeGetOutput = async (call: { output: unknown }): Promise<unknown> => {
+        try {
+          return await call.output
+        } catch (err) {
+          if (signal?.aborted) {
+            const abortErr = new Error('Tool call aborted')
+            abortErr.name = 'AbortError'
+            throw abortErr
+          }
+          throw err
         }
       }
 
@@ -312,7 +402,7 @@ class ChatService {
         } finally {
           markDone()
         }
-      })()
+      })().catch(() => {})
 
       // 生产者2：工具调用 — 同一源发 executing 和 completed，callId 天然一致
       const toolProducer = (async (): Promise<void> => {
@@ -332,7 +422,7 @@ class ChatService {
               })
               await new Promise<void>((resolve) => setTimeout(resolve, 100))
               if (signal?.aborted) break
-              const raw = await call.output
+              const raw = await safeGetOutput(call)
               const output = typeof raw === 'string' ? raw : JSON.stringify(raw)
               // completed → 下发 completed 子代理事件
               enqueue({
@@ -359,7 +449,7 @@ class ChatService {
             // 延迟 100ms 确保渲染进程有时间渲染 loading 状态
             await new Promise<void>((resolve) => setTimeout(resolve, 100))
             if (signal?.aborted) break
-            const raw = await call.output
+            const raw = await safeGetOutput(call)
             const output = typeof raw === 'string' ? raw : JSON.stringify(raw)
             // 再发"已完成"状态
             enqueue({
@@ -379,7 +469,7 @@ class ChatService {
         } finally {
           markDone()
         }
-      })()
+      })().catch(() => {})
 
       // 生产者3：子代理流式输出 — 消费 run.subagents，逐 token / tool call 下发
       // 注意：生命周期事件（started/completed）由 toolProducer 统一发送，此处只发内容事件。
@@ -551,7 +641,7 @@ class ChatService {
                         })
                         await new Promise<void>((resolve) => setTimeout(resolve, 100))
                         if (signal?.aborted) break
-                        const raw = await call.output
+                        const raw = await safeGetOutput(call)
                         const output = typeof raw === 'string' ? raw : JSON.stringify(raw)
                         enqueue({
                           subAgent: {
@@ -591,7 +681,7 @@ class ChatService {
         } finally {
           markDone()
         }
-      })()
+      })().catch(() => {})
 
       // 主消费者循环：从队列中取出并 yield
       while (producersAlive > 0 || queue.length > 0) {

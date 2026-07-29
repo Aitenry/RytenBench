@@ -1657,7 +1657,8 @@ app.whenReady().then(async () => {
         chatSettings?.historyWindowSize ?? 10,
         chatSettings?.toolCallWindowSize ?? 20,
         chatSettings?.skillsPath || undefined,
-        chatSettings?.enabledSkills
+        chatSettings?.enabledSkills,
+        chatSettings?.workspacePath || undefined
       )
       return await chatService.sendMessage(question, options)
     }
@@ -1739,7 +1740,9 @@ app.whenReady().then(async () => {
           getDialoguesByTopicId,
           historyWindowSize,
           toolCallWindowSize,
-          chatSettings?.skillsPath || undefined
+          chatSettings?.skillsPath || undefined,
+          undefined,
+          chatSettings?.workspacePath || undefined
         )
         const stream = chatService.sendMessageStream(question, {
           ...options,
@@ -2047,7 +2050,7 @@ app.whenReady().then(async () => {
                 }
               }
             }
-            event.sender.send('chat-stream-chunk', chunk)
+            event.sender.send('chat-stream-chunk', { ...chunk, __topicId: topicId })
           }
         } catch (error) {
           if ((error as Error)?.name !== 'AbortError') {
@@ -2092,6 +2095,16 @@ app.whenReady().then(async () => {
     const result = await dialog.showOpenDialog({
       properties: ['openDirectory', 'createDirectory'],
       title: '选择技能存储目录'
+    })
+    if (result.canceled || result.filePaths.length === 0) return null
+    return result.filePaths[0]
+  })
+
+  // 选择 AI 工作区目录（FilesystemBackend 挂载根目录）
+  ipcMain.handle('chat-select-workspace', async () => {
+    const result = await dialog.showOpenDialog({
+      properties: ['openDirectory', 'createDirectory'],
+      title: '选择 AI 工作区目录'
     })
     if (result.canceled || result.filePaths.length === 0) return null
     return result.filePaths[0]

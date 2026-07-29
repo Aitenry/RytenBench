@@ -40,6 +40,8 @@ const Index: React.FC = () => {
     setSelectedProviderId,
     attachments,
     setAttachments,
+    isLoading,
+    loadingTopicIds,
     messagesEndRef,
     textareaRef,
     modelSupportsTools,
@@ -112,6 +114,7 @@ const Index: React.FC = () => {
         colorTextSecondary={colorTextSecondary}
         colorTextTertiary={colorTextTertiary}
         colorFillAlter={colorFillAlter}
+        loadingTopicIds={loadingTopicIds}
         onSelectTopic={handleSelectTopic}
         onDeleteTopic={handleDeleteTopic}
       />
@@ -158,7 +161,7 @@ const Index: React.FC = () => {
               textareaRef={textareaRef}
               attachments={attachments}
               onAttachmentsChange={setAttachments}
-              isLoading={messages.some((msg) => msg.loading)}
+              isLoading={isLoading}
               selectedTools={selectedTools}
               onSelectedToolsChange={setSelectedTools}
               availableTools={availableTools}

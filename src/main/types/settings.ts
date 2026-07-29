@@ -20,6 +20,8 @@ export interface ChatSettings {
   skillsPath?: string
   /** 启用的技能 ID 列表，undefined 表示全部启用，[] 表示全部禁用 */
   enabledSkills?: string[]
+  /** AI 工作区目录，挂载为 FilesystemBackend 的根目录（虚拟 /）；未设置时回退到 skillsPath */
+  workspacePath?: string
 }
 
 export type ThemeMode = 'light' | 'dark' | 'auto'

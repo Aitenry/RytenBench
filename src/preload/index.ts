@@ -1,5 +1,4 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { IpcRendererEvent } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import { TodoItemRow } from '../main/database/mapper/todo'
 import { DocRow } from '../main/database/mapper/document'
@@ -27,11 +26,22 @@ interface WeatherData {
   }[]
 }
 
-// 使用命名 handler + ipcRenderer.off() 精确管理监听器，避免 removeAllListeners 误删其他组件监听
-let streamChunkHandler: ((event: IpcRendererEvent, chunk: Record<string, unknown>) => void) | null =
-  null
-let streamDoneHandler: ((event: IpcRendererEvent, result: { topicId: number }) => void) | null =
-  null
+// 使用 Set 管理多个监听器，支持多会话并发流式输出
+const streamChunkHandlers = new Set<(chunk: Record<string, unknown>) => void>()
+const streamDoneHandlers = new Set<(result: { topicId: number }) => void>()
+
+// 注册全局 IPC 监听器，分发到所有注册的回调
+ipcRenderer.on('chat-stream-chunk', (_event, chunk) => {
+  for (const handler of streamChunkHandlers) {
+    handler(chunk)
+  }
+})
+
+ipcRenderer.on('chat-stream-done', (_event, result) => {
+  for (const handler of streamDoneHandlers) {
+    handler(result)
+  }
+})
 
 // Custom APIs for renderer
 const api = {
@@ -159,35 +169,22 @@ const api = {
     },
     getTools: () => ipcRenderer.invoke('chat-get-tools'),
     onStreamChunk: (callback: (chunk: Record<string, unknown>) => void) => {
-      if (streamChunkHandler) {
-        ipcRenderer.off('chat-stream-chunk', streamChunkHandler)
-      }
-      streamChunkHandler = (_event, chunk) => callback(chunk)
-      ipcRenderer.on('chat-stream-chunk', streamChunkHandler)
+      streamChunkHandlers.add(callback)
       return () => {
-        if (streamChunkHandler) {
-          ipcRenderer.off('chat-stream-chunk', streamChunkHandler)
-          streamChunkHandler = null
-        }
+        streamChunkHandlers.delete(callback)
       }
     },
     onStreamDone: (callback: (result: { topicId: number }) => void) => {
-      if (streamDoneHandler) {
-        ipcRenderer.off('chat-stream-done', streamDoneHandler)
-      }
-      streamDoneHandler = (_event, result) => callback(result)
-      ipcRenderer.on('chat-stream-done', streamDoneHandler)
+      streamDoneHandlers.add(callback)
       return () => {
-        if (streamDoneHandler) {
-          ipcRenderer.off('chat-stream-done', streamDoneHandler)
-          streamDoneHandler = null
-        }
+        streamDoneHandlers.delete(callback)
       }
     },
     cancelStream: () => {
       ipcRenderer.send('chat-cancel-stream')
     },
     selectSkillsDirectory: () => ipcRenderer.invoke('chat-select-skills-directory'),
+    selectWorkspace: () => ipcRenderer.invoke('chat-select-workspace') as Promise<string | null>,
     listSkills: () => ipcRenderer.invoke('chat-list-skills'),
     // 话题管理
     getAllTopics: () => ipcRenderer.invoke('chat-topic-get-all'),
@@ -467,8 +464,10 @@ const api = {
         targetIndex: number
       }) => void
     ) => {
-      const handler = (_event: Electron.IpcRendererEvent, data: Parameters<typeof callback>[0]) =>
-        callback(data)
+      const handler = (
+        _event: Electron.IpcRendererEvent,
+        data: Parameters<typeof callback>[0]
+      ): void => callback(data)
       ipcRenderer.on('music-play-track', handler)
       return () => ipcRenderer.removeListener('music-play-track', handler)
     }

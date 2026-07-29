@@ -1,11 +1,21 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react'
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import type { TextAreaRef } from 'antd/es/input/TextArea'
 import { ChatDialogueRow, ChatTopicRow } from '../../../../../main/database/mapper/chat'
 import { LlmProviderConfig } from '../../../../../main/database/mapper/provider'
 import { Window, ToolInfo } from '../../../../resource/types/window'
 import type { Message, Attachment, ToolCall, MessageBlock } from '@renderer/types/chat'
+import type { StreamChunk } from '../../../../../main/chat/types'
 import { useTypewriter, useCyclingTypewriter } from './useTypewriter'
 import { isSameToolCall, computeTextDelta, pushBlock } from '../utils/chatHelpers'
+
+/** 每个话题的会话缓存状态 */
+interface SessionState {
+  messages: Message[]
+  inputValue: string
+  selectedTools: string[]
+  attachments: Attachment[]
+  sessionId: string | null
+}
 
 interface UseChatHandlersReturn {
   messages: Message[]
@@ -24,10 +34,12 @@ interface UseChatHandlersReturn {
   setSelectedProviderId: React.Dispatch<React.SetStateAction<number | null>>
   attachments: Attachment[]
   setAttachments: React.Dispatch<React.SetStateAction<Attachment[]>>
+  isLoading: boolean
   messagesEndRef: React.RefObject<HTMLDivElement | null>
   textareaRef: React.RefObject<TextAreaRef | null>
   currentSessionIdRef: React.RefObject<string | null>
   currentTopicIdRef: React.RefObject<number | null>
+  loadingTopicIds: Set<number>
   selectedProvider: LlmProviderConfig | null
   modelSupportsTools: boolean
   modelSupportsVision: boolean
@@ -58,17 +70,35 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<TextAreaRef>(null)
   const currentSessionIdRef = useRef<string | null>(null)
-  const currentTopicIdRef = useRef<number | null>(null)
-  const cleanupChunkRef = useRef<(() => void) | null>(null)
-  const cleanupDoneRef = useRef<(() => void) | null>(null)
+
   /** 当前活跃的子代理 causeId 集合：用于把子代理事件路由到正确块 */
-  const activeSubAgentCauseIdsRef = useRef<Set<string>>(new Set())
+  const activeSubAgentCauseIdsRef = useRef<Map<number, Set<string>>>(new Map())
   const [currentTopicId, setCurrentTopicId] = useState<number | null>(null)
+  const currentTopicIdRef = useRef<number | null>(null)
+  /** messages React 状态实际属于哪个话题——用于检测 handleSelectTopic 异步间隙中的跨话题污染 */
+  const messagesBelongToTopicRef = useRef<number | null>(null)
   const [topics, setTopics] = useState<ChatTopicRow[]>([])
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [providers, setProviders] = useState<LlmProviderConfig[]>([])
   const [selectedProviderId, setSelectedProviderId] = useState<number | null>(null)
   const [attachments, setAttachments] = useState<Attachment[]>([])
+  const [isLoading, setIsLoading] = useState(false)
+  const [loadingTopicIds, setLoadingTopicIds] = useState<Set<number>>(new Set())
+
+  // ── 多会话支持 ──
+  /** 每个 topicId 的会话缓存（进行中的对话） */
+  const sessionsRef = useRef<Map<number, SessionState>>(new Map())
+  /** 每个 topicId 的加载状态 */
+  const isLoadingMapRef = useRef<Map<number, boolean>>(new Map())
+  /** 每个 topicId 的 stream chunk 清理函数 */
+  const chunkCleanupsRef = useRef<Map<number, () => void>>(new Map())
+  /** 每个 topicId 的 stream done 清理函数 */
+  const doneCleanupsRef = useRef<Map<number, () => void>>(new Map())
+
+  /** 同步 isLoadingMapRef 到 loadingTopicIds 状态 */
+  const syncLoadingTopics = useCallback((): void => {
+    setLoadingTopicIds(new Set(isLoadingMapRef.current.keys()))
+  }, [])
 
   const titleText = '你好，我是 Rita～'
   const subtitleTexts = [
@@ -93,13 +123,13 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
   const modelSupportsTools = selectedProvider?.tags?.includes('tools') ?? false
   const modelSupportsVision = selectedProvider?.tags?.includes('vision') ?? false
 
-  const scrollToBottom = (): void => {
+  const scrollToBottom = useCallback((): void => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }
+  }, [])
 
   useEffect(() => {
     scrollToBottom()
-  }, [messages])
+  }, [messages, scrollToBottom])
 
   useEffect(() => {
     ;(window as unknown as Window).api.chat.getTools().then(setAvailableTools).catch(console.error)
@@ -137,70 +167,585 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
     refreshTopics().then()
   }, [])
 
-  const handleNewChat = (): void => {
-    setMessages([])
-    setCurrentTopicId(null)
-    currentTopicIdRef.current = null
-    setInputValue('')
-    setSelectedTools([])
-    setAttachments([])
-  }
-
-  const handleSelectTopic = async (topic: ChatTopicRow): Promise<void> => {
-    if (messages.some((msg) => msg.loading)) return
-
-    currentTopicIdRef.current = topic.id
-    setCurrentTopicId(topic.id)
-
-    if (topic.selected_tools) {
-      try {
-        setSelectedTools(JSON.parse(topic.selected_tools))
-      } catch {
-        setSelectedTools([])
-      }
-    } else {
-      setSelectedTools([])
-    }
-
-    try {
-      const dialogues: ChatDialogueRow[] = await (
-        window as unknown as Window
-      ).api.chat.getDialoguesByTopic(topic.id)
-      const loadedMessages: Message[] = dialogues.map((d) => ({
-        id: String(d.id),
-        role: d.role,
-        content: d.content,
-        blocks: d.blocks ? JSON.parse(d.blocks) : [],
-        timestamp: new Date(d.created_at).getTime(),
-        loading: false
-      }))
-      setMessages(loadedMessages)
-    } catch (err) {
-      console.error('Failed to load dialogues:', err)
-    }
-  }
-
-  const handleDeleteTopic = async (topicId: number, e?: React.MouseEvent): Promise<void> => {
-    e?.stopPropagation()
-    try {
-      await (window as unknown as Window).api.chat.deleteTopic(topicId)
-      if (currentTopicIdRef.current === topicId) {
-        handleNewChat()
-      }
-      await refreshTopics()
-    } catch (err) {
-      console.error('Failed to delete topic:', err)
-    }
-  }
-
+  // 组件卸载时清理所有流监听器
   useEffect(() => {
+    const chunkCleanups = chunkCleanupsRef.current
+    const doneCleanups = doneCleanupsRef.current
     return () => {
-      cleanupChunkRef.current?.()
-      cleanupDoneRef.current?.()
+      for (const cleanup of chunkCleanups.values()) cleanup()
+      for (const cleanup of doneCleanups.values()) cleanup()
     }
   }, [])
 
-  const handleCopy = async (text: string, id: string): Promise<void> => {
+  // ── 会话缓存管理 ──
+
+  /** 保存当前对话窗口的状态到缓存 */
+  const saveSessionToCache = useCallback((): void => {
+    const topicId = currentTopicIdRef.current
+    if (topicId == null) return
+    sessionsRef.current.set(topicId, {
+      messages: [...messages],
+      inputValue,
+      selectedTools: [...selectedTools],
+      attachments: [...attachments],
+      sessionId: currentSessionIdRef.current
+    })
+  }, [messages, inputValue, selectedTools, attachments])
+
+  /** 从缓存恢复会话到当前对话窗口 */
+  const restoreSessionFromCache = useCallback((topicId: number): boolean => {
+    const cached = sessionsRef.current.get(topicId)
+    if (!cached) return false
+    setMessages(cached.messages)
+    setInputValue(cached.inputValue)
+    setSelectedTools(cached.selectedTools)
+    setAttachments(cached.attachments)
+    currentSessionIdRef.current = cached.sessionId
+    return true
+  }, [])
+
+  // ── 处理流式 chunk 的核心逻辑（主代理 + 子代理） ──
+
+  /** 将 stream chunk 应用到消息上，返回更新后的 messages 浅拷贝 */
+  const applyChunkToMessages = useCallback(
+    (msgs: Message[], aiMessageId: string, chunk: StreamChunk, topicId: number): Message[] => {
+      let activeCauseIds = activeSubAgentCauseIdsRef.current.get(topicId)
+      if (!activeCauseIds) {
+        activeCauseIds = new Set()
+        activeSubAgentCauseIdsRef.current.set(topicId, activeCauseIds)
+      }
+      return msgs.map((msg) => {
+        if (msg.id !== aiMessageId) return msg
+
+        const updatedReasoning = chunk.reasoning_content
+          ? msg.reasoning_content &&
+            String(chunk.reasoning_content).startsWith(msg.reasoning_content)
+            ? String(chunk.reasoning_content)
+            : msg.reasoning_content &&
+                msg.reasoning_content.endsWith(String(chunk.reasoning_content))
+              ? msg.reasoning_content
+              : (msg.reasoning_content || '') + chunk.reasoning_content
+          : msg.reasoning_content
+
+        const updatedContent = chunk.content
+          ? msg.content && chunk.content.startsWith(msg.content)
+            ? chunk.content
+            : msg.content && msg.content.endsWith(chunk.content)
+              ? msg.content
+              : msg.content + chunk.content
+          : msg.content
+
+        let updatedToolCalls = msg.toolCalls || []
+        if (chunk.tool) {
+          const existingIndex = updatedToolCalls.findIndex((tc) =>
+            isSameToolCall(tc, chunk.tool as ToolCall)
+          )
+          if (existingIndex >= 0) {
+            updatedToolCalls = [
+              ...updatedToolCalls.slice(0, existingIndex),
+              chunk.tool as ToolCall,
+              ...updatedToolCalls.slice(existingIndex + 1)
+            ]
+          } else {
+            updatedToolCalls = [...updatedToolCalls, chunk.tool as ToolCall]
+          }
+        }
+        const updatedBlocks = [...msg.blocks]
+
+        if (chunk.reasoning_content) {
+          const reasoningDelta = computeTextDelta(
+            String(chunk.reasoning_content),
+            msg.reasoning_content || ''
+          )
+          if (reasoningDelta) {
+            const lastBlock = updatedBlocks[updatedBlocks.length - 1]
+            if (lastBlock?.type === 'reasoning') {
+              updatedBlocks[updatedBlocks.length - 1] = {
+                type: 'reasoning',
+                reasoning: (lastBlock.reasoning || '') + reasoningDelta
+              }
+            } else {
+              pushBlock(updatedBlocks, { type: 'reasoning', reasoning: reasoningDelta })
+            }
+          }
+        }
+
+        if (chunk.content) {
+          const contentDelta = computeTextDelta(String(chunk.content), msg.content || '')
+          if (contentDelta) {
+            const lastBlock = updatedBlocks[updatedBlocks.length - 1]
+            if (lastBlock?.type === 'text') {
+              updatedBlocks[updatedBlocks.length - 1] = {
+                type: 'text',
+                text: (lastBlock.text || '') + contentDelta
+              }
+            } else {
+              pushBlock(updatedBlocks, { type: 'text', text: contentDelta })
+            }
+          }
+        }
+
+        if (chunk.tool) {
+          if (chunk.tool.name !== 'task') {
+            if (chunk.tool.status === 'completed') {
+              for (let i = updatedBlocks.length - 1; i >= 0; i--) {
+                const b = updatedBlocks[i]
+                if (
+                  b.type === 'tool' &&
+                  b.tool &&
+                  b.tool.status !== 'completed' &&
+                  isSameToolCall(b.tool, chunk.tool)
+                ) {
+                  updatedBlocks[i] = {
+                    type: 'tool',
+                    tool: {
+                      ...b.tool,
+                      output: chunk.tool.output,
+                      status: chunk.tool.status
+                    }
+                  }
+                  break
+                }
+              }
+            } else if (chunk.tool.status === 'preparing') {
+              const exists = updatedBlocks.some(
+                (b) =>
+                  b.type === 'tool' && isSameToolCall(b.tool as ToolCall, chunk.tool as ToolCall)
+              )
+              if (!exists) {
+                const blockTool = {
+                  name: chunk.tool.name,
+                  input: {},
+                  output: '',
+                  status: 'preparing' as const,
+                  id: chunk.tool.id
+                }
+                pushBlock(updatedBlocks, { type: 'tool', tool: blockTool })
+              }
+            } else {
+              let merged = false
+              for (let i = updatedBlocks.length - 1; i >= 0; i--) {
+                const b = updatedBlocks[i]
+                if (
+                  b.type === 'tool' &&
+                  b.tool?.status === 'preparing' &&
+                  isSameToolCall(b.tool, chunk.tool)
+                ) {
+                  updatedBlocks[i] = {
+                    type: 'tool',
+                    tool: {
+                      name: chunk.tool.name,
+                      input: chunk.tool.input,
+                      output: '',
+                      status: 'executing',
+                      id: b.tool.id ?? chunk.tool.id
+                    }
+                  }
+                  merged = true
+                  break
+                }
+              }
+              if (!merged) {
+                const blockTool = {
+                  name: chunk.tool.name,
+                  input: chunk.tool.input,
+                  output: chunk.tool.output,
+                  status: (chunk.tool.status || 'executing') as ToolCall['status'],
+                  id: chunk.tool.id
+                }
+                pushBlock(updatedBlocks, { type: 'tool', tool: blockTool })
+              }
+            }
+          }
+        }
+
+        if (chunk.subAgent) {
+          const sa = chunk.subAgent
+
+          const findSaBlock = (): number => {
+            for (let i = updatedBlocks.length - 1; i >= 0; i--) {
+              const block = updatedBlocks[i]
+              if (block.type !== 'subAgent' || !block.subAgent) continue
+              if (sa.causeId && block.subAgent.causeId && block.subAgent.causeId === sa.causeId) {
+                return i
+              }
+              if (block.subAgent.name === sa.name && (!sa.causeId || !block.subAgent.causeId)) {
+                return i
+              }
+            }
+            return -1
+          }
+
+          if (sa.status === 'started') {
+            const idx = findSaBlock()
+            if (idx < 0) {
+              pushBlock(updatedBlocks, {
+                type: 'subAgent',
+                subAgent: {
+                  name: sa.name,
+                  causeId: sa.causeId,
+                  status: 'started',
+                  taskDescription: sa.taskDescription
+                },
+                children: []
+              })
+            } else {
+              const existing = updatedBlocks[idx].subAgent!
+              existing.status = 'started'
+              existing.taskDescription = existing.taskDescription || sa.taskDescription
+            }
+            if (sa.causeId) {
+              activeCauseIds.add(sa.causeId)
+            }
+          } else if (sa.status === 'completed' || sa.status === 'error') {
+            const idx = findSaBlock()
+            if (idx >= 0) {
+              const existing = updatedBlocks[idx].subAgent!
+              existing.status = sa.status
+              existing.output = sa.output
+              existing.error = sa.error
+              existing.taskDescription = existing.taskDescription || sa.taskDescription
+            }
+            if (sa.causeId) {
+              activeCauseIds.delete(sa.causeId)
+            }
+          } else if (sa.content || sa.reasoning_content || sa.tool) {
+            const idx = findSaBlock()
+            let block: MessageBlock
+            if (idx >= 0) {
+              block = updatedBlocks[idx]
+            } else {
+              block = {
+                type: 'subAgent',
+                subAgent: {
+                  name: sa.name,
+                  causeId: sa.causeId,
+                  status: 'running',
+                  taskDescription: sa.taskDescription
+                },
+                children: []
+              }
+              pushBlock(updatedBlocks, block)
+            }
+            if (block.subAgent!.status !== 'completed' && block.subAgent!.status !== 'error') {
+              block.subAgent!.status = 'running'
+            }
+            block.subAgent!.taskDescription = block.subAgent!.taskDescription || sa.taskDescription
+            if (!block.children) block.children = []
+
+            if (sa.reasoning_content) {
+              const totalPrevReasoning = block.children
+                .filter((c) => c.type === 'reasoning')
+                .map((c) => c.reasoning || '')
+                .join('')
+              const reasoningDelta = computeTextDelta(
+                String(sa.reasoning_content),
+                totalPrevReasoning
+              )
+              if (reasoningDelta) {
+                const lastChild = block.children[block.children.length - 1]
+                if (lastChild?.type === 'reasoning') {
+                  block.children[block.children.length - 1] = {
+                    type: 'reasoning',
+                    reasoning: (lastChild.reasoning || '') + reasoningDelta
+                  }
+                } else {
+                  pushBlock(block.children, { type: 'reasoning', reasoning: reasoningDelta })
+                }
+              }
+            }
+
+            if (sa.content) {
+              const totalPrevText = block.children
+                .filter((c) => c.type === 'text')
+                .map((c) => c.text || '')
+                .join('')
+              const contentDelta = computeTextDelta(String(sa.content), totalPrevText)
+              if (contentDelta) {
+                const lastChild = block.children[block.children.length - 1]
+                if (lastChild?.type === 'text') {
+                  block.children[block.children.length - 1] = {
+                    type: 'text',
+                    text: (lastChild.text || '') + contentDelta
+                  }
+                } else {
+                  pushBlock(block.children, { type: 'text', text: contentDelta })
+                }
+              }
+            }
+
+            if (sa.tool) {
+              if (sa.tool.name !== 'task') {
+                if (sa.tool.status === 'completed') {
+                  for (let i = block.children.length - 1; i >= 0; i--) {
+                    const c = block.children[i]
+                    if (
+                      c.type === 'tool' &&
+                      c.tool &&
+                      c.tool.status !== 'completed' &&
+                      isSameToolCall(c.tool, sa.tool)
+                    ) {
+                      block.children[i] = {
+                        type: 'tool',
+                        tool: {
+                          ...c.tool,
+                          output: sa.tool.output,
+                          status: sa.tool.status
+                        }
+                      }
+                      break
+                    }
+                  }
+                } else if (sa.tool.status === 'preparing') {
+                  const exists = block.children.some(
+                    (c) =>
+                      c.type === 'tool' && isSameToolCall(c.tool as ToolCall, sa.tool as ToolCall)
+                  )
+                  if (!exists) {
+                    pushBlock(block.children, {
+                      type: 'tool',
+                      tool: {
+                        name: sa.tool.name,
+                        input: {},
+                        output: '',
+                        status: 'preparing',
+                        id: sa.tool.id
+                      }
+                    })
+                  }
+                } else {
+                  let merged = false
+                  for (let i = block.children.length - 1; i >= 0; i--) {
+                    const c = block.children[i]
+                    if (
+                      c.type === 'tool' &&
+                      c.tool?.status === 'preparing' &&
+                      isSameToolCall(c.tool, sa.tool)
+                    ) {
+                      block.children[i] = {
+                        type: 'tool',
+                        tool: {
+                          name: sa.tool.name,
+                          input: sa.tool.input,
+                          output: '',
+                          status: 'executing',
+                          id: c.tool.id ?? sa.tool.id
+                        }
+                      }
+                      merged = true
+                      break
+                    }
+                  }
+                  if (!merged) {
+                    pushBlock(block.children, {
+                      type: 'tool',
+                      tool: {
+                        name: sa.tool.name,
+                        input: sa.tool.input,
+                        output: sa.tool.output,
+                        status: (sa.tool.status || 'executing') as ToolCall['status'],
+                        id: sa.tool.id
+                      }
+                    })
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        return {
+          ...msg,
+          content: updatedContent,
+          blocks: updatedBlocks,
+          toolCalls: updatedToolCalls.length > 0 ? updatedToolCalls : undefined,
+          reasoning_content: updatedReasoning
+        }
+      })
+    },
+    []
+  )
+
+  // ── 开始流式监听（每个 topic 独立） ──
+
+  const startStreamListener = useCallback(
+    (topicId: number, aiMessageId: string): void => {
+      // 清理旧的监听器
+      chunkCleanupsRef.current.get(topicId)?.()
+      doneCleanupsRef.current.get(topicId)?.()
+
+      const chunkCleanup = (window as unknown as Window).api.chat.onStreamChunk(
+        (chunk: StreamChunk) => {
+          // topicId 守卫：只处理属于本话题的 chunk（Set 分发机制会使所有 handler 收到所有 chunk）
+          if (chunk.__topicId !== topicId) return
+          const session = sessionsRef.current.get(topicId)
+          if (session) {
+            const updatedMessages = applyChunkToMessages(
+              session.messages,
+              aiMessageId,
+              chunk,
+              topicId
+            )
+            sessionsRef.current.set(topicId, {
+              ...session,
+              messages: updatedMessages
+            })
+          }
+
+          // 如果当前正在显示此 topic，同步更新 React 状态
+          if (currentTopicIdRef.current === topicId) {
+            setMessages((prev) => applyChunkToMessages(prev, aiMessageId, chunk, topicId))
+          }
+        }
+      )
+      chunkCleanupsRef.current.set(topicId, chunkCleanup)
+
+      const doneCleanup = (window as unknown as Window).api.chat.onStreamDone(
+        ({ topicId: doneTopicId }) => {
+          // 守卫：只处理本 topic 的完成事件（Set 分发可能导致旧 handler 收到其他 topic 的事件）
+          if (doneTopicId !== topicId) return
+
+          // 清理对应 topic 的加载状态
+          isLoadingMapRef.current.delete(doneTopicId)
+          syncLoadingTopics()
+
+          // 完成后清除缓存（后续切换回来直接读数据库）
+          sessionsRef.current.delete(doneTopicId)
+
+          // 清理子代理追踪
+          activeSubAgentCauseIdsRef.current.delete(doneTopicId)
+
+          // 清理流监听器（doneCleanup 自身由 startStreamListener L575-576 在下一次同 topic 启动时清理）
+          chunkCleanupsRef.current.get(doneTopicId)?.()
+          chunkCleanupsRef.current.delete(doneTopicId)
+          doneCleanupsRef.current.delete(doneTopicId)
+
+          // 刷新话题列表
+          refreshTopics().then()
+
+          // 如果是当前显示的话题，更新 UI
+          if (currentTopicIdRef.current === doneTopicId) {
+            setIsLoading(false)
+            setMessages((prev) =>
+              prev.map((msg) => (msg.loading ? { ...msg, loading: false } : msg))
+            )
+          }
+        }
+      )
+      doneCleanupsRef.current.set(topicId, doneCleanup)
+    },
+    [applyChunkToMessages, syncLoadingTopics]
+  )
+
+  // ── Handlers ──
+
+  const handleNewChat = useCallback((): void => {
+    saveSessionToCache()
+    setMessages([])
+    setCurrentTopicId(null)
+    currentTopicIdRef.current = null
+    messagesBelongToTopicRef.current = null
+    setInputValue('')
+    setSelectedTools([])
+    setAttachments([])
+    setIsLoading(false)
+  }, [saveSessionToCache])
+
+  const handleSelectTopic = useCallback(
+    async (topic: ChatTopicRow): Promise<void> => {
+      // 不在加载时禁止切换，允许自由切换
+
+      // 保存当前话题状态到缓存
+      saveSessionToCache()
+
+      currentTopicIdRef.current = topic.id
+      setCurrentTopicId(topic.id)
+
+      // 恢复选中工具
+      if (topic.selected_tools) {
+        try {
+          setSelectedTools(JSON.parse(topic.selected_tools))
+        } catch {
+          setSelectedTools([])
+        }
+      } else {
+        setSelectedTools([])
+      }
+
+      // 先尝试从缓存恢复（进行中的会话）
+      const restored = restoreSessionFromCache(topic.id)
+      if (restored) {
+        // 从缓存恢复，同步 loading 状态
+        setIsLoading(isLoadingMapRef.current.get(topic.id) ?? false)
+        messagesBelongToTopicRef.current = topic.id
+        return
+      }
+
+      // 缓存未命中：从数据库加载（已完成的会话）
+      // 注意：此处有异步间隙，messagesBelongToTopicRef 仍指向旧话题，
+      // handleSend 会在间隙中检测到不同步而安全降级
+      currentSessionIdRef.current = null
+      setIsLoading(false)
+
+      try {
+        const dialogues: ChatDialogueRow[] = await (
+          window as unknown as Window
+        ).api.chat.getDialoguesByTopic(topic.id)
+        const loadedMessages: Message[] = dialogues.map((d) => ({
+          id: String(d.id),
+          role: d.role,
+          content: d.content,
+          blocks: d.blocks ? JSON.parse(d.blocks) : [],
+          timestamp: new Date(d.created_at).getTime(),
+          loading: false
+        }))
+        setMessages(loadedMessages)
+      } catch (err) {
+        console.error('Failed to load dialogues:', err)
+        setMessages([])
+      }
+
+      messagesBelongToTopicRef.current = topic.id
+
+      setInputValue('')
+      setAttachments([])
+    },
+    [saveSessionToCache, restoreSessionFromCache]
+  )
+
+  const handleDeleteTopic = useCallback(
+    async (topicId: number, e?: React.MouseEvent): Promise<void> => {
+      e?.stopPropagation()
+      try {
+        // 如果删除的是正在流式输出的话题，先取消后端流
+        if (isLoadingMapRef.current.has(topicId)) {
+          ;(window as unknown as Window).api.chat.cancelStream()
+        }
+
+        await (window as unknown as Window).api.chat.deleteTopic(topicId)
+
+        // 清理该话题的所有缓存和监听器
+        sessionsRef.current.delete(topicId)
+        isLoadingMapRef.current.delete(topicId)
+        syncLoadingTopics()
+        chunkCleanupsRef.current.get(topicId)?.()
+        chunkCleanupsRef.current.delete(topicId)
+        doneCleanupsRef.current.get(topicId)?.()
+        doneCleanupsRef.current.delete(topicId)
+        activeSubAgentCauseIdsRef.current.delete(topicId)
+
+        if (currentTopicIdRef.current === topicId) {
+          handleNewChat()
+        }
+        await refreshTopics()
+      } catch (err) {
+        console.error('Failed to delete topic:', err)
+      }
+    },
+    [handleNewChat, syncLoadingTopics]
+  )
+
+  const handleCopy = useCallback(async (text: string, id: string): Promise<void> => {
     try {
       await navigator.clipboard.writeText(text)
       setCopiedId(id)
@@ -208,11 +753,10 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
     } catch (err) {
       console.error('Failed to copy:', err)
     }
-  }
+  }, [])
 
-  const handleSend = async (): Promise<void> => {
-    const hasLoadingMessage = messages.some((msg) => msg.loading)
-    if (!inputValue.trim() || hasLoadingMessage) return
+  const handleSend = useCallback(async (): Promise<void> => {
+    if (!inputValue.trim()) return
 
     const currentAttachments = [...attachments]
     setAttachments([])
@@ -237,9 +781,7 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
     setMessages((prev) => [...prev, userMessage])
     setInputValue('')
 
-    const aiMessageId = (Date.now() + 1).toString()
-    currentSessionIdRef.current = aiMessageId
-    activeSubAgentCauseIdsRef.current = new Set()
+    const aiMessageId = `${Date.now()}_${currentTopicIdRef.current ?? 'new'}_${Math.random().toString(36).slice(2, 8)}`
 
     const initialAiMessage: Message = {
       id: aiMessageId,
@@ -250,406 +792,53 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
       toolCalls: [],
       loading: true
     }
+
     setMessages((prev) => [...prev, initialAiMessage])
 
     try {
-      cleanupChunkRef.current?.()
-      cleanupChunkRef.current = (window as unknown as Window).api.chat.onStreamChunk((chunk) => {
-        if (currentSessionIdRef.current !== aiMessageId) {
-          return
-        }
+      // 如果还没有 topic，先创建（让话题立即出现在侧边栏）
+      let topicId = currentTopicIdRef.current
+      if (!topicId) {
+        const title = userMessage.content.slice(0, 50)
+        topicId = await (window as unknown as Window).api.chat.createTopic(title)
+        currentTopicIdRef.current = topicId
+        setCurrentTopicId(topicId)
+        refreshTopics().then()
+      }
 
-        setMessages((prev) =>
-          prev.map((msg) => {
-            if (msg.id !== aiMessageId) return msg
+      currentSessionIdRef.current = aiMessageId
 
-            const updatedReasoning = chunk.reasoning_content
-              ? msg.reasoning_content &&
-                String(chunk.reasoning_content).startsWith(msg.reasoning_content)
-                ? String(chunk.reasoning_content)
-                : msg.reasoning_content &&
-                    msg.reasoning_content.endsWith(String(chunk.reasoning_content))
-                  ? msg.reasoning_content
-                  : (msg.reasoning_content || '') + chunk.reasoning_content
-              : msg.reasoning_content
-            // 兼容 provider 可能下发完整文本而非增量：如果 chunk.content 是已有内容的前缀/后缀，则替换/忽略，避免重复拼接
-            const updatedContent = chunk.content
-              ? msg.content && chunk.content.startsWith(msg.content)
-                ? chunk.content
-                : msg.content && msg.content.endsWith(chunk.content)
-                  ? msg.content
-                  : msg.content + chunk.content
-              : msg.content
-            // 按 callId/name 更新已有工具调用状态，避免只追加导致状态不同步
-            let updatedToolCalls = msg.toolCalls || []
-            if (chunk.tool) {
-              const existingIndex = updatedToolCalls.findIndex((tc) =>
-                isSameToolCall(tc, chunk.tool as ToolCall)
-              )
-              if (existingIndex >= 0) {
-                updatedToolCalls = [
-                  ...updatedToolCalls.slice(0, existingIndex),
-                  chunk.tool as ToolCall,
-                  ...updatedToolCalls.slice(existingIndex + 1)
-                ]
-              } else {
-                updatedToolCalls = [...updatedToolCalls, chunk.tool as ToolCall]
-              }
-            }
-            const updatedBlocks = [...msg.blocks]
+      // 标记加载状态
+      isLoadingMapRef.current.set(topicId, true)
+      syncLoadingTopics()
+      setIsLoading(true)
 
-            if (chunk.reasoning_content) {
-              const reasoningDelta = computeTextDelta(
-                String(chunk.reasoning_content),
-                msg.reasoning_content || ''
-              )
-              if (reasoningDelta) {
-                const lastBlock = updatedBlocks[updatedBlocks.length - 1]
-                if (lastBlock?.type === 'reasoning') {
-                  updatedBlocks[updatedBlocks.length - 1] = {
-                    type: 'reasoning',
-                    reasoning: (lastBlock.reasoning || '') + reasoningDelta
-                  }
-                } else {
-                  pushBlock(updatedBlocks, { type: 'reasoning', reasoning: reasoningDelta })
-                }
-              }
-            }
+      // 启动流监听（独立于当前对话窗口，持续更新缓存）
+      startStreamListener(topicId, aiMessageId)
 
-            if (chunk.content) {
-              const contentDelta = computeTextDelta(String(chunk.content), msg.content || '')
-              if (contentDelta) {
-                const lastBlock = updatedBlocks[updatedBlocks.length - 1]
-                if (lastBlock?.type === 'text') {
-                  updatedBlocks[updatedBlocks.length - 1] = {
-                    type: 'text',
-                    text: (lastBlock.text || '') + contentDelta
-                  }
-                } else {
-                  pushBlock(updatedBlocks, { type: 'text', text: contentDelta })
-                }
-              }
-            }
-
-            if (chunk.tool) {
-              if (chunk.tool.name === 'task') {
-                // task 工具已由 service.ts 转换为 subAgent 事件下发，此处跳过
-              } else {
-                if (chunk.tool.status === 'completed') {
-                  // 匹配同一次调用的未完成工具块并更新（优先 callId，兼容同名工具重复调用）
-                  for (let i = updatedBlocks.length - 1; i >= 0; i--) {
-                    const b = updatedBlocks[i]
-                    if (
-                      b.type === 'tool' &&
-                      b.tool &&
-                      b.tool.status !== 'completed' &&
-                      isSameToolCall(b.tool, chunk.tool)
-                    ) {
-                      updatedBlocks[i] = {
-                        type: 'tool',
-                        tool: {
-                          ...b.tool,
-                          output: chunk.tool.output,
-                          status: chunk.tool.status
-                        }
-                      }
-                      break
-                    }
-                  }
-                } else if (chunk.tool.status === 'preparing') {
-                  // 模型开始构建工具参数，立即给出反馈；
-                  // 后续进度 chunk 仅用于保活，已存在对应 preparing 块则跳过。
-                  //  additionally，若同一次调用已处于 executing/completed（事件乱序），也跳过，
-                  //  避免屏幕上同时出现"执行中"和"生成中"两个同名工具块。
-                  const exists = updatedBlocks.some(
-                    (b) =>
-                      b.type === 'tool' &&
-                      isSameToolCall(b.tool as ToolCall, chunk.tool as ToolCall)
-                  )
-                  if (!exists) {
-                    const blockTool = {
-                      name: chunk.tool.name,
-                      input: {},
-                      output: '',
-                      status: 'preparing' as const,
-                      id: chunk.tool.id
-                    }
-                    pushBlock(updatedBlocks, { type: 'tool', tool: blockTool })
-                  }
-                } else {
-                  // executing：优先合并到同一次调用的 preparing 块
-                  let merged = false
-                  for (let i = updatedBlocks.length - 1; i >= 0; i--) {
-                    const b = updatedBlocks[i]
-                    if (
-                      b.type === 'tool' &&
-                      b.tool?.status === 'preparing' &&
-                      isSameToolCall(b.tool, chunk.tool)
-                    ) {
-                      updatedBlocks[i] = {
-                        type: 'tool',
-                        tool: {
-                          name: chunk.tool.name,
-                          input: chunk.tool.input,
-                          output: '',
-                          status: 'executing',
-                          id: b.tool.id ?? chunk.tool.id
-                        }
-                      }
-                      merged = true
-                      break
-                    }
-                  }
-                  if (!merged) {
-                    const blockTool = {
-                      name: chunk.tool.name,
-                      input: chunk.tool.input,
-                      output: chunk.tool.output,
-                      status: (chunk.tool.status || 'executing') as ToolCall['status'],
-                      id: chunk.tool.id
-                    }
-                    pushBlock(updatedBlocks, { type: 'tool', tool: blockTool })
-                  }
-                }
-              }
-            }
-
-            if (chunk.subAgent) {
-              const sa = chunk.subAgent
-
-              // 查找子代理块：按 causeId 精确匹配（每次 task 调用唯一），回退按名称
-              const findSaBlock = (): number => {
-                for (let i = updatedBlocks.length - 1; i >= 0; i--) {
-                  const block = updatedBlocks[i]
-                  if (block.type !== 'subAgent' || !block.subAgent) continue
-                  if (
-                    sa.causeId &&
-                    block.subAgent.causeId &&
-                    block.subAgent.causeId === sa.causeId
-                  ) {
-                    return i
-                  }
-                  if (block.subAgent.name === sa.name && (!sa.causeId || !block.subAgent.causeId)) {
-                    return i
-                  }
-                }
-                return -1
-              }
-
-              if (sa.status === 'started') {
-                const idx = findSaBlock()
-                if (idx < 0) {
-                  pushBlock(updatedBlocks, {
-                    type: 'subAgent',
-                    subAgent: {
-                      name: sa.name,
-                      causeId: sa.causeId,
-                      status: 'started',
-                      taskDescription: sa.taskDescription
-                    },
-                    children: []
-                  })
-                } else {
-                  const existing = updatedBlocks[idx].subAgent!
-                  existing.status = 'started'
-                  existing.taskDescription = existing.taskDescription || sa.taskDescription
-                }
-                if (sa.causeId) {
-                  activeSubAgentCauseIdsRef.current.add(sa.causeId)
-                }
-              } else if (sa.status === 'completed' || sa.status === 'error') {
-                const idx = findSaBlock()
-                if (idx >= 0) {
-                  const existing = updatedBlocks[idx].subAgent!
-                  existing.status = sa.status
-                  existing.output = sa.output
-                  existing.error = sa.error
-                  existing.taskDescription = existing.taskDescription || sa.taskDescription
-                }
-                if (sa.causeId) {
-                  activeSubAgentCauseIdsRef.current.delete(sa.causeId)
-                }
-              } else if (sa.content || sa.reasoning_content || sa.tool) {
-                const idx = findSaBlock()
-                let block: MessageBlock
-                if (idx >= 0) {
-                  block = updatedBlocks[idx]
-                } else {
-                  block = {
-                    type: 'subAgent',
-                    subAgent: {
-                      name: sa.name,
-                      causeId: sa.causeId,
-                      status: 'running',
-                      taskDescription: sa.taskDescription
-                    },
-                    children: []
-                  }
-                  pushBlock(updatedBlocks, block)
-                }
-                if (block.subAgent!.status !== 'completed' && block.subAgent!.status !== 'error') {
-                  block.subAgent!.status = 'running'
-                }
-                block.subAgent!.taskDescription =
-                  block.subAgent!.taskDescription || sa.taskDescription
-                if (!block.children) block.children = []
-
-                if (sa.reasoning_content) {
-                  const totalPrevReasoning = block.children
-                    .filter((c) => c.type === 'reasoning')
-                    .map((c) => c.reasoning || '')
-                    .join('')
-                  const reasoningDelta = computeTextDelta(
-                    String(sa.reasoning_content),
-                    totalPrevReasoning
-                  )
-                  if (reasoningDelta) {
-                    const lastChild = block.children[block.children.length - 1]
-                    if (lastChild?.type === 'reasoning') {
-                      block.children[block.children.length - 1] = {
-                        type: 'reasoning',
-                        reasoning: (lastChild.reasoning || '') + reasoningDelta
-                      }
-                    } else {
-                      pushBlock(block.children, { type: 'reasoning', reasoning: reasoningDelta })
-                    }
-                  }
-                }
-
-                if (sa.content) {
-                  const totalPrevText = block.children
-                    .filter((c) => c.type === 'text')
-                    .map((c) => c.text || '')
-                    .join('')
-                  const contentDelta = computeTextDelta(String(sa.content), totalPrevText)
-                  if (contentDelta) {
-                    const lastChild = block.children[block.children.length - 1]
-                    if (lastChild?.type === 'text') {
-                      block.children[block.children.length - 1] = {
-                        type: 'text',
-                        text: (lastChild.text || '') + contentDelta
-                      }
-                    } else {
-                      pushBlock(block.children, { type: 'text', text: contentDelta })
-                    }
-                  }
-                }
-
-                if (sa.tool) {
-                  if (sa.tool.name === 'task') {
-                    // task 工具已由 service.ts 转换为 subAgent 事件下发，此处跳过
-                  } else {
-                    if (sa.tool.status === 'completed') {
-                      for (let i = block.children.length - 1; i >= 0; i--) {
-                        const c = block.children[i]
-                        if (
-                          c.type === 'tool' &&
-                          c.tool &&
-                          c.tool.status !== 'completed' &&
-                          isSameToolCall(c.tool, sa.tool)
-                        ) {
-                          block.children[i] = {
-                            type: 'tool',
-                            tool: {
-                              ...c.tool,
-                              output: sa.tool.output,
-                              status: sa.tool.status
-                            }
-                          }
-                          break
-                        }
-                      }
-                    } else if (sa.tool.status === 'preparing') {
-                      // 同主代理：若该子代理的同一次工具调用已存在任意状态块，跳过乱序的 preparing
-                      const exists = block.children.some(
-                        (c) =>
-                          c.type === 'tool' &&
-                          isSameToolCall(c.tool as ToolCall, sa.tool as ToolCall)
-                      )
-                      if (!exists) {
-                        pushBlock(block.children, {
-                          type: 'tool',
-                          tool: {
-                            name: sa.tool.name,
-                            input: {},
-                            output: '',
-                            status: 'preparing',
-                            id: sa.tool.id
-                          }
-                        })
-                      }
-                    } else {
-                      // executing
-                      let merged = false
-                      for (let i = block.children.length - 1; i >= 0; i--) {
-                        const c = block.children[i]
-                        if (
-                          c.type === 'tool' &&
-                          c.tool?.status === 'preparing' &&
-                          isSameToolCall(c.tool, sa.tool)
-                        ) {
-                          block.children[i] = {
-                            type: 'tool',
-                            tool: {
-                              name: sa.tool.name,
-                              input: sa.tool.input,
-                              output: '',
-                              status: 'executing',
-                              id: c.tool.id ?? sa.tool.id
-                            }
-                          }
-                          merged = true
-                          break
-                        }
-                      }
-                      if (!merged) {
-                        pushBlock(block.children, {
-                          type: 'tool',
-                          tool: {
-                            name: sa.tool.name,
-                            input: sa.tool.input,
-                            output: sa.tool.output,
-                            status: (sa.tool.status || 'executing') as ToolCall['status'],
-                            id: sa.tool.id
-                          }
-                        })
-                      }
-                    }
-                  }
-                }
-              }
-              // 纯 running 心跳：跳过
-            }
-
-            return {
-              ...msg,
-              content: updatedContent,
-              blocks: updatedBlocks,
-              toolCalls: updatedToolCalls.length > 0 ? updatedToolCalls : undefined,
-              reasoning_content: updatedReasoning
-            }
-          })
-        )
+      // 缓存当前会话——使用 messagesBelongToTopicRef 防止跨话题污染：
+      // 如果 handleSelectTopic 的异步 DB 加载尚未完成，messages 仍属于旧话题，
+      // 此时应丢弃旧消息，从新对话开始（否则会把 A 的历史混入 B 的会话缓存）
+      const sameTopic = messagesBelongToTopicRef.current === topicId
+      const baseMessages = sameTopic ? messages : ([] as Message[])
+      const currentMessages: Message[] = [...baseMessages, userMessage, initialAiMessage]
+      sessionsRef.current.set(topicId, {
+        messages: currentMessages,
+        inputValue: '',
+        selectedTools: [...selectedTools],
+        attachments: [],
+        sessionId: aiMessageId
       })
-      cleanupDoneRef.current?.()
-      cleanupDoneRef.current = (window as unknown as Window).api.chat.onStreamDone(
-        ({ topicId }) => {
-          if (currentSessionIdRef.current !== aiMessageId) return
-          currentTopicIdRef.current = topicId
-          setCurrentTopicId(topicId)
-          refreshTopics()
-          setMessages((prev) =>
-            prev.map((msg) => (msg.id === aiMessageId ? { ...msg, loading: false } : msg))
-          )
-        }
-      )
+      messagesBelongToTopicRef.current = topicId
 
-      console.log('[Chat] Sending message with providerId:', selectedProviderId)
+      // 同步 React 状态
+      setMessages(currentMessages)
+
       ;(window as unknown as Window).api.chat.startMessageStream(userMessage.content, {
         tools: selectedTools,
         images: currentImages.length > 0 ? currentImages : undefined,
         documents: currentDocuments.length > 0 ? currentDocuments : undefined,
-        topicId: currentTopicIdRef.current ?? undefined,
+        topicId,
         providerId: selectedProviderId ?? undefined
       })
     } catch (error) {
@@ -663,59 +852,103 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
         loading: false
       }
       setMessages((prev) => prev.map((msg) => (msg.id === aiMessageId ? errorMessage : msg)))
-    }
-  }
 
-  const handleDeleteMessagePair = async (msgIndex: number): Promise<void> => {
-    const msgs = [...messages]
-    const current = msgs[msgIndex]
-    if (!current) return
-
-    const indicesToDelete: number[] = []
-
-    if (current.role === 'user') {
-      indicesToDelete.push(msgIndex)
-      if (msgIndex + 1 < msgs.length && msgs[msgIndex + 1].role === 'assistant') {
-        indicesToDelete.push(msgIndex + 1)
+      // 清理加载状态
+      const topicId = currentTopicIdRef.current
+      if (topicId != null) {
+        isLoadingMapRef.current.delete(topicId)
+        syncLoadingTopics()
+        setIsLoading(false)
       }
-    } else if (current.role === 'assistant') {
-      if (msgIndex - 1 >= 0 && msgs[msgIndex - 1].role === 'user') {
-        indicesToDelete.push(msgIndex - 1)
-      }
-      indicesToDelete.push(msgIndex)
     }
+  }, [
+    messages,
+    inputValue,
+    selectedTools,
+    attachments,
+    selectedProviderId,
+    startStreamListener,
+    syncLoadingTopics
+  ])
 
-    try {
-      for (const idx of indicesToDelete) {
-        const msg = msgs[idx]
-        if (msg.id && !isNaN(Number(msg.id))) {
-          await (window as unknown as Window).api.chat.deleteDialogue(Number(msg.id))
+  const handleDeleteMessagePair = useCallback(
+    async (msgIndex: number): Promise<void> => {
+      const msgs = [...messages]
+      const current = msgs[msgIndex]
+      if (!current) return
+
+      const indicesToDelete: number[] = []
+
+      if (current.role === 'user') {
+        indicesToDelete.push(msgIndex)
+        if (msgIndex + 1 < msgs.length && msgs[msgIndex + 1].role === 'assistant') {
+          indicesToDelete.push(msgIndex + 1)
+        }
+      } else if (current.role === 'assistant') {
+        if (msgIndex - 1 >= 0 && msgs[msgIndex - 1].role === 'user') {
+          indicesToDelete.push(msgIndex - 1)
+        }
+        indicesToDelete.push(msgIndex)
+      }
+
+      try {
+        for (const idx of indicesToDelete) {
+          const msg = msgs[idx]
+          if (msg.id && !isNaN(Number(msg.id))) {
+            await (window as unknown as Window).api.chat.deleteDialogue(Number(msg.id))
+          }
+        }
+      } catch (err) {
+        console.error('Failed to delete dialogue:', err)
+      }
+
+      const toDelete = new Set(indicesToDelete)
+      const newMsgs = msgs.filter((_, i) => !toDelete.has(i))
+      setMessages(newMsgs)
+
+      if (newMsgs.length === 0) {
+        const deletedTopicId = currentTopicIdRef.current
+        currentTopicIdRef.current = null
+        messagesBelongToTopicRef.current = null
+        setCurrentTopicId(null)
+        if (deletedTopicId != null) {
+          sessionsRef.current.delete(deletedTopicId)
+          isLoadingMapRef.current.delete(deletedTopicId)
+          syncLoadingTopics()
         }
       }
-    } catch (err) {
-      console.error('Failed to delete dialogue:', err)
-    }
+    },
+    [messages, syncLoadingTopics]
+  )
 
-    const toDelete = new Set(indicesToDelete)
-    const newMsgs = msgs.filter((_, i) => !toDelete.has(i))
-    setMessages(newMsgs)
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault()
+        handleSend().then()
+      }
+    },
+    [handleSend]
+  )
 
-    if (newMsgs.length === 0) {
-      currentTopicIdRef.current = null
-      setCurrentTopicId(null)
-    }
-  }
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      handleSend().then()
-    }
-  }
-
-  const handleStop = (): void => {
+  const handleStop = useCallback((): void => {
     ;(window as unknown as Window).api.chat.cancelStream()
-  }
+
+    const topicId = currentTopicIdRef.current
+    if (topicId != null) {
+      isLoadingMapRef.current.delete(topicId)
+      syncLoadingTopics()
+      setIsLoading(false)
+
+      // 清理流监听器
+      chunkCleanupsRef.current.get(topicId)?.()
+      chunkCleanupsRef.current.delete(topicId)
+      doneCleanupsRef.current.get(topicId)?.()
+      doneCleanupsRef.current.delete(topicId)
+    }
+
+    setMessages((prev) => prev.map((msg) => (msg.loading ? { ...msg, loading: false } : msg)))
+  }, [syncLoadingTopics])
 
   const groupedProviderOptions = useMemo(() => {
     const grouped = new Map<string, { value: number; name: string; model: string }[]>()
@@ -753,6 +986,8 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
     setSelectedProviderId,
     attachments,
     setAttachments,
+    isLoading,
+    loadingTopicIds,
     // refs
     messagesEndRef,
     textareaRef,
