@@ -172,6 +172,7 @@ export interface Window {
       ) => Promise<StructuredMessage[]>
       onStreamChunk: (callback: (chunk: StructuredMessage) => void) => () => void
       onStreamDone: (callback: (result: { topicId: number }) => void) => () => void
+      onStreamError: (callback: (error: { error: string; topicId?: number }) => void) => () => void
       cancelStream: () => void
       startMessageStream: (
         message: string,
@@ -248,6 +249,12 @@ export interface Window {
       update: (id: number, updates: Partial<LlmProviderInput>) => Promise<boolean>
       delete: (id: number) => Promise<boolean>
       setDefault: (id: number) => Promise<boolean>
+      fetchModels: (
+        providerType: string,
+        baseUrl?: string,
+        apiKey?: string
+      ) => Promise<{ id: string }[]>
+      onChanged: (callback: () => void) => () => void
     }
     systemSettings: {
       getAll: () => Promise<SystemSettings>

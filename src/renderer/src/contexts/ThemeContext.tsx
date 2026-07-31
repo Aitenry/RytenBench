@@ -19,9 +19,8 @@ const getTimeBasedTheme = (): 'light' | 'dark' => {
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [themeMode, setThemeModeState] = useState<ThemeMode>('auto')
   const [effectiveTheme, setEffectiveTheme] = useState<'light' | 'dark'>(getTimeBasedTheme())
-  const [loading, setLoading] = useState(true)
 
-  // 挂载时从系统设置加载主题偏好
+  // 挂载时从系统设置加载主题偏好（异步，不阻塞首屏渲染）
   useEffect(() => {
     const loadTheme = async (): Promise<void> => {
       try {
@@ -31,16 +30,12 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setThemeModeState(mode)
         if (mode !== 'auto') {
           setEffectiveTheme(mode)
-        } else {
-          setEffectiveTheme(getTimeBasedTheme())
         }
       } catch {
         // 加载失败时使用默认值
-      } finally {
-        setLoading(false)
       }
     }
-    loadTheme().then()
+    loadTheme()
   }, [])
 
   // 自动模式：每分钟根据时间更新一次有效主题
@@ -82,10 +77,9 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     () => ({
       themeMode,
       effectiveTheme,
-      setThemeMode,
-      loading
+      setThemeMode
     }),
-    [themeMode, effectiveTheme, setThemeMode, loading]
+    [themeMode, effectiveTheme, setThemeMode]
   )
 
   return (

@@ -17,7 +17,7 @@ interface SessionState {
   sessionId: string | null
 }
 
-interface UseChatHandlersReturn {
+export interface UseChatHandlersReturn {
   messages: Message[]
   inputValue: string
   setInputValue: React.Dispatch<React.SetStateAction<string>>
@@ -94,6 +94,8 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
   const chunkCleanupsRef = useRef<Map<number, () => void>>(new Map())
   /** 每个 topicId 的 stream done 清理函数 */
   const doneCleanupsRef = useRef<Map<number, () => void>>(new Map())
+  /** 每个 topicId 的 stream error 清理函数 */
+  const errorCleanupsRef = useRef<Map<number, () => void>>(new Map())
 
   /** 同步 isLoadingMapRef 到 loadingTopicIds 状态 */
   const syncLoadingTopics = useCallback((): void => {
@@ -139,10 +141,16 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
     const loadProviders = async (): Promise<void> => {
       try {
         const list = await (window as unknown as Window).api.providers.getEnabled()
-        const chatModels = list.filter((p) => !p.tags?.includes('embedding'))
+        // 排除向量/嵌入模型：标签含 embedding，或名称/模型名含 embedding（不区分大小写）
+        const isEmbeddingModel = (p: LlmProviderConfig): boolean => {
+          if (p.tags?.some((t) => t.toLowerCase() === 'embedding')) return true
+          const lowered = (p.name + p.model).toLowerCase()
+          return lowered.includes('embedding')
+        }
+        const chatModels = list.filter((p) => !isEmbeddingModel(p))
         setProviders(chatModels)
         const defaultProvider = await (window as unknown as Window).api.providers.getDefault()
-        if (defaultProvider && !defaultProvider.tags?.includes('embedding')) {
+        if (defaultProvider && !isEmbeddingModel(defaultProvider)) {
           setSelectedProviderId(defaultProvider.id)
         } else if (chatModels.length > 0) {
           setSelectedProviderId(chatModels[0].id)
@@ -152,6 +160,10 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
       }
     }
     loadProviders().then()
+    const unsubscribe = (window as unknown as Window).api.providers.onChanged(() => {
+      loadProviders().then()
+    })
+    return unsubscribe
   }, [])
 
   const refreshTopics = async (): Promise<void> => {
@@ -171,9 +183,11 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
   useEffect(() => {
     const chunkCleanups = chunkCleanupsRef.current
     const doneCleanups = doneCleanupsRef.current
+    const errorCleanups = errorCleanupsRef.current
     return () => {
       for (const cleanup of chunkCleanups.values()) cleanup()
       for (const cleanup of doneCleanups.values()) cleanup()
+      for (const cleanup of errorCleanups.values()) cleanup()
     }
   }, [])
 
@@ -573,6 +587,7 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
       // 清理旧的监听器
       chunkCleanupsRef.current.get(topicId)?.()
       doneCleanupsRef.current.get(topicId)?.()
+      errorCleanupsRef.current.get(topicId)?.()
 
       const chunkCleanup = (window as unknown as Window).api.chat.onStreamChunk(
         (chunk: StreamChunk) => {
@@ -619,6 +634,8 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
           chunkCleanupsRef.current.get(doneTopicId)?.()
           chunkCleanupsRef.current.delete(doneTopicId)
           doneCleanupsRef.current.delete(doneTopicId)
+          errorCleanupsRef.current.get(doneTopicId)?.()
+          errorCleanupsRef.current.delete(doneTopicId)
 
           // 刷新话题列表
           refreshTopics().then()
@@ -633,6 +650,40 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
         }
       )
       doneCleanupsRef.current.set(topicId, doneCleanup)
+
+      // 注册流错误监听：模型不存在 / 被禁用等启动阶段的错误
+      const errorCleanup = (window as unknown as Window).api.chat.onStreamError(
+        ({ error: errMsg, topicId: errorTopicId }) => {
+          // 守卫：只处理本 topic 的错误
+          if (errorTopicId !== topicId) return
+
+          console.error(`[Stream] Error for topic ${topicId}: ${errMsg}`)
+
+          // 更新会话缓存中的 AI 消息为错误信息
+          const session = sessionsRef.current.get(topicId)
+          if (session) {
+            const updatedMessages = session.messages.map((msg) =>
+              msg.id === aiMessageId ? { ...msg, content: errMsg, blocks: [], loading: false } : msg
+            )
+            sessionsRef.current.set(topicId, {
+              ...session,
+              messages: updatedMessages
+            })
+          }
+
+          // 如果当前正在显示此 topic，同步更新 React 状态
+          if (currentTopicIdRef.current === topicId) {
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === aiMessageId
+                  ? { ...msg, content: errMsg, blocks: [], loading: false }
+                  : msg
+              )
+            )
+          }
+        }
+      )
+      errorCleanupsRef.current.set(topicId, errorCleanup)
     },
     [applyChunkToMessages, syncLoadingTopics]
   )
@@ -732,6 +783,8 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
         chunkCleanupsRef.current.delete(topicId)
         doneCleanupsRef.current.get(topicId)?.()
         doneCleanupsRef.current.delete(topicId)
+        errorCleanupsRef.current.get(topicId)?.()
+        errorCleanupsRef.current.delete(topicId)
         activeSubAgentCauseIdsRef.current.delete(topicId)
 
         if (currentTopicIdRef.current === topicId) {
@@ -945,6 +998,8 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
       chunkCleanupsRef.current.delete(topicId)
       doneCleanupsRef.current.get(topicId)?.()
       doneCleanupsRef.current.delete(topicId)
+      errorCleanupsRef.current.get(topicId)?.()
+      errorCleanupsRef.current.delete(topicId)
     }
 
     setMessages((prev) => prev.map((msg) => (msg.loading ? { ...msg, loading: false } : msg)))

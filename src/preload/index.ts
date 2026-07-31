@@ -29,6 +29,7 @@ interface WeatherData {
 // 使用 Set 管理多个监听器，支持多会话并发流式输出
 const streamChunkHandlers = new Set<(chunk: Record<string, unknown>) => void>()
 const streamDoneHandlers = new Set<(result: { topicId: number }) => void>()
+const streamErrorHandlers = new Set<(error: { error: string; topicId?: number }) => void>()
 
 // 注册全局 IPC 监听器，分发到所有注册的回调
 ipcRenderer.on('chat-stream-chunk', (_event, chunk) => {
@@ -40,6 +41,12 @@ ipcRenderer.on('chat-stream-chunk', (_event, chunk) => {
 ipcRenderer.on('chat-stream-done', (_event, result) => {
   for (const handler of streamDoneHandlers) {
     handler(result)
+  }
+})
+
+ipcRenderer.on('chat-stream-error', (_event, error) => {
+  for (const handler of streamErrorHandlers) {
+    handler(error)
   }
 })
 
@@ -180,6 +187,12 @@ const api = {
         streamDoneHandlers.delete(callback)
       }
     },
+    onStreamError: (callback: (error: { error: string; topicId?: number }) => void) => {
+      streamErrorHandlers.add(callback)
+      return () => {
+        streamErrorHandlers.delete(callback)
+      }
+    },
     cancelStream: () => {
       ipcRenderer.send('chat-cancel-stream')
     },
@@ -308,7 +321,20 @@ const api = {
     update: (id: number, updates: Partial<LlmProviderInput>) =>
       ipcRenderer.invoke('provider-update', id, updates) as Promise<boolean>,
     delete: (id: number) => ipcRenderer.invoke('provider-delete', id) as Promise<boolean>,
-    setDefault: (id: number) => ipcRenderer.invoke('provider-set-default', id) as Promise<boolean>
+    setDefault: (id: number) => ipcRenderer.invoke('provider-set-default', id) as Promise<boolean>,
+    fetchModels: (
+      providerType: string,
+      baseUrl?: string,
+      apiKey?: string
+    ): Promise<{ id: string }[]> =>
+      ipcRenderer.invoke('provider-fetch-models', providerType, baseUrl, apiKey),
+    onChanged: (callback: () => void) => {
+      const handler = (): void => callback()
+      ipcRenderer.on('providers-changed', handler)
+      return () => {
+        ipcRenderer.off('providers-changed', handler)
+      }
+    }
   },
   systemSettings: {
     getAll: () => ipcRenderer.invoke('system-settings-get-all') as Promise<SystemSettings>,

@@ -1,22 +1,6 @@
-import React, { createContext, useContext, useState, useCallback } from 'react'
+import React, { useState, useCallback } from 'react'
 import type { NotificationItem } from '@renderer/types/notification'
-
-interface NotificationContextType {
-  notifications: NotificationItem[]
-  unreadCount: number
-  addNotification: (notification: NotificationItem) => void
-  updateNotification: (id: string, updates: Partial<NotificationItem>) => void
-  removeNotification: (id: string) => void
-  markAllRead: () => void
-}
-
-const NotificationCtx = createContext<NotificationContextType | undefined>(undefined)
-
-export const useNotification = (): NotificationContextType => {
-  const ctx = useContext(NotificationCtx)
-  if (!ctx) throw new Error('useNotification must be used within NotificationProvider')
-  return ctx
-}
+import { NotificationContext } from './NotificationContextCore'
 
 export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [notifications, setNotifications] = useState<NotificationItem[]>([])
@@ -52,7 +36,7 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const unreadCount = notifications.filter((n) => !n.read).length
 
   return (
-    <NotificationCtx.Provider
+    <NotificationContext.Provider
       value={{
         notifications,
         unreadCount,
@@ -63,6 +47,6 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       }}
     >
       {children}
-    </NotificationCtx.Provider>
+    </NotificationContext.Provider>
   )
 }

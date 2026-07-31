@@ -1,7 +1,7 @@
 import React from 'react'
 import { theme } from 'antd'
 import { useTheme } from '@renderer/contexts/useTheme'
-import { useChatHandlers } from './hooks/useChatHandlers'
+import { useChat } from '@renderer/contexts/ChatContextCore'
 import ChatSidebar from './components/ChatSidebar'
 import ChatHeader from './components/ChatHeader'
 import ChatMessageArea from './components/ChatMessageArea'
@@ -59,7 +59,7 @@ const Index: React.FC = () => {
     handleDeleteMessagePair,
     handleKeyDown,
     handleStop
-  } = useChatHandlers()
+  } = useChat()
 
   const scrollbarThumbColor = isDarkMode ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.15)'
   const scrollbarThumbHoverColor = isDarkMode ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.3)'

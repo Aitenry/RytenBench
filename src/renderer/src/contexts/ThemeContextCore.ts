@@ -6,6 +6,5 @@ export type { ThemeContextType }
 export const ThemeContext = createContext<ThemeContextType>({
   themeMode: 'auto',
   effectiveTheme: 'light',
-  setThemeMode: async () => {},
-  loading: true
+  setThemeMode: async () => {}
 })

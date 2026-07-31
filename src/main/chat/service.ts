@@ -163,7 +163,7 @@ class ChatService {
     const baseConfig = {
       model: this.model,
       tools: this.tools,
-      systemPrompt: 'You are a helpful assistant.',
+      systemPrompt: 'Your name is Rita. You are a helpful assistant.',
       subagents: deepSubAgents.length > 0 ? deepSubAgents : undefined
     }
 

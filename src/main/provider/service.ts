@@ -29,13 +29,26 @@ class ProviderService {
   }
 
   /**
-   * 根据供应商 ID 创建 ChatModel 实例
+   * 根据供应商 ID 创建 ChatModel 实例。
+   * 不再回退到默认供应商——要求前端显式传入 providerId。
    */
   async createModel(providerId?: number): Promise<BaseChatModel> {
+    if (providerId == null) {
+      throw new Error('目标模型不存在：请先在聊天界面顶部选择一个可用的 AI 模型。')
+    }
+
     const config = await this.resolveConfig(providerId)
 
     if (!config) {
-      throw new Error('No LLM provider configured. Please add a provider in settings.')
+      throw new Error(
+        `目标模型不存在：未找到 ID 为 ${providerId} 的供应商配置，或该供应商已被禁用。`
+      )
+    }
+
+    if (!config.model || config.model.trim() === '') {
+      throw new Error(
+        `目标模型不存在：供应商 "${config.name}" 未指定模型名称，请在设置中配置模型。`
+      )
     }
 
     return this.buildModel(config)
@@ -65,11 +78,16 @@ class ProviderService {
   private async resolveConfig(providerId?: number): Promise<LlmProviderConfig | null> {
     if (providerId != null) {
       if (this.providerCache.has(providerId)) {
-        return this.providerCache.get(providerId)!
+        const cached = this.providerCache.get(providerId)!
+        // 缓存命中时也校验 is_enabled，防止使用已禁用的供应商
+        if (!cached.is_enabled) return null
+        return cached
       }
       const config = await getProviderById(providerId)
       if (config) {
         this.providerCache.set(providerId, config)
+        // 指定 ID 查询时也需要检查是否已启用
+        if (!config.is_enabled) return null
       }
       return config
     }

@@ -12,7 +12,9 @@ import {
   Tag,
   Popconfirm,
   Space,
-  Tooltip
+  Tooltip,
+  Checkbox,
+  List
 } from 'antd'
 import {
   PlusOutlined,
@@ -20,6 +22,7 @@ import {
   DeleteOutlined,
   StarOutlined,
   StarFilled,
+  DownloadOutlined,
   OpenAIFilled,
   DeepSeekFilled,
   OllamaFilled,
@@ -110,6 +113,13 @@ const MODEL_TAGS = [
   { value: 'thinking', label: 'Thinking', color: 'orange' }
 ]
 
+/** 判断是否为向量/嵌入模型：标签含 embedding，或名称/模型名含 embedding */
+const isEmbeddingModel = (p: LlmProviderConfig): boolean => {
+  if (p.tags?.some((t) => t.toLowerCase() === 'embedding')) return true
+  const lowered = (p.name + p.model).toLowerCase()
+  return lowered.includes('embedding')
+}
+
 const ModelSettings: React.FC = () => {
   const {
     token: { colorText, colorTextSecondary }
@@ -122,6 +132,16 @@ const ModelSettings: React.FC = () => {
   const [modalOpen, setModalOpen] = useState(false)
   const [editingProvider, setEditingProvider] = useState<LlmProviderConfig | null>(null)
   const [form] = Form.useForm()
+
+  // 拉取模型模态框
+  const [fetchModalOpen, setFetchModalOpen] = useState(false)
+  const [fetchProviderType, setFetchProviderType] = useState('ollama')
+  const [fetchBaseUrl, setFetchBaseUrl] = useState('http://localhost:11434')
+  const [fetchApiKey, setFetchApiKey] = useState('')
+  const [fetchModels, setFetchModels] = useState<{ id: string }[]>([])
+  const [fetchLoading, setFetchLoading] = useState(false)
+  const [checkedModels, setCheckedModels] = useState<string[]>([])
+  const [addingModels, setAddingModels] = useState(false)
 
   const watchedTags: string[] = (Form.useWatch('tags', form) as string[]) || []
 
@@ -238,12 +258,87 @@ const ModelSettings: React.FC = () => {
   const handleSetDefault = async (id: number): Promise<void> => {
     const msgKey = 'provider-default'
     try {
+      const provider = providers.find((p) => p.id === id)
+      if (provider && isEmbeddingModel(provider)) {
+        viewMessage(msgKey, 'error', '向量（Embedding）模型不能设为默认聊天模型')
+        return
+      }
       viewMessage(msgKey, 'loading', '正在设置默认供应商...')
       await (window as unknown as Window).api.providers.setDefault(id)
       viewMessage(msgKey, 'success', '默认供应商已更新', 2)
       await loadProviders()
     } catch (error) {
       viewMessage(msgKey, 'error', `设置失败: ${error}`)
+    }
+  }
+
+  // 拉取模型
+  const handleFetchModels = async (): Promise<void> => {
+    setFetchLoading(true)
+    setFetchModels([])
+    setCheckedModels([])
+    try {
+      const result = await (window as unknown as Window).api.providers.fetchModels(
+        fetchProviderType,
+        fetchBaseUrl || undefined,
+        fetchApiKey || undefined
+      )
+      // 过滤掉已存在的模型
+      const existingIds = new Set(providers.map((p) => p.model))
+      const newModels = result.filter((m) => !existingIds.has(m.id))
+      setFetchModels(newModels)
+    } catch (error) {
+      viewMessage('fetch-models', 'error', `拉取失败: ${error}`)
+    } finally {
+      setFetchLoading(false)
+    }
+  }
+
+  const handleProviderTypeChangeForFetch = (type: string): void => {
+    setFetchProviderType(type)
+    const config = PROVIDER_TYPES.find((t) => t.value === type)
+    if (config?.baseURL) {
+      setFetchBaseUrl(config.baseURL)
+      setFetchApiKey('')
+    } else {
+      setFetchBaseUrl('')
+    }
+  }
+
+  // 一键添加选中的模型
+  const handleBatchAdd = async (): Promise<void> => {
+    const msgKey = 'batch-add'
+    if (checkedModels.length === 0) {
+      viewMessage(msgKey, 'warning', '请至少选择一个模型')
+      return
+    }
+    setAddingModels(true)
+    try {
+      let added = 0
+      for (const modelId of checkedModels) {
+        try {
+          await (window as unknown as Window).api.providers.create({
+            name: modelId,
+            provider: fetchProviderType,
+            base_url: fetchBaseUrl || undefined,
+            api_key: fetchApiKey || undefined,
+            model: modelId,
+            tags: [],
+            is_enabled: true,
+            is_default: false
+          })
+          added++
+        } catch (err) {
+          console.error(`Failed to add model ${modelId}:`, err)
+        }
+      }
+      viewMessage(msgKey, 'success', `成功添加 ${added} 个模型`, 3)
+      setFetchModalOpen(false)
+      await loadProviders()
+    } catch (error) {
+      viewMessage(msgKey, 'error', `批量添加失败: ${error}`)
+    } finally {
+      setAddingModels(false)
     }
   }
 
@@ -282,10 +377,10 @@ const ModelSettings: React.FC = () => {
             <Tooltip title="当前已是默认">
               <Button type="text" size="small" icon={<StarFilled style={{ color: '#faad14' }} />} />
             </Tooltip>
-          ) : (
+          ) : isEmbeddingModel(record) ? null : (
             <Popconfirm
-              title="设为默认供应商？"
-              description="对话框和知识图谱将使用此供应商"
+              title="设为默认模型？"
+              description="对话框将默认选中该模型进行问答"
               onConfirm={() => handleSetDefault(record.id)}
               okText="确定"
               cancelText="取消"
@@ -331,9 +426,14 @@ const ModelSettings: React.FC = () => {
             管理 AI 聊天和知识图谱使用的模型供应商配置
           </p>
         </div>
-        <Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>
-          添加模型
-        </Button>
+        <Space>
+          <Button icon={<DownloadOutlined />} onClick={() => setFetchModalOpen(true)}>
+            拉取模型
+          </Button>
+          <Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>
+            添加模型
+          </Button>
+        </Space>
       </div>
 
       <Table
@@ -470,12 +570,117 @@ const ModelSettings: React.FC = () => {
               name="is_default"
               label="设为默认"
               valuePropName="checked"
-              tooltip="只能有一个默认供应商"
+              tooltip={
+                watchedTags.includes('embedding')
+                  ? '向量模型不能设为默认聊天模型'
+                  : '只能有一个默认供应商'
+              }
             >
-              <Switch />
+              <Switch disabled={watchedTags.includes('embedding')} />
             </Form.Item>
           </Space>
         </Form>
+      </Modal>
+
+      {/* 拉取模型模态框 */}
+      <Modal
+        title="拉取模型列表"
+        open={fetchModalOpen}
+        onCancel={() => setFetchModalOpen(false)}
+        footer={[
+          <Button key="cancel" onClick={() => setFetchModalOpen(false)}>
+            取消
+          </Button>,
+          <Button
+            key="add"
+            type="primary"
+            loading={addingModels}
+            disabled={checkedModels.length === 0}
+            onClick={handleBatchAdd}
+          >
+            一键添加 ({checkedModels.length})
+          </Button>
+        ]}
+        width={520}
+        destroyOnHidden
+        styles={{ body: { maxHeight: 480, padding: 12, overflowY: 'auto' } }}
+        classNames={{ body: 'custom-scrollbar' }}
+      >
+        <Space direction="vertical" style={{ width: '100%' }} size="middle">
+          <Space>
+            <Select
+              value={fetchProviderType}
+              options={PROVIDER_TYPES}
+              onChange={handleProviderTypeChangeForFetch}
+              style={{ width: 180 }}
+              placeholder="选择供应商类型"
+            />
+            <Input
+              placeholder="API 地址"
+              value={fetchBaseUrl}
+              onChange={(e) => setFetchBaseUrl(e.target.value)}
+              style={{ width: 200 }}
+              allowClear
+            />
+          </Space>
+
+          {fetchProviderType !== 'ollama' && (
+            <Input.Password
+              placeholder="API Key（可选）"
+              value={fetchApiKey}
+              onChange={(e) => setFetchApiKey(e.target.value)}
+              allowClear
+            />
+          )}
+
+          <Button
+            type="primary"
+            icon={<DownloadOutlined />}
+            loading={fetchLoading}
+            onClick={handleFetchModels}
+            block
+          >
+            获取模型列表
+          </Button>
+
+          {fetchModels.length > 0 && (
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <span style={{ color: colorTextSecondary, fontSize: 13 }}>
+                  共 {fetchModels.length} 个模型
+                </span>
+                <Button
+                  type="link"
+                  size="small"
+                  onClick={() => setCheckedModels(fetchModels.map((m) => m.id))}
+                >
+                  全选
+                </Button>
+              </div>
+              <Checkbox.Group
+                value={checkedModels}
+                onChange={(vals) => setCheckedModels(vals as string[])}
+                style={{ width: '100%' }}
+              >
+                <List
+                  size="small"
+                  dataSource={fetchModels}
+                  renderItem={(m) => (
+                    <List.Item style={{ padding: '4px 0', border: 'none' }}>
+                      <Checkbox value={m.id}>{m.id}</Checkbox>
+                    </List.Item>
+                  )}
+                />
+              </Checkbox.Group>
+            </div>
+          )}
+
+          {!fetchLoading && fetchModels.length === 0 && (
+            <div className="text-center py-6" style={{ color: colorTextSecondary }}>
+              暂无新模型（已存在的模型自动跳过）
+            </div>
+          )}
+        </Space>
       </Modal>
     </div>
   )

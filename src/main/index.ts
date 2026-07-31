@@ -95,6 +95,7 @@ import {
 import { ChatService } from './chat/service'
 import { buildTools, subAgentDefinitions, availableTools } from './chat/tools'
 import type { ToolCallDetail, SubAgentEvent } from './chat/types'
+import type { BaseChatModel } from '@langchain/core/language_models/chat_models'
 // BaseMessage 等 LangChain 类型已移入 ChatService 内部使用
 import { KnowledgeGraphService, BuildConfig } from './graph'
 import { getProviderService } from './provider/service'
@@ -107,7 +108,8 @@ import {
   updateProvider,
   deleteProvider,
   setDefaultProvider,
-  LlmProviderInput
+  LlmProviderInput,
+  LlmProviderConfig
 } from './database/mapper/provider'
 import { initKeystore } from './crypto/provider-key'
 import { SystemSettings, GraphSettings, ChatSettings } from './types/settings'
@@ -188,6 +190,39 @@ export async function getDatabaseInstance(): Promise<Database> {
 
   // 如果既没有实例也没有进行中的初始化，则说明初始化未开始或失败
   throw new Error('Database has not been initialized yet.')
+}
+
+// ── 预加载缓存：loading 阶段预取 ChatProvider 所需数据 ──
+let cachedEnabledProviders: LlmProviderConfig[] | null = null
+let cachedDefaultProvider: LlmProviderConfig | null = null
+let cachedTopics: ChatTopicRow[] | null = null
+
+function clearProviderCache(): void {
+  cachedEnabledProviders = null
+  cachedDefaultProvider = null
+}
+
+function clearTopicCache(): void {
+  cachedTopics = null
+}
+
+async function preloadChatData(): Promise<void> {
+  try {
+    const [enabled, defaultProvider, topics] = await Promise.all([
+      getEnabledProviders(),
+      getDefaultProvider(),
+      getAllTopics()
+    ])
+    cachedEnabledProviders = enabled
+    cachedDefaultProvider = defaultProvider
+    cachedTopics = topics
+    logger.info('[Preload] Chat data preloaded:', {
+      providers: enabled.length,
+      topics: topics.length
+    })
+  } catch (err) {
+    logger.error('[Preload] Failed to preload chat data:', err)
+  }
 }
 
 async function performInitializationTasks(): Promise<void> {
@@ -305,8 +340,10 @@ async function createLoadingWindow(): Promise<void> {
   })
 
   initializationPromise = performInitializationTasks()
-    .then(() => {
+    .then(async () => {
       logger.info('All initialization tasks completed.')
+      // 预加载 ChatProvider 所需数据，不阻塞 init-complete 发送
+      preloadChatData()
       if (loadingWindow) {
         loadingWindow.webContents.send('init-complete')
       }
@@ -1681,7 +1718,21 @@ app.whenReady().then(async () => {
       const streamPromise = (async () => {
         const tools = buildTools(options?.tools || [])
         logger.info(`[Chat] Creating model with providerId: ${options?.providerId ?? 'default'}`)
-        const model = await getProviderService().createModel(options?.providerId)
+
+        // 模型创建可能因供应商不存在、被禁用、模型名称为空等原因失败，需要捕获并通知前端
+        let model: BaseChatModel
+        try {
+          model = await getProviderService().createModel(options?.providerId)
+        } catch (modelErr) {
+          const errMsg = modelErr instanceof Error ? modelErr.message : String(modelErr)
+          logger.error('[Chat] Model creation failed:', errMsg)
+          if (!event.sender.isDestroyed()) {
+            event.sender.send('chat-stream-error', { error: errMsg, topicId: options?.topicId })
+            event.sender.send('chat-stream-done', { topicId: options?.topicId ?? 0 })
+          }
+          return
+        }
+
         const chatSettings = settingsStore.get('chat') as ChatSettings | undefined
 
         // 创建 AbortController 用于取消流式输出
@@ -2055,6 +2106,16 @@ app.whenReady().then(async () => {
         } catch (error) {
           if ((error as Error)?.name !== 'AbortError') {
             logger.error('Error in chat stream:', error)
+            const errMsg = error instanceof Error ? error.message : String(error)
+            if (!event.sender.isDestroyed()) {
+              event.sender.send('chat-stream-error', { error: errMsg, topicId })
+            }
+            // 流异常中断时不保存不完整的 AI 回复，直接跳到清理
+            streamAbortControllers.delete(event.sender.id)
+            if (!event.sender.isDestroyed()) {
+              event.sender.send('chat-stream-done', { topicId })
+            }
+            return
           }
         }
 
@@ -2152,7 +2213,10 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('chat-topic-get-all', async () => {
     try {
-      return await getAllTopics()
+      if (cachedTopics) return cachedTopics
+      const topics = await getAllTopics()
+      cachedTopics = topics
+      return topics
     } catch (error) {
       logger.error('Error in chat-topic-get-all:', error)
       throw error
@@ -2172,6 +2236,7 @@ app.whenReady().then(async () => {
     'chat-topic-create',
     async (_event, title: string, model?: string, selectedTools?: string) => {
       try {
+        clearTopicCache()
         return await createTopic(title, model, selectedTools)
       } catch (error) {
         logger.error('Error in chat-topic-create:', error)
@@ -2188,6 +2253,7 @@ app.whenReady().then(async () => {
       updates: Partial<Pick<ChatTopicRow, 'title' | 'model' | 'selected_tools'>>
     ) => {
       try {
+        clearTopicCache()
         return await updateTopic(id, updates)
       } catch (error) {
         logger.error('Error in chat-topic-update:', error)
@@ -2198,6 +2264,7 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('chat-topic-delete', async (_event, id: number) => {
     try {
+      clearTopicCache()
       return await deleteTopic(id)
     } catch (error) {
       logger.error('Error in chat-topic-delete:', error)
@@ -2416,7 +2483,10 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('provider-get-default', async () => {
     try {
-      return await getDefaultProvider()
+      if (cachedDefaultProvider) return cachedDefaultProvider
+      const provider = await getDefaultProvider()
+      cachedDefaultProvider = provider
+      return provider
     } catch (error) {
       logger.error('Error in provider-get-default:', error)
       throw error
@@ -2425,7 +2495,10 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('provider-get-enabled', async () => {
     try {
-      return await getEnabledProviders()
+      if (cachedEnabledProviders) return cachedEnabledProviders
+      const providers = await getEnabledProviders()
+      cachedEnabledProviders = providers
+      return providers
     } catch (error) {
       logger.error('Error in provider-get-enabled:', error)
       throw error
@@ -2435,7 +2508,9 @@ app.whenReady().then(async () => {
   ipcMain.handle('provider-create', async (_event, input: LlmProviderInput) => {
     try {
       const id = await createProvider(input)
+      clearProviderCache()
       getProviderService().clearCache()
+      BrowserWindow.getAllWindows().forEach((w) => w.webContents.send('providers-changed'))
       return id
     } catch (error) {
       logger.error('Error in provider-create:', error)
@@ -2448,7 +2523,9 @@ app.whenReady().then(async () => {
     async (_event, id: number, updates: Partial<LlmProviderInput>) => {
       try {
         const result = await updateProvider(id, updates)
+        clearProviderCache()
         getProviderService().clearCache()
+        BrowserWindow.getAllWindows().forEach((w) => w.webContents.send('providers-changed'))
         return result
       } catch (error) {
         logger.error('Error in provider-update:', error)
@@ -2460,7 +2537,9 @@ app.whenReady().then(async () => {
   ipcMain.handle('provider-delete', async (_event, id: number) => {
     try {
       const result = await deleteProvider(id)
+      clearProviderCache()
       getProviderService().clearCache()
+      BrowserWindow.getAllWindows().forEach((w) => w.webContents.send('providers-changed'))
       return result
     } catch (error) {
       logger.error('Error in provider-delete:', error)
@@ -2471,13 +2550,66 @@ app.whenReady().then(async () => {
   ipcMain.handle('provider-set-default', async (_event, id: number) => {
     try {
       const result = await setDefaultProvider(id)
+      clearProviderCache()
       getProviderService().clearCache()
+      BrowserWindow.getAllWindows().forEach((w) => w.webContents.send('providers-changed'))
       return result
     } catch (error) {
       logger.error('Error in provider-set-default:', error)
       throw error
     }
   })
+
+  // 拉取供应商的模型列表
+  ipcMain.handle(
+    'provider-fetch-models',
+    async (_event, providerType: string, baseUrl?: string, apiKey?: string) => {
+      try {
+        const models: { id: string }[] = []
+
+        if (providerType === 'ollama') {
+          const url = (baseUrl || 'http://localhost:11434').replace(/\/+$/, '') + '/api/tags'
+          logger.info(`[FetchModels] Ollama: ${url}`)
+          const controller = new AbortController()
+          const timeout = setTimeout(() => controller.abort(), 15000)
+          const res = await fetch(url, { signal: controller.signal })
+          clearTimeout(timeout)
+          if (!res.ok) {
+            throw new Error(`Ollama 返回 HTTP ${res.status}`)
+          }
+          const data = (await res.json()) as { models?: { name: string }[] }
+          for (const m of data.models || []) {
+            models.push({ id: m.name })
+          }
+        } else {
+          // OpenAI 兼容协议: GET /v1/models
+          const base = (baseUrl || 'https://api.openai.com/v1').replace(/\/+$/, '')
+          const url = base.endsWith('/v1') ? `${base}/models` : `${base}/v1/models`
+          logger.info(`[FetchModels] OpenAI-compatible: ${url}`)
+          const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+          if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`
+          const controller = new AbortController()
+          const timeout = setTimeout(() => controller.abort(), 15000)
+          const res = await fetch(url, { headers, signal: controller.signal })
+          clearTimeout(timeout)
+          if (!res.ok) {
+            throw new Error(`API 返回 HTTP ${res.status}`)
+          }
+          const data = (await res.json()) as { data?: { id: string }[] }
+          for (const m of data.data || []) {
+            models.push({ id: m.id })
+          }
+        }
+
+        logger.info(`[FetchModels] Got ${models.length} models for ${providerType}`)
+        return models
+      } catch (error) {
+        const errMsg = error instanceof Error ? error.message : String(error)
+        logger.error(`[FetchModels] Failed for ${providerType}:`, errMsg)
+        throw new Error(`拉取模型列表失败：${errMsg}`)
+      }
+    }
+  )
 
   await createLoadingWindow()
 
