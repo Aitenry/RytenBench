@@ -21,6 +21,12 @@ export interface ChatDialogueRow {
   created_at: string
 }
 
+export interface PaginatedResult<T> {
+  items: T[]
+  hasMore: boolean
+  total: number
+}
+
 // --- chat_topic CRUD ---
 
 async function getAllTopics(): Promise<ChatTopicRow[]> {
@@ -32,6 +38,32 @@ async function getAllTopics(): Promise<ChatTopicRow[]> {
     return result.rows
   } catch (error) {
     logger.error('Failed to get all chat topics:', error)
+    throw error
+  }
+}
+
+async function getAllTopicsPaginated(
+  page: number,
+  pageSize: number
+): Promise<PaginatedResult<ChatTopicRow>> {
+  try {
+    const db = (await getDatabaseInstance()).getDatabase()
+    const countResult = await db.query<{ total: number }>(
+      'SELECT COUNT(*)::int as total FROM chat_topic'
+    )
+    const total = countResult.rows[0]?.total ?? 0
+    const sql = 'SELECT * FROM chat_topic ORDER BY updated_at DESC LIMIT $1 OFFSET $2'
+    const result = await db.query<ChatTopicRow>(sql, [pageSize, page * pageSize])
+    logger.info(
+      `Paginated topics: page=${page}, size=${pageSize}, got=${result.rows.length}, total=${total}`
+    )
+    return {
+      items: result.rows,
+      hasMore: (page + 1) * pageSize < total,
+      total
+    }
+  } catch (error) {
+    logger.error('Failed to get paginated chat topics:', error)
     throw error
   }
 }
@@ -138,6 +170,33 @@ async function getDialoguesByTopicId(topicId: number): Promise<ChatDialogueRow[]
   }
 }
 
+async function getDialoguesByTopicIdPaginated(
+  topicId: number,
+  page: number,
+  pageSize: number
+): Promise<PaginatedResult<ChatDialogueRow>> {
+  try {
+    const db = (await getDatabaseInstance()).getDatabase()
+    const countResult = await db.query<{ total: number }>(
+      'SELECT COUNT(*)::int as total FROM chat_dialogue WHERE topic_id = $1',
+      [topicId]
+    )
+    const total = countResult.rows[0]?.total ?? 0
+    // 从最新消息开始分页：DESC 排序，取一页后反转，上层得到 oldest→newest
+    const sql =
+      'SELECT * FROM chat_dialogue WHERE topic_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3'
+    const result = await db.query<ChatDialogueRow>(sql, [topicId, pageSize, page * pageSize])
+    const items = result.rows.reverse()
+    logger.info(
+      `Paginated dialogues: topic=${topicId}, page=${page}, size=${pageSize}, got=${items.length}, total=${total}`
+    )
+    return { items, hasMore: (page + 1) * pageSize < total, total }
+  } catch (error) {
+    logger.error('Failed to get paginated dialogues by topic id:', error)
+    throw error
+  }
+}
+
 async function addDialogue(dialogue: Omit<ChatDialogueRow, 'id' | 'created_at'>): Promise<number> {
   try {
     const db = (await getDatabaseInstance()).getDatabase()
@@ -184,11 +243,13 @@ async function deleteDialogueById(id: number): Promise<boolean> {
 
 export {
   getAllTopics,
+  getAllTopicsPaginated,
   getTopicById,
   createTopic,
   updateTopic,
   deleteTopic,
   getDialoguesByTopicId,
+  getDialoguesByTopicIdPaginated,
   addDialogue,
   deleteDialoguesByTopicId,
   deleteDialogueById

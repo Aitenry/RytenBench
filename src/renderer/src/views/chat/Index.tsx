@@ -51,6 +51,10 @@ const Index: React.FC = () => {
     titleDone,
     subtitleDisplayed,
     subtitleDone,
+    topicsHasMore,
+    topicsLoading,
+    messagesHasMore,
+    messagesLoadingMore,
     handleSelectTopic,
     handleDeleteTopic,
     handleCopy,
@@ -58,7 +62,9 @@ const Index: React.FC = () => {
     handleNewChat,
     handleDeleteMessagePair,
     handleKeyDown,
-    handleStop
+    handleStop,
+    handleLoadMoreTopics,
+    handleLoadMoreMessages
   } = useChat()
 
   const scrollbarThumbColor = isDarkMode ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.15)'
@@ -115,8 +121,11 @@ const Index: React.FC = () => {
         colorTextTertiary={colorTextTertiary}
         colorFillAlter={colorFillAlter}
         loadingTopicIds={loadingTopicIds}
+        hasMoreTopics={topicsHasMore}
+        isLoadingMoreTopics={topicsLoading}
         onSelectTopic={handleSelectTopic}
         onDeleteTopic={handleDeleteTopic}
+        onLoadMoreTopics={handleLoadMoreTopics}
       />
 
       <main
@@ -148,8 +157,11 @@ const Index: React.FC = () => {
           subtitleDisplayed={subtitleDisplayed}
           subtitleDone={subtitleDone}
           copiedId={copiedId}
+          hasMoreMessages={messagesHasMore}
+          isLoadingMoreMessages={messagesLoadingMore}
           onCopy={handleCopy}
           onDelete={handleDeleteMessagePair}
+          onLoadMoreMessages={handleLoadMoreMessages}
           messagesEndRef={messagesEndRef}
         />
 

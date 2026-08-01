@@ -201,6 +201,8 @@ const api = {
     listSkills: () => ipcRenderer.invoke('chat-list-skills'),
     // 话题管理
     getAllTopics: () => ipcRenderer.invoke('chat-topic-get-all'),
+    getAllTopicsPaginated: (page: number, pageSize: number) =>
+      ipcRenderer.invoke('chat-topic-get-paginated', page, pageSize),
     getTopicById: (id: number) => ipcRenderer.invoke('chat-topic-get-by-id', id),
     createTopic: (title: string, model?: string, selectedTools?: string) =>
       ipcRenderer.invoke('chat-topic-create', title, model, selectedTools),
@@ -212,6 +214,8 @@ const api = {
     // 消息管理
     getDialoguesByTopic: (topicId: number) =>
       ipcRenderer.invoke('chat-dialogue-get-by-topic', topicId),
+    getDialoguesByTopicPaginated: (topicId: number, page: number, pageSize: number) =>
+      ipcRenderer.invoke('chat-dialogue-get-by-topic-paginated', topicId, page, pageSize),
     addDialogue: (dialogue: Omit<ChatDialogueRow, 'id' | 'created_at'>) =>
       ipcRenderer.invoke('chat-dialogue-add', dialogue),
     deleteDialoguesByTopic: (topicId: number) =>

@@ -1,12 +1,15 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import type { TextAreaRef } from 'antd/es/input/TextArea'
-import { ChatDialogueRow, ChatTopicRow } from '../../../../../main/database/mapper/chat'
+import type { ChatTopicRow } from '../../../../../main/database/mapper/chat'
 import { LlmProviderConfig } from '../../../../../main/database/mapper/provider'
 import { Window, ToolInfo } from '../../../../resource/types/window'
 import type { Message, Attachment, ToolCall, MessageBlock } from '@renderer/types/chat'
 import type { StreamChunk } from '../../../../../main/chat/types'
 import { useTypewriter, useCyclingTypewriter } from './useTypewriter'
 import { isSameToolCall, computeTextDelta, pushBlock } from '../utils/chatHelpers'
+
+const TOPICS_PAGE_SIZE = 20
+const MESSAGES_PAGE_SIZE = 20 // 10对消息
 
 /** 每个话题的会话缓存状态 */
 interface SessionState {
@@ -51,6 +54,12 @@ export interface UseChatHandlersReturn {
   titleDone: boolean
   subtitleDisplayed: string
   subtitleDone: boolean
+  /** 话题分页 */
+  topicsHasMore: boolean
+  topicsLoading: boolean
+  /** 消息分页（当前话题） */
+  messagesHasMore: boolean
+  messagesLoadingMore: boolean
   handleSelectTopic: (topic: ChatTopicRow) => Promise<void>
   handleDeleteTopic: (topicId: number, e?: React.MouseEvent) => Promise<void>
   handleCopy: (text: string, id: string) => Promise<void>
@@ -59,6 +68,8 @@ export interface UseChatHandlersReturn {
   handleDeleteMessagePair: (msgIndex: number) => Promise<void>
   handleKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void
   handleStop: () => void
+  handleLoadMoreTopics: () => Promise<void>
+  handleLoadMoreMessages: () => Promise<void>
 }
 
 export const useChatHandlers = (): UseChatHandlersReturn => {
@@ -84,6 +95,14 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [loadingTopicIds, setLoadingTopicIds] = useState<Set<number>>(new Set())
+
+  // ── 分页状态 ──
+  const [topicsPage, setTopicsPage] = useState(0)
+  const [topicsHasMore, setTopicsHasMore] = useState(true)
+  const [topicsLoading, setTopicsLoading] = useState(false)
+  const [messagesPage, setMessagesPage] = useState(0)
+  const [messagesHasMore, setMessagesHasMore] = useState(true)
+  const [messagesLoadingMore, setMessagesLoadingMore] = useState(false)
 
   // ── 多会话支持 ──
   /** 每个 topicId 的会话缓存（进行中的对话） */
@@ -166,14 +185,41 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
     return unsubscribe
   }, [])
 
-  const refreshTopics = async (): Promise<void> => {
+  const refreshTopics = useCallback(async (): Promise<void> => {
     try {
-      const list = await (window as unknown as Window).api.chat.getAllTopics()
-      setTopics(list)
+      setTopicsLoading(true)
+      setTopicsPage(0)
+      const result = await (window as unknown as Window).api.chat.getAllTopicsPaginated(
+        0,
+        TOPICS_PAGE_SIZE
+      )
+      setTopics(result.items)
+      setTopicsHasMore(result.hasMore)
     } catch (err) {
       console.error('Failed to load topics:', err)
+    } finally {
+      setTopicsLoading(false)
     }
-  }
+  }, [])
+
+  const handleLoadMoreTopics = useCallback(async (): Promise<void> => {
+    if (topicsLoading || !topicsHasMore) return
+    try {
+      setTopicsLoading(true)
+      const nextPage = topicsPage + 1
+      const result = await (window as unknown as Window).api.chat.getAllTopicsPaginated(
+        nextPage,
+        TOPICS_PAGE_SIZE
+      )
+      setTopicsPage(nextPage)
+      setTopics((prev) => [...prev, ...result.items])
+      setTopicsHasMore(result.hasMore)
+    } catch (err) {
+      console.error('Failed to load more topics:', err)
+    } finally {
+      setTopicsLoading(false)
+    }
+  }, [topicsPage, topicsHasMore, topicsLoading])
 
   useEffect(() => {
     refreshTopics().then()
@@ -732,17 +778,17 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
         return
       }
 
-      // 缓存未命中：从数据库加载（已完成的会话）
-      // 注意：此处有异步间隙，messagesBelongToTopicRef 仍指向旧话题，
-      // handleSend 会在间隙中检测到不同步而安全降级
+      // 缓存未命中：从数据库分页加载第一页
       currentSessionIdRef.current = null
       setIsLoading(false)
+      setMessagesPage(0)
+      setMessagesHasMore(true)
 
       try {
-        const dialogues: ChatDialogueRow[] = await (
+        const result = await (
           window as unknown as Window
-        ).api.chat.getDialoguesByTopic(topic.id)
-        const loadedMessages: Message[] = dialogues.map((d) => ({
+        ).api.chat.getDialoguesByTopicPaginated(topic.id, 0, MESSAGES_PAGE_SIZE)
+        const loadedMessages: Message[] = result.items.map((d) => ({
           id: String(d.id),
           role: d.role,
           content: d.content,
@@ -751,6 +797,7 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
           loading: false
         }))
         setMessages(loadedMessages)
+        setMessagesHasMore(result.hasMore)
       } catch (err) {
         console.error('Failed to load dialogues:', err)
         setMessages([])
@@ -797,6 +844,37 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
     },
     [handleNewChat, syncLoadingTopics]
   )
+
+  const handleLoadMoreMessages = useCallback(async (): Promise<void> => {
+    if (messagesLoadingMore || !messagesHasMore || currentTopicIdRef.current == null) return
+    try {
+      setMessagesLoadingMore(true)
+      const nextPage = messagesPage + 1
+      const result = await (
+        window as unknown as Window
+      ).api.chat.getDialoguesByTopicPaginated(
+        currentTopicIdRef.current,
+        nextPage,
+        MESSAGES_PAGE_SIZE
+      )
+      setMessagesPage(nextPage)
+      // 更旧的消息插入到列表头部
+      const olderMessages: Message[] = result.items.map((d) => ({
+        id: String(d.id),
+        role: d.role,
+        content: d.content,
+        blocks: d.blocks ? JSON.parse(d.blocks) : [],
+        timestamp: new Date(d.created_at).getTime(),
+        loading: false
+      }))
+      setMessages((prev) => [...olderMessages, ...prev])
+      setMessagesHasMore(result.hasMore)
+    } catch (err) {
+      console.error('Failed to load more messages:', err)
+    } finally {
+      setMessagesLoadingMore(false)
+    }
+  }, [messagesPage, messagesHasMore, messagesLoadingMore])
 
   const handleCopy = useCallback(async (text: string, id: string): Promise<void> => {
     try {
@@ -1058,6 +1136,11 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
     titleDone,
     subtitleDisplayed,
     subtitleDone,
+    // pagination
+    topicsHasMore,
+    topicsLoading,
+    messagesHasMore,
+    messagesLoadingMore,
     // handlers
     handleSelectTopic,
     handleDeleteTopic,
@@ -1066,6 +1149,8 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
     handleNewChat,
     handleDeleteMessagePair,
     handleKeyDown,
-    handleStop
+    handleStop,
+    handleLoadMoreTopics,
+    handleLoadMoreMessages
   }
 }

@@ -189,6 +189,10 @@ export interface Window {
       selectWorkspace: () => Promise<string | null>
       listSkills: () => Promise<{ id: string; name: string; description: string }[]>
       getAllTopics: () => Promise<ChatTopicRow[]>
+      getAllTopicsPaginated: (
+        page: number,
+        pageSize: number
+      ) => Promise<PaginatedResult<ChatTopicRow>>
       getTopicById: (id: number) => Promise<ChatTopicRow[]>
       createTopic: (title: string, model?: string, selectedTools?: string) => Promise<number>
       updateTopic: (
@@ -197,6 +201,11 @@ export interface Window {
       ) => Promise<boolean>
       deleteTopic: (id: number) => Promise<boolean>
       getDialoguesByTopic: (topicId: number) => Promise<ChatDialogueRow[]>
+      getDialoguesByTopicPaginated: (
+        topicId: number,
+        page: number,
+        pageSize: number
+      ) => Promise<PaginatedResult<ChatDialogueRow>>
       addDialogue: (dialogue: Omit<ChatDialogueRow, 'id' | 'created_at'>) => Promise<number>
       deleteDialoguesByTopic: (topicId: number) => Promise<boolean>
       deleteDialogue: (id: number) => Promise<boolean>

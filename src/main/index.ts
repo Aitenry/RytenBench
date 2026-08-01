@@ -131,17 +131,18 @@ import {
 } from './database/mapper/node_position'
 import {
   getAllTopics,
+  getAllTopicsPaginated,
   getTopicById,
   createTopic,
   updateTopic,
   deleteTopic,
   getDialoguesByTopicId,
+  getDialoguesByTopicIdPaginated,
   addDialogue,
   deleteDialoguesByTopicId,
-  deleteDialogueById,
-  ChatTopicRow,
-  ChatDialogueRow
+  deleteDialogueById
 } from './database/mapper/chat'
+import type { ChatTopicRow, ChatDialogueRow } from './database/mapper/chat'
 
 // 单实例锁：防止多开，同时确保安装程序能正确检测和关闭进程
 const gotTheLock = app.requestSingleInstanceLock()
@@ -195,7 +196,6 @@ export async function getDatabaseInstance(): Promise<Database> {
 // ── 预加载缓存：loading 阶段预取 ChatProvider 所需数据 ──
 let cachedEnabledProviders: LlmProviderConfig[] | null = null
 let cachedDefaultProvider: LlmProviderConfig | null = null
-let cachedTopics: ChatTopicRow[] | null = null
 
 function clearProviderCache(): void {
   cachedEnabledProviders = null
@@ -203,22 +203,22 @@ function clearProviderCache(): void {
 }
 
 function clearTopicCache(): void {
-  cachedTopics = null
+  // 话题数据不再全量缓存，前端使用分页查询
 }
 
 async function preloadChatData(): Promise<void> {
   try {
-    const [enabled, defaultProvider, topics] = await Promise.all([
+    const [enabled, defaultProvider, topicsResult] = await Promise.all([
       getEnabledProviders(),
       getDefaultProvider(),
-      getAllTopics()
+      getAllTopicsPaginated(0, 20)
     ])
     cachedEnabledProviders = enabled
     cachedDefaultProvider = defaultProvider
-    cachedTopics = topics
     logger.info('[Preload] Chat data preloaded:', {
       providers: enabled.length,
-      topics: topics.length
+      topics: topicsResult.items.length,
+      topicsTotal: topicsResult.total
     })
   } catch (err) {
     logger.error('[Preload] Failed to preload chat data:', err)
@@ -2213,15 +2213,25 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('chat-topic-get-all', async () => {
     try {
-      if (cachedTopics) return cachedTopics
-      const topics = await getAllTopics()
-      cachedTopics = topics
-      return topics
+      return await getAllTopics()
     } catch (error) {
       logger.error('Error in chat-topic-get-all:', error)
       throw error
     }
   })
+
+  ipcMain.handle(
+    'chat-topic-get-paginated',
+    async (_event, page: number, pageSize: number) => {
+      try {
+        // 分页查询不走缓存（缓存是全量数据，用于预加载场景）
+        return await getAllTopicsPaginated(page, pageSize)
+      } catch (error) {
+        logger.error('Error in chat-topic-get-paginated:', error)
+        throw error
+      }
+    }
+  )
 
   ipcMain.handle('chat-topic-get-by-id', async (_event, id: number) => {
     try {
@@ -2282,6 +2292,18 @@ app.whenReady().then(async () => {
       throw error
     }
   })
+
+  ipcMain.handle(
+    'chat-dialogue-get-by-topic-paginated',
+    async (_event, topicId: number, page: number, pageSize: number) => {
+      try {
+        return await getDialoguesByTopicIdPaginated(topicId, page, pageSize)
+      } catch (error) {
+        logger.error('Error in chat-dialogue-get-by-topic-paginated:', error)
+        throw error
+      }
+    }
+  )
 
   ipcMain.handle(
     'chat-dialogue-add',

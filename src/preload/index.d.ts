@@ -141,6 +141,10 @@ interface Api {
     onStreamDone: (callback: (result: { topicId: number }) => void) => () => void
     // 话题管理
     getAllTopics: () => Promise<ChatTopicRow[]>
+    getAllTopicsPaginated: (
+      page: number,
+      pageSize: number
+    ) => Promise<PaginatedResult<ChatTopicRow>>
     getTopicById: (id: number) => Promise<ChatTopicRow[]>
     createTopic: (title: string, model?: string, selectedTools?: string) => Promise<number>
     updateTopic: (
@@ -150,6 +154,11 @@ interface Api {
     deleteTopic: (id: number) => Promise<boolean>
     // 消息管理
     getDialoguesByTopic: (topicId: number) => Promise<ChatDialogueRow[]>
+    getDialoguesByTopicPaginated: (
+      topicId: number,
+      page: number,
+      pageSize: number
+    ) => Promise<PaginatedResult<ChatDialogueRow>>
     addDialogue: (dialogue: Omit<ChatDialogueRow, 'id' | 'created_at'>) => Promise<number>
     deleteDialoguesByTopic: (topicId: number) => Promise<boolean>
   }
