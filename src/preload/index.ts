@@ -3,8 +3,10 @@ import { electronAPI } from '@electron-toolkit/preload'
 import { TodoItemRow } from '../main/database/mapper/todo'
 import { DocRow } from '../main/database/mapper/document'
 import { WikiRow, WikiDirectoryRow } from '../main/database/mapper/wiki'
-import { ChatTopicRow, ChatDialogueRow } from '../main/database/mapper/chat'
+import { ChatTopicRow, ChatDialogueRow, WorkspaceRow } from '../main/database/mapper/chat'
 import type { LlmProviderInput, LlmProviderConfig } from '../main/database/mapper/provider'
+import type { AgentConfigRow, AgentConfigInput } from '../main/database/mapper/agent'
+import type { PaginatedResult as AgentPaginatedResult } from '../main/database/mapper/agent'
 import type { SystemSettings } from '../main/types/settings'
 
 interface WeatherData {
@@ -160,14 +162,12 @@ const api = {
     sendMessage: (
       message: string,
       options?: {
-        tools?: string[]
         providerId?: number
       }
     ) => ipcRenderer.invoke('chat-send-message', message, options),
     startMessageStream: (
       message: string,
       options?: {
-        tools?: string[]
         topicId?: number
         providerId?: number
       }
@@ -199,13 +199,20 @@ const api = {
     selectSkillsDirectory: () => ipcRenderer.invoke('chat-select-skills-directory'),
     selectWorkspace: () => ipcRenderer.invoke('chat-select-workspace') as Promise<string | null>,
     listSkills: () => ipcRenderer.invoke('chat-list-skills'),
+    // 工作区管理
+    getAllWorkspaces: () => ipcRenderer.invoke('workspace-get-all') as Promise<WorkspaceRow[]>,
+    createWorkspace: (name: string, path: string) =>
+      ipcRenderer.invoke('workspace-create', name, path) as Promise<number>,
+    deleteWorkspace: (id: number) =>
+      ipcRenderer.invoke('workspace-delete', id) as Promise<boolean>,
     // 话题管理
-    getAllTopics: () => ipcRenderer.invoke('chat-topic-get-all'),
-    getAllTopicsPaginated: (page: number, pageSize: number) =>
-      ipcRenderer.invoke('chat-topic-get-paginated', page, pageSize),
+    getAllTopics: (workspaceId: number) =>
+      ipcRenderer.invoke('chat-topic-get-all', workspaceId),
+    getAllTopicsPaginated: (workspaceId: number, page: number, pageSize: number) =>
+      ipcRenderer.invoke('chat-topic-get-paginated', workspaceId, page, pageSize),
     getTopicById: (id: number) => ipcRenderer.invoke('chat-topic-get-by-id', id),
-    createTopic: (title: string, model?: string, selectedTools?: string) =>
-      ipcRenderer.invoke('chat-topic-create', title, model, selectedTools),
+    createTopic: (workspaceId: number, title: string, model?: string, selectedTools?: string) =>
+      ipcRenderer.invoke('chat-topic-create', workspaceId, title, model, selectedTools),
     updateTopic: (
       id: number,
       updates: Partial<Pick<ChatTopicRow, 'title' | 'model' | 'selected_tools'>>
@@ -339,6 +346,26 @@ const api = {
         ipcRenderer.off('providers-changed', handler)
       }
     }
+  },
+  agents: {
+    getAll: () => ipcRenderer.invoke('agent-get-all') as Promise<AgentConfigRow[]>,
+    getPaginated: (page: number, pageSize: number) =>
+      ipcRenderer.invoke('agent-get-paginated', page, pageSize) as Promise<
+        AgentPaginatedResult<AgentConfigRow>
+      >,
+    getById: (id: number) =>
+      ipcRenderer.invoke('agent-get-by-id', id) as Promise<AgentConfigRow | null>,
+    create: (input: AgentConfigInput) =>
+      ipcRenderer.invoke('agent-create', input) as Promise<number>,
+    update: (id: number, updates: Partial<AgentConfigInput>) =>
+      ipcRenderer.invoke('agent-update', id, updates) as Promise<boolean>,
+    delete: (id: number) => ipcRenderer.invoke('agent-delete', id) as Promise<boolean>
+  },
+  mainAgent: {
+    get: () =>
+      ipcRenderer.invoke('main-agent-get') as Promise<{ tools: string[]; skills: string[] }>,
+    update: (config: { tools: string[]; skills: string[] }) =>
+      ipcRenderer.invoke('main-agent-update', config) as Promise<boolean>
   },
   systemSettings: {
     getAll: () => ipcRenderer.invoke('system-settings-get-all') as Promise<SystemSettings>,

@@ -40,7 +40,7 @@ export const computeTextDelta = (incoming: string, previous: string): string => 
 }
 
 /**
- * 将新块追加到数组末尾；只做追加，不根据子代理状态做重排。
+ * 将新块追加到数组末尾；只做追加，不根据智能体状态做重排。
  * 合并/去重由调用方负责，确保最终顺序严格等于事件流顺序。
  */
 export const pushBlock = (blocks: MessageBlock[], block: MessageBlock): void => {

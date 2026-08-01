@@ -82,7 +82,10 @@ const ChatMessageArea: React.FC<ChatMessageAreaProps> = ({
   }, [handleScroll])
 
   return (
-    <div ref={scrollRef} className="flex-1 overflow-y-scroll my-1 mr-1 ml-3 px-16 py-8 chat-scrollbar">
+    <div
+      ref={scrollRef}
+      className="flex-1 overflow-y-scroll my-1 mr-1 ml-3 px-16 py-8 chat-scrollbar"
+    >
       {messages.length === 0 ? (
         <div className="h-full flex flex-col items-center justify-center">
           <h1 className="text-2xl font-semibold mb-2 h-8" style={{ color: colorText }}>

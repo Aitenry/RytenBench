@@ -14,9 +14,16 @@ const dbDir = path.join(app.getPath('userData'), 'RytenBenchDB')
 const sqlDir = app.isPackaged
   ? path.join(process.resourcesPath, 'database', 'sql')
   : path.join(app.getAppPath(), 'src', 'main', 'database', 'sql')
-const createTablesSqlPath = path.join(sqlDir, 'create_tables.sql')
-const graphTablesSqlPath = path.join(sqlDir, 'graph_tables.sql')
-const cityCodeSqlPath = path.join(sqlDir, 'urban_resource.sql')
+const schemaMigrationsSqlPath = path.join(sqlDir, 'schema_migrations.sql')
+const imagesSqlPath = path.join(sqlDir, 'images.sql')
+const todosSqlPath = path.join(sqlDir, 'todos.sql')
+const plannerSqlPath = path.join(sqlDir, 'planner.sql')
+const wikiSqlPath = path.join(sqlDir, 'wiki.sql')
+const chatSqlPath = path.join(sqlDir, 'chat.sql')
+const musicSqlPath = path.join(sqlDir, 'music.sql')
+const nodePositionsSqlPath = path.join(sqlDir, 'node_positions.sql')
+const graphTablesSqlPath = path.join(sqlDir, 'graph.sql')
+const agentConfigSqlPath = path.join(sqlDir, 'agent_config.sql')
 const llmProvidersSqlPath = path.join(sqlDir, 'llm_providers.sql')
 
 export class Database {
@@ -41,10 +48,17 @@ export class Database {
   }
 
   private async initializeTables(): Promise<void> {
-    await this.executeSQLFile(createTablesSqlPath, 'create_tables.sql')
+    await this.executeSQLFile(schemaMigrationsSqlPath, 'schema_migrations.sql')
+    await this.executeSQLFile(imagesSqlPath, 'images.sql')
+    await this.executeSQLFile(todosSqlPath, 'todos.sql')
+    await this.executeSQLFile(plannerSqlPath, 'planner.sql')
+    await this.executeSQLFile(wikiSqlPath, 'wiki.sql')
+    await this.executeSQLFile(chatSqlPath, 'chat.sql')
+    await this.executeSQLFile(musicSqlPath, 'music.sql')
+    await this.executeSQLFile(nodePositionsSqlPath, 'node_positions.sql')
     await this.executeSQLFile(graphTablesSqlPath, 'graph_tables.sql')
+    await this.executeSQLFile(agentConfigSqlPath, 'agent_config.sql')
     await this.executeSQLFile(llmProvidersSqlPath, 'llm_providers.sql')
-    await this.executeSQLFileIfNotDone(cityCodeSqlPath, 'urban_resource.sql')
     logger.info('Initialization and SQL file execution complete.')
   }
 
@@ -55,27 +69,6 @@ export class Database {
     logger.info(`Executing SQL file: ${scriptName}`)
     await this.db!.exec(sqlContent)
     logger.info(`Successfully executed SQL file: ${scriptName}`)
-  }
-
-  // 检查并执行 SQL 文件（用于需要避免重复执行的场景，如插入初始数据）
-  private async executeSQLFileIfNotDone(filePath: string, scriptName: string): Promise<void> {
-    const checkResult = await this.db!.query(
-      'SELECT 1 FROM schema_migrations WHERE script_name = $1 LIMIT 1',
-      [scriptName]
-    )
-
-    if (checkResult.rows.length > 0) {
-      logger.info(`SQL file ${scriptName} has already been executed.`)
-      return
-    }
-
-    const sqlContent = await fs.readFile(filePath, 'utf8')
-    logger.info(`Executing SQL file from path: ${filePath}`)
-    await this.db!.exec(sqlContent)
-    logger.info(`Successfully executed SQL file: ${filePath}`)
-
-    await this.db!.query('INSERT INTO schema_migrations (script_name) VALUES ($1)', [scriptName])
-    logger.info(`Recorded execution of ${scriptName} in schema_migrations.`)
   }
 
   getDatabase(): PGlite {

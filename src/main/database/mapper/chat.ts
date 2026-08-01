@@ -3,8 +3,17 @@ import logger from 'electron-log'
 
 // --- 类型定义 ---
 
+export interface WorkspaceRow {
+  id: number
+  name: string
+  path: string
+  created_at: string
+  updated_at: string
+}
+
 export interface ChatTopicRow {
   id: number
+  workspace_id: number
   title: string
   model: string | null
   selected_tools: string | null
@@ -27,14 +36,57 @@ export interface PaginatedResult<T> {
   total: number
 }
 
-// --- chat_topic CRUD ---
+// --- workspace CRUD ---
 
-async function getAllTopics(): Promise<ChatTopicRow[]> {
+async function getAllWorkspaces(): Promise<WorkspaceRow[]> {
   try {
     const db = (await getDatabaseInstance()).getDatabase()
-    const sql = 'SELECT * FROM chat_topic ORDER BY updated_at DESC'
-    const result = await db.query<ChatTopicRow>(sql)
-    logger.info(`Query for all chat topics returned ${result.rows.length} rows.`)
+    const sql = 'SELECT * FROM workspace ORDER BY created_at ASC'
+    const result = await db.query<WorkspaceRow>(sql)
+    logger.info(`Query for all workspaces returned ${result.rows.length} rows.`)
+    return result.rows
+  } catch (error) {
+    logger.error('Failed to get all workspaces:', error)
+    throw error
+  }
+}
+
+async function createWorkspace(name: string, path: string): Promise<number> {
+  try {
+    const db = (await getDatabaseInstance()).getDatabase()
+    const sql = 'INSERT INTO workspace (name, path) VALUES ($1, $2) RETURNING id'
+    const result = await db.query<{ id: number }>(sql, [name, path])
+    const newId = result.rows[0].id
+    logger.info(`Created workspace ID=${newId}, name="${name}", path="${path}"`)
+    return newId
+  } catch (error) {
+    logger.error('Failed to create workspace:', error)
+    throw error
+  }
+}
+
+async function deleteWorkspace(id: number): Promise<boolean> {
+  try {
+    const db = (await getDatabaseInstance()).getDatabase()
+    const sql = 'DELETE FROM workspace WHERE id = $1'
+    const result = await db.query(sql, [id])
+    const changes = result.affectedRows ?? 0
+    logger.info(`Deleted workspace ID=${id}, ${changes} row(s) affected.`)
+    return changes > 0
+  } catch (error) {
+    logger.error('Failed to delete workspace:', error)
+    throw error
+  }
+}
+
+// --- chat_topic CRUD ---
+
+async function getAllTopics(workspaceId: number): Promise<ChatTopicRow[]> {
+  try {
+    const db = (await getDatabaseInstance()).getDatabase()
+    const sql = 'SELECT * FROM chat_topic WHERE workspace_id = $1 ORDER BY updated_at DESC'
+    const result = await db.query<ChatTopicRow>(sql, [workspaceId])
+    logger.info(`Query for chat topics in workspace=${workspaceId} returned ${result.rows.length} rows.`)
     return result.rows
   } catch (error) {
     logger.error('Failed to get all chat topics:', error)
@@ -43,19 +95,26 @@ async function getAllTopics(): Promise<ChatTopicRow[]> {
 }
 
 async function getAllTopicsPaginated(
+  workspaceId: number,
   page: number,
   pageSize: number
 ): Promise<PaginatedResult<ChatTopicRow>> {
   try {
+    const safePage = Number.isFinite(page) ? Math.floor(page) : 0
+    const safePageSize = Number.isFinite(pageSize) ? Math.floor(pageSize) : 20
+    const safeWorkspaceId = Number.isFinite(workspaceId) ? Math.floor(workspaceId) : 0
+
     const db = (await getDatabaseInstance()).getDatabase()
     const countResult = await db.query<{ total: number }>(
-      'SELECT COUNT(*)::int as total FROM chat_topic'
+      'SELECT COUNT(*)::int as total FROM chat_topic WHERE workspace_id = $1',
+      [safeWorkspaceId]
     )
     const total = countResult.rows[0]?.total ?? 0
-    const sql = 'SELECT * FROM chat_topic ORDER BY updated_at DESC LIMIT $1 OFFSET $2'
-    const result = await db.query<ChatTopicRow>(sql, [pageSize, page * pageSize])
+    const sql =
+      'SELECT * FROM chat_topic WHERE workspace_id = $1 ORDER BY updated_at DESC LIMIT $2 OFFSET $3'
+    const result = await db.query<ChatTopicRow>(sql, [safeWorkspaceId, safePageSize, safePage * safePageSize])
     logger.info(
-      `Paginated topics: page=${page}, size=${pageSize}, got=${result.rows.length}, total=${total}`
+      `Paginated topics: workspace=${workspaceId}, page=${page}, size=${pageSize}, got=${result.rows.length}, total=${total}`
     )
     return {
       items: result.rows,
@@ -80,18 +139,24 @@ async function getTopicById(id: number): Promise<ChatTopicRow[]> {
   }
 }
 
-async function createTopic(title: string, model?: string, selectedTools?: string): Promise<number> {
+async function createTopic(
+  workspaceId: number,
+  title: string,
+  model?: string,
+  selectedTools?: string
+): Promise<number> {
   try {
     const db = (await getDatabaseInstance()).getDatabase()
     const sql =
-      'INSERT INTO chat_topic (title, model, selected_tools) VALUES ($1, $2, $3) RETURNING id'
+      'INSERT INTO chat_topic (workspace_id, title, model, selected_tools) VALUES ($1, $2, $3, $4) RETURNING id'
     const result = await db.query<{ id: number }>(sql, [
+      workspaceId,
       title,
       model || null,
       selectedTools || null
     ])
     const newId = result.rows[0].id
-    logger.info(`Created chat topic with ID: ${newId}, title: ${title}`)
+    logger.info(`Created chat topic ID=${newId} in workspace=${workspaceId}, title: ${title}`)
     return newId
   } catch (error) {
     logger.error('Failed to create chat topic:', error)
@@ -176,16 +241,20 @@ async function getDialoguesByTopicIdPaginated(
   pageSize: number
 ): Promise<PaginatedResult<ChatDialogueRow>> {
   try {
+    const safePage = Number.isFinite(page) ? Math.floor(page) : 0
+    const safePageSize = Number.isFinite(pageSize) ? Math.floor(pageSize) : 20
+    const safeTopicId = Number.isFinite(topicId) ? Math.floor(topicId) : 0
+
     const db = (await getDatabaseInstance()).getDatabase()
     const countResult = await db.query<{ total: number }>(
       'SELECT COUNT(*)::int as total FROM chat_dialogue WHERE topic_id = $1',
-      [topicId]
+      [safeTopicId]
     )
     const total = countResult.rows[0]?.total ?? 0
     // 从最新消息开始分页：DESC 排序，取一页后反转，上层得到 oldest→newest
     const sql =
       'SELECT * FROM chat_dialogue WHERE topic_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3'
-    const result = await db.query<ChatDialogueRow>(sql, [topicId, pageSize, page * pageSize])
+    const result = await db.query<ChatDialogueRow>(sql, [safeTopicId, safePageSize, safePage * safePageSize])
     const items = result.rows.reverse()
     logger.info(
       `Paginated dialogues: topic=${topicId}, page=${page}, size=${pageSize}, got=${items.length}, total=${total}`
@@ -242,6 +311,9 @@ async function deleteDialogueById(id: number): Promise<boolean> {
 }
 
 export {
+  getAllWorkspaces,
+  createWorkspace,
+  deleteWorkspace,
   getAllTopics,
   getAllTopicsPaginated,
   getTopicById,

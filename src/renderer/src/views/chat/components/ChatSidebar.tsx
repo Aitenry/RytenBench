@@ -131,10 +131,7 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
                   )}
                   <div className="flex-1 min-w-0">
                     <span className="block text-sm truncate">{topic.title}</span>
-                    <span
-                      className="block text-xs truncate"
-                      style={{ color: colorTextTertiary }}
-                    >
+                    <span className="block text-xs truncate" style={{ color: colorTextTertiary }}>
                       {new Date(topic.updated_at).toLocaleDateString('zh-CN', {
                         month: '2-digit',
                         day: '2-digit'
@@ -164,12 +161,8 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
                     <button
                       onClick={(e) => e.stopPropagation()}
                       className="opacity-0 group-hover:opacity-100 p-0.5 rounded transition-all"
-                      onMouseEnter={(e) =>
-                        (e.currentTarget.style.background = colorFillAlter)
-                      }
-                      onMouseLeave={(e) =>
-                        (e.currentTarget.style.background = 'transparent')
-                      }
+                      onMouseEnter={(e) => (e.currentTarget.style.background = colorFillAlter)}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
                     >
                       <RiMoreLine size={16} style={{ color: colorTextTertiary }} />
                     </button>

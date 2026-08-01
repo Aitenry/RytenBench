@@ -13,8 +13,7 @@ import {
   Popconfirm,
   Space,
   Tooltip,
-  Checkbox,
-  List
+  Checkbox
 } from 'antd'
 import {
   PlusOutlined,
@@ -606,7 +605,7 @@ const ModelSettings: React.FC = () => {
         styles={{ body: { maxHeight: 480, padding: 12, overflowY: 'auto' } }}
         classNames={{ body: 'custom-scrollbar' }}
       >
-        <Space direction="vertical" style={{ width: '100%' }} size="middle">
+        <Space orientation="vertical" style={{ width: '100%' }} size="middle">
           <Space>
             <Select
               value={fetchProviderType}
@@ -662,15 +661,13 @@ const ModelSettings: React.FC = () => {
                 onChange={(vals) => setCheckedModels(vals as string[])}
                 style={{ width: '100%' }}
               >
-                <List
-                  size="small"
-                  dataSource={fetchModels}
-                  renderItem={(m) => (
-                    <List.Item style={{ padding: '4px 0', border: 'none' }}>
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  {fetchModels.map((m) => (
+                    <div key={m.id} style={{ padding: '4px 0' }}>
                       <Checkbox value={m.id}>{m.id}</Checkbox>
-                    </List.Item>
-                  )}
-                />
+                    </div>
+                  ))}
+                </div>
               </Checkbox.Group>
             </div>
           )}

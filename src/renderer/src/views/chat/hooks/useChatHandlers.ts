@@ -15,7 +15,6 @@ const MESSAGES_PAGE_SIZE = 20 // 10对消息
 interface SessionState {
   messages: Message[]
   inputValue: string
-  selectedTools: string[]
   attachments: Attachment[]
   sessionId: string | null
 }
@@ -24,8 +23,6 @@ export interface UseChatHandlersReturn {
   messages: Message[]
   inputValue: string
   setInputValue: React.Dispatch<React.SetStateAction<string>>
-  selectedTools: string[]
-  setSelectedTools: React.Dispatch<React.SetStateAction<string[]>>
   availableTools: ToolInfo[]
   copiedId: string | null
   currentTopicId: number | null
@@ -75,14 +72,26 @@ export interface UseChatHandlersReturn {
 export const useChatHandlers = (): UseChatHandlersReturn => {
   const [messages, setMessages] = useState<Message[]>([])
   const [inputValue, setInputValue] = useState('')
-  const [selectedTools, setSelectedTools] = useState<string[]>([])
   const [availableTools, setAvailableTools] = useState<ToolInfo[]>([])
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<TextAreaRef>(null)
   const currentSessionIdRef = useRef<string | null>(null)
 
-  /** 当前活跃的子代理 causeId 集合：用于把子代理事件路由到正确块 */
+  /** 当前活跃的工作区 ID */
+  const activeWorkspaceIdRef = useRef<number>(0)
+  const getActiveWorkspaceId = useCallback(async (): Promise<number> => {
+    try {
+      const settings = await (window as unknown as Window).api.systemSettings.getAll()
+      const id = settings.chat.activeWorkspaceId ?? 0
+      activeWorkspaceIdRef.current = id
+      return id
+    } catch {
+      return activeWorkspaceIdRef.current
+    }
+  }, [])
+
+  /** 当前活跃的智能体 causeId 集合：用于把智能体事件路由到正确块 */
   const activeSubAgentCauseIdsRef = useRef<Map<number, Set<string>>>(new Map())
   const [currentTopicId, setCurrentTopicId] = useState<number | null>(null)
   const currentTopicIdRef = useRef<number | null>(null)
@@ -160,7 +169,6 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
     const loadProviders = async (): Promise<void> => {
       try {
         const list = await (window as unknown as Window).api.providers.getEnabled()
-        // 排除向量/嵌入模型：标签含 embedding，或名称/模型名含 embedding（不区分大小写）
         const isEmbeddingModel = (p: LlmProviderConfig): boolean => {
           if (p.tags?.some((t) => t.toLowerCase() === 'embedding')) return true
           const lowered = (p.name + p.model).toLowerCase()
@@ -168,6 +176,8 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
         }
         const chatModels = list.filter((p) => !isEmbeddingModel(p))
         setProviders(chatModels)
+
+        // 模型：优先使用默认 provider
         const defaultProvider = await (window as unknown as Window).api.providers.getDefault()
         if (defaultProvider && !isEmbeddingModel(defaultProvider)) {
           setSelectedProviderId(defaultProvider.id)
@@ -189,7 +199,9 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
     try {
       setTopicsLoading(true)
       setTopicsPage(0)
+      const workspaceId = await getActiveWorkspaceId()
       const result = await (window as unknown as Window).api.chat.getAllTopicsPaginated(
+        workspaceId,
         0,
         TOPICS_PAGE_SIZE
       )
@@ -200,14 +212,16 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
     } finally {
       setTopicsLoading(false)
     }
-  }, [])
+  }, [getActiveWorkspaceId])
 
   const handleLoadMoreTopics = useCallback(async (): Promise<void> => {
     if (topicsLoading || !topicsHasMore) return
     try {
       setTopicsLoading(true)
       const nextPage = topicsPage + 1
+      const workspaceId = await getActiveWorkspaceId()
       const result = await (window as unknown as Window).api.chat.getAllTopicsPaginated(
+        workspaceId,
         nextPage,
         TOPICS_PAGE_SIZE
       )
@@ -219,7 +233,7 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
     } finally {
       setTopicsLoading(false)
     }
-  }, [topicsPage, topicsHasMore, topicsLoading])
+  }, [topicsPage, topicsHasMore, topicsLoading, getActiveWorkspaceId])
 
   useEffect(() => {
     refreshTopics().then()
@@ -246,11 +260,10 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
     sessionsRef.current.set(topicId, {
       messages: [...messages],
       inputValue,
-      selectedTools: [...selectedTools],
       attachments: [...attachments],
       sessionId: currentSessionIdRef.current
     })
-  }, [messages, inputValue, selectedTools, attachments])
+  }, [messages, inputValue, attachments])
 
   /** 从缓存恢复会话到当前对话窗口 */
   const restoreSessionFromCache = useCallback((topicId: number): boolean => {
@@ -258,13 +271,12 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
     if (!cached) return false
     setMessages(cached.messages)
     setInputValue(cached.inputValue)
-    setSelectedTools(cached.selectedTools)
     setAttachments(cached.attachments)
     currentSessionIdRef.current = cached.sessionId
     return true
   }, [])
 
-  // ── 处理流式 chunk 的核心逻辑（主代理 + 子代理） ──
+  // ── 处理流式 chunk 的核心逻辑（主代理 + 智能体） ──
 
   /** 将 stream chunk 应用到消息上，返回更新后的 messages 浅拷贝 */
   const applyChunkToMessages = useCallback(
@@ -673,7 +685,7 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
           // 完成后清除缓存（后续切换回来直接读数据库）
           sessionsRef.current.delete(doneTopicId)
 
-          // 清理子代理追踪
+          // 清理智能体追踪
           activeSubAgentCauseIdsRef.current.delete(doneTopicId)
 
           // 清理流监听器（doneCleanup 自身由 startStreamListener L575-576 在下一次同 topic 启动时清理）
@@ -743,7 +755,6 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
     currentTopicIdRef.current = null
     messagesBelongToTopicRef.current = null
     setInputValue('')
-    setSelectedTools([])
     setAttachments([])
     setIsLoading(false)
   }, [saveSessionToCache])
@@ -757,17 +768,6 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
 
       currentTopicIdRef.current = topic.id
       setCurrentTopicId(topic.id)
-
-      // 恢复选中工具
-      if (topic.selected_tools) {
-        try {
-          setSelectedTools(JSON.parse(topic.selected_tools))
-        } catch {
-          setSelectedTools([])
-        }
-      } else {
-        setSelectedTools([])
-      }
 
       // 先尝试从缓存恢复（进行中的会话）
       const restored = restoreSessionFromCache(topic.id)
@@ -785,9 +785,11 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
       setMessagesHasMore(true)
 
       try {
-        const result = await (
-          window as unknown as Window
-        ).api.chat.getDialoguesByTopicPaginated(topic.id, 0, MESSAGES_PAGE_SIZE)
+        const result = await (window as unknown as Window).api.chat.getDialoguesByTopicPaginated(
+          topic.id,
+          0,
+          MESSAGES_PAGE_SIZE
+        )
         const loadedMessages: Message[] = result.items.map((d) => ({
           id: String(d.id),
           role: d.role,
@@ -850,9 +852,7 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
     try {
       setMessagesLoadingMore(true)
       const nextPage = messagesPage + 1
-      const result = await (
-        window as unknown as Window
-      ).api.chat.getDialoguesByTopicPaginated(
+      const result = await (window as unknown as Window).api.chat.getDialoguesByTopicPaginated(
         currentTopicIdRef.current,
         nextPage,
         MESSAGES_PAGE_SIZE
@@ -931,7 +931,8 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
       let topicId = currentTopicIdRef.current
       if (!topicId) {
         const title = userMessage.content.slice(0, 50)
-        topicId = await (window as unknown as Window).api.chat.createTopic(title)
+        const workspaceId = await getActiveWorkspaceId()
+        topicId = await (window as unknown as Window).api.chat.createTopic(workspaceId, title)
         currentTopicIdRef.current = topicId
         setCurrentTopicId(topicId)
         refreshTopics().then()
@@ -956,7 +957,6 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
       sessionsRef.current.set(topicId, {
         messages: currentMessages,
         inputValue: '',
-        selectedTools: [...selectedTools],
         attachments: [],
         sessionId: aiMessageId
       })
@@ -966,7 +966,6 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
       setMessages(currentMessages)
 
       ;(window as unknown as Window).api.chat.startMessageStream(userMessage.content, {
-        tools: selectedTools,
         images: currentImages.length > 0 ? currentImages : undefined,
         documents: currentDocuments.length > 0 ? currentDocuments : undefined,
         topicId,
@@ -995,7 +994,6 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
   }, [
     messages,
     inputValue,
-    selectedTools,
     attachments,
     selectedProviderId,
     startStreamListener,
@@ -1095,7 +1093,7 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
       label: provider.charAt(0).toUpperCase() + provider.slice(1),
       options: opts.map((o) => ({
         value: o.value,
-        label: o.model,
+        label: o.name,
         providerType: provider
       }))
     }))
@@ -1106,8 +1104,6 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
     messages,
     inputValue,
     setInputValue,
-    selectedTools,
-    setSelectedTools,
     availableTools,
     copiedId,
     currentTopicId,

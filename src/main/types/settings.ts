@@ -22,6 +22,8 @@ export interface ChatSettings {
   enabledSkills?: string[]
   /** AI 工作区目录，挂载为 FilesystemBackend 的根目录（虚拟 /）；未设置时回退到 skillsPath */
   workspacePath?: string
+  /** 当前活跃的工作区 ID，用于按工作区筛选话题 */
+  activeWorkspaceId?: number
 }
 
 export type ThemeMode = 'light' | 'dark' | 'auto'

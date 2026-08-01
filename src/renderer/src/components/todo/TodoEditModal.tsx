@@ -124,66 +124,73 @@ const TodoEditModal: React.FC<TodoEditModalProps> = ({
         okText="保存"
         cancelText="取消"
       >
-        {currentTodo && (
-          <Form
-            form={editForm}
-            layout="vertical"
-            initialValues={{
-              title: currentTodo.title,
-              description: currentTodo.description,
-              due_date: currentTodo.due_date ? dayjs(currentTodo.due_date) : null,
-              priority: currentTodo.priority,
-              status: currentTodo.status,
-              category: currentTodo.category
-            }}
-          >
-            <Form.Item
-              name="title"
-              label="标题"
-              rules={[{ required: true, message: '请输入标题' }]}
-            >
-              <Input placeholder="请输入待办事项标题" />
-            </Form.Item>
-
-            <Form.Item name="description" label="描述">
-              <Input.TextArea rows={4} placeholder="请输入待办事项描述" />
-            </Form.Item>
-
-            <Form.Item name="due_date" label="截止日期">
-              <DatePicker
-                style={{ width: '100%' }}
-                placeholder="请选择截止日期"
-                format="YYYY-MM-DD"
-              />
-            </Form.Item>
-
-            <div className="grid grid-cols-3 gap-4">
-              <Form.Item name="priority" label="优先级" className="mb-0">
-                <Select placeholder="请选择优先级">
-                  {[0, 1, 2, 3, 4, 5, 6, 7].map((p) => (
-                    <Select.Option key={p} value={p}>
-                      P{p}
-                    </Select.Option>
-                  ))}
-                </Select>
+        <Form
+          key={currentTodo?.id ?? 'edit-form-empty'}
+          form={editForm}
+          layout="vertical"
+          initialValues={
+            currentTodo
+              ? {
+                  title: currentTodo.title,
+                  description: currentTodo.description,
+                  due_date: currentTodo.due_date ? dayjs(currentTodo.due_date) : null,
+                  priority: currentTodo.priority,
+                  status: currentTodo.status,
+                  category: currentTodo.category
+                }
+              : undefined
+          }
+        >
+          {currentTodo && (
+            <>
+              <Form.Item
+                name="title"
+                label="标题"
+                rules={[{ required: true, message: '请输入标题' }]}
+              >
+                <Input placeholder="请输入待办事项标题" />
               </Form.Item>
 
-              <Form.Item name="status" label="状态" className="mb-0">
-                <Select placeholder="请选择状态">
-                  {getStatusOptions(currentTodo.status).map((option) => (
-                    <Select.Option key={option.value} value={option.value}>
-                      {option.label}
-                    </Select.Option>
-                  ))}
-                </Select>
+              <Form.Item name="description" label="描述">
+                <Input.TextArea rows={4} placeholder="请输入待办事项描述" />
               </Form.Item>
 
-              <Form.Item name="category" label="分类" className="mb-0">
-                <Input placeholder="请输入分类" />
+              <Form.Item name="due_date" label="截止日期">
+                <DatePicker
+                  style={{ width: '100%' }}
+                  placeholder="请选择截止日期"
+                  format="YYYY-MM-DD"
+                />
               </Form.Item>
-            </div>
-          </Form>
-        )}
+
+              <div className="grid grid-cols-3 gap-4">
+                <Form.Item name="priority" label="优先级" className="mb-0">
+                  <Select placeholder="请选择优先级">
+                    {[0, 1, 2, 3, 4, 5, 6, 7].map((p) => (
+                      <Select.Option key={p} value={p}>
+                        P{p}
+                      </Select.Option>
+                    ))}
+                  </Select>
+                </Form.Item>
+
+                <Form.Item name="status" label="状态" className="mb-0">
+                  <Select placeholder="请选择状态">
+                    {getStatusOptions(currentTodo.status).map((option) => (
+                      <Select.Option key={option.value} value={option.value}>
+                        {option.label}
+                      </Select.Option>
+                    ))}
+                  </Select>
+                </Form.Item>
+
+                <Form.Item name="category" label="分类" className="mb-0">
+                  <Input placeholder="请输入分类" />
+                </Form.Item>
+              </div>
+            </>
+          )}
+        </Form>
       </Modal>
 
       {/* Add Modal */}

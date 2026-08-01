@@ -17,14 +17,14 @@ interface IpApiResponse {
   query: string
 }
 
-export const getIp = async (): Promise<IpApiResponse> => {
+export const getIp = async (): Promise<IpApiResponse | null> => {
   try {
     const response = await axios.get('http://ip-api.com/json/?lang=zh-CN', {
       timeout: 3000
     })
     return response.data
   } catch (error) {
-    console.error('Error fetching IP data:', error)
-    throw error
+    console.error('Error fetching IP data:', (error as Error).message)
+    return null
   }
 }

@@ -28,8 +28,6 @@ const Index: React.FC = () => {
     messages,
     inputValue,
     setInputValue,
-    selectedTools,
-    setSelectedTools,
     availableTools,
     copiedId,
     currentTopicId,
@@ -138,9 +136,6 @@ const Index: React.FC = () => {
         <ChatHeader
           sidebarOpen={sidebarOpen}
           onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
-          selectedProviderId={selectedProviderId}
-          onSelectProvider={(value) => setSelectedProviderId(value)}
-          groupedProviderOptions={groupedProviderOptions}
           colorBorderSecondary={colorBorderSecondary}
           onNewChat={handleNewChat}
         />
@@ -174,9 +169,9 @@ const Index: React.FC = () => {
               attachments={attachments}
               onAttachmentsChange={setAttachments}
               isLoading={isLoading}
-              selectedTools={selectedTools}
-              onSelectedToolsChange={setSelectedTools}
-              availableTools={availableTools}
+              selectedProviderId={selectedProviderId}
+              onSelectProvider={(value) => setSelectedProviderId(value)}
+              groupedProviderOptions={groupedProviderOptions}
               modelSupportsTools={modelSupportsTools}
               modelSupportsVision={modelSupportsVision}
               isDarkMode={isDarkMode}

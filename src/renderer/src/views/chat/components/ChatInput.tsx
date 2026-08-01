@@ -1,11 +1,41 @@
-import React from 'react'
-import { Input, Button, Tooltip, Select, Tag } from 'antd'
+import React, { useMemo } from 'react'
+import { Input, Button, Tooltip, Select } from 'antd'
 import type { TextAreaRef } from 'antd/es/input/TextArea'
 import { RiArrowUpLine, RiAttachment2, RiCloseLine, RiStopFill } from '@remixicon/react'
-import { toolIconMap } from './ChatConstants'
+import {
+  OpenAIFilled,
+  DeepSeekFilled,
+  OllamaFilled,
+  MistralFilled,
+  AnthropicFilled,
+  GeminiFilled
+} from '@ant-design/icons'
 import type { Attachment } from '@renderer/types/chat'
-import type { ToolInfo } from '../../../../resource/types/window'
 import { Window } from '../../../../resource/types/window'
+
+const providerIconMap: Record<string, React.ComponentType<{ style?: React.CSSProperties }> | null> =
+  {
+    openai: OpenAIFilled,
+    deepseek: DeepSeekFilled,
+    ollama: OllamaFilled,
+    mistral: MistralFilled,
+    anthropic: AnthropicFilled,
+    'google-genai': GeminiFilled,
+    'google-vertexai': GeminiFilled
+  }
+
+const providerColors: Record<string, string> = {
+  openai: '#10a37f',
+  deepseek: '#4d6bfe',
+  ollama: '#000000',
+  openrouter: '#6366f1',
+  mistral: '#f90',
+  xai: '#1d9bf0',
+  anthropic: '#d97757',
+  'google-genai': '#4285f4',
+  'google-vertexai': '#4285f4',
+  groq: '#f55036'
+}
 
 interface ChatInputProps {
   inputValue: string
@@ -14,9 +44,12 @@ interface ChatInputProps {
   attachments: Attachment[]
   onAttachmentsChange: (attachments: Attachment[]) => void
   isLoading: boolean
-  selectedTools: string[]
-  onSelectedToolsChange: (tools: string[]) => void
-  availableTools: ToolInfo[]
+  selectedProviderId: number | null
+  onSelectProvider: (value: number) => void
+  groupedProviderOptions: {
+    label: string
+    options: { value: number; label: string; providerType: string }[]
+  }[]
   modelSupportsTools: boolean
   modelSupportsVision: boolean
   isDarkMode: boolean
@@ -36,9 +69,9 @@ const ChatInput: React.FC<ChatInputProps> = ({
   attachments,
   onAttachmentsChange,
   isLoading,
-  selectedTools,
-  onSelectedToolsChange,
-  availableTools,
+  selectedProviderId,
+  onSelectProvider,
+  groupedProviderOptions,
   modelSupportsTools,
   modelSupportsVision,
   isDarkMode,
@@ -50,6 +83,19 @@ const ChatInput: React.FC<ChatInputProps> = ({
   onStop,
   onKeyDown
 }) => {
+  const selectedProviderType = useMemo(() => {
+    if (selectedProviderId == null) return ''
+    for (const group of groupedProviderOptions) {
+      for (const opt of group.options) {
+        if (opt.value === selectedProviderId) return opt.providerType
+      }
+    }
+    return ''
+  }, [selectedProviderId, groupedProviderOptions])
+
+  const SelectedIcon = providerIconMap[selectedProviderType]
+  const selectedColor = providerColors[selectedProviderType] || undefined
+
   return (
     <div
       className="rounded-2xl input-scrollbar"
@@ -144,66 +190,77 @@ const ChatInput: React.FC<ChatInputProps> = ({
               }}
             />
           </Tooltip>
-          <Tooltip
-            title={
-              modelSupportsTools
-                ? '选择工具'
-                : '当前模型不支持工具调用，请切换至支持 Tools 标签的模型'
-            }
-          >
-            <Select
-              mode="multiple"
-              placeholder="选择工具"
-              value={selectedTools}
-              onChange={onSelectedToolsChange}
-              style={{ minWidth: 140, padding: '6px', borderRadius: '10px' }}
-              size="small"
-              allowClear
-              disabled={!modelSupportsTools}
-              maxTagCount={1}
-              maxTagPlaceholder={(omitted) => <span>+{omitted.length}</span>}
-              optionRender={(option) => {
-                const tool = availableTools.find((t) => t.name === option.value)
-                if (!tool) return option.label as React.ReactNode
-                return (
-                  <div className="flex items-center gap-2">
-                    <span style={{ color: tool.color }}>{toolIconMap[tool.icon]}</span>
-                    <span>{tool.label}</span>
-                  </div>
-                )
-              }}
-              tagRender={(props) => {
-                const tool = availableTools.find((t) => t.name === props.value)
-                const { label, closable, onClose } = props
-                return (
-                  <Tag
-                    closable={closable}
-                    onClose={onClose}
+          <Select
+            size="small"
+            value={selectedProviderId}
+            onChange={(value) => onSelectProvider(value)}
+            style={{ minWidth: 140, padding: '6px', borderRadius: '10px' }}
+            placeholder="选择模型"
+            showSearch={{
+              filterOption: (input, option) =>
+                (option?.label as string)?.toLowerCase().includes(input.toLowerCase()) ?? false
+            }}
+            popupMatchSelectWidth={false}
+            popupStyle={{ minWidth: 260 }}
+            labelRender={(props) => (
+              <span className="flex items-center gap-1.5">
+                {SelectedIcon ? (
+                  <SelectedIcon style={{ fontSize: 14, color: selectedColor }} />
+                ) : selectedProviderType ? (
+                  <span
                     style={{
-                      marginInlineEnd: 4,
-                      background: tool ? `${tool.color}12` : undefined,
-                      border: tool ? `1px solid ${tool.color}30` : undefined,
-                      color: tool?.color,
-                      borderRadius: 12,
-                      paddingInline: 8,
-                      display: 'flex',
+                      display: 'inline-flex',
                       alignItems: 'center',
-                      justifyContent: 'space-between'
+                      justifyContent: 'center',
+                      width: 14,
+                      height: 14,
+                      borderRadius: 3,
+                      background: `${providerColors[selectedProviderType] || '#888'}20`,
+                      color: providerColors[selectedProviderType] || '#888',
+                      fontSize: 9,
+                      fontWeight: 600,
+                      flexShrink: 0
                     }}
                   >
-                    <span style={{ marginRight: 4 }}>{tool ? toolIconMap[tool.icon] : null}</span>
-                    {label}
-                  </Tag>
-                )
-              }}
-              options={availableTools.map((t) => ({
-                value: t.name,
-                label: t.label,
-                icon: t.icon,
-                color: t.color
-              }))}
-            />
-          </Tooltip>
+                    {selectedProviderType.charAt(0).toUpperCase()}
+                  </span>
+                ) : null}
+                {props.label}
+              </span>
+            )}
+            optionRender={(option) => {
+              const providerType = (option.data as { providerType?: string })?.providerType ?? ''
+              const Icon = providerIconMap[providerType]
+              const color = providerColors[providerType] || '#888'
+              return (
+                <div className="flex items-center gap-2">
+                  {Icon ? (
+                    <Icon style={{ fontSize: 18, color }} />
+                  ) : (
+                    <span
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        width: 18,
+                        height: 18,
+                        borderRadius: 4,
+                        background: `${color}18`,
+                        color,
+                        fontSize: 10,
+                        fontWeight: 600,
+                        flexShrink: 0
+                      }}
+                    >
+                      {providerType.charAt(0).toUpperCase()}
+                    </span>
+                  )}
+                  <span>{option.label as string}</span>
+                </div>
+              )
+            }}
+            options={groupedProviderOptions}
+          />
         </div>
         <div className="flex items-center gap-2">
           {isLoading ? (

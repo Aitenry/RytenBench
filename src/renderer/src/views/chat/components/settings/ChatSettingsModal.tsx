@@ -1,10 +1,17 @@
 import React, { useState } from 'react'
 import { Modal, theme } from 'antd'
-import { RiSettings4Line, RiFileAi2Line, RiServerLine, RiListIndefinite } from '@remixicon/react'
+import {
+  RiSettings4Line,
+  RiFileAi2Line,
+  RiServerLine,
+  RiListIndefinite,
+  RiAiAgentLine
+} from '@remixicon/react'
 import SkillsSettings from './SkillsSettings'
 import GeneralSettings from './GeneralSettings'
+import AgentSettings from './AgentSettings'
 
-type SettingsTab = 'general' | 'skills' | 'mcp'
+type SettingsTab = 'general' | 'skills' | 'agents' | 'mcp'
 
 const TAB_ITEMS: {
   key: SettingsTab
@@ -12,6 +19,7 @@ const TAB_ITEMS: {
   icon: React.ReactNode
 }[] = [
   { key: 'general', label: '通用', icon: <RiListIndefinite size={18} /> },
+  { key: 'agents', label: '智能体', icon: <RiAiAgentLine size={18} /> },
   { key: 'skills', label: '技能', icon: <RiFileAi2Line size={18} /> },
   { key: 'mcp', label: 'MCP', icon: <RiServerLine size={18} /> }
 ]
@@ -40,6 +48,8 @@ const ChatSettingsModal: React.FC<ChatSettingsModalProps> = ({ open, onClose }) 
     switch (activeTab) {
       case 'general':
         return <GeneralSettings />
+      case 'agents':
+        return <AgentSettings />
       case 'skills':
         return <SkillsSettings />
       case 'mcp':

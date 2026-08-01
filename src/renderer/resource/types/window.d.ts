@@ -1,10 +1,11 @@
 import { TodoItemRow } from '../../../main/database/mapper/todo'
 import { DocRow, DocListItem, DocWithContent } from '../../../main/database/mapper/document'
 import { WikiRow, WikiDirectoryRow } from '../../../main/database/mapper/wiki'
-import { ChatTopicRow, ChatDialogueRow } from '../../../main/database/mapper/chat'
+import { ChatTopicRow, ChatDialogueRow, WorkspaceRow } from '../../../main/database/mapper/chat'
 import { GraphEntity, GraphBuildJob, GraphData } from '../../../main/database/mapper/graph'
 import { Lock } from '@renderer/types/settings'
 import { LlmProviderInput, LlmProviderConfig } from '../../../../main/database/mapper/provider'
+import { AgentConfigRow, AgentConfigInput } from '../../../../main/database/mapper/agent'
 import { SystemSettings } from '@renderer/types/settings'
 
 export interface PaginatedResult<T> {
@@ -30,7 +31,7 @@ export interface StructuredMessage {
 
 export interface SubAgentEvent {
   name: string
-  /** 派遣此子代理的 task 工具调用唯一 ID */
+  /** 派遣此智能体的 task 工具调用唯一 ID */
   causeId?: string
   status: 'started' | 'running' | 'completed' | 'error'
   output?: string
@@ -164,7 +165,6 @@ export interface Window {
       sendMessage: (
         message: string,
         options?: {
-          tools?: string[]
           images?: string[]
           documents?: { fileName: string; filePath: string }[]
           providerId?: number
@@ -177,7 +177,6 @@ export interface Window {
       startMessageStream: (
         message: string,
         options?: {
-          tools?: string[]
           images?: string[]
           documents?: { fileName: string; filePath: string }[]
           topicId?: number
@@ -188,13 +187,17 @@ export interface Window {
       selectSkillsDirectory: () => Promise<string | null>
       selectWorkspace: () => Promise<string | null>
       listSkills: () => Promise<{ id: string; name: string; description: string }[]>
-      getAllTopics: () => Promise<ChatTopicRow[]>
+      getAllWorkspaces: () => Promise<WorkspaceRow[]>
+      createWorkspace: (name: string, path: string) => Promise<number>
+      deleteWorkspace: (id: number) => Promise<boolean>
+      getAllTopics: (workspaceId: number) => Promise<ChatTopicRow[]>
       getAllTopicsPaginated: (
+        workspaceId: number,
         page: number,
         pageSize: number
       ) => Promise<PaginatedResult<ChatTopicRow>>
       getTopicById: (id: number) => Promise<ChatTopicRow[]>
-      createTopic: (title: string, model?: string, selectedTools?: string) => Promise<number>
+      createTopic: (workspaceId: number, title: string, model?: string, selectedTools?: string) => Promise<number>
       updateTopic: (
         id: number,
         updates: Partial<Pick<ChatTopicRow, 'title' | 'model' | 'selected_tools'>>
@@ -264,6 +267,18 @@ export interface Window {
         apiKey?: string
       ) => Promise<{ id: string }[]>
       onChanged: (callback: () => void) => () => void
+    }
+    agents: {
+      getAll: () => Promise<AgentConfigRow[]>
+      getPaginated: (page: number, pageSize: number) => Promise<PaginatedResult<AgentConfigRow>>
+      getById: (id: number) => Promise<AgentConfigRow | null>
+      create: (input: AgentConfigInput) => Promise<number>
+      update: (id: number, updates: Partial<AgentConfigInput>) => Promise<boolean>
+      delete: (id: number) => Promise<boolean>
+    }
+    mainAgent: {
+      get: () => Promise<{ tools: string[]; skills: string[] }>
+      update: (config: { tools: string[]; skills: string[] }) => Promise<boolean>
     }
     systemSettings: {
       getAll: () => Promise<SystemSettings>

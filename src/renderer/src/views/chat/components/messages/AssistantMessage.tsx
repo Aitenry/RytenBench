@@ -344,7 +344,7 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
               : `${sa.name} · 已完成`
           const saIconColor = isError ? '#ef4444' : isActive ? '#1677ff' : '#52c41a'
 
-          // 递归渲染子代理的嵌套子块（text / tool / reasoning / subAgent）
+          // 递归渲染智能体的嵌套子块（text / tool / reasoning / subAgent）
           const renderChildren = (children: MessageBlock[], depth = 0): React.ReactNode => {
             // 合并相邻的 reasoning 块：防止模型把 reasoning 拆成 token 级事件，导致满屏"思考过程"
             // 合并相邻的 text 块：避免流式输出把正文拆成 "Good" / "," / "found" 等碎片
@@ -577,7 +577,7 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                         renderChildren(block.children)
                       ) : isActive ? (
                         <div style={{ color: colorTextTertiary }} className="text-sm italic">
-                          子代理正在执行中…
+                          智能体正在执行中…
                         </div>
                       ) : sa.error ? (
                         <div style={{ color: '#ef4444' }} className="text-sm">

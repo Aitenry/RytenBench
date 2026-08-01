@@ -109,7 +109,7 @@ class ChatService {
   /**
    * @param model 已创建的 BaseChatModel 实例（由外部 ProviderService 提供）
    * @param tools 工具列表
-   * @param subAgents 子代理定义列表
+   * @param subAgents 智能体定义列表
    * @param maxIterations 工具调用最大轮次（保留兼容性，deepAgents 内部自动管理）
    * @param loadHistory 从数据库加载历史对话的回调（由主进程注入，避免循环依赖）
    * @param historyWindowSize 历史对话轮次上限（0 = 不限制），默认 10
@@ -148,7 +148,7 @@ class ChatService {
   /**
    * 创建 DeepAgent 实例；配置工作区目录时挂载 FilesystemBackend，配置技能目录时启用 skills 加载。
    * 路径需转换为 POSIX 正斜杠（deepAgents 内部使用 path.resolve，Windows 反斜杠会被误解析）。
-   * 子代理将工具组合为专用子代理，主代理通过 task() 工具委托任务。
+   * 智能体将工具组合为专用智能体，主代理通过 task() 工具委托任务。
    */
   private createAgent(): ReturnType<typeof createDeepAgent> {
     // 构建 deepAgents SubAgent 字典，解析工具名称为实际工具实例
@@ -410,13 +410,13 @@ class ChatService {
           for await (const call of run.toolCalls) {
             if (signal?.aborted) break
             const input = call.input as Record<string, unknown>
-            // task 工具是子代理派遣器：转换为 subAgent 事件下发，前端只看到子代理块
+            // task 工具是智能体派遣器：转换为 subAgent 事件下发，前端只看到智能体块
             if (call.name === 'task') {
               const saName =
                 (typeof input?.subagent_type === 'string' && input.subagent_type) || 'subAgent'
               const taskDesc = (typeof input?.description === 'string' && input.description) || ''
               const causeId = call.callId
-              // executing → 下发 started 子代理事件（携带任务描述）
+              // executing → 下发 started 智能体事件（携带任务描述）
               enqueue({
                 subAgent: { name: saName, causeId, status: 'started', taskDescription: taskDesc }
               })
@@ -424,7 +424,7 @@ class ChatService {
               if (signal?.aborted) break
               const raw = await safeGetOutput(call)
               const output = typeof raw === 'string' ? raw : JSON.stringify(raw)
-              // completed → 下发 completed 子代理事件
+              // completed → 下发 completed 智能体事件
               enqueue({
                 subAgent: {
                   name: saName,
@@ -471,7 +471,7 @@ class ChatService {
         }
       })().catch(() => {})
 
-      // 生产者3：子代理流式输出 — 消费 run.subagents，逐 token / tool call 下发
+      // 生产者3：智能体流式输出 — 消费 run.subagents，逐 token / tool call 下发
       // 注意：生命周期事件（started/completed）由 toolProducer 统一发送，此处只发内容事件。
       //
       // 关键同步策略：逐条消息处理，每条消息中统计工具调用数量，处理完后

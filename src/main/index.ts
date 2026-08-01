@@ -93,7 +93,7 @@ import {
   deleteTrackById
 } from './database/mapper/music'
 import { ChatService } from './chat/service'
-import { buildTools, subAgentDefinitions, availableTools } from './chat/tools'
+import { buildTools, loadSubAgentDefinitions, availableTools } from './chat/tools'
 import type { ToolCallDetail, SubAgentEvent } from './chat/types'
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models'
 // BaseMessage 等 LangChain 类型已移入 ChatService 内部使用
@@ -130,6 +130,9 @@ import {
   deleteNodePosition
 } from './database/mapper/node_position'
 import {
+  getAllWorkspaces,
+  createWorkspace,
+  deleteWorkspace,
   getAllTopics,
   getAllTopicsPaginated,
   getTopicById,
@@ -142,7 +145,19 @@ import {
   deleteDialoguesByTopicId,
   deleteDialogueById
 } from './database/mapper/chat'
-import type { ChatTopicRow, ChatDialogueRow } from './database/mapper/chat'
+import type { WorkspaceRow, ChatTopicRow, ChatDialogueRow } from './database/mapper/chat'
+import {
+  getAllAgents,
+  getAgentsPaginated,
+  getEnabledSubAgentConfigs,
+  getAgentById,
+  createAgent,
+  updateAgent,
+  deleteAgent,
+  AgentConfigRow,
+  AgentConfigInput
+} from './database/mapper/agent'
+import type { SubAgentConfig } from './chat/types'
 
 // 单实例锁：防止多开，同时确保安装程序能正确检测和关闭进程
 const gotTheLock = app.requestSingleInstanceLock()
@@ -196,10 +211,21 @@ export async function getDatabaseInstance(): Promise<Database> {
 // ── 预加载缓存：loading 阶段预取 ChatProvider 所需数据 ──
 let cachedEnabledProviders: LlmProviderConfig[] | null = null
 let cachedDefaultProvider: LlmProviderConfig | null = null
+let cachedSubAgentDefs: SubAgentConfig[] | null = null
 
 function clearProviderCache(): void {
   cachedEnabledProviders = null
   cachedDefaultProvider = null
+}
+
+function clearAgentCache(): void {
+  cachedSubAgentDefs = null
+}
+
+async function getSubAgentDefs(): Promise<SubAgentConfig[]> {
+  if (cachedSubAgentDefs) return cachedSubAgentDefs
+  cachedSubAgentDefs = await loadSubAgentDefinitions()
+  return cachedSubAgentDefs
 }
 
 function clearTopicCache(): void {
@@ -208,17 +234,20 @@ function clearTopicCache(): void {
 
 async function preloadChatData(): Promise<void> {
   try {
-    const [enabled, defaultProvider, topicsResult] = await Promise.all([
+    const [enabled, defaultProvider, topicsResult, subAgents] = await Promise.all([
       getEnabledProviders(),
       getDefaultProvider(),
-      getAllTopicsPaginated(0, 20)
+      getAllTopicsPaginated(0, 0, 20),
+      loadSubAgentDefinitions()
     ])
     cachedEnabledProviders = enabled
     cachedDefaultProvider = defaultProvider
+    cachedSubAgentDefs = subAgents
     logger.info('[Preload] Chat data preloaded:', {
       providers: enabled.length,
       topics: topicsResult.items.length,
-      topicsTotal: topicsResult.total
+      topicsTotal: topicsResult.total,
+      subAgents: subAgents.length
     })
   } catch (err) {
     logger.error('[Preload] Failed to preload chat data:', err)
@@ -265,7 +294,7 @@ async function loadConfig(): Promise<void> {
   if (!ipConfig) {
     configPromises.push(
       getIp().then((ip) => {
-        settingsStore.set('ip', ip)
+        if (ip) settingsStore.set('ip', ip)
       })
     )
   }
@@ -556,12 +585,17 @@ function createMainWindow(): void {
         if (cached) return cached
       }
 
-      const ip = settingsStore.get('ip') as Record<string, unknown> | undefined
-      if (!ip) throw new Error('No location data')
+      let ip = settingsStore.get('ip') as Record<string, unknown> | undefined
+      // 如果 IP 数据在初始化时没取到，尝试现场获取
+      if (!ip) {
+        ip = await getIp()
+        if (ip) settingsStore.set('ip', ip)
+        else return {}
+      }
       const lat = ip.lat as number | undefined
       const lon = ip.lon as number | undefined
       const city = (ip.city as string) || (ip.regionName as string) || ''
-      if (!lat || !lon) throw new Error('No coordinates')
+      if (!lat || !lon) return {}
       return await fetchWeatherData(lat, lon, city)
     }
   )
@@ -1675,26 +1709,32 @@ app.whenReady().then(async () => {
       _event,
       question: string,
       options?: {
-        tools?: string[]
         providerId?: number
         images?: string[]
         documents?: { fileName: string; filePath: string }[]
       }
     ) => {
-      const tools = buildTools(options?.tools || [])
+      // 加载主智能体默认配置（electron-store）
+      const mainAgentDefaults = settingsStore.get('mainAgent') as
+        { tools?: string[]; skills?: string[] } | undefined
+      const tools = buildTools(mainAgentDefaults?.tools ?? [])
       logger.info(`[Chat] Creating model with providerId: ${options?.providerId ?? 'default'}`)
       const model = await getProviderService().createModel(options?.providerId)
       const chatSettings = settingsStore.get('chat') as ChatSettings | undefined
+
+      // 技能优先级：chatSettings.enabledSkills > mainAgent.skills
+      const effectiveSkills = chatSettings?.enabledSkills ?? mainAgentDefaults?.skills
+
       const chatService = new ChatService(
         model,
         tools,
-        subAgentDefinitions,
+        await getSubAgentDefs(),
         chatSettings?.maxIterations ?? 5,
         getDialoguesByTopicId,
         chatSettings?.historyWindowSize ?? 10,
         chatSettings?.toolCallWindowSize ?? 20,
         chatSettings?.skillsPath || undefined,
-        chatSettings?.enabledSkills,
+        effectiveSkills,
         chatSettings?.workspacePath || undefined
       )
       return await chatService.sendMessage(question, options)
@@ -1707,7 +1747,6 @@ app.whenReady().then(async () => {
       event,
       question: string,
       options?: {
-        tools?: string[]
         topicId?: number
         providerId?: number
         images?: string[]
@@ -1716,7 +1755,10 @@ app.whenReady().then(async () => {
     ) => {
       // 跟踪进行中的流：应用退出时统一中止并等待数据保存完成
       const streamPromise = (async () => {
-        const tools = buildTools(options?.tools || [])
+        // 加载主智能体默认配置（electron-store）
+        const mainAgentDefaults = settingsStore.get('mainAgent') as
+          { tools?: string[]; skills?: string[] } | undefined
+        const tools = buildTools(mainAgentDefaults?.tools ?? [])
         logger.info(`[Chat] Creating model with providerId: ${options?.providerId ?? 'default'}`)
 
         // 模型创建可能因供应商不存在、被禁用、模型名称为空等原因失败，需要捕获并通知前端
@@ -1743,11 +1785,13 @@ app.whenReady().then(async () => {
         let topicId = options?.topicId
         if (!topicId) {
           const title = question.slice(0, 50)
+          const workspaceId = chatSettings?.activeWorkspaceId ?? 0
           try {
             topicId = await createTopic(
+              workspaceId,
               title,
               undefined,
-              options?.tools ? JSON.stringify(options.tools) : undefined
+              mainAgentDefaults?.tools?.length ? JSON.stringify(mainAgentDefaults.tools) : undefined
             )
           } catch (err) {
             logger.error('Failed to create topic:', err)
@@ -1783,16 +1827,20 @@ app.whenReady().then(async () => {
         // 3. 流式输出 + 累积完整内容
         const historyWindowSize = chatSettings?.historyWindowSize ?? 10
         const toolCallWindowSize = chatSettings?.toolCallWindowSize ?? 20
+
+        // 技能优先级：chatSettings.enabledSkills > mainAgent.skills
+        const effectiveSkills = chatSettings?.enabledSkills ?? mainAgentDefaults?.skills
+
         const chatService = new ChatService(
           model,
           tools,
-          subAgentDefinitions,
+          await getSubAgentDefs(),
           chatSettings?.maxIterations ?? 5,
           getDialoguesByTopicId,
           historyWindowSize,
           toolCallWindowSize,
           chatSettings?.skillsPath || undefined,
-          undefined,
+          effectiveSkills,
           chatSettings?.workspacePath || undefined
         )
         const stream = chatService.sendMessageStream(question, {
@@ -1960,20 +2008,20 @@ app.whenReady().then(async () => {
             if (chunk.subAgent) {
               const sa = chunk.subAgent
 
-              // 累积子代理最终输出到完整内容，避免历史记录重载时丢失子代理详情
+              // 累积智能体最终输出到完整内容，避免历史记录重载时丢失智能体详情
               // 只取 output 作为持久化文本，避免与 blocks 中的流式 text 重复拼接
               if (sa.status === 'completed' && sa.output && !fullContent.includes(sa.output)) {
                 fullContent += sa.output
               }
 
-              // 匹配子代理累积块：优先 causeId，回退 name
+              // 匹配智能体累积块：优先 causeId，回退 name
               const matchesSa = (b: (typeof accumulatedBlocks)[number]): boolean => {
                 if (b.type !== 'subAgent' || !b.subAgent) return false
                 if (sa.causeId && b.subAgent.causeId) return b.subAgent.causeId === sa.causeId
                 return b.subAgent.name === sa.name
               }
 
-              // 查找或创建同名子代理累积块
+              // 查找或创建同名智能体累积块
               let saBlock = accumulatedBlocks.find(matchesSa)
               if (!saBlock) {
                 saBlock = {
@@ -2209,11 +2257,41 @@ app.whenReady().then(async () => {
     }
   })
 
+  // --- Chat Workspace IPC handlers ---
+
+  ipcMain.handle('workspace-get-all', async () => {
+    try {
+      return await getAllWorkspaces()
+    } catch (error) {
+      logger.error('Error in workspace-get-all:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('workspace-create', async (_event, name: string, path: string) => {
+    try {
+      return await createWorkspace(name, path)
+    } catch (error) {
+      logger.error('Error in workspace-create:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('workspace-delete', async (_event, id: number) => {
+    try {
+      clearTopicCache()
+      return await deleteWorkspace(id)
+    } catch (error) {
+      logger.error('Error in workspace-delete:', error)
+      throw error
+    }
+  })
+
   // --- Chat Topic IPC handlers ---
 
-  ipcMain.handle('chat-topic-get-all', async () => {
+  ipcMain.handle('chat-topic-get-all', async (_event, workspaceId: number) => {
     try {
-      return await getAllTopics()
+      return await getAllTopics(workspaceId)
     } catch (error) {
       logger.error('Error in chat-topic-get-all:', error)
       throw error
@@ -2222,10 +2300,9 @@ app.whenReady().then(async () => {
 
   ipcMain.handle(
     'chat-topic-get-paginated',
-    async (_event, page: number, pageSize: number) => {
+    async (_event, workspaceId: number, page: number, pageSize: number) => {
       try {
-        // 分页查询不走缓存（缓存是全量数据，用于预加载场景）
-        return await getAllTopicsPaginated(page, pageSize)
+        return await getAllTopicsPaginated(workspaceId, page, pageSize)
       } catch (error) {
         logger.error('Error in chat-topic-get-paginated:', error)
         throw error
@@ -2244,10 +2321,16 @@ app.whenReady().then(async () => {
 
   ipcMain.handle(
     'chat-topic-create',
-    async (_event, title: string, model?: string, selectedTools?: string) => {
+    async (
+      _event,
+      workspaceId: number,
+      title: string,
+      model?: string,
+      selectedTools?: string
+    ) => {
       try {
         clearTopicCache()
-        return await createTopic(title, model, selectedTools)
+        return await createTopic(workspaceId, title, model, selectedTools)
       } catch (error) {
         logger.error('Error in chat-topic-create:', error)
         throw error
@@ -2580,6 +2663,78 @@ app.whenReady().then(async () => {
       logger.error('Error in provider-set-default:', error)
       throw error
     }
+  })
+
+  // --- Agent (智能体) IPC handlers ---
+
+  ipcMain.handle('agent-get-all', async () => {
+    try {
+      return await getAllAgents()
+    } catch (error) {
+      logger.error('Error in agent-get-all:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('agent-get-paginated', async (_event, page: number, pageSize: number) => {
+    try {
+      return await getAgentsPaginated(page, pageSize)
+    } catch (error) {
+      logger.error('Error in agent-get-paginated:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('agent-get-by-id', async (_event, id: number) => {
+    try {
+      return await getAgentById(id)
+    } catch (error) {
+      logger.error('Error in agent-get-by-id:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('agent-create', async (_event, input: AgentConfigInput) => {
+    try {
+      const id = await createAgent(input)
+      clearAgentCache()
+      return id
+    } catch (error) {
+      logger.error('Error in agent-create:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('agent-update', async (_event, id: number, updates: Partial<AgentConfigInput>) => {
+    try {
+      const result = await updateAgent(id, updates)
+      clearAgentCache()
+      return result
+    } catch (error) {
+      logger.error('Error in agent-update:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('agent-delete', async (_event, id: number) => {
+    try {
+      await deleteAgent(id)
+      clearAgentCache()
+      return true
+    } catch (error) {
+      logger.error('Error in agent-delete:', error)
+      throw error
+    }
+  })
+
+  // 主智能体配置（electron-store）
+  ipcMain.handle('main-agent-get', async () => {
+    return (settingsStore.get('mainAgent') as Record<string, unknown>) ?? { tools: [], skills: [] }
+  })
+
+  ipcMain.handle('main-agent-update', async (_event, config: Record<string, unknown>) => {
+    settingsStore.set('mainAgent', config)
+    return true
   })
 
   // 拉取供应商的模型列表

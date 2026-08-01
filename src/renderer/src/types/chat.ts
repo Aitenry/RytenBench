@@ -7,10 +7,10 @@ export interface ToolCall {
   id?: string
 }
 
-/** 子代理活动事件 */
+/** 智能体活动事件 */
 export interface SubAgentEvent {
   name: string
-  /** 派遣此子代理的 task 工具调用唯一 ID */
+  /** 派遣此智能体的 task 工具调用唯一 ID */
   causeId?: string
   status: 'started' | 'running' | 'completed' | 'error'
   output?: string
@@ -32,7 +32,7 @@ export interface MessageBlock {
   image_url?: string
   fileName?: string
   subAgent?: SubAgentEvent
-  /** 子代理嵌套的子块（仅 subAgent 类型使用，用于流式构建子代理的 text/tool/reasoning） */
+  /** 智能体嵌套的子块（仅 subAgent 类型使用，用于流式构建智能体的 text/tool/reasoning） */
   children?: MessageBlock[]
 }
 

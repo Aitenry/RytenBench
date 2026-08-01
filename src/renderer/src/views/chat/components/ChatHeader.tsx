@@ -1,22 +1,19 @@
-import React, { useState } from 'react'
-import { Button, Select } from 'antd'
+import React, { useState, useEffect, useCallback } from 'react'
+import { Button, Popover, Input, message, Modal } from 'antd'
 import {
   RiListSettingsLine,
-  RiMessageAi3Line,
   RiSidebarFoldLine,
-  RiSidebarUnfoldLine
+  RiSidebarUnfoldLine,
+  RiApps2AddLine,
+  RiFolderOpenLine
 } from '@remixicon/react'
 import ChatSettingsModal from './settings/ChatSettingsModal'
+import type { WorkspaceRow } from '../../../../../main/database/mapper/chat'
+import type { Window } from '../../../../resource/types/window'
 
 interface ChatHeaderProps {
   sidebarOpen: boolean
   onToggleSidebar: () => void
-  selectedProviderId: number | null
-  onSelectProvider: (value: number) => void
-  groupedProviderOptions: {
-    label: string
-    options: { value: number; label: string; providerType: string }[]
-  }[]
   colorBorderSecondary: string
   onNewChat: () => void
 }
@@ -24,17 +21,195 @@ interface ChatHeaderProps {
 const ChatHeader: React.FC<ChatHeaderProps> = ({
   sidebarOpen,
   onToggleSidebar,
-  selectedProviderId,
-  onSelectProvider,
-  groupedProviderOptions,
   colorBorderSecondary,
   onNewChat
 }) => {
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [workspaceOpen, setWorkspaceOpen] = useState(false)
+  const [workspaces, setWorkspaces] = useState<WorkspaceRow[]>([])
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState<number | null>(null)
+  const [creatingName, setCreatingName] = useState('')
+  const [creatingPath, setCreatingPath] = useState('')
+
+  const loadWorkspaces = useCallback(async () => {
+    try {
+      const win = window as unknown as Window
+      const [list, settings] = await Promise.all([
+        win.api.chat.getAllWorkspaces(),
+        win.api.systemSettings.getAll()
+      ])
+      setWorkspaces(list)
+      setActiveWorkspaceId(settings.chat.activeWorkspaceId ?? null)
+    } catch {
+      // ignore
+    }
+  }, [])
+
+  useEffect(() => {
+    loadWorkspaces()
+  }, [loadWorkspaces])
+
+  const handleSelectWorkspace = async (ws: WorkspaceRow): Promise<void> => {
+    try {
+      const win = window as unknown as Window
+      await win.api.systemSettings.update({
+        chat: {
+          workspacePath: ws.path,
+          activeWorkspaceId: ws.id
+        } as Parameters<typeof win.api.systemSettings.update>[0]['chat']
+      })
+      setActiveWorkspaceId(ws.id)
+      setWorkspaceOpen(false)
+      onNewChat()
+    } catch (err) {
+      console.error('Failed to switch workspace:', err)
+    }
+  }
+
+  const handleDeleteWorkspace = async (ws: WorkspaceRow): Promise<void> => {
+    Modal.confirm({
+      title: '删除工作区',
+      content: `确定要删除「${ws.name}」吗？该工作区下的所有对话记录也将被删除。`,
+      okText: '删除',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          const win = window as unknown as Window
+          await win.api.chat.deleteWorkspace(ws.id)
+          if (activeWorkspaceId === ws.id) {
+            await win.api.systemSettings.update({
+              chat: {
+                workspacePath: undefined,
+                activeWorkspaceId: undefined
+              } as Parameters<typeof win.api.systemSettings.update>[0]['chat']
+            })
+            setActiveWorkspaceId(null)
+            onNewChat()
+          }
+          await loadWorkspaces()
+        } catch (err) {
+          console.error('Failed to delete workspace:', err)
+        }
+      }
+    })
+  }
+
+  const handleBrowseFolder = async (): Promise<void> => {
+    try {
+      const dir = await (window as unknown as Window).api.chat.selectWorkspace()
+      if (dir) {
+        setCreatingPath(dir)
+        // 取路径最后一级作为默认名称
+        const defaultName = dir.replace(/[/\\]$/, '').split(/[/\\]/).pop() || dir
+        setCreatingName(defaultName)
+      }
+    } catch (err) {
+      console.error('Failed to select folder:', err)
+    }
+  }
+
+  const handleCreateWorkspace = async (): Promise<void> => {
+    const name = creatingName.trim()
+    if (!name || !creatingPath) {
+      message.warning('请输入工作区名称')
+      return
+    }
+    try {
+      const win = window as unknown as Window
+      const id = await win.api.chat.createWorkspace(name, creatingPath)
+      await win.api.systemSettings.update({
+        chat: {
+          workspacePath: creatingPath,
+          activeWorkspaceId: id
+        } as Parameters<typeof win.api.systemSettings.update>[0]['chat']
+      })
+      setActiveWorkspaceId(id)
+      setCreatingName('')
+      setCreatingPath('')
+      setWorkspaceOpen(false)
+      onNewChat()
+      await loadWorkspaces()
+    } catch (err) {
+      console.error('Failed to create workspace:', err)
+    }
+  }
+
+  const activeWs = workspaces.find((w) => w.id === activeWorkspaceId)
+
+  const workspaceContent = (
+    <div style={{ width: 320, maxHeight: 360, overflowY: 'auto' }}>
+      {/* 选择文件夹 */}
+      <div className="mb-2">
+        <Button
+          block
+          icon={<RiFolderOpenLine size={14} />}
+          onClick={handleBrowseFolder}
+          size="small"
+        >
+          选择文件夹
+        </Button>
+      </div>
+
+      {/* 新工作区名称 & 路径 & 创建按钮 */}
+      {creatingPath && (
+        <div className="mb-2 p-2 rounded" style={{ background: 'rgba(0,0,0,0.04)' }}>
+          <div className="text-xs mb-1" style={{ wordBreak: 'break-all', opacity: 0.6 }}>
+            {creatingPath}
+          </div>
+          <div className="flex items-center gap-1">
+            <Input
+              size="small"
+              value={creatingName}
+              onChange={(e) => setCreatingName(e.target.value)}
+              placeholder="工作区名称"
+              onPressEnter={handleCreateWorkspace}
+              style={{ flex: 1 }}
+            />
+            <Button size="small" type="primary" onClick={handleCreateWorkspace}>
+              创建
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* 工作区列表 */}
+      {workspaces.length > 0 && (
+        <div>
+          <div className="text-xs font-medium mb-1" style={{ opacity: 0.5 }}>
+            工作区列表
+          </div>
+          {workspaces.map((ws) => (
+            <div
+              key={ws.id}
+              className="flex items-center justify-between px-2 py-1.5 rounded cursor-pointer hover:bg-black/5 transition-colors text-sm"
+              style={{
+                background: ws.id === activeWorkspaceId ? 'rgba(0,0,0,0.06)' : undefined
+              }}
+              onClick={() => handleSelectWorkspace(ws)}
+            >
+              <span className="truncate flex-1">{ws.name}</span>
+              <Button
+                type="text"
+                size="small"
+                danger
+                onClick={(e) => {
+                  e.stopPropagation()
+                  handleDeleteWorkspace(ws)
+                }}
+              >
+                删除
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
 
   return (
     <div
-      className="flex items-center justify-between px-4 py-1.5"
+      className="flex items-center justify-between px-2 py-1.5"
       style={{ borderBottom: `1px solid ${colorBorderSecondary}` }}
     >
       <div className="flex items-center gap-2">
@@ -44,28 +219,31 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
           icon={sidebarOpen ? <RiSidebarFoldLine size={16} /> : <RiSidebarUnfoldLine size={16} />}
           onClick={onToggleSidebar}
         />
-        <Select
-          size="small"
-          value={selectedProviderId}
-          onChange={(value) => onSelectProvider(value)}
-          style={{ minWidth: 100 }}
-          placeholder="选择模型"
-          showSearch={{
-            filterOption: (input, option) =>
-              (option?.label as string)?.toLowerCase().includes(input.toLowerCase()) ?? false
-          }}
-          popupMatchSelectWidth={false}
-          popupStyle={{ minWidth: 260 }}
-          options={groupedProviderOptions}
-        />
+        <Popover
+          content={workspaceContent}
+          title={null}
+          trigger="click"
+          open={workspaceOpen}
+          onOpenChange={setWorkspaceOpen}
+          placement="bottomLeft"
+          overlayStyle={{ width: 340 }}
+        >
+          <Button
+            type="text"
+            size="small"
+            style={{
+              maxWidth: 160,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap'
+            }}
+          >
+            {activeWs ? activeWs.name : '选择工作区'}
+          </Button>
+        </Popover>
       </div>
-      <div className="flex items-center gap-1">
-        <Button
-          type="text"
-          size="small"
-          icon={<RiMessageAi3Line size={16} />}
-          onClick={onNewChat}
-        />
+      <div className="flex items-center gap-2.5">
+        <Button type="text" size="small" icon={<RiApps2AddLine size={16} />} onClick={onNewChat} />
         <Button
           type="text"
           size="small"
