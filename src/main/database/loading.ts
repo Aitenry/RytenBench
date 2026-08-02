@@ -23,7 +23,6 @@ const chatSqlPath = path.join(sqlDir, 'chat.sql')
 const musicSqlPath = path.join(sqlDir, 'music.sql')
 const nodePositionsSqlPath = path.join(sqlDir, 'node_positions.sql')
 const graphTablesSqlPath = path.join(sqlDir, 'graph.sql')
-const agentConfigSqlPath = path.join(sqlDir, 'agent_config.sql')
 const llmProvidersSqlPath = path.join(sqlDir, 'llm_providers.sql')
 
 export class Database {
@@ -57,7 +56,6 @@ export class Database {
     await this.executeSQLFile(musicSqlPath, 'music.sql')
     await this.executeSQLFile(nodePositionsSqlPath, 'node_positions.sql')
     await this.executeSQLFile(graphTablesSqlPath, 'graph_tables.sql')
-    await this.executeSQLFile(agentConfigSqlPath, 'agent_config.sql')
     await this.executeSQLFile(llmProvidersSqlPath, 'llm_providers.sql')
     logger.info('Initialization and SQL file execution complete.')
   }

@@ -14,8 +14,6 @@ export interface ChatSettings {
   maxIterations: number
   /** 历史对话上下文窗口大小（轮次），0 表示不限制 */
   historyWindowSize: number
-  /** 工具调用上下文窗口大小（条数），0 表示不限制 */
-  toolCallWindowSize: number
   /** 技能（Skills）存储目录，空/未设置表示不启用；目录下每个含 SKILL.md 的子目录即一个技能 */
   skillsPath?: string
   /** 启用的技能 ID 列表，undefined 表示全部启用，[] 表示全部禁用 */

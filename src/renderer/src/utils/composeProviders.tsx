@@ -1,5 +1,6 @@
 import React from 'react'
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type ProviderTuple<P = any> =
   [React.ComponentType<P>, P?] | [React.ComponentType<{ children: React.ReactNode }>]
 

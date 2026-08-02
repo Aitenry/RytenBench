@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
 /**
  * Patch @langchain/langgraph-sdk's async_caller.cjs which contains hardcoded
  * pnpm virtual-store paths that don't exist when packaged with ASAR.

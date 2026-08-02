@@ -75,8 +75,7 @@ const SkillsSettings: React.FC = () => {
       const nextChat: ChatSettings = {
         ...(settings?.chat ?? {
           maxIterations: 5,
-          historyWindowSize: 10,
-          toolCallWindowSize: 20
+          historyWindowSize: 10
         }),
         skillsPath: trimmed || undefined
       }

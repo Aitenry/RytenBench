@@ -86,7 +86,9 @@ async function getAllTopics(workspaceId: number): Promise<ChatTopicRow[]> {
     const db = (await getDatabaseInstance()).getDatabase()
     const sql = 'SELECT * FROM chat_topic WHERE workspace_id = $1 ORDER BY updated_at DESC'
     const result = await db.query<ChatTopicRow>(sql, [workspaceId])
-    logger.info(`Query for chat topics in workspace=${workspaceId} returned ${result.rows.length} rows.`)
+    logger.info(
+      `Query for chat topics in workspace=${workspaceId} returned ${result.rows.length} rows.`
+    )
     return result.rows
   } catch (error) {
     logger.error('Failed to get all chat topics:', error)
@@ -112,7 +114,11 @@ async function getAllTopicsPaginated(
     const total = countResult.rows[0]?.total ?? 0
     const sql =
       'SELECT * FROM chat_topic WHERE workspace_id = $1 ORDER BY updated_at DESC LIMIT $2 OFFSET $3'
-    const result = await db.query<ChatTopicRow>(sql, [safeWorkspaceId, safePageSize, safePage * safePageSize])
+    const result = await db.query<ChatTopicRow>(sql, [
+      safeWorkspaceId,
+      safePageSize,
+      safePage * safePageSize
+    ])
     logger.info(
       `Paginated topics: workspace=${workspaceId}, page=${page}, size=${pageSize}, got=${result.rows.length}, total=${total}`
     )
@@ -254,7 +260,11 @@ async function getDialoguesByTopicIdPaginated(
     // 从最新消息开始分页：DESC 排序，取一页后反转，上层得到 oldest→newest
     const sql =
       'SELECT * FROM chat_dialogue WHERE topic_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3'
-    const result = await db.query<ChatDialogueRow>(sql, [safeTopicId, safePageSize, safePage * safePageSize])
+    const result = await db.query<ChatDialogueRow>(sql, [
+      safeTopicId,
+      safePageSize,
+      safePage * safePageSize
+    ])
     const items = result.rows.reverse()
     logger.info(
       `Paginated dialogues: topic=${topicId}, page=${page}, size=${pageSize}, got=${items.length}, total=${total}`

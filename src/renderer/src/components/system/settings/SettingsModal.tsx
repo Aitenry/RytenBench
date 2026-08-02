@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { Modal, theme } from 'antd'
 import {
   RiSettings3Line,
@@ -30,9 +30,10 @@ const TAB_ITEMS: {
 interface SettingsModalProps {
   open: boolean
   onClose: () => void
+  initialTab?: SettingsTab
 }
 
-const SettingsModal: React.FC<SettingsModalProps> = ({ open, onClose }) => {
+const SettingsModal: React.FC<SettingsModalProps> = ({ open, onClose, initialTab }) => {
   const {
     token: {
       colorTextSecondary,
@@ -45,7 +46,14 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ open, onClose }) => {
     }
   } = theme.useToken()
 
-  const [activeTab, setActiveTab] = useState<SettingsTab>('general')
+  const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab ?? 'general')
+
+  // 每次打开弹窗时同步外部传入的 initialTab
+  useEffect(() => {
+    if (open && initialTab) {
+      setActiveTab(initialTab)
+    }
+  }, [open, initialTab])
 
   const renderContent = (): React.ReactNode => {
     switch (activeTab) {

@@ -145,16 +145,14 @@ import {
   deleteDialoguesByTopicId,
   deleteDialogueById
 } from './database/mapper/chat'
-import type { WorkspaceRow, ChatTopicRow, ChatDialogueRow } from './database/mapper/chat'
+import type { ChatTopicRow, ChatDialogueRow } from './database/mapper/chat'
 import {
   getAllAgents,
   getAgentsPaginated,
-  getEnabledSubAgentConfigs,
   getAgentById,
   createAgent,
   updateAgent,
   deleteAgent,
-  AgentConfigRow,
   AgentConfigInput
 } from './database/mapper/agent'
 import type { SubAgentConfig } from './chat/types'
@@ -211,7 +209,7 @@ export async function getDatabaseInstance(): Promise<Database> {
 // ── 预加载缓存：loading 阶段预取 ChatProvider 所需数据 ──
 let cachedEnabledProviders: LlmProviderConfig[] | null = null
 let cachedDefaultProvider: LlmProviderConfig | null = null
-let cachedSubAgentDefs: SubAgentConfig[] | null = null
+let cachedSubAgentDefs: Map<number, SubAgentConfig[]> | null = null
 
 function clearProviderCache(): void {
   cachedEnabledProviders = null
@@ -222,10 +220,12 @@ function clearAgentCache(): void {
   cachedSubAgentDefs = null
 }
 
-async function getSubAgentDefs(): Promise<SubAgentConfig[]> {
-  if (cachedSubAgentDefs) return cachedSubAgentDefs
-  cachedSubAgentDefs = await loadSubAgentDefinitions()
-  return cachedSubAgentDefs
+async function getSubAgentDefs(workspaceId: number): Promise<SubAgentConfig[]> {
+  if (!cachedSubAgentDefs) cachedSubAgentDefs = new Map()
+  if (cachedSubAgentDefs.has(workspaceId)) return cachedSubAgentDefs.get(workspaceId)!
+  const defs = await loadSubAgentDefinitions(workspaceId)
+  cachedSubAgentDefs.set(workspaceId, defs)
+  return defs
 }
 
 function clearTopicCache(): void {
@@ -234,15 +234,18 @@ function clearTopicCache(): void {
 
 async function preloadChatData(): Promise<void> {
   try {
+    const chatSettings = settingsStore.get('chat') as ChatSettings | undefined
+    const workspaceId = chatSettings?.activeWorkspaceId ?? 0
     const [enabled, defaultProvider, topicsResult, subAgents] = await Promise.all([
       getEnabledProviders(),
       getDefaultProvider(),
-      getAllTopicsPaginated(0, 0, 20),
-      loadSubAgentDefinitions()
+      getAllTopicsPaginated(workspaceId, 0, 20),
+      loadSubAgentDefinitions(workspaceId)
     ])
     cachedEnabledProviders = enabled
     cachedDefaultProvider = defaultProvider
-    cachedSubAgentDefs = subAgents
+    if (!cachedSubAgentDefs) cachedSubAgentDefs = new Map()
+    cachedSubAgentDefs.set(workspaceId, subAgents)
     logger.info('[Preload] Chat data preloaded:', {
       providers: enabled.length,
       topics: topicsResult.items.length,
@@ -292,11 +295,12 @@ async function loadConfig(): Promise<void> {
   const configPromises: Promise<void>[] = []
 
   if (!ipConfig) {
-    configPromises.push(
-      getIp().then((ip) => {
+    // IP 数据非关键依赖，后台静默获取，不阻塞初始化
+    getIp()
+      .then((ip) => {
         if (ip) settingsStore.set('ip', ip)
       })
-    )
+      .catch(() => {})
   }
   if (!lockPermission) {
     configPromises.push(
@@ -322,8 +326,7 @@ async function loadConfig(): Promise<void> {
       Promise.resolve().then(() => {
         settingsStore.set('chat', {
           maxIterations: 5,
-          historyWindowSize: 10,
-          toolCallWindowSize: 20
+          historyWindowSize: 10
         } as ChatSettings)
       })
     )
@@ -588,9 +591,13 @@ function createMainWindow(): void {
       let ip = settingsStore.get('ip') as Record<string, unknown> | undefined
       // 如果 IP 数据在初始化时没取到，尝试现场获取
       if (!ip) {
-        ip = await getIp()
-        if (ip) settingsStore.set('ip', ip)
-        else return {}
+        try {
+          ip = (await getIp()) as unknown as Record<string, unknown> | undefined
+          if (ip) settingsStore.set('ip', ip)
+        } catch {
+          // getIp 失败（超时等），静默处理
+        }
+        if (!ip) return {}
       }
       const lat = ip.lat as number | undefined
       const lon = ip.lon as number | undefined
@@ -1728,11 +1735,10 @@ app.whenReady().then(async () => {
       const chatService = new ChatService(
         model,
         tools,
-        await getSubAgentDefs(),
+        await getSubAgentDefs(chatSettings?.activeWorkspaceId ?? 0),
         chatSettings?.maxIterations ?? 5,
         getDialoguesByTopicId,
         chatSettings?.historyWindowSize ?? 10,
-        chatSettings?.toolCallWindowSize ?? 20,
         chatSettings?.skillsPath || undefined,
         effectiveSkills,
         chatSettings?.workspacePath || undefined
@@ -1826,7 +1832,6 @@ app.whenReady().then(async () => {
 
         // 3. 流式输出 + 累积完整内容
         const historyWindowSize = chatSettings?.historyWindowSize ?? 10
-        const toolCallWindowSize = chatSettings?.toolCallWindowSize ?? 20
 
         // 技能优先级：chatSettings.enabledSkills > mainAgent.skills
         const effectiveSkills = chatSettings?.enabledSkills ?? mainAgentDefaults?.skills
@@ -1834,11 +1839,10 @@ app.whenReady().then(async () => {
         const chatService = new ChatService(
           model,
           tools,
-          await getSubAgentDefs(),
+          await getSubAgentDefs(chatSettings?.activeWorkspaceId ?? 0),
           chatSettings?.maxIterations ?? 5,
           getDialoguesByTopicId,
           historyWindowSize,
-          toolCallWindowSize,
           chatSettings?.skillsPath || undefined,
           effectiveSkills,
           chatSettings?.workspacePath || undefined
@@ -2321,13 +2325,7 @@ app.whenReady().then(async () => {
 
   ipcMain.handle(
     'chat-topic-create',
-    async (
-      _event,
-      workspaceId: number,
-      title: string,
-      model?: string,
-      selectedTools?: string
-    ) => {
+    async (_event, workspaceId: number, title: string, model?: string, selectedTools?: string) => {
       try {
         clearTopicCache()
         return await createTopic(workspaceId, title, model, selectedTools)
@@ -2667,27 +2665,30 @@ app.whenReady().then(async () => {
 
   // --- Agent (智能体) IPC handlers ---
 
-  ipcMain.handle('agent-get-all', async () => {
+  ipcMain.handle('agent-get-all', async (_event, workspaceId: number) => {
     try {
-      return await getAllAgents()
+      return await getAllAgents(workspaceId)
     } catch (error) {
       logger.error('Error in agent-get-all:', error)
       throw error
     }
   })
 
-  ipcMain.handle('agent-get-paginated', async (_event, page: number, pageSize: number) => {
-    try {
-      return await getAgentsPaginated(page, pageSize)
-    } catch (error) {
-      logger.error('Error in agent-get-paginated:', error)
-      throw error
+  ipcMain.handle(
+    'agent-get-paginated',
+    async (_event, workspaceId: number, page: number, pageSize: number) => {
+      try {
+        return await getAgentsPaginated(workspaceId, page, pageSize)
+      } catch (error) {
+        logger.error('Error in agent-get-paginated:', error)
+        throw error
+      }
     }
-  })
+  )
 
-  ipcMain.handle('agent-get-by-id', async (_event, id: number) => {
+  ipcMain.handle('agent-get-by-id', async (_event, workspaceId: number, id: number) => {
     try {
-      return await getAgentById(id)
+      return await getAgentById(workspaceId, id)
     } catch (error) {
       logger.error('Error in agent-get-by-id:', error)
       throw error
@@ -2705,20 +2706,23 @@ app.whenReady().then(async () => {
     }
   })
 
-  ipcMain.handle('agent-update', async (_event, id: number, updates: Partial<AgentConfigInput>) => {
-    try {
-      const result = await updateAgent(id, updates)
-      clearAgentCache()
-      return result
-    } catch (error) {
-      logger.error('Error in agent-update:', error)
-      throw error
+  ipcMain.handle(
+    'agent-update',
+    async (_event, workspaceId: number, id: number, updates: Partial<AgentConfigInput>) => {
+      try {
+        const result = await updateAgent(workspaceId, id, updates)
+        clearAgentCache()
+        return result
+      } catch (error) {
+        logger.error('Error in agent-update:', error)
+        throw error
+      }
     }
-  })
+  )
 
-  ipcMain.handle('agent-delete', async (_event, id: number) => {
+  ipcMain.handle('agent-delete', async (_event, workspaceId: number, id: number) => {
     try {
-      await deleteAgent(id)
+      await deleteAgent(workspaceId, id)
       clearAgentCache()
       return true
     } catch (error) {

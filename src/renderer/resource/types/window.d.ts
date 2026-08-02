@@ -197,7 +197,12 @@ export interface Window {
         pageSize: number
       ) => Promise<PaginatedResult<ChatTopicRow>>
       getTopicById: (id: number) => Promise<ChatTopicRow[]>
-      createTopic: (workspaceId: number, title: string, model?: string, selectedTools?: string) => Promise<number>
+      createTopic: (
+        workspaceId: number,
+        title: string,
+        model?: string,
+        selectedTools?: string
+      ) => Promise<number>
       updateTopic: (
         id: number,
         updates: Partial<Pick<ChatTopicRow, 'title' | 'model' | 'selected_tools'>>
@@ -269,12 +274,20 @@ export interface Window {
       onChanged: (callback: () => void) => () => void
     }
     agents: {
-      getAll: () => Promise<AgentConfigRow[]>
-      getPaginated: (page: number, pageSize: number) => Promise<PaginatedResult<AgentConfigRow>>
-      getById: (id: number) => Promise<AgentConfigRow | null>
+      getAll: (workspaceId: number) => Promise<AgentConfigRow[]>
+      getPaginated: (
+        workspaceId: number,
+        page: number,
+        pageSize: number
+      ) => Promise<PaginatedResult<AgentConfigRow>>
+      getById: (workspaceId: number, id: number) => Promise<AgentConfigRow | null>
       create: (input: AgentConfigInput) => Promise<number>
-      update: (id: number, updates: Partial<AgentConfigInput>) => Promise<boolean>
-      delete: (id: number) => Promise<boolean>
+      update: (
+        workspaceId: number,
+        id: number,
+        updates: Partial<AgentConfigInput>
+      ) => Promise<boolean>
+      delete: (workspaceId: number, id: number) => Promise<boolean>
     }
     mainAgent: {
       get: () => Promise<{ tools: string[]; skills: string[] }>

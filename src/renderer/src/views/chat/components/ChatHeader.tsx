@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { Button, Popover, Input, message, Modal } from 'antd'
+import { Button, Popover, Input, message, Modal, Dropdown } from 'antd'
 import {
   RiListSettingsLine,
   RiSidebarFoldLine,
   RiSidebarUnfoldLine,
   RiApps2AddLine,
-  RiFolderOpenLine
+  RiFolderOpenLine,
+  RiMoreLine
 } from '@remixicon/react'
 import ChatSettingsModal from './settings/ChatSettingsModal'
 import type { WorkspaceRow } from '../../../../../main/database/mapper/chat'
@@ -16,13 +17,17 @@ interface ChatHeaderProps {
   onToggleSidebar: () => void
   colorBorderSecondary: string
   onNewChat: () => void
+  onWorkspaceChange: () => Promise<void>
+  refreshTrigger?: number
 }
 
 const ChatHeader: React.FC<ChatHeaderProps> = ({
   sidebarOpen,
   onToggleSidebar,
   colorBorderSecondary,
-  onNewChat
+  onNewChat,
+  onWorkspaceChange,
+  refreshTrigger
 }) => {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [workspaceOpen, setWorkspaceOpen] = useState(false)
@@ -47,7 +52,15 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
 
   useEffect(() => {
     loadWorkspaces()
-  }, [loadWorkspaces])
+  }, [loadWorkspaces, refreshTrigger])
+
+  const handleWorkspaceButtonClick = async (): Promise<void> => {
+    if (workspaces.length === 0) {
+      await handleBrowseFolder()
+    } else {
+      setWorkspaceOpen(true)
+    }
+  }
 
   const handleSelectWorkspace = async (ws: WorkspaceRow): Promise<void> => {
     try {
@@ -61,6 +74,7 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
       setActiveWorkspaceId(ws.id)
       setWorkspaceOpen(false)
       onNewChat()
+      onWorkspaceChange().then()
     } catch (err) {
       console.error('Failed to switch workspace:', err)
     }
@@ -86,6 +100,7 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
             })
             setActiveWorkspaceId(null)
             onNewChat()
+            onWorkspaceChange().then()
           }
           await loadWorkspaces()
         } catch (err) {
@@ -101,8 +116,13 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
       if (dir) {
         setCreatingPath(dir)
         // 取路径最后一级作为默认名称
-        const defaultName = dir.replace(/[/\\]$/, '').split(/[/\\]/).pop() || dir
+        const defaultName =
+          dir
+            .replace(/[/\\]$/, '')
+            .split(/[/\\]/)
+            .pop() || dir
         setCreatingName(defaultName)
+        setWorkspaceOpen(true)
       }
     } catch (err) {
       console.error('Failed to select folder:', err)
@@ -129,6 +149,7 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
       setCreatingPath('')
       setWorkspaceOpen(false)
       onNewChat()
+      onWorkspaceChange().then()
       await loadWorkspaces()
     } catch (err) {
       console.error('Failed to create workspace:', err)
@@ -189,17 +210,27 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
               onClick={() => handleSelectWorkspace(ws)}
             >
               <span className="truncate flex-1">{ws.name}</span>
-              <Button
-                type="text"
-                size="small"
-                danger
-                onClick={(e) => {
-                  e.stopPropagation()
-                  handleDeleteWorkspace(ws)
+              <Dropdown
+                menu={{
+                  items: [
+                    {
+                      key: 'delete',
+                      label: '删除',
+                      danger: true,
+                      onClick: () => handleDeleteWorkspace(ws)
+                    }
+                  ]
                 }}
+                trigger={['click']}
+                placement="bottomRight"
               >
-                删除
-              </Button>
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<RiMoreLine size={14} />}
+                  onClick={(e) => e.stopPropagation()}
+                />
+              </Dropdown>
             </div>
           ))}
         </div>
@@ -222,7 +253,7 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
         <Popover
           content={workspaceContent}
           title={null}
-          trigger="click"
+          trigger={workspaces.length === 0 ? [] : 'click'}
           open={workspaceOpen}
           onOpenChange={setWorkspaceOpen}
           placement="bottomLeft"
@@ -231,6 +262,7 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
           <Button
             type="text"
             size="small"
+            onClick={handleWorkspaceButtonClick}
             style={{
               maxWidth: 160,
               overflow: 'hidden',

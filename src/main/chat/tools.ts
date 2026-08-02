@@ -109,8 +109,8 @@ export function buildSubAgentTools(subAgent: SubAgentConfig): StructuredToolInte
 // SubAgent Registry
 // ============================================================================
 
-/** 从数据库加载已启用的智能体定义 */
-export async function loadSubAgentDefinitions(): Promise<SubAgentConfig[]> {
+/** 从数据库加载指定工作区下已启用的智能体定义 */
+export async function loadSubAgentDefinitions(workspaceId: number): Promise<SubAgentConfig[]> {
   const { getEnabledSubAgentConfigs } = await import('../database/mapper/agent')
-  return getEnabledSubAgentConfigs()
+  return getEnabledSubAgentConfigs(workspaceId)
 }

@@ -52,9 +52,14 @@ interface Api {
       getById: (id: number) => Promise<PlannerTaskRow | null>
       getTree: () => Promise<PlannerTreeNode[]>
       add: (task: Omit<PlannerTaskRow, 'id' | 'created_at' | 'updated_at'>) => Promise<number>
-      update: (id: number, updates: Partial<Omit<PlannerTaskRow, 'id' | 'created_at'>>) => Promise<boolean>
+      update: (
+        id: number,
+        updates: Partial<Omit<PlannerTaskRow, 'id' | 'created_at'>>
+      ) => Promise<boolean>
       delete: (id: number) => Promise<boolean>
-      reorder: (orderList: { id: number; sort_order: number; parent_id: number | null }[]) => Promise<boolean>
+      reorder: (
+        orderList: { id: number; sort_order: number; parent_id: number | null }[]
+      ) => Promise<boolean>
     }
     deps: {
       add: (taskId: number, dependsOnTaskId: number) => Promise<number>
@@ -96,10 +101,11 @@ interface Api {
   wikis: {
     getById: (id: number) => Promise<WikiRow | null>
     getAll: (page?: number, pageSize?: number) => Promise<PaginatedResult<WikiRow>>
-    add: (
-      wiki: Omit<WikiRow, 'id' | 'doc_count' | 'created_at' | 'updated_at'>
-    ) => Promise<number>
-    update: (id: number, updates: Partial<Omit<WikiRow, 'id' | 'doc_count' | 'created_at'>>) => Promise<boolean>
+    add: (wiki: Omit<WikiRow, 'id' | 'doc_count' | 'created_at' | 'updated_at'>) => Promise<number>
+    update: (
+      id: number,
+      updates: Partial<Omit<WikiRow, 'id' | 'doc_count' | 'created_at'>>
+    ) => Promise<boolean>
     delete: (id: number) => Promise<boolean>
     getDirectories: (wikiId: number) => Promise<WikiDirectoryRow[]>
     addDirectory: (
@@ -282,30 +288,32 @@ interface Api {
       }[]
     >
     /** 监听来自 AI 对话的播放请求，返回取消监听的函数 */
-    onMusicPlay: (callback: (data: {
-      track: {
-        id: string
-        filePath: string
-        title: string
-        artist: string
-        album: string
-        duration: number
-        liked: boolean
-        coverDataUrl: string | null
-      }
-      folderTracks: {
-        id: string
-        filePath: string
-        title: string
-        artist: string
-        album: string
-        duration: number
-        liked: boolean
-        coverDataUrl: string | null
-      }[]
-      folderId: string
-      targetIndex: number
-    }) => void) => () => void
+    onMusicPlay: (
+      callback: (data: {
+        track: {
+          id: string
+          filePath: string
+          title: string
+          artist: string
+          album: string
+          duration: number
+          liked: boolean
+          coverDataUrl: string | null
+        }
+        folderTracks: {
+          id: string
+          filePath: string
+          title: string
+          artist: string
+          album: string
+          duration: number
+          liked: boolean
+          coverDataUrl: string | null
+        }[]
+        folderId: string
+        targetIndex: number
+      }) => void
+    ) => () => void
   }
   weather: {
     getCurrent: (force?: boolean) => Promise<WeatherData>

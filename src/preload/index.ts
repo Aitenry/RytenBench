@@ -203,11 +203,9 @@ const api = {
     getAllWorkspaces: () => ipcRenderer.invoke('workspace-get-all') as Promise<WorkspaceRow[]>,
     createWorkspace: (name: string, path: string) =>
       ipcRenderer.invoke('workspace-create', name, path) as Promise<number>,
-    deleteWorkspace: (id: number) =>
-      ipcRenderer.invoke('workspace-delete', id) as Promise<boolean>,
+    deleteWorkspace: (id: number) => ipcRenderer.invoke('workspace-delete', id) as Promise<boolean>,
     // 话题管理
-    getAllTopics: (workspaceId: number) =>
-      ipcRenderer.invoke('chat-topic-get-all', workspaceId),
+    getAllTopics: (workspaceId: number) => ipcRenderer.invoke('chat-topic-get-all', workspaceId),
     getAllTopicsPaginated: (workspaceId: number, page: number, pageSize: number) =>
       ipcRenderer.invoke('chat-topic-get-paginated', workspaceId, page, pageSize),
     getTopicById: (id: number) => ipcRenderer.invoke('chat-topic-get-by-id', id),
@@ -348,18 +346,20 @@ const api = {
     }
   },
   agents: {
-    getAll: () => ipcRenderer.invoke('agent-get-all') as Promise<AgentConfigRow[]>,
-    getPaginated: (page: number, pageSize: number) =>
-      ipcRenderer.invoke('agent-get-paginated', page, pageSize) as Promise<
+    getAll: (workspaceId: number) =>
+      ipcRenderer.invoke('agent-get-all', workspaceId) as Promise<AgentConfigRow[]>,
+    getPaginated: (workspaceId: number, page: number, pageSize: number) =>
+      ipcRenderer.invoke('agent-get-paginated', workspaceId, page, pageSize) as Promise<
         AgentPaginatedResult<AgentConfigRow>
       >,
-    getById: (id: number) =>
-      ipcRenderer.invoke('agent-get-by-id', id) as Promise<AgentConfigRow | null>,
+    getById: (workspaceId: number, id: number) =>
+      ipcRenderer.invoke('agent-get-by-id', workspaceId, id) as Promise<AgentConfigRow | null>,
     create: (input: AgentConfigInput) =>
       ipcRenderer.invoke('agent-create', input) as Promise<number>,
-    update: (id: number, updates: Partial<AgentConfigInput>) =>
-      ipcRenderer.invoke('agent-update', id, updates) as Promise<boolean>,
-    delete: (id: number) => ipcRenderer.invoke('agent-delete', id) as Promise<boolean>
+    update: (workspaceId: number, id: number, updates: Partial<AgentConfigInput>) =>
+      ipcRenderer.invoke('agent-update', workspaceId, id, updates) as Promise<boolean>,
+    delete: (workspaceId: number, id: number) =>
+      ipcRenderer.invoke('agent-delete', workspaceId, id) as Promise<boolean>
   },
   mainAgent: {
     get: () =>

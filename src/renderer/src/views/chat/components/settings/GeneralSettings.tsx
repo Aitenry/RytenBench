@@ -90,18 +90,6 @@ const GeneralSettings: React.FC = () => {
               style={{ width: 120 }}
             />
           </Form.Item>
-          <Form.Item
-            label="工具调用上下文窗口（条数）"
-            tooltip="历史对话中保留的工具调用结果条数，0 表示不限制。用于控制上下文中的工具调用数量"
-          >
-            <InputNumber
-              min={0}
-              max={100}
-              value={settings.chat.toolCallWindowSize}
-              onChange={(v) => v !== null && handleChatChange('toolCallWindowSize', v)}
-              style={{ width: 120 }}
-            />
-          </Form.Item>
         </Form>
       </div>
     </div>

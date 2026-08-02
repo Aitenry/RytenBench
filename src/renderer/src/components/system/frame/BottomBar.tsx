@@ -61,9 +61,13 @@ const BottomBar: React.FC<BottomBarProps> = ({
       const city = s.ip?.city as string | undefined
       if (city) setWeatherCity(city)
     })
-    const unsub = api.weather.onUpdate((data: unknown) => setWeatherData(data as WeatherData))
+    const unsub = api.weather.onUpdate((data: unknown) => {
+      const wd = data as WeatherData
+      if (wd?.current) setWeatherData(wd)
+    })
     api.weather.getCurrent().then((data: unknown) => {
-      if (data) setWeatherData(data as WeatherData)
+      const wd = data as WeatherData
+      if (wd?.current) setWeatherData(wd)
     })
     return unsub
   }, [])
@@ -116,7 +120,7 @@ const BottomBar: React.FC<BottomBarProps> = ({
               <div className="text-sm">
                 {weatherLoading ? (
                   <span style={{ color: colorTextSecondary }}>加载中...</span>
-                ) : weatherData ? (
+                ) : weatherData?.current ? (
                   <>
                     <div className="flex items-center justify-between mb-2">
                       <div className="font-medium" style={{ color: colorText }}>
@@ -189,7 +193,7 @@ const BottomBar: React.FC<BottomBarProps> = ({
             ) : (
               <span className="flex items-center gap-1.5">
                 <RiSunCloudyLine size={14} />
-                {weatherData
+                {weatherData?.current
                   ? `${weatherData.current.temp}° ${weatherData.current.weatherDesc}`
                   : weatherCity || '天气'}
               </span>

@@ -6,6 +6,7 @@ import logger from 'electron-log'
 
 export interface AgentConfigRow {
   id: number
+  workspace_id: number
   name: string
   rename: string | null
   prompt: string | null
@@ -25,6 +26,7 @@ export interface PaginatedResult<T> {
 }
 
 export interface AgentConfigInput {
+  workspace_id: number
   name: string
   rename?: string | null
   prompt?: string | null
@@ -49,13 +51,15 @@ function rowToSubAgentConfig(row: AgentConfigRow): SubAgentConfig {
 
 // --- CRUD ---
 
-/** 获取所有代理配置 */
-async function getAllAgents(): Promise<AgentConfigRow[]> {
+/** 获取指定工作区下所有代理配置 */
+async function getAllAgents(workspaceId: number): Promise<AgentConfigRow[]> {
   try {
     const db = (await getDatabaseInstance()).getDatabase()
-    const sql = 'SELECT * FROM agent_config ORDER BY id ASC'
-    const result = await db.query<AgentConfigRow>(sql)
-    logger.info(`Query for all agents returned ${result.rows.length} rows.`)
+    const sql = 'SELECT * FROM agent_config WHERE workspace_id = $1 ORDER BY id ASC'
+    const result = await db.query<AgentConfigRow>(sql, [workspaceId])
+    logger.info(
+      `Query for all agents (workspace=${workspaceId}) returned ${result.rows.length} rows.`
+    )
     return result.rows
   } catch (error) {
     logger.error('Failed to get all agents:', error)
@@ -63,22 +67,25 @@ async function getAllAgents(): Promise<AgentConfigRow[]> {
   }
 }
 
-/** 分页获取代理配置 */
+/** 分页获取指定工作区下代理配置 */
 async function getAgentsPaginated(
+  workspaceId: number,
   page: number,
   pageSize: number
 ): Promise<PaginatedResult<AgentConfigRow>> {
   try {
     const db = (await getDatabaseInstance()).getDatabase()
     const countResult = await db.query<{ total: number }>(
-      'SELECT COUNT(*)::int as total FROM agent_config'
+      'SELECT COUNT(*)::int as total FROM agent_config WHERE workspace_id = $1',
+      [workspaceId]
     )
     const total = countResult.rows[0]?.total ?? 0
-    const sql = 'SELECT * FROM agent_config ORDER BY id ASC LIMIT $1 OFFSET $2'
+    const sql =
+      'SELECT * FROM agent_config WHERE workspace_id = $1 ORDER BY id ASC LIMIT $2 OFFSET $3'
     const offset = page * pageSize
-    const result = await db.query<AgentConfigRow>(sql, [pageSize, offset])
+    const result = await db.query<AgentConfigRow>(sql, [workspaceId, pageSize, offset])
     logger.info(
-      `Paginated agents: page=${page}, size=${pageSize}, got=${result.rows.length}, total=${total}`
+      `Paginated agents: workspace=${workspaceId}, page=${page}, size=${pageSize}, got=${result.rows.length}, total=${total}`
     )
     return {
       items: result.rows,
@@ -91,13 +98,16 @@ async function getAgentsPaginated(
   }
 }
 
-/** 获取所有已启用的代理（转换为 SubAgentConfig 供 ChatService 使用） */
-async function getEnabledSubAgentConfigs(): Promise<SubAgentConfig[]> {
+/** 获取指定工作区下所有已启用的代理（转换为 SubAgentConfig 供 ChatService 使用） */
+async function getEnabledSubAgentConfigs(workspaceId: number): Promise<SubAgentConfig[]> {
   try {
     const db = (await getDatabaseInstance()).getDatabase()
-    const sql = 'SELECT * FROM agent_config WHERE enable = TRUE ORDER BY id ASC'
-    const result = await db.query<AgentConfigRow>(sql)
-    logger.info(`Query for enabled agents returned ${result.rows.length} rows.`)
+    const sql =
+      'SELECT * FROM agent_config WHERE workspace_id = $1 AND enable = TRUE ORDER BY id ASC'
+    const result = await db.query<AgentConfigRow>(sql, [workspaceId])
+    logger.info(
+      `Query for enabled agents (workspace=${workspaceId}) returned ${result.rows.length} rows.`
+    )
     return result.rows.map(rowToSubAgentConfig)
   } catch (error) {
     logger.error('Failed to get enabled sub-agent configs:', error)
@@ -105,12 +115,12 @@ async function getEnabledSubAgentConfigs(): Promise<SubAgentConfig[]> {
   }
 }
 
-/** 根据 ID 获取代理 */
-async function getAgentById(id: number): Promise<AgentConfigRow | null> {
+/** 根据 ID 获取代理（同时校验 workspace_id） */
+async function getAgentById(workspaceId: number, id: number): Promise<AgentConfigRow | null> {
   try {
     const db = (await getDatabaseInstance()).getDatabase()
-    const sql = 'SELECT * FROM agent_config WHERE id = $1'
-    const result = await db.query<AgentConfigRow>(sql, [id])
+    const sql = 'SELECT * FROM agent_config WHERE workspace_id = $1 AND id = $2'
+    const result = await db.query<AgentConfigRow>(sql, [workspaceId, id])
     if (result.rows.length === 0) return null
     return result.rows[0]
   } catch (error) {
@@ -127,11 +137,12 @@ async function createAgent(input: AgentConfigInput): Promise<number> {
     const skills = input.skills && input.skills.length > 0 ? JSON.stringify(input.skills) : null
 
     const sql = `
-      INSERT INTO agent_config (name, rename, prompt, description, skills, model, tools, enable)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      INSERT INTO agent_config (workspace_id, name, rename, prompt, description, skills, model, tools, enable)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
       RETURNING id
     `
     const result = await db.query<{ id: number }>(sql, [
+      input.workspace_id,
       input.name,
       input.rename || null,
       input.prompt || null,
@@ -143,7 +154,7 @@ async function createAgent(input: AgentConfigInput): Promise<number> {
     ])
 
     const newId = result.rows[0].id
-    logger.info(`Created agent "${input.name}" with ID: ${newId}`)
+    logger.info(`Created agent "${input.name}" (workspace=${input.workspace_id}) with ID: ${newId}`)
     return newId
   } catch (error) {
     logger.error('Failed to create agent:', error)
@@ -151,8 +162,12 @@ async function createAgent(input: AgentConfigInput): Promise<number> {
   }
 }
 
-/** 更新代理 */
-async function updateAgent(id: number, updates: Partial<AgentConfigInput>): Promise<boolean> {
+/** 更新代理（同时校验 workspace_id） */
+async function updateAgent(
+  workspaceId: number,
+  id: number,
+  updates: Partial<AgentConfigInput>
+): Promise<boolean> {
   try {
     const db = (await getDatabaseInstance()).getDatabase()
 
@@ -202,12 +217,12 @@ async function updateAgent(id: number, updates: Partial<AgentConfigInput>): Prom
     }
 
     updateFields.push('updated_at = NOW()')
-    const sql = `UPDATE agent_config SET ${updateFields.join(', ')} WHERE id = $${paramIndex++}`
-    updateValues.push(id)
+    const sql = `UPDATE agent_config SET ${updateFields.join(', ')} WHERE workspace_id = $${paramIndex++} AND id = $${paramIndex++}`
+    updateValues.push(workspaceId, id)
 
     const result = await db.query(sql, updateValues)
     const changes = result.affectedRows ?? 0
-    logger.info(`Updated agent ID=${id}, ${changes} row(s) affected.`)
+    logger.info(`Updated agent workspace=${workspaceId} id=${id}, ${changes} row(s) affected.`)
     return changes > 0
   } catch (error) {
     logger.error('Failed to update agent:', error)
@@ -215,14 +230,14 @@ async function updateAgent(id: number, updates: Partial<AgentConfigInput>): Prom
   }
 }
 
-/** 删除代理 */
-async function deleteAgent(id: number): Promise<boolean> {
+/** 删除代理（同时校验 workspace_id） */
+async function deleteAgent(workspaceId: number, id: number): Promise<boolean> {
   try {
     const db = (await getDatabaseInstance()).getDatabase()
-    const sql = 'DELETE FROM agent_config WHERE id = $1'
-    const result = await db.query(sql, [id])
+    const sql = 'DELETE FROM agent_config WHERE workspace_id = $1 AND id = $2'
+    const result = await db.query(sql, [workspaceId, id])
     const changes = result.affectedRows ?? 0
-    logger.info(`Deleted agent ID=${id}, ${changes} row(s) affected.`)
+    logger.info(`Deleted agent workspace=${workspaceId} id=${id}, ${changes} row(s) affected.`)
     return changes > 0
   } catch (error) {
     logger.error('Failed to delete agent:', error)

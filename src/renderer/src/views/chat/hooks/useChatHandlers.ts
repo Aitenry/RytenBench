@@ -67,6 +67,7 @@ export interface UseChatHandlersReturn {
   handleStop: () => void
   handleLoadMoreTopics: () => Promise<void>
   handleLoadMoreMessages: () => Promise<void>
+  refreshTopics: () => Promise<void>
 }
 
 export const useChatHandlers = (): UseChatHandlersReturn => {
@@ -1147,6 +1148,7 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
     handleKeyDown,
     handleStop,
     handleLoadMoreTopics,
-    handleLoadMoreMessages
+    handleLoadMoreMessages,
+    refreshTopics
   }
 }

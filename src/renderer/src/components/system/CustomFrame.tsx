@@ -31,12 +31,24 @@ const CustomFrame: React.FC<CustomFrameProps> = ({ currentKey, setCurrentKey }) 
 
   const [isMaximized, setIsMaximized] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [settingsTab, setSettingsTab] = useState<string | undefined>(undefined)
 
   const api = (window as unknown as Window).api
 
   useEffect(() => {
     api.window.isMaximized().then(setIsMaximized)
     return api.window.onMaximized(setIsMaximized)
+  }, [])
+
+  // 监听自定义事件以从其他页面打开系统设置
+  useEffect(() => {
+    const handler = (e: Event): void => {
+      const detail = (e as CustomEvent).detail as { tab?: string } | undefined
+      setSettingsTab(detail?.tab)
+      setSettingsOpen(true)
+    }
+    window.addEventListener('open-system-settings', handler)
+    return () => window.removeEventListener('open-system-settings', handler)
   }, [])
 
   const menuItems: MenuItem[] = useMemo(
@@ -60,7 +72,10 @@ const CustomFrame: React.FC<CustomFrameProps> = ({ currentKey, setCurrentKey }) 
   const handleMinimize = useCallback(() => api.window.minimize(), [])
   const handleMaximize = useCallback(() => api.window.maximize(), [])
   const handleClose = useCallback(() => api.window.close(), [])
-  const handleSettingsClick = useCallback(() => setSettingsOpen(true), [])
+  const handleSettingsClick = useCallback(() => {
+    setSettingsTab(undefined)
+    setSettingsOpen(true)
+  }, [])
 
   return (
     <div className="custom-frame-outer" style={{ background: 'transparent' }}>
@@ -108,7 +123,11 @@ const CustomFrame: React.FC<CustomFrameProps> = ({ currentKey, setCurrentKey }) 
         />
       </div>
 
-      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <SettingsModal
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        initialTab={settingsTab as 'general' | 'music' | 'graph' | 'model' | 'system' | undefined}
+      />
     </div>
   )
 }

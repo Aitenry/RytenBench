@@ -250,9 +250,9 @@ const TaskTree: React.FC<Props> = ({
             className="flex flex-col items-center justify-center h-full gap-2"
             style={{ color: token.colorTextTertiary }}
           >
-            <span className="text-sm">暂无任务</span>
+            <span className="text-sm">暂无项目</span>
             <Button type="link" size="small" onClick={() => onAddTask(null)}>
-              创建第一个任务
+              创建第一个项目
             </Button>
           </div>
         ) : (

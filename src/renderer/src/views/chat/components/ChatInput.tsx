@@ -72,7 +72,6 @@ const ChatInput: React.FC<ChatInputProps> = ({
   selectedProviderId,
   onSelectProvider,
   groupedProviderOptions,
-  modelSupportsTools,
   modelSupportsVision,
   isDarkMode,
   colorBgLayout,
@@ -194,7 +193,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
             size="small"
             value={selectedProviderId}
             onChange={(value) => onSelectProvider(value)}
-            style={{ minWidth: 140, padding: '6px', borderRadius: '10px' }}
+            style={{ minWidth: 140, padding: '5px', borderRadius: '10px' }}
             placeholder="选择模型"
             showSearch={{
               filterOption: (input, option) =>

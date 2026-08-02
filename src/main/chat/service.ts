@@ -101,7 +101,6 @@ class ChatService {
   private readonly _maxIterations: number
   private readonly loadHistory?: LoadHistoryFn
   private readonly historyWindowSize: number
-  private readonly toolCallWindowSize: number
   private readonly skillsPath?: string
   private readonly enabledSkills?: string[]
   private readonly workspacePath?: string
@@ -113,7 +112,6 @@ class ChatService {
    * @param maxIterations 工具调用最大轮次（保留兼容性，deepAgents 内部自动管理）
    * @param loadHistory 从数据库加载历史对话的回调（由主进程注入，避免循环依赖）
    * @param historyWindowSize 历史对话轮次上限（0 = 不限制），默认 10
-   * @param toolCallWindowSize 历史工具调用条数上限（0 = 不限制），默认 20
    * @param skillsPath 技能存储目录（deepAgents skills），空表示不启用
    * @param enabledSkills 启用的技能 ID 列表，undefined 表示全部启用
    * @param workspacePath AI 工作区目录，挂载为 FilesystemBackend 根目录（虚拟 /）
@@ -125,7 +123,6 @@ class ChatService {
     maxIterations = 5,
     loadHistory?: LoadHistoryFn,
     historyWindowSize = 10,
-    toolCallWindowSize = 20,
     skillsPath?: string,
     enabledSkills?: string[],
     workspacePath?: string
@@ -136,12 +133,11 @@ class ChatService {
     this._maxIterations = maxIterations
     this.loadHistory = loadHistory
     this.historyWindowSize = historyWindowSize
-    this.toolCallWindowSize = toolCallWindowSize
     this.skillsPath = skillsPath
     this.enabledSkills = enabledSkills
     this.workspacePath = workspacePath
     logger.info(
-      `ChatService initialized with DeepAgents (maxIterations=${this._maxIterations}, historyWindow=${this.historyWindowSize}, toolCallWindow=${this.toolCallWindowSize}, skillsPath=${this.skillsPath ?? 'disabled'}, workspacePath=${this.workspacePath ?? 'disabled'}, subAgents=${this.subAgents.length})`
+      `ChatService initialized with DeepAgents (maxIterations=${this._maxIterations}, historyWindow=${this.historyWindowSize}, skillsPath=${this.skillsPath ?? 'disabled'}, workspacePath=${this.workspacePath ?? 'disabled'}, subAgents=${this.subAgents.length})`
     )
   }
 
@@ -163,7 +159,12 @@ class ChatService {
     const baseConfig = {
       model: this.model,
       tools: this.tools,
-      systemPrompt: 'Your name is Rita. You are a helpful assistant.',
+      systemPrompt: `Your name is Rita. You are a helpful assistant.
+
+You are in a continuous conversation with the user. All messages in the chat history are genuine prior exchanges between you and this same user — treat them as real conversation context.
+- When the user asks about "previous" or "last time", refer to the conversation history provided.
+- Do NOT claim you cannot see or remember earlier messages. You have full access to the chat history.
+- Keep your responses concise and natural in Chinese unless the user writes in another language.`,
       subagents: deepSubAgents.length > 0 ? deepSubAgents : undefined
     }
 
@@ -192,19 +193,28 @@ class ChatService {
    * @returns 转换后的 LangChain BaseMessage 数组
    */
   private async loadContextMessages(topicId: number): Promise<BaseMessage[]> {
-    if (!this.loadHistory || topicId <= 0) return []
+    if (!this.loadHistory) {
+      logger.warn('[Chat] loadHistory callback not provided, skipping history')
+      return []
+    }
+    if (topicId <= 0) {
+      logger.warn(`[Chat] Invalid topicId=${topicId}, skipping history`)
+      return []
+    }
 
     try {
       const dialogues = await this.loadHistory(topicId)
+      logger.info(`[Chat] Fetched ${dialogues.length} dialogues for topic ${topicId}`)
       // 排除最后一条（当前用户消息），只取之前的对话
       const historyDialogues = dialogues.slice(0, -1)
-      if (historyDialogues.length === 0) return []
+      if (historyDialogues.length === 0) {
+        logger.info(
+          `[Chat] No prior dialogues for topic ${topicId} after excluding current message`
+        )
+        return []
+      }
 
-      const messages = convertDialoguesToMessages(
-        historyDialogues,
-        this.historyWindowSize,
-        this.toolCallWindowSize
-      )
+      const messages = convertDialoguesToMessages(historyDialogues, this.historyWindowSize)
       logger.info(`[Chat] Loaded ${messages.length} history messages for topic ${topicId}`)
       return messages
     } catch (err) {
@@ -227,6 +237,9 @@ class ChatService {
       const contextMessages = options?.topicId
         ? await this.loadContextMessages(options.topicId)
         : []
+      logger.info(
+        `[Chat] Passing ${contextMessages.length} context messages + 1 user message to deepagent (topicId=${options?.topicId})`
+      )
       const result = await agent.invoke({ messages: [...contextMessages, userMessage] })
 
       return extractStructuredMessages(result.messages || [])
@@ -260,6 +273,12 @@ class ChatService {
       const contextMessages = options?.topicId
         ? await this.loadContextMessages(options.topicId)
         : []
+      logger.info(
+        `[Chat] Passing ${contextMessages.length} context messages + 1 user message to deepagent (topicId=${options?.topicId})`
+      )
+      if (contextMessages.length > 0) {
+        logger.info(`[Chat] Context roles: ${contextMessages.map((m) => m._getType()).join(' → ')}`)
+      }
       const run = await agent.streamEvents(
         { messages: [...contextMessages, userMessage] },
         { version: 'v3', signal }
@@ -768,17 +787,14 @@ function extractStructuredMessages(messages: BaseMessage[]): StructuredMessage[]
 
 /**
  * 将数据库中的对话记录转换为 LangChain BaseMessage 数组，
- * 支持窗口限制（历史轮数 + 工具调用条数）
+ * 支持窗口限制（历史轮数）
  */
 function convertDialoguesToMessages(
   dialogues: HistoryDialogue[],
-  historyWindowSize: number,
-  toolCallWindowSize: number
+  historyWindowSize: number
 ): BaseMessage[] {
   // historyWindowSize=0 表示不限制
   const effectiveHistory = historyWindowSize > 0 ? historyWindowSize : Number.MAX_SAFE_INTEGER
-  // toolCallWindowSize=0 表示不限制
-  const effectiveToolCalls = toolCallWindowSize > 0 ? toolCallWindowSize : Number.MAX_SAFE_INTEGER
 
   // 从后往前取最多 effectiveHistory 轮对话
   const selected: HistoryDialogue[] = []
@@ -791,14 +807,21 @@ function convertDialoguesToMessages(
   }
 
   const messages: BaseMessage[] = []
-  let toolCallCount = 0
 
   for (const d of selected) {
     if (d.role === 'user') {
       messages.push(new HumanMessage(d.content))
     } else if (d.role === 'assistant') {
-      const blocks: { type: string; text?: string; tool?: ToolCallDetail; reasoning?: string }[] =
-        d.blocks ? JSON.parse(d.blocks) : []
+      let blocks: { type: string; text?: string; tool?: ToolCallDetail; reasoning?: string }[]
+      try {
+        blocks = d.blocks ? JSON.parse(d.blocks) : []
+      } catch {
+        logger.warn(
+          `[History] Failed to parse blocks for dialogue id=${d.id}, falling back to plain text`
+        )
+        messages.push(new AIMessage(d.content))
+        continue
+      }
 
       const textBlocks = blocks.filter((b) => b.type === 'text')
       const toolBlocks = blocks.filter((b) => b.type === 'tool')
@@ -808,14 +831,12 @@ function convertDialoguesToMessages(
         // 构建 AIMessage 的 tool_calls 数组
         const toolCalls: { name: string; args: Record<string, unknown>; id: string }[] = []
         for (const tb of toolBlocks) {
-          if (toolCallCount >= effectiveToolCalls) break
-          const callId = `hist_${d.id}_${toolCallCount}`
+          const callId = `hist_${d.id}_${toolCalls.length}`
           toolCalls.push({
             id: callId,
             name: tb.tool!.name,
             args: tb.tool!.input
           })
-          toolCallCount++
         }
 
         if (toolCalls.length > 0) {
