@@ -68,7 +68,6 @@ const EditPlaylistModal: React.FC<EditPlaylistModalProps> = ({
       okText="保存"
       cancelText="取消"
       confirmLoading={saving}
-      destroyOnHidden
     >
       {/* 封面 — 点击更换，hover 显示遮罩 */}
       <div className="flex justify-center mb-5">

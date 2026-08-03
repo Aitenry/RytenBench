@@ -56,7 +56,6 @@ const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({ open, onClose
       okText="创建"
       cancelText="取消"
       confirmLoading={creating}
-      destroyOnHidden
     >
       {/* 封面 — 点击上传，hover 显示遮罩 */}
       <div className="flex justify-center mb-5">

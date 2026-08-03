@@ -10,7 +10,6 @@ interface SidebarProps {
   currentKey: string
   menuItems: MenuItem[]
   onMenuClick: (key: string) => void
-  colorFillAlter: string
   colorTextSecondary: string
 }
 
@@ -18,12 +17,11 @@ const Sidebar: React.FC<SidebarProps> = ({
   currentKey,
   menuItems,
   onMenuClick,
-  colorFillAlter,
   colorTextSecondary
 }) => {
   return (
     <div className="frame-body-left">
-      <div className="frame-menu" style={{ background: colorFillAlter }}>
+      <div className="frame-menu">
         {menuItems.map((item) => (
           <button
             key={item.key}

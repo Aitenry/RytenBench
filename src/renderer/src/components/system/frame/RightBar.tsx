@@ -22,7 +22,7 @@ const RightBar: React.FC<RightBarProps> = ({
 
   return (
     <div className="frame-body-right">
-      <div className="frame-menu" style={{ background: colorFillAlter }}>
+      <div className="frame-menu">
         <Popover
           content={
             <NotificationList

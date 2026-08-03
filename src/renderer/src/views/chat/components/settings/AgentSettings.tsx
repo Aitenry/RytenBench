@@ -10,8 +10,7 @@ import {
   Select,
   Pagination,
   Tag,
-  Divider,
-  message
+  Divider
 } from 'antd'
 import {
   LoadingOutlined,
@@ -240,7 +239,7 @@ const AgentSettings: React.FC = () => {
 
   const handleImportExec = async (raw: string): Promise<void> => {
     if (!raw) {
-      message.warning('文件内容为空')
+      viewMessage('import-error', 'warning', '文件内容为空')
       return
     }
 
@@ -248,17 +247,17 @@ const AgentSettings: React.FC = () => {
     try {
       data = JSON.parse(raw)
     } catch {
-      message.error('JSON 格式错误，请检查')
+      viewMessage('import-error', 'error', 'JSON 格式错误，请检查')
       return
     }
 
     if (!Array.isArray(data)) {
-      message.error('JSON 内容必须是一个数组')
+      viewMessage('import-error', 'error', 'JSON 内容必须是一个数组')
       return
     }
 
     if (data.length === 0) {
-      message.warning('导入内容为空')
+      viewMessage('import-error', 'warning', '导入内容为空')
       return
     }
 
@@ -333,7 +332,7 @@ const AgentSettings: React.FC = () => {
         imported++
       }
     } catch (err) {
-      message.error(`导入过程出错: ${err}`)
+      viewMessage('import-error', 'error', `导入过程出错: ${err}`)
     } finally {
       setImportLoading(false)
     }
@@ -343,7 +342,7 @@ const AgentSettings: React.FC = () => {
     if (imported > 0) parts.push(`成功导入 ${imported} 个智能体`)
     if (skipped.length > 0) parts.push(`${skipped.length} 个被跳过`)
     const summary = parts.length > 0 ? parts.join('，') : '未导入任何智能体'
-    message.success(summary)
+    viewMessage('import-summary', 'success', summary)
 
     // 逐条展示剔除提示
     if (stripped.length > 0) {
@@ -376,7 +375,7 @@ const AgentSettings: React.FC = () => {
       const text = (ev.target?.result as string) || ''
       handleImportExec(text)
     }
-    reader.onerror = () => message.error('读取文件失败')
+    reader.onerror = () => viewMessage('import-file', 'error', '读取文件失败')
     reader.readAsText(file)
   }
 
@@ -643,7 +642,6 @@ const AgentSettings: React.FC = () => {
         onOk={handleSave}
         confirmLoading={saving}
         width={640}
-        destroyOnHidden
         okText="保存"
         cancelText="取消"
         styles={{ body: { padding: 0 } }}

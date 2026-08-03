@@ -105,6 +105,7 @@ const Index: React.FC = () => {
       return () => clearTimeout(timer)
     }
     setGuideVisible(false)
+    return undefined
   }, [showGuide])
   // 触发 ChatHeader 刷新工作区列表
   const [headerRefreshKey, setHeaderRefreshKey] = useState(0)

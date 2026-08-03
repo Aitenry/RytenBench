@@ -457,7 +457,6 @@ const ModelSettings: React.FC = () => {
         okText="保存"
         cancelText="取消"
         width={520}
-        destroyOnHidden
         styles={{ body: { maxHeight: 420, padding: 12, overflowY: 'auto' } }}
         classNames={{ body: 'custom-scrollbar' }}
       >

@@ -12,7 +12,6 @@ interface TitleBarProps {
   onMinimize: () => void
   onMaximize: () => void
   onClose: () => void
-  colorFillAlter: string
   colorText: string
   colorTextSecondary: string
 }
@@ -22,12 +21,11 @@ const TitleBar: React.FC<TitleBarProps> = ({
   onMinimize,
   onMaximize,
   onClose,
-  colorFillAlter,
   colorText,
   colorTextSecondary
 }) => {
   return (
-    <div className="frame-titlebar" style={{ height: 36, background: colorFillAlter }}>
+    <div className="frame-titlebar" style={{ height: 36 }}>
       <div className="frame-titlebar-left">
         <img src={logo} alt="RytenBench" className="frame-titlebar-icon" />
         <span className="frame-titlebar-title" style={{ color: colorTextSecondary }}>

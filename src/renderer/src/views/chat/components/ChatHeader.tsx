@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { Button, Popover, Input, message, Modal, Dropdown } from 'antd'
+import { Button, Popover, Input, Modal, Dropdown, App } from 'antd'
 import {
   RiListSettingsLine,
   RiSidebarFoldLine,
@@ -29,6 +29,7 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
   onWorkspaceChange,
   refreshTrigger
 }) => {
+  const { message } = App.useApp()
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [workspaceOpen, setWorkspaceOpen] = useState(false)
   const [workspaces, setWorkspaces] = useState<WorkspaceRow[]>([])

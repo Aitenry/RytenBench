@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect } from 'react'
-import { theme, Modal, message } from 'antd'
+import { theme, Modal, App } from 'antd'
 import { useAudioState } from '../../contexts/AudioContext'
 import type { MusicFolder, Track } from '../../types/music'
 import MusicSidebar from './components/MusicSidebar'
@@ -13,6 +13,7 @@ const RECENTLY_PLAYED_ID = '__recent__'
 const LIKED_TRACKS_ID = '__liked__'
 
 const Index: React.FC = () => {
+  const { message } = App.useApp()
   const {
     token: { colorBgContainer, borderRadiusLG }
   } = theme.useToken()

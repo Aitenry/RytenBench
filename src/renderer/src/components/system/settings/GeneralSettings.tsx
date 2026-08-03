@@ -152,7 +152,6 @@ const GeneralSettings: React.FC = () => {
         onOk={handleChangePassword}
         okText="确定"
         cancelText="取消"
-        destroyOnHidden
       >
         <Form form={passwordForm} layout="vertical" className="mt-4">
           <Form.Item

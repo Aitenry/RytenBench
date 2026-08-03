@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { theme, Button, Table, Empty, Modal, Form, Input, message } from 'antd'
+import { theme, Button, Table, Empty, Modal, Form, Input, App } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import {
   RiMusic2Line,
@@ -21,6 +21,7 @@ const PlaylistTable: React.FC<PlaylistTableProps> = ({
   onUpdate,
   onToggleLike
 }) => {
+  const { message } = App.useApp()
   const {
     token: { colorFillAlter, colorTextTertiary }
   } = theme.useToken()
@@ -203,7 +204,6 @@ const PlaylistTable: React.FC<PlaylistTableProps> = ({
         onCancel={() => setEditModalOpen(false)}
         okText="保存"
         cancelText="取消"
-        destroyOnHidden
       >
         {/* 封面 — 点击更换，hover 显示遮罩 */}
         <div className="flex justify-center mb-5">

@@ -14,7 +14,6 @@ interface WeatherData {
 
 interface BottomBarProps {
   colorBgContainer: string
-  colorFillAlter: string
   colorPrimary: string
   colorText: string
   colorTextSecondary: string
@@ -24,7 +23,6 @@ const CAROUSEL_INTERVAL = 4000
 
 const BottomBar: React.FC<BottomBarProps> = ({
   colorBgContainer,
-  colorFillAlter,
   colorPrimary,
   colorText,
   colorTextSecondary
@@ -103,7 +101,7 @@ const BottomBar: React.FC<BottomBarProps> = ({
   }, [])
 
   return (
-    <div className="frame-bottombar" style={{ background: colorFillAlter }}>
+    <div className="frame-bottombar">
       <div className="frame-bottombar-inner" onMouseLeave={handleCarouselLeave}>
         {popupOpen && (
           <div

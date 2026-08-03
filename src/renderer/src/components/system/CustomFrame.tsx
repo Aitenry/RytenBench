@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { theme } from 'antd'
 import { RiCalendar2Line, RiChatAiLine, RiDashboardLine, RiMusicLine } from '@remixicon/react'
+import { useTheme } from '@renderer/contexts/useTheme'
 import { Window } from '../../../resource/types/window'
 import MainRoutes from '@renderer/route/MainRoutes'
 import SettingsModal from './settings/SettingsModal'
@@ -28,6 +29,8 @@ const CustomFrame: React.FC<CustomFrameProps> = ({ currentKey, setCurrentKey }) 
       colorTextSecondary
     }
   } = theme.useToken()
+
+  const { effectiveTheme } = useTheme()
 
   const [isMaximized, setIsMaximized] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -81,14 +84,16 @@ const CustomFrame: React.FC<CustomFrameProps> = ({ currentKey, setCurrentKey }) 
     <div className="custom-frame-outer" style={{ background: 'transparent' }}>
       <div
         className="custom-frame"
-        style={{ background: colorBgContainer, borderRadius: borderRadiusLG }}
+        style={{
+          background: effectiveTheme === 'dark' ? 'rgb(32, 32, 32)' : 'rgb(238 238 238)',
+          borderRadius: borderRadiusLG
+        }}
       >
         <TitleBar
           isMaximized={isMaximized}
           onMinimize={handleMinimize}
           onMaximize={handleMaximize}
           onClose={handleClose}
-          colorFillAlter={colorFillAlter}
           colorText={colorText}
           colorTextSecondary={colorTextSecondary}
         />
@@ -98,7 +103,6 @@ const CustomFrame: React.FC<CustomFrameProps> = ({ currentKey, setCurrentKey }) 
             currentKey={currentKey}
             menuItems={menuItems}
             onMenuClick={onMenuClick}
-            colorFillAlter={colorFillAlter}
             colorTextSecondary={colorTextSecondary}
           />
 
@@ -116,7 +120,6 @@ const CustomFrame: React.FC<CustomFrameProps> = ({ currentKey, setCurrentKey }) 
 
         <BottomBar
           colorBgContainer={colorBgContainer}
-          colorFillAlter={colorFillAlter}
           colorPrimary={colorPrimary}
           colorText={colorText}
           colorTextSecondary={colorTextSecondary}
