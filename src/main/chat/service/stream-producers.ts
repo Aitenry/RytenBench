@@ -61,24 +61,23 @@ export async function produceMessages(
       if (reasoning) {
         drains.push(
           (async () => {
-            let acc = ''
             for await (const token of reasoning) {
               if (signal?.aborted) break
               const tokenText = String(token ?? '')
               if (!tokenText) continue
+              let delta = ''
               if (
                 tokenText.startsWith(lastSentReasoning) &&
                 tokenText.length > lastSentReasoning.length
               ) {
-                acc += tokenText.slice(lastSentReasoning.length)
+                delta = tokenText.slice(lastSentReasoning.length)
               } else if (tokenText !== lastSentReasoning) {
-                acc += tokenText
+                delta = tokenText
               }
               lastSentReasoning = tokenText
-            }
-            // 批量发送：避免与 text 流 token 级交替造成 reasoning 块的碎片化
-            if (acc) {
-              enqueue({ reasoning_content: acc })
+              if (delta) {
+                enqueue({ reasoning_content: delta })
+              }
             }
           })()
         )
@@ -258,35 +257,35 @@ export async function produceSubAgents(
               const drains: Promise<void>[] = []
               let pendingToolCount = 0
 
-              // 推理 drain：独立运行，批量发送
+              // 推理 drain：独立运行，逐 token 实时下发
               const reasoning = msg.reasoning
               if (reasoning) {
                 drains.push(
                   (async () => {
-                    let acc = ''
                     for await (const token of reasoning) {
                       if (signal?.aborted) return
                       const tokenText = String(token ?? '')
                       if (!tokenText) continue
+                      let delta = ''
                       if (
                         tokenText.startsWith(lastSentReasoning) &&
                         tokenText.length > lastSentReasoning.length
                       ) {
-                        acc += tokenText.slice(lastSentReasoning.length)
+                        delta = tokenText.slice(lastSentReasoning.length)
                       } else if (tokenText !== lastSentReasoning) {
-                        acc += tokenText
+                        delta = tokenText
                       }
                       lastSentReasoning = tokenText
-                    }
-                    if (acc) {
-                      enqueue({
-                        subAgent: {
-                          name: sa.name,
-                          causeId,
-                          status: 'running',
-                          reasoning_content: acc
-                        }
-                      })
+                      if (delta) {
+                        enqueue({
+                          subAgent: {
+                            name: sa.name,
+                            causeId,
+                            status: 'running',
+                            reasoning_content: delta
+                          }
+                        })
+                      }
                     }
                   })()
                 )
