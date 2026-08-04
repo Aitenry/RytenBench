@@ -1,13 +1,13 @@
 import type { StructuredToolInterface } from '@langchain/core/tools'
-import type { ToolInfo, SubAgentConfig } from './types'
-import { buildGetWeatherTool } from './tools/weather'
-import { buildGetTimeTool } from './tools/time'
-import { buildManageTodosTool } from './tools/todos'
-import { buildManageDocsTool } from './tools/docs'
-import { buildManageWikisTool } from './tools/wikis'
-import { buildSearchGraphTool } from './tools/graph'
-import { buildManagePlannerTool } from './tools/planner'
-import { buildManageMusicTool } from './tools/music'
+import type { ToolInfo, SubAgentConfig } from '../types'
+import { buildGetWeatherTool } from './weather'
+import { buildGetTimeTool } from './time'
+import { buildManageTodosTool } from './todos'
+import { buildManageDocsTool } from './docs'
+import { buildManageWikisTool } from './wikis'
+import { buildSearchGraphTool } from './graph'
+import { buildManagePlannerTool } from './planner'
+import { buildManageMusicTool } from './music'
 
 // ============================================================================
 // Tool Registry
@@ -111,6 +111,6 @@ export function buildSubAgentTools(subAgent: SubAgentConfig): StructuredToolInte
 
 /** 从数据库加载指定工作区下已启用的智能体定义 */
 export async function loadSubAgentDefinitions(workspaceId: number): Promise<SubAgentConfig[]> {
-  const { getEnabledSubAgentConfigs } = await import('../database/mapper/agent')
+  const { getEnabledSubAgentConfigs } = await import('../../database/mapper/agent')
   return getEnabledSubAgentConfigs(workspaceId)
 }

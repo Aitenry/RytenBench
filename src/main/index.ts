@@ -92,8 +92,7 @@ import {
   getRecentlyPlayed,
   deleteTrackById
 } from './database/mapper/music'
-import { ChatService } from './chat/service'
-import { buildTools, loadSubAgentDefinitions, availableTools } from './chat/tools'
+import { ChatService, buildTools, loadSubAgentDefinitions, availableTools } from './chat'
 import type { ToolCallDetail, SubAgentEvent } from './chat/types'
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models'
 // BaseMessage 等 LangChain 类型已移入 ChatService 内部使用
