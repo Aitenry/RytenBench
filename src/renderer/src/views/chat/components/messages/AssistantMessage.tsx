@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useRef, useEffect, useCallback } from 'react'
 import { Tooltip, Collapse, Modal } from 'antd'
 import {
   RiFileCopyLine,
@@ -44,6 +44,24 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
     onDelete
   }) => {
     const isCopied = copiedId === message.id
+
+    // 折叠内容滚动容器管理 & 流式输出时自动滚动到底部
+    const scrollRefs = useRef<Record<string, HTMLDivElement | null>>({})
+    const setScrollRef = useCallback(
+      (key: string) => (el: HTMLDivElement | null) => {
+        scrollRefs.current[key] = el
+      },
+      []
+    )
+    useEffect(() => {
+      if (message.loading) {
+        Object.values(scrollRefs.current).forEach((el) => {
+          if (el) {
+            el.scrollTop = el.scrollHeight
+          }
+        })
+      }
+    })
 
     if (
       message.loading &&
@@ -235,7 +253,8 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                   ...extra,
                   children: (
                     <div
-                      className="text-sm border-l-2 pl-3"
+                      ref={setScrollRef(`reasoning-${blockIndex}`)}
+                      className="max-h-64 overflow-y-auto chat-scrollbar text-sm border-l-2 pl-3 px-1.5"
                       style={{ borderColor: colorBorderSecondary }}
                     >
                       <MarkdownLoad content={block.reasoning} isDarkMode={isDarkMode} />
@@ -290,7 +309,10 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                   label: toolLabel,
                   collapsible: inProgress ? 'disabled' : undefined,
                   children: (
-                    <div>
+                    <div
+                      ref={setScrollRef(`tool-${blockIndex}`)}
+                      className="max-h-64 overflow-y-auto chat-scrollbar px-1.5"
+                    >
                       <div style={{ color: colorTextSecondary }} className="font-medium mb-1">
                         输入：
                       </div>
@@ -381,7 +403,8 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                         ),
                         children: (
                           <div
-                            className="text-xs border-l-2 pl-3"
+                            ref={setScrollRef(`nested-reasoning-${ci}`)}
+                            className="max-h-48 overflow-y-auto chat-scrollbar text-xs border-l-2 pl-3 px-1.5"
                             style={{ borderColor: colorBorderSecondary }}
                           >
                             <MarkdownLoad content={child.reasoning} isDarkMode={isDarkMode} />
@@ -427,7 +450,10 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                         ),
                         collapsible: inProgress ? 'disabled' : undefined,
                         children: (
-                          <div className="ml-2">
+                          <div
+                            ref={setScrollRef(`nested-tool-${ci}`)}
+                            className="max-h-48 overflow-y-auto chat-scrollbar ml-2 px-1.5"
+                          >
                             <div
                               style={{ color: colorTextSecondary }}
                               className="font-medium mb-1 text-xs"
@@ -510,7 +536,10 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                         ),
                         collapsible: childIsActive ? 'disabled' : undefined,
                         children: (
-                          <div className="pl-2">
+                          <div
+                            ref={setScrollRef(`nested-subagent-${ci}`)}
+                            className="max-h-48 overflow-y-auto chat-scrollbar pl-2 px-1.5"
+                          >
                             {childSa.taskDescription ? (
                               <div style={{ color: colorTextSecondary }} className="text-xs mb-1">
                                 {childSa.taskDescription}
@@ -567,7 +596,10 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                   ),
                   collapsible: isActive ? 'disabled' : undefined,
                   children: (
-                    <div className="pl-2">
+                    <div
+                      ref={setScrollRef(`subagent-${blockIndex}`)}
+                      className="max-h-64 overflow-y-auto chat-scrollbar pl-2 px-1.5"
+                    >
                       {sa.taskDescription ? (
                         <div style={{ color: colorTextSecondary }} className="text-sm mb-2">
                           <MarkdownLoad content={sa.taskDescription} isDarkMode={isDarkMode} />
