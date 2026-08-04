@@ -1,4 +1,4 @@
-export { ChatService } from './service/chat-service'
+export { ChatService } from './service/chat'
 export type { HistoryDialogue, LoadHistoryFn } from './service/history'
 export type { ChatOptions, ChatMessage } from './types'
 export {
