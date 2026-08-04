@@ -664,11 +664,12 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
               ...session,
               messages: updatedMessages
             })
-          }
 
-          // 如果当前正在显示此 topic，同步更新 React 状态
-          if (currentTopicIdRef.current === topicId) {
-            setMessages((prev) => applyChunkToMessages(prev, aiMessageId, chunk, topicId))
+            // 复用 session cache 的结果直接更新 React state
+            // 避免 setMessages(prev => ...) 中 updater 被 StrictMode 双重调用导致重复块
+            if (currentTopicIdRef.current === topicId) {
+              setMessages(updatedMessages)
+            }
           }
         }
       )
