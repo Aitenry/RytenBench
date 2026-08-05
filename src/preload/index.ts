@@ -529,6 +529,16 @@ const api = {
       return () => ipcRenderer.removeListener('music-play-track', handler)
     }
   },
+  workspace: {
+    listDir: (dirPath: string) =>
+      ipcRenderer.invoke('workspace-list-dir', dirPath) as Promise<
+        { name: string; isDirectory: boolean; path: string }[]
+      >,
+    readFile: (filePath: string) =>
+      ipcRenderer.invoke('workspace-read-file', filePath) as Promise<string>,
+    saveFile: (filePath: string, content: string) =>
+      ipcRenderer.invoke('workspace-save-file', filePath, content) as Promise<boolean>
+  },
   weather: {
     getCurrent: (force?: boolean) =>
       ipcRenderer.invoke('weather-get', force) as Promise<WeatherData>,

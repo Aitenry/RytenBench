@@ -1,0 +1,52 @@
+/** Map file extensions to Monaco Editor language identifiers */
+const extLangMap: Record<string, string> = {
+  ts: 'typescript',
+  tsx: 'typescript',
+  js: 'javascript',
+  jsx: 'javascript',
+  json: 'json',
+  html: 'html',
+  htm: 'html',
+  css: 'css',
+  scss: 'scss',
+  less: 'less',
+  md: 'markdown',
+  markdown: 'markdown',
+  py: 'python',
+  rs: 'rust',
+  go: 'go',
+  java: 'java',
+  c: 'c',
+  cpp: 'cpp',
+  h: 'c',
+  hpp: 'cpp',
+  cs: 'csharp',
+  rb: 'ruby',
+  php: 'php',
+  sql: 'sql',
+  sh: 'shell',
+  bash: 'shell',
+  zsh: 'shell',
+  yml: 'yaml',
+  yaml: 'yaml',
+  toml: 'ini',
+  ini: 'ini',
+  env: 'plaintext',
+  xml: 'xml',
+  svg: 'xml',
+  vue: 'html',
+  svelte: 'html',
+  graphql: 'graphql',
+  gql: 'graphql',
+  prisma: 'graphql',
+  dockerfile: 'dockerfile',
+  gitignore: 'plaintext',
+  lock: 'plaintext',
+  txt: 'plaintext',
+  log: 'plaintext'
+}
+
+export function getLanguageFromPath(filePath: string): string {
+  const ext = filePath.split('.').pop()?.toLowerCase() || ''
+  return extLangMap[ext] || 'plaintext'
+}

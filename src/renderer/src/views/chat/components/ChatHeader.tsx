@@ -6,7 +6,9 @@ import {
   RiSidebarUnfoldLine,
   RiApps2AddLine,
   RiFolderOpenLine,
-  RiMoreLine
+  RiMoreLine,
+  RiLayoutRightLine,
+  RiLayoutRightFill
 } from '@remixicon/react'
 import ChatSettingsModal from './settings/ChatSettingsModal'
 import type { WorkspaceRow } from '../../../../../main/database/mapper/chat'
@@ -15,6 +17,8 @@ import type { Window } from '../../../../resource/types/window'
 interface ChatHeaderProps {
   sidebarOpen: boolean
   onToggleSidebar: () => void
+  panelOpen: boolean
+  onTogglePanel: () => void
   colorBorderSecondary: string
   onNewChat: () => void
   onWorkspaceChange: () => Promise<void>
@@ -24,6 +28,8 @@ interface ChatHeaderProps {
 const ChatHeader: React.FC<ChatHeaderProps> = ({
   sidebarOpen,
   onToggleSidebar,
+  panelOpen,
+  onTogglePanel,
   colorBorderSecondary,
   onNewChat,
   onWorkspaceChange,
@@ -282,6 +288,12 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
           size="small"
           icon={<RiListSettingsLine size={16} />}
           onClick={() => setSettingsOpen(true)}
+        />
+        <Button
+          type="text"
+          size="small"
+          icon={panelOpen ? <RiLayoutRightFill size={16} /> : <RiLayoutRightLine size={16} />}
+          onClick={onTogglePanel}
         />
       </div>
       <ChatSettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />

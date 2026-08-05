@@ -319,6 +319,11 @@ interface Api {
     getCurrent: (force?: boolean) => Promise<WeatherData>
     onUpdate: (callback: (data: WeatherData) => void) => () => void
   }
+  workspace: {
+    listDir: (dirPath: string) => Promise<{ name: string; isDirectory: boolean; path: string }[]>
+    readFile: (filePath: string) => Promise<string>
+    saveFile: (filePath: string, content: string) => Promise<boolean>
+  }
 }
 
 interface WeatherData {
