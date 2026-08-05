@@ -1,16 +1,14 @@
 import React, { useRef, useEffect, useCallback } from 'react'
 import { Dropdown, Spin } from 'antd'
-import { RiHistoryLine, RiDeleteBin6Line, RiMoreLine, RiLoader4Line } from '@remixicon/react'
+import { RiListCheck2, RiDeleteBin6Line, RiMoreLine, RiLoader4Line } from '@remixicon/react'
 import type { ChatTopicRow } from '../../../../../main/database/mapper/chat'
 
 interface ChatSidebarProps {
-  sidebarOpen: boolean
   topics: ChatTopicRow[]
   currentTopicId: number | null
   isDarkMode: boolean
   colorBgContainer: string
   borderRadiusLG: number
-  colorBorderSecondary: string
   colorText: string
   colorTextSecondary: string
   colorTextTertiary: string
@@ -25,13 +23,11 @@ interface ChatSidebarProps {
 }
 
 const ChatSidebar: React.FC<ChatSidebarProps> = ({
-  sidebarOpen,
   topics,
   currentTopicId,
   isDarkMode,
   colorBgContainer,
   borderRadiusLG,
-  colorBorderSecondary,
   colorText,
   colorTextSecondary,
   colorTextTertiary,
@@ -62,32 +58,32 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 
   return (
     <div
-      className="flex flex-col transition-all duration-200 overflow-hidden"
+      className="flex flex-col overflow-hidden h-full"
       style={{
-        width: sidebarOpen ? 260 : 0,
-        minWidth: sidebarOpen ? 260 : 0,
         background: colorBgContainer,
-        borderRadius: borderRadiusLG,
-        marginRight: sidebarOpen ? '6px' : '-1px',
-        borderRight: `1px solid ${colorBorderSecondary}`
+        borderRadius: borderRadiusLG
       }}
     >
-      <div
-        style={{ display: sidebarOpen ? 'flex' : 'none' }}
-        className="items-center justify-between px-4 py-2"
-      >
+      <div className="items-center justify-between px-4 py-2 flex">
         <span className="text-sm font-medium" style={{ color: colorTextSecondary }}>
-          历史记录
+          任务
+        </span>
+        <span
+          className="text-xs px-1.5 py-0.5 rounded-full"
+          style={{
+            color: colorTextSecondary,
+            background: colorFillAlter,
+            minWidth: 20,
+            textAlign: 'center'
+          }}
+        >
+          {topics.length}
         </span>
       </div>
-      <div
-        ref={scrollRef}
-        style={{ display: sidebarOpen ? 'block' : 'none' }}
-        className="flex-1 overflow-y-auto py-2 history-scrollbar"
-      >
+      <div ref={scrollRef} className="flex-1 overflow-y-auto py-2 history-scrollbar">
         {topics.length === 0 ? (
           <p className="text-xs text-center py-8" style={{ color: colorTextTertiary }}>
-            暂无历史记录
+            暂无任务
           </p>
         ) : (
           <>
@@ -123,7 +119,7 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
                       style={{ color: colorTextTertiary }}
                     />
                   ) : (
-                    <RiHistoryLine
+                    <RiListCheck2
                       size={16}
                       className="shrink-0"
                       style={{ color: colorTextTertiary }}

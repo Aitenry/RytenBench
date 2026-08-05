@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { theme } from 'antd'
 import GuideSetupPanel from './components/GuideSetupPanel'
 import { useTheme } from '@renderer/contexts/useTheme'
@@ -148,8 +148,41 @@ const Index: React.FC = () => {
 
   const isReady = !showGuide
 
+  // 自定义分栏拖拽
+  const [sidebarWidth, setSidebarWidth] = useState(230)
+  const draggingRef = useRef(false)
+
+  const handleResizerMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault()
+      draggingRef.current = true
+      const startX = e.clientX
+      const startWidth = sidebarWidth
+
+      const handleMouseMove = (ev: MouseEvent): void => {
+        if (!draggingRef.current) return
+        const newWidth = Math.min(260, Math.max(200, startWidth + ev.clientX - startX))
+        setSidebarWidth(newWidth)
+      }
+
+      const handleMouseUp = (): void => {
+        draggingRef.current = false
+        document.removeEventListener('mousemove', handleMouseMove)
+        document.removeEventListener('mouseup', handleMouseUp)
+        document.body.style.cursor = ''
+        document.body.style.userSelect = ''
+      }
+
+      document.body.style.cursor = 'col-resize'
+      document.body.style.userSelect = 'none'
+      document.addEventListener('mousemove', handleMouseMove)
+      document.addEventListener('mouseup', handleMouseUp)
+    },
+    [sidebarWidth]
+  )
+
   return (
-    <div className="h-full flex-1 flex">
+    <div className="h-full flex-1">
       <style>{`
         .chat-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
         .chat-scrollbar::-webkit-scrollbar-track { background: transparent; }
@@ -182,108 +215,135 @@ const Index: React.FC = () => {
           border-radius: 2px;
         }
         .history-scrollbar::-webkit-scrollbar-thumb:hover { background: ${inputScrollbarThumbHoverColor}; }
+        .chat-resizer {
+          width: 6px;
+          cursor: col-resize;
+          flex-shrink: 0;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: transparent;
+        }
+        .chat-resizer-dragger {
+          width: 2px;
+          height: calc(100% - 16px);
+          border-radius: 1px;
+          background: ${isDarkMode ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.12)'};
+          transition: background 0.15s;
+        }
+        .chat-resizer:hover .chat-resizer-dragger {
+          background: ${isDarkMode ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.25)'};
+        }
       `}</style>
 
-      {hasWorkspace !== null && isReady && (
-        <ChatSidebar
-          sidebarOpen={sidebarOpen}
-          topics={topics}
-          currentTopicId={currentTopicId}
-          isDarkMode={isDarkMode}
-          colorBgContainer={colorBgContainer}
-          borderRadiusLG={borderRadiusLG}
-          colorBorderSecondary={colorBorderSecondary}
-          colorText={colorText}
-          colorTextSecondary={colorTextSecondary}
-          colorTextTertiary={colorTextTertiary}
-          colorFillAlter={colorFillAlter}
-          loadingTopicIds={loadingTopicIds}
-          hasMoreTopics={topicsHasMore}
-          isLoadingMoreTopics={topicsLoading}
-          onSelectTopic={handleSelectTopic}
-          onDeleteTopic={handleDeleteTopic}
-          onLoadMoreTopics={handleLoadMoreTopics}
-        />
-      )}
-
-      <main
-        className="flex-1 flex flex-col overflow-hidden"
-        style={{
-          background: colorBgContainer,
-          borderRadius: borderRadiusLG
-        }}
-      >
-        <ChatHeader
-          sidebarOpen={sidebarOpen}
-          onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
-          colorBorderSecondary={colorBorderSecondary}
-          onNewChat={handleNewChat}
-          onWorkspaceChange={handleWorkspaceChange}
-          refreshTrigger={headerRefreshKey}
-        />
-
-        {hasWorkspace === null ? null : isReady ? (
+      <div className="chat-layout" style={{ height: '100%', display: 'flex' }}>
+        {hasWorkspace !== null && isReady && sidebarOpen && (
           <>
-            <ChatMessageArea
-              messages={messages}
-              isDarkMode={isDarkMode}
+            <div style={{ width: sidebarWidth, minWidth: 200, maxWidth: 239, flexShrink: 0 }}>
+              <ChatSidebar
+                topics={topics}
+                currentTopicId={currentTopicId}
+                isDarkMode={isDarkMode}
+                colorBgContainer={colorBgContainer}
+                borderRadiusLG={borderRadiusLG}
+                colorText={colorText}
+                colorTextSecondary={colorTextSecondary}
+                colorTextTertiary={colorTextTertiary}
+                colorFillAlter={colorFillAlter}
+                loadingTopicIds={loadingTopicIds}
+                hasMoreTopics={topicsHasMore}
+                isLoadingMoreTopics={topicsLoading}
+                onSelectTopic={handleSelectTopic}
+                onDeleteTopic={handleDeleteTopic}
+                onLoadMoreTopics={handleLoadMoreTopics}
+              />
+            </div>
+            <div className="chat-resizer" onMouseDown={handleResizerMouseDown}>
+              <div className="chat-resizer-dragger" />
+            </div>
+          </>
+        )}
+        <main
+          className="h-full flex flex-col overflow-hidden"
+          style={{
+            flex: 1,
+            minWidth: '20%',
+            background: colorBgContainer,
+            borderRadius: borderRadiusLG
+          }}
+        >
+          <ChatHeader
+            sidebarOpen={sidebarOpen}
+            onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
+            colorBorderSecondary={colorBorderSecondary}
+            onNewChat={handleNewChat}
+            onWorkspaceChange={handleWorkspaceChange}
+            refreshTrigger={headerRefreshKey}
+          />
+
+          {hasWorkspace === null ? null : isReady ? (
+            <>
+              <ChatMessageArea
+                messages={messages}
+                isDarkMode={isDarkMode}
+                colorText={colorText}
+                colorTextSecondary={colorTextSecondary}
+                colorTextTertiary={colorTextTertiary}
+                colorFillAlter={colorFillAlter}
+                colorBorderSecondary={colorBorderSecondary}
+                titleDisplayed={titleDisplayed}
+                titleDone={titleDone}
+                subtitleDisplayed={subtitleDisplayed}
+                subtitleDone={subtitleDone}
+                copiedId={copiedId}
+                hasMoreMessages={messagesHasMore}
+                isLoadingMoreMessages={messagesLoadingMore}
+                onCopy={handleCopy}
+                onDelete={handleDeleteMessagePair}
+                onLoadMoreMessages={handleLoadMoreMessages}
+                messagesEndRef={messagesEndRef}
+              />
+
+              <div className="px-16 pb-8">
+                <div className="max-w-4xl mx-auto">
+                  <ChatInput
+                    inputValue={inputValue}
+                    onInputChange={setInputValue}
+                    textareaRef={textareaRef}
+                    attachments={attachments}
+                    onAttachmentsChange={setAttachments}
+                    isLoading={isLoading}
+                    selectedProviderId={selectedProviderId}
+                    onSelectProvider={(value) => setSelectedProviderId(value)}
+                    groupedProviderOptions={groupedProviderOptions}
+                    modelSupportsTools={modelSupportsTools}
+                    modelSupportsVision={modelSupportsVision}
+                    isDarkMode={isDarkMode}
+                    colorBgLayout={colorBgLayout}
+                    colorBorder={colorBorder}
+                    colorText={colorText}
+                    colorBorderSecondary={colorBorderSecondary}
+                    onSend={handleSend}
+                    onStop={handleStop}
+                    onKeyDown={handleKeyDown}
+                  />
+                </div>
+              </div>
+            </>
+          ) : guideVisible ? (
+            <GuideSetupPanel
+              guideWorkspaceDone={guideWorkspaceDone}
+              hasModels={hasModels}
+              colorFillAlter={colorFillAlter}
               colorText={colorText}
               colorTextSecondary={colorTextSecondary}
               colorTextTertiary={colorTextTertiary}
-              colorFillAlter={colorFillAlter}
-              colorBorderSecondary={colorBorderSecondary}
-              titleDisplayed={titleDisplayed}
-              titleDone={titleDone}
-              subtitleDisplayed={subtitleDisplayed}
-              subtitleDone={subtitleDone}
-              copiedId={copiedId}
-              hasMoreMessages={messagesHasMore}
-              isLoadingMoreMessages={messagesLoadingMore}
-              onCopy={handleCopy}
-              onDelete={handleDeleteMessagePair}
-              onLoadMoreMessages={handleLoadMoreMessages}
-              messagesEndRef={messagesEndRef}
+              onWorkspaceSetup={handleWorkspaceSetup}
+              onModelSetup={handleModelSetup}
             />
-
-            <div className="px-16 pb-8">
-              <div className="max-w-4xl mx-auto">
-                <ChatInput
-                  inputValue={inputValue}
-                  onInputChange={setInputValue}
-                  textareaRef={textareaRef}
-                  attachments={attachments}
-                  onAttachmentsChange={setAttachments}
-                  isLoading={isLoading}
-                  selectedProviderId={selectedProviderId}
-                  onSelectProvider={(value) => setSelectedProviderId(value)}
-                  groupedProviderOptions={groupedProviderOptions}
-                  modelSupportsTools={modelSupportsTools}
-                  modelSupportsVision={modelSupportsVision}
-                  isDarkMode={isDarkMode}
-                  colorBgLayout={colorBgLayout}
-                  colorBorder={colorBorder}
-                  colorText={colorText}
-                  colorBorderSecondary={colorBorderSecondary}
-                  onSend={handleSend}
-                  onStop={handleStop}
-                  onKeyDown={handleKeyDown}
-                />
-              </div>
-            </div>
-          </>
-        ) : guideVisible ? (
-          <GuideSetupPanel
-            guideWorkspaceDone={guideWorkspaceDone}
-            hasModels={hasModels}
-            colorFillAlter={colorFillAlter}
-            colorText={colorText}
-            colorTextSecondary={colorTextSecondary}
-            colorTextTertiary={colorTextTertiary}
-            onWorkspaceSetup={handleWorkspaceSetup}
-            onModelSetup={handleModelSetup}
-          />
-        ) : null}
-      </main>
+          ) : null}
+        </main>
+      </div>
     </div>
   )
 }
