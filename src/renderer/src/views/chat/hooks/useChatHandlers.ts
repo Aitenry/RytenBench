@@ -1,5 +1,4 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react'
-import type { TextAreaRef } from 'antd/es/input/TextArea'
 import type { ChatTopicRow } from '../../../../../main/database/mapper/chat'
 import { LlmProviderConfig } from '../../../../../main/database/mapper/provider'
 import { Window, ToolInfo } from '../../../../resource/types/window'
@@ -36,7 +35,7 @@ export interface UseChatHandlersReturn {
   setAttachments: React.Dispatch<React.SetStateAction<Attachment[]>>
   isLoading: boolean
   messagesEndRef: React.RefObject<HTMLDivElement | null>
-  textareaRef: React.RefObject<TextAreaRef | null>
+  textareaRef: React.RefObject<HTMLDivElement | null>
   currentSessionIdRef: React.RefObject<string | null>
   currentTopicIdRef: React.RefObject<number | null>
   loadingTopicIds: Set<number>
@@ -63,7 +62,7 @@ export interface UseChatHandlersReturn {
   handleSend: () => Promise<void>
   handleNewChat: () => void
   handleDeleteMessagePair: (msgIndex: number) => Promise<void>
-  handleKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void
+  handleKeyDown: (e: React.KeyboardEvent<HTMLDivElement>) => void
   handleStop: () => void
   handleLoadMoreTopics: () => Promise<void>
   handleLoadMoreMessages: () => Promise<void>
@@ -76,7 +75,7 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
   const [availableTools, setAvailableTools] = useState<ToolInfo[]>([])
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  const textareaRef = useRef<TextAreaRef>(null)
+  const textareaRef = useRef<HTMLDivElement>(null)
   const currentSessionIdRef = useRef<string | null>(null)
 
   /** 当前活跃的工作区 ID */
@@ -1053,7 +1052,7 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
   )
 
   const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
+    (e: React.KeyboardEvent<HTMLDivElement>): void => {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault()
         handleSend().then()

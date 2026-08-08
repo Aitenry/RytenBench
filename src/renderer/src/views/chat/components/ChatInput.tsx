@@ -1,7 +1,13 @@
-import React, { useMemo } from 'react'
-import { Input, Button, Tooltip, Select } from 'antd'
-import type { TextAreaRef } from 'antd/es/input/TextArea'
-import { RiArrowUpLine, RiAttachment2, RiCloseLine, RiStopFill } from '@remixicon/react'
+import React, { useMemo, useState, useCallback, useEffect } from 'react'
+import { Button, Tooltip, Select } from 'antd'
+import {
+  RiArrowUpLine,
+  RiAttachment2,
+  RiCloseLine,
+  RiStopFill,
+  RiFileLine,
+  RiFolder3Line
+} from '@remixicon/react'
 import {
   OpenAIFilled,
   DeepSeekFilled,
@@ -40,7 +46,7 @@ const providerColors: Record<string, string> = {
 interface ChatInputProps {
   inputValue: string
   onInputChange: (value: string) => void
-  textareaRef: React.RefObject<TextAreaRef | null>
+  textareaRef: React.RefObject<HTMLDivElement | null>
   attachments: Attachment[]
   onAttachmentsChange: (attachments: Attachment[]) => void
   isLoading: boolean
@@ -59,7 +65,31 @@ interface ChatInputProps {
   colorBorderSecondary: string
   onSend: () => void
   onStop: () => void
-  onKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void
+  onKeyDown: (e: React.KeyboardEvent<HTMLDivElement>) => void
+}
+
+/** 从 contentEditable div 提取纯文本，chip 取其 data-path */
+const extractPlainText = (el: HTMLDivElement): string => {
+  let text = ''
+  const walk = (node: Node): void => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      text += node.textContent || ''
+    } else if (node instanceof HTMLBRElement) {
+      text += '\n'
+    } else if (node instanceof HTMLDivElement) {
+      // block-level divs created by Enter key
+      walk(node)
+      text += '\n'
+    } else if (node instanceof HTMLElement) {
+      if (node.dataset.path) {
+        text += node.dataset.path
+      } else {
+        node.childNodes.forEach(walk)
+      }
+    }
+  }
+  el.childNodes.forEach(walk)
+  return text.replace(/\n+$/, '')
 }
 
 const ChatInput: React.FC<ChatInputProps> = ({
@@ -82,6 +112,8 @@ const ChatInput: React.FC<ChatInputProps> = ({
   onStop,
   onKeyDown
 }) => {
+  const [isDragOver, setIsDragOver] = useState(false)
+
   const selectedProviderType = useMemo(() => {
     if (selectedProviderId == null) return ''
     for (const group of groupedProviderOptions) {
@@ -95,34 +127,217 @@ const ChatInput: React.FC<ChatInputProps> = ({
   const SelectedIcon = providerIconMap[selectedProviderType]
   const selectedColor = providerColors[selectedProviderType] || undefined
 
+  // ── 同步纯文本到父组件 ──
+  const syncText = useCallback(() => {
+    const el = textareaRef.current
+    if (!el) return
+    onInputChange(extractPlainText(el))
+  }, [onInputChange, textareaRef])
+
+  // 父组件清空 inputValue 时（发送后），同步清空 contentEditable
+  useEffect(() => {
+    if (inputValue === '' && textareaRef.current) {
+      const el = textareaRef.current
+      if (el.textContent !== '') {
+        el.innerHTML = ''
+      }
+    }
+  }, [inputValue, textareaRef])
+
+  // ── Chip 样式 ──
+  const chipBg = isDarkMode ? '#1a2744' : '#eff6ff'
+  const chipColor = isDarkMode ? '#93c5fd' : '#1d4ed8'
+  const chipBorder = isDarkMode ? '#1e3a5f' : '#bfdbfe'
+
+  // ── 在光标位置插入 chip ──
+  const insertChipAtCursor = useCallback(
+    (path: string) => {
+      const el = textareaRef.current
+      if (!el) return
+      el.focus()
+
+      const selection = window.getSelection()
+      if (!selection || !selection.rangeCount) return
+
+      const range = selection.getRangeAt(0)
+      if (!el.contains(range.commonAncestorContainer)) {
+        range.selectNodeContents(el)
+        range.collapse(false)
+      }
+
+      // 提取显示名称：路径最后一段
+      const cleanPath = path.replace(/\/$/, '')
+      const segments = cleanPath.split('/')
+      const displayName = segments[segments.length - 1] || path
+
+      // 创建 chip DOM
+      const chip = document.createElement('span')
+      chip.contentEditable = 'false'
+      chip.dataset.path = path
+      chip.title = path
+      chip.setAttribute(
+        'style',
+        [
+          'display:inline-flex',
+          'align-items:center',
+          'gap:2px',
+          'font-size:13px',
+          'line-height:1',
+          'padding: 4px',
+          'border-radius:3px',
+          'vertical-align:middle',
+          'margin:0 1px',
+          'white-space:nowrap',
+          'cursor:default',
+          'user-select:none',
+          `background:${chipBg}`,
+          `color:${chipColor}`,
+          `border:1px solid ${chipBorder}`
+        ].join(';')
+      )
+
+      const isDir = path.endsWith('/') || !path.includes('.')
+      const icon = document.createElement('span')
+      icon.style.cssText = 'display:inline-flex;align-items:center;flex-shrink:0;line-height:0'
+      icon.innerHTML = isDir
+        ? '<svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M12.414 5H21C21.5523 5 22 5.44772 22 6V20C22 20.5523 21.5523 21 21 21H3C2.44772 21 2 20.5523 2 20V4C2 3.44772 2.44772 3 3 3H10.414L12.414 5Z"/></svg>'
+        : '<svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M3 8L9.00319 2H19.9978C20.5513 2 21 2.45531 21 2.99078V21.0092C21 21.556 20.5551 22 20.0066 22H3.9934C3.44476 22 3 21.5501 3 20.9932V8ZM10 4V9H5V20H19V4H10Z"/></svg>'
+
+      const text = document.createElement('span')
+      text.style.cssText = 'max-width:160px;overflow:hidden;text-overflow:ellipsis'
+      text.textContent = displayName
+
+      const closeBtn = document.createElement('span')
+      closeBtn.style.cssText =
+        'display:inline-flex;align-items:center;cursor:pointer;margin-left:1px;line-height:0;opacity:0.7'
+      closeBtn.innerHTML =
+        '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M12 10.586L17.95 4.636L19.364 6.05L13.414 12L19.364 17.95L17.95 19.364L12 13.414L6.05 19.364L4.636 17.95L10.586 12L4.636 6.05L6.05 4.636L12 10.586Z"/></svg>'
+      closeBtn.addEventListener('click', (e) => {
+        e.stopPropagation()
+        chip.remove()
+        syncText()
+        el.focus()
+      })
+
+      chip.appendChild(icon)
+      chip.appendChild(text)
+      chip.appendChild(closeBtn)
+
+      // 插入到光标位置
+      range.deleteContents()
+      range.insertNode(chip)
+
+      // 在 chip 后面插入一个空格，光标移到空格后
+      const space = document.createTextNode('\u00A0')
+      range.setStartAfter(chip)
+      range.collapse(true)
+      range.insertNode(space)
+
+      range.setStartAfter(space)
+      range.collapse(true)
+      selection.removeAllRanges()
+      selection.addRange(range)
+
+      syncText()
+    },
+    [textareaRef, chipBg, chipColor, chipBorder, syncText]
+  )
+
+  // ── 拖拽处理 ──
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'copy'
+    setIsDragOver(true)
+  }, [])
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragOver(false)
+  }, [])
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault()
+      setIsDragOver(false)
+      const relativePath = e.dataTransfer.getData('text/plain')
+      if (!relativePath) return
+      insertChipAtCursor(relativePath)
+    },
+    [insertChipAtCursor]
+  )
+
+  // ── 键盘处理：Enter 发送，Shift+Enter 换行 ──
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault()
+        onKeyDown(e)
+      } else {
+        onKeyDown(e)
+      }
+    },
+    [onKeyDown]
+  )
+
+  // ── 点击 chip 关闭按钮时移除 chip ──
+  const handleClick = useCallback(
+    (e: React.MouseEvent) => {
+      const target = e.target as HTMLElement
+      const chip = target.closest('[data-path]') as HTMLElement | null
+      if (chip && target.closest('[data-close]')) {
+        e.preventDefault()
+        chip.remove()
+        syncText()
+        textareaRef.current?.focus()
+      }
+    },
+    [syncText, textareaRef]
+  )
+
+  const hasContent = inputValue.trim().length > 0
+
   return (
     <div
       className="rounded-2xl input-scrollbar"
       style={{
         background: colorBgLayout,
-        border: `1px solid ${colorBorder}`
+        border: `1px solid ${isDragOver ? '#4d6bfe' : colorBorder}`,
+        transition: 'border-color 0.2s'
       }}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
     >
       <div className="p-4">
-        <Input.TextArea
+        <div
           ref={textareaRef}
-          value={inputValue}
-          onChange={(e) => onInputChange(e.target.value)}
-          onKeyDown={onKeyDown}
-          placeholder="给 Rita 发送消息"
-          autoSize={{ minRows: 1, maxRows: 8 }}
-          style={{ color: colorText }}
-          styles={{
-            textarea: {
-              backgroundColor: 'transparent',
-              border: 'none',
-              boxShadow: 'none',
-              padding: 0,
-              minHeight: '24px',
-              maxHeight: '200px'
-            }
+          contentEditable
+          suppressContentEditableWarning
+          className="outline-none whitespace-pre-wrap break-words overflow-y-auto"
+          style={{
+            color: colorText,
+            backgroundColor: 'transparent',
+            border: 'none',
+            boxShadow: 'none',
+            padding: 0,
+            minHeight: '24px',
+            maxHeight: '200px',
+            fontSize: '14px',
+            lineHeight: '19px'
           }}
+          data-placeholder="给 Rita 发送消息"
+          onInput={syncText}
+          onKeyDown={handleKeyDown}
+          onClick={handleClick}
+          onBlur={syncText}
         />
+        <style>{`
+          [data-placeholder]:empty::before {
+            content: attr(data-placeholder);
+            color: #bfbfbf;
+            pointer-events: none;
+          }
+        `}</style>
       </div>
       {attachments.length > 0 && (
         <div className="flex gap-2 px-4 pb-3 flex-wrap">
@@ -278,7 +493,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
               shape="circle"
               icon={<RiArrowUpLine size={16} />}
               onClick={onSend}
-              disabled={!inputValue.trim()}
+              disabled={!hasContent}
             />
           )}
         </div>

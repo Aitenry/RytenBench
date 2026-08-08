@@ -114,7 +114,7 @@ const WorkspacePanel: React.FC<WorkspacePanelProps> = ({
 
       const handleMouseMove = (ev: MouseEvent): void => {
         if (!draggingRef.current) return
-        const newWidth = Math.min(300, Math.max(150, startWidth - (ev.clientX - startX)))
+        const newWidth = Math.min(300, Math.max(220, startWidth - (ev.clientX - startX)))
         setExplorerWidth(newWidth)
       }
 
@@ -183,10 +183,7 @@ const WorkspacePanel: React.FC<WorkspacePanelProps> = ({
             />
           </div>
 
-          <div
-            className="workspace-resizer"
-            onMouseDown={handleResizerMouseDown}
-          >
+          <div className="workspace-resizer" onMouseDown={handleResizerMouseDown}>
             <div className="workspace-resizer-dragger" />
           </div>
         </>

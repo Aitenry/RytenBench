@@ -5,13 +5,15 @@ import {
   RiFileAi2Line,
   RiServerLine,
   RiListIndefinite,
-  RiAiAgentLine
+  RiAiAgentLine,
+  RiBrain4Line
 } from '@remixicon/react'
 import SkillsSettings from './SkillsSettings'
 import GeneralSettings from './GeneralSettings'
 import AgentSettings from './AgentSettings'
+import MemorySettings from './MemorySettings'
 
-type SettingsTab = 'general' | 'skills' | 'agents' | 'mcp'
+type SettingsTab = 'general' | 'skills' | 'agents' | 'mcp' | 'memory'
 
 const TAB_ITEMS: {
   key: SettingsTab
@@ -21,6 +23,7 @@ const TAB_ITEMS: {
   { key: 'general', label: '通用', icon: <RiListIndefinite size={18} /> },
   { key: 'agents', label: '智能体', icon: <RiAiAgentLine size={18} /> },
   { key: 'skills', label: '技能', icon: <RiFileAi2Line size={18} /> },
+  { key: 'memory', label: '记忆', icon: <RiBrain4Line size={18} /> },
   { key: 'mcp', label: 'MCP', icon: <RiServerLine size={18} /> }
 ]
 
@@ -52,6 +55,8 @@ const ChatSettingsModal: React.FC<ChatSettingsModalProps> = ({ open, onClose }) 
         return <AgentSettings />
       case 'skills':
         return <SkillsSettings />
+      case 'memory':
+        return <MemorySettings />
       case 'mcp':
         return (
           <div

@@ -3,6 +3,7 @@ import { createDeepAgent } from 'deepagents'
 import logger from 'electron-log'
 import { ChatOptions, StructuredMessage } from '../types'
 import { buildHumanMessage } from './message-builder'
+import type { UploadedFileRef } from './message-builder'
 import {
   produceMessages,
   produceToolCalls,
@@ -15,6 +16,11 @@ export interface StreamDeps {
   createAgent(): ReturnType<typeof createDeepAgent>
 
   loadContextMessages(topicId: number): Promise<BaseMessage[]>
+
+  /** 将上传文件复制到 agent 工作区，返回虚拟路径引用 */
+  copyUploadedFiles(
+    docs?: { fileName: string; filePath: string }[]
+  ): Promise<UploadedFileRef[] | undefined>
 }
 
 /**
@@ -35,7 +41,8 @@ export async function* runStream(
   try {
     const agent = deps.createAgent()
 
-    const userMessage = buildHumanMessage(message, options?.images, options?.documents)
+    const uploadedRefs = await deps.copyUploadedFiles(options?.documents)
+    const userMessage = buildHumanMessage(message, options?.images, uploadedRefs)
     const contextMessages = options?.topicId ? await deps.loadContextMessages(options.topicId) : []
     logger.info(
       `[Chat] Passing ${contextMessages.length} context messages + 1 user message to deepagent (topicId=${options?.topicId})`

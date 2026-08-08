@@ -192,8 +192,20 @@ const Index: React.FC = () => {
     Math.max(500, Math.floor(window.innerWidth * 0.4))
   )
 
-  const panelMinWidth = panelHasEditor ? 450 : 300
-  const panelMaxWidth = panelHasEditor ? 900 : 500
+  const MAIN_MIN_WIDTH = 300
+  const panelMinWidth = panelHasEditor ? 450 : 220
+  // 动态限制 panel 最大宽度：不超过窗口 45%，且确保主内容区至少有 MAIN_MIN_WIDTH
+  const panelMaxWidth = panelHasEditor
+    ? Math.min(
+        Math.floor(window.innerWidth * 0.45),
+        window.innerWidth - (sidebarOpen ? sidebarWidth + 6 : 0) - MAIN_MIN_WIDTH - 6
+      )
+    : 220
+
+  // 自动调整面板宽度：无文件时收窄到 220px，有文件时按窗口 35% 展开
+  useEffect(() => {
+    setPanelWidth(panelHasEditor ? Math.floor(window.innerWidth * 0.35) : 220)
+  }, [panelHasEditor])
 
   const panelDraggingRef = useRef(false)
 

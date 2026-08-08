@@ -1,31 +1,34 @@
 import { HumanMessage } from '@langchain/core/messages'
-import * as fs from 'fs'
-import logger from 'electron-log'
 
 /**
- * 构建 HumanMessage，支持多模态（图片 + 文本）及文档附件
+ * 上传文件信息（已复制到 agent 文件系统中的路径）
+ */
+export interface UploadedFileRef {
+  fileName: string
+  /** agent 文件系统中的虚拟路径，如 /uploads/report.pdf */
+  virtualPath: string
+}
+
+/**
+ * 构建 HumanMessage，支持多模态（图片 + 文本）
+ *
+ * 文档附件不直接嵌入内容，而是告知 agent 文件路径，让 agent 通过
+ * read_file 工具按需读取。DeepAgents 框架内置了上下文管理：
+ * - 大文件读取结果 > 20K token 自动写入 /large_tool_results/
+ * - 上下文超 85% 时旧工具调用替换为文件指针
+ * - 最终回退到摘要压缩
  */
 export function buildHumanMessage(
   text: string,
   images?: string[],
-  documents?: { fileName: string; filePath: string }[]
+  documents?: UploadedFileRef[]
 ): HumanMessage {
   let fullText = text
 
-  // 将文档内容拼接到消息文本中
+  // 告知 agent 上传文件的位置，让 agent 自行用 read_file 按需读取
   if (documents && documents.length > 0) {
-    for (const doc of documents) {
-      try {
-        const content = fs.readFileSync(doc.filePath, 'utf-8')
-        // 截断过大的文件（限制 5KB，避免超出 token 上限）
-        const truncated =
-          content.length > 5000 ? content.slice(0, 5000) + '\n...(内容已截断)' : content
-        fullText += `\n\n--- 附件文档: ${doc.fileName} ---\n${truncated}\n--- 文档结束 ---`
-      } catch (err) {
-        logger.warn(`Failed to read document ${doc.fileName}:`, err)
-        fullText += `\n\n[无法读取文件: ${doc.fileName}]`
-      }
-    }
+    const fileList = documents.map((doc) => `- \`${doc.virtualPath}\` (${doc.fileName})`).join('\n')
+    fullText += `\n\n## 上传的文件\n以下文件已上传到你的文件系统中，请使用 read_file 工具按需读取：\n${fileList}`
   }
 
   if (!images || images.length === 0) {

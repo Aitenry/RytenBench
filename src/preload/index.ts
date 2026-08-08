@@ -199,6 +199,18 @@ const api = {
     selectSkillsDirectory: () => ipcRenderer.invoke('chat-select-skills-directory'),
     selectWorkspace: () => ipcRenderer.invoke('chat-select-workspace') as Promise<string | null>,
     listSkills: () => ipcRenderer.invoke('chat-list-skills'),
+    // 记忆管理
+    selectMemoryDirectory: () => ipcRenderer.invoke('chat-select-memory-directory'),
+    scanMemoryTree: (workspaceId: number) =>
+      ipcRenderer.invoke('chat-scan-memory-tree', workspaceId),
+    initMemoryDirs: (workspaceId: number) =>
+      ipcRenderer.invoke('chat-init-memory-dirs', workspaceId),
+    checkMemoryInitialized: () => ipcRenderer.invoke('chat-check-memory-initialized'),
+    initSubagentMemoryDirs: (workspaceId: number, agentName: string) =>
+      ipcRenderer.invoke('chat-init-subagent-memory-dirs', workspaceId, agentName),
+    removeSubagentMemoryDirs: (workspaceId: number, agentName: string) =>
+      ipcRenderer.invoke('chat-remove-subagent-memory-dirs', workspaceId, agentName),
+    readMemoryFile: (filePath: string) => ipcRenderer.invoke('chat-read-memory-file', filePath),
     // 工作区管理
     getAllWorkspaces: () => ipcRenderer.invoke('workspace-get-all') as Promise<WorkspaceRow[]>,
     createWorkspace: (name: string, path: string) =>

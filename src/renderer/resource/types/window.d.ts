@@ -187,6 +187,46 @@ export interface Window {
       selectSkillsDirectory: () => Promise<string | null>
       selectWorkspace: () => Promise<string | null>
       listSkills: () => Promise<{ id: string; name: string; description: string }[]>
+      selectMemoryDirectory: () => Promise<string | null>
+      scanMemoryTree: (workspaceId: number) => Promise<
+        {
+          key: string
+          title: string
+          type: 'global' | 'workspace' | 'agent' | 'folder'
+          isLeaf?: boolean
+          children?: {
+            key: string
+            title: string
+            type: 'global' | 'workspace' | 'agent' | 'folder'
+            isLeaf?: boolean
+            children?: {
+              key: string
+              title: string
+              type: 'global' | 'workspace' | 'agent' | 'folder'
+              isLeaf?: boolean
+              children?: {
+                key: string
+                title: string
+                type: 'global' | 'workspace' | 'agent' | 'folder'
+                isLeaf?: boolean
+              }[]
+            }[]
+          }[]
+        }[]
+      >
+      initMemoryDirs: (workspaceId: number) => Promise<{ success: boolean; error?: string }>
+      checkMemoryInitialized: () => Promise<{ configured: boolean; initialized: boolean }>
+      initSubagentMemoryDirs: (
+        workspaceId: number,
+        agentName: string
+      ) => Promise<{ success: boolean; error?: string }>
+      removeSubagentMemoryDirs: (
+        workspaceId: number,
+        agentName: string
+      ) => Promise<{ success: boolean; error?: string }>
+      readMemoryFile: (
+        filePath: string
+      ) => Promise<{ success: boolean; content?: string; error?: string }>
       getAllWorkspaces: () => Promise<WorkspaceRow[]>
       createWorkspace: (name: string, path: string) => Promise<number>
       deleteWorkspace: (id: number) => Promise<boolean>

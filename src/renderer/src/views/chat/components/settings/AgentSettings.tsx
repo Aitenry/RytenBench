@@ -123,6 +123,17 @@ const AgentSettings: React.FC = () => {
     })
   }, [loadPage, loadOptions])
 
+  // 监听工作区切换
+  useEffect(() => {
+    const handleWorkspaceChanged = (): void => {
+      loadOptions().then((wsId) => {
+        loadPage(1, wsId)
+      })
+    }
+    window.addEventListener('workspace-changed', handleWorkspaceChanged)
+    return () => window.removeEventListener('workspace-changed', handleWorkspaceChanged)
+  }, [loadOptions, loadPage])
+
   // ===== 主智能体 =====
 
   const handleMainSave = async (): Promise<void> => {
@@ -182,6 +193,8 @@ const AgentSettings: React.FC = () => {
       } else {
         await (window as unknown as Window).api.agents.create(input)
         viewMessage('agent-save', 'success', '智能体已创建', 2)
+        // 通知记忆树刷新（后端已自动创建记忆目录）
+        window.dispatchEvent(new CustomEvent('memory-tree-refresh'))
       }
 
       setModalOpen(false)
@@ -216,6 +229,8 @@ const AgentSettings: React.FC = () => {
         try {
           await (window as unknown as Window).api.agents.delete(workspaceId, agent.id)
           viewMessage('agent-delete', 'success', '已删除', 2)
+          // 通知记忆树刷新（后端已自动删除记忆目录）
+          window.dispatchEvent(new CustomEvent('memory-tree-refresh'))
           await loadPage(currentPage, workspaceId)
         } catch (error) {
           viewMessage('agent-delete', 'error', `删除失败: ${error}`)
@@ -363,6 +378,10 @@ const AgentSettings: React.FC = () => {
 
     // 刷新 & 清空
     if (fileInputRef.current) fileInputRef.current.value = ''
+    // 通知记忆树刷新（后端已自动创建记忆目录）
+    if (imported > 0) {
+      window.dispatchEvent(new CustomEvent('memory-tree-refresh'))
+    }
     await loadPage(1, workspaceId)
   }
 

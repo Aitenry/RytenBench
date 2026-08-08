@@ -82,6 +82,7 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
       setWorkspaceOpen(false)
       onNewChat()
       onWorkspaceChange().then()
+      window.dispatchEvent(new CustomEvent('workspace-changed', { detail: { workspaceId: ws.id } }))
     } catch (err) {
       console.error('Failed to switch workspace:', err)
     }
@@ -108,6 +109,9 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
             setActiveWorkspaceId(null)
             onNewChat()
             onWorkspaceChange().then()
+            window.dispatchEvent(
+              new CustomEvent('workspace-changed', { detail: { workspaceId: null } })
+            )
           }
           await loadWorkspaces()
         } catch (err) {
@@ -157,6 +161,7 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
       setWorkspaceOpen(false)
       onNewChat()
       onWorkspaceChange().then()
+      window.dispatchEvent(new CustomEvent('workspace-changed', { detail: { workspaceId: id } }))
       await loadWorkspaces()
     } catch (err) {
       console.error('Failed to create workspace:', err)

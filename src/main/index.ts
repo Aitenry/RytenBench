@@ -906,7 +906,14 @@ app.whenReady().then(async () => {
     try {
       for (const [key, value] of Object.entries(updates)) {
         if (value !== undefined) {
-          settingsStore.set(key as keyof SystemSettings, value)
+          // 对于对象类型的设置（如 chat），与现有值合并而非替换
+          if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+            const existing = settingsStore.get(key as keyof SystemSettings) as
+              Record<string, unknown> | undefined
+            settingsStore.set(key as keyof SystemSettings, { ...existing, ...value } as never)
+          } else {
+            settingsStore.set(key as keyof SystemSettings, value)
+          }
         }
       }
       logger.info('System settings updated:', Object.keys(updates).join(', '))
@@ -1740,7 +1747,9 @@ app.whenReady().then(async () => {
         chatSettings?.historyWindowSize ?? 10,
         chatSettings?.skillsPath || undefined,
         effectiveSkills,
-        chatSettings?.workspacePath || undefined
+        chatSettings?.workspacePath || undefined,
+        chatSettings?.memoryPath || undefined,
+        chatSettings?.activeWorkspaceId ?? 0
       )
       return await chatService.sendMessage(question, options)
     }
@@ -1774,8 +1783,12 @@ app.whenReady().then(async () => {
           const errMsg = modelErr instanceof Error ? modelErr.message : String(modelErr)
           logger.error('[Chat] Model creation failed:', errMsg)
           if (!event.sender.isDestroyed()) {
-            event.sender.send('chat-stream-error', { error: errMsg, topicId: options?.topicId })
-            event.sender.send('chat-stream-done', { topicId: options?.topicId ?? 0 })
+            try {
+              event.sender.send('chat-stream-error', { error: errMsg, topicId: options?.topicId })
+              event.sender.send('chat-stream-done', { topicId: options?.topicId ?? 0 })
+            } catch (sendErr) {
+              logger.warn('[Chat] Failed to send stream error/done (renderer disposed):', sendErr)
+            }
           }
           return
         }
@@ -1844,7 +1857,9 @@ app.whenReady().then(async () => {
           historyWindowSize,
           chatSettings?.skillsPath || undefined,
           effectiveSkills,
-          chatSettings?.workspacePath || undefined
+          chatSettings?.workspacePath || undefined,
+          chatSettings?.memoryPath || undefined,
+          chatSettings?.activeWorkspaceId ?? 0
         )
         const stream = chatService.sendMessageStream(question, {
           ...options,
@@ -2152,19 +2167,34 @@ app.whenReady().then(async () => {
                 }
               }
             }
-            event.sender.send('chat-stream-chunk', { ...chunk, __topicId: topicId })
+            if (!event.sender.isDestroyed()) {
+              try {
+                event.sender.send('chat-stream-chunk', { ...chunk, __topicId: topicId })
+              } catch (sendErr) {
+                logger.warn('[Chat] Failed to send stream chunk (renderer disposed):', sendErr)
+                break
+              }
+            }
           }
         } catch (error) {
           if ((error as Error)?.name !== 'AbortError') {
             logger.error('Error in chat stream:', error)
             const errMsg = error instanceof Error ? error.message : String(error)
             if (!event.sender.isDestroyed()) {
-              event.sender.send('chat-stream-error', { error: errMsg, topicId })
+              try {
+                event.sender.send('chat-stream-error', { error: errMsg, topicId })
+              } catch (sendErr) {
+                logger.warn('[Chat] Failed to send stream error (renderer disposed):', sendErr)
+              }
             }
             // 流异常中断时不保存不完整的 AI 回复，直接跳到清理
             streamAbortControllers.delete(event.sender.id)
             if (!event.sender.isDestroyed()) {
-              event.sender.send('chat-stream-done', { topicId })
+              try {
+                event.sender.send('chat-stream-done', { topicId })
+              } catch (sendErr) {
+                logger.warn('[Chat] Failed to send stream done (renderer disposed):', sendErr)
+              }
             }
             return
           }
@@ -2185,7 +2215,11 @@ app.whenReady().then(async () => {
         // 5. 清理并通知渲染进程流式输出已完成
         streamAbortControllers.delete(event.sender.id)
         if (!event.sender.isDestroyed()) {
-          event.sender.send('chat-stream-done', { topicId })
+          try {
+            event.sender.send('chat-stream-done', { topicId })
+          } catch (sendErr) {
+            logger.warn('[Chat] Failed to send stream done (renderer disposed):', sendErr)
+          }
         }
       })()
       activeChatStreams.add(streamPromise)
@@ -2201,6 +2235,366 @@ app.whenReady().then(async () => {
       streamAbortControllers.delete(event.sender.id)
     }
   })
+
+  // 选择记忆（Memory）存储目录
+  ipcMain.handle('chat-select-memory-directory', async () => {
+    const result = await dialog.showOpenDialog({
+      properties: ['openDirectory', 'createDirectory'],
+      title: '选择记忆存储目录'
+    })
+    if (result.canceled || result.filePaths.length === 0) return null
+    return result.filePaths[0]
+  })
+
+  // 扫描记忆目录树（仅当前工作区 + 全局）
+  ipcMain.handle('chat-scan-memory-tree', async (_event, workspaceId: number) => {
+    try {
+      const path = await import('path')
+      const settings = settingsStore.store
+      const memoryPath = (settings.chat as ChatSettings)?.memoryPath
+      if (!memoryPath || !fs.existsSync(memoryPath)) return []
+
+      const SUB_DIRS = ['memories', 'peers', 'privacy', 'resources', 'sessions', 'skills']
+
+      interface MemoryTreeNode {
+        key: string
+        title: string
+        type: 'global' | 'workspace' | 'agent' | 'folder' | 'file'
+        isLeaf?: boolean
+        children?: MemoryTreeNode[]
+        filePath?: string
+      }
+
+      // 扫描目录下的文件
+      const scanFiles = (dirPath: string, prefix: string): MemoryTreeNode[] => {
+        const files: MemoryTreeNode[] = []
+        if (!fs.existsSync(dirPath)) return files
+        const entries = fs.readdirSync(dirPath, { withFileTypes: true })
+        for (const entry of entries) {
+          if (entry.isFile()) {
+            files.push({
+              key: `${prefix}/${entry.name}`,
+              title: entry.name,
+              type: 'file',
+              isLeaf: true,
+              filePath: path.join(dirPath, entry.name)
+            })
+          }
+        }
+        return files
+      }
+
+      const tree: MemoryTreeNode[] = []
+
+      // 全局记忆
+      const globalDir = path.join(memoryPath, '_global')
+      if (fs.existsSync(globalDir)) {
+        const globalChildren: MemoryTreeNode[] = []
+        for (const sub of SUB_DIRS) {
+          const subPath = path.join(globalDir, sub)
+          if (fs.existsSync(subPath)) {
+            const fileNodes = scanFiles(subPath, `global/${sub}`)
+            globalChildren.push({
+              key: `global/${sub}`,
+              title: sub,
+              type: 'folder',
+              isLeaf: fileNodes.length === 0,
+              children: fileNodes.length > 0 ? fileNodes : undefined
+            })
+          }
+        }
+        if (globalChildren.length > 0) {
+          tree.push({
+            key: 'global',
+            title: '全局记忆',
+            type: 'global',
+            children: globalChildren
+          })
+        }
+      }
+
+      // 当前工作区记忆
+      if (workspaceId) {
+        const wsName = `workspace-${workspaceId}`
+        const wsPath = path.join(memoryPath, wsName)
+        if (fs.existsSync(wsPath)) {
+          const wsChildren: MemoryTreeNode[] = []
+
+          // 主 Agent
+          const mainAgentDir = path.join(wsPath, 'main-agent')
+          if (fs.existsSync(mainAgentDir)) {
+            const mainChildren: MemoryTreeNode[] = []
+            for (const sub of SUB_DIRS) {
+              const subPath = path.join(mainAgentDir, sub)
+              if (fs.existsSync(subPath)) {
+                const fileNodes = scanFiles(subPath, `${wsName}/main-agent/${sub}`)
+                mainChildren.push({
+                  key: `${wsName}/main-agent/${sub}`,
+                  title: sub,
+                  type: 'folder',
+                  isLeaf: fileNodes.length === 0,
+                  children: fileNodes.length > 0 ? fileNodes : undefined
+                })
+              }
+            }
+            if (mainChildren.length > 0) {
+              wsChildren.push({
+                key: `${wsName}/main-agent`,
+                title: 'DeepAgent',
+                type: 'agent',
+                children: mainChildren
+              })
+            }
+          }
+
+          // 子 Agent
+          const subAgentsDir = path.join(wsPath, 'sub-agents')
+          if (fs.existsSync(subAgentsDir)) {
+            const saEntries = fs.readdirSync(subAgentsDir, { withFileTypes: true })
+            const saChildren: MemoryTreeNode[] = []
+            for (const sa of saEntries) {
+              if (!sa.isDirectory()) continue
+              const saPath = path.join(subAgentsDir, sa.name)
+              const saSubChildren: MemoryTreeNode[] = []
+              for (const sub of SUB_DIRS) {
+                const subPath = path.join(saPath, sub)
+                if (fs.existsSync(subPath)) {
+                  const fileNodes = scanFiles(subPath, `${wsName}/sub-agents/${sa.name}/${sub}`)
+                  saSubChildren.push({
+                    key: `${wsName}/sub-agents/${sa.name}/${sub}`,
+                    title: sub,
+                    type: 'folder',
+                    isLeaf: fileNodes.length === 0,
+                    children: fileNodes.length > 0 ? fileNodes : undefined
+                  })
+                }
+              }
+              if (saSubChildren.length > 0) {
+                saChildren.push({
+                  key: `${wsName}/sub-agents/${sa.name}`,
+                  title: sa.name,
+                  type: 'agent',
+                  children: saSubChildren
+                })
+              }
+            }
+            if (saChildren.length > 0) {
+              wsChildren.push({
+                key: `${wsName}/sub-agents`,
+                title: 'SubAgent',
+                type: 'agent',
+                children: saChildren
+              })
+            }
+          }
+
+          if (wsChildren.length > 0) {
+            // 尝试获取工作区名称
+            let wsTitle = `工作区 ${workspaceId}`
+            try {
+              const workspaces = await getAllWorkspaces()
+              const ws = workspaces.find((w) => w.id === workspaceId)
+              if (ws) wsTitle = ws.name
+            } catch {
+              // 保持默认名称
+            }
+            tree.push({
+              key: wsName,
+              title: wsTitle,
+              type: 'workspace',
+              children: wsChildren
+            })
+          }
+        }
+      }
+
+      return tree
+    } catch (error) {
+      logger.error('Error scanning memory tree:', error)
+      return []
+    }
+  })
+
+  // 读取记忆文件内容
+  ipcMain.handle('chat-read-memory-file', async (_event, filePath: string) => {
+    try {
+      if (!fs.existsSync(filePath)) {
+        return { success: false, error: '文件不存在' }
+      }
+      const content = fs.readFileSync(filePath, 'utf-8')
+      return { success: true, content }
+    } catch (error) {
+      logger.error('Error reading memory file:', error)
+      return { success: false, error: String(error) }
+    }
+  })
+
+  // 初始化记忆目录结构（仅当前工作区 + 全局）
+  ipcMain.handle('chat-init-memory-dirs', async (_event, workspaceId: number) => {
+    try {
+      const path = await import('path')
+      const settings = settingsStore.store
+      const memoryPath = (settings.chat as ChatSettings)?.memoryPath
+      if (!memoryPath) return { success: false, error: '未配置记忆存储目录' }
+
+      const SUB_DIRS = ['memories', 'peers', 'privacy', 'resources', 'sessions', 'skills']
+
+      // 确保根目录存在
+      if (!fs.existsSync(memoryPath)) {
+        fs.mkdirSync(memoryPath, { recursive: true })
+      }
+
+      // 模板文件路径（相对于项目源码目录）
+      const templatePath = path.resolve(
+        __dirname,
+        '..',
+        '..',
+        'src',
+        'main',
+        'memory',
+        'AGENTS.md.template'
+      )
+
+      // 创建全局记忆目录
+      const globalDir = path.join(memoryPath, '_global')
+      for (const sub of SUB_DIRS) {
+        const subPath = path.join(globalDir, sub)
+        if (!fs.existsSync(subPath)) {
+          fs.mkdirSync(subPath, { recursive: true })
+        }
+      }
+      // 全局记忆 AGENTS.md
+      const globalMemFile = path.join(globalDir, 'memories', 'AGENTS.md')
+      if (!fs.existsSync(globalMemFile)) {
+        fs.copyFileSync(templatePath, globalMemFile)
+      }
+
+      // 当前工作区记忆
+      if (workspaceId) {
+        const wsDir = path.join(memoryPath, `workspace-${workspaceId}`)
+
+        // DeepAgent目录
+        const mainAgentDir = path.join(wsDir, 'main-agent')
+        for (const sub of SUB_DIRS) {
+          const subPath = path.join(mainAgentDir, sub)
+          if (!fs.existsSync(subPath)) {
+            fs.mkdirSync(subPath, { recursive: true })
+          }
+        }
+        // DeepAgent 记忆文件
+        const mainMemFile = path.join(mainAgentDir, 'memories', 'AGENTS.md')
+        if (!fs.existsSync(mainMemFile)) {
+          fs.copyFileSync(templatePath, mainMemFile)
+        }
+
+        // 子Agent目录
+        const agents = await getAllAgents(workspaceId)
+        for (const agent of agents) {
+          const agentDir = path.join(wsDir, 'sub-agents', agent.name)
+          for (const sub of SUB_DIRS) {
+            const subPath = path.join(agentDir, sub)
+            if (!fs.existsSync(subPath)) {
+              fs.mkdirSync(subPath, { recursive: true })
+            }
+          }
+          // 子Agent 记忆文件
+          const subMemFile = path.join(agentDir, 'memories', 'AGENTS.md')
+          if (!fs.existsSync(subMemFile)) {
+            fs.copyFileSync(templatePath, subMemFile)
+          }
+        }
+      }
+
+      logger.info(`Memory directories initialized for workspace ${workspaceId}`)
+      return { success: true }
+    } catch (error) {
+      logger.error('Error initializing memory directories:', error)
+      return { success: false, error: String(error) }
+    }
+  })
+
+  // 检查记忆目录是否已初始化
+  ipcMain.handle('chat-check-memory-initialized', async () => {
+    try {
+      const path = await import('path')
+      const settings = settingsStore.store
+      const memoryPath = (settings.chat as ChatSettings)?.memoryPath
+      if (!memoryPath) return { configured: false, initialized: false }
+      const globalDir = path.join(memoryPath, '_global')
+      const globalMemFile = path.join(globalDir, 'memories', 'AGENTS.md')
+      return {
+        configured: true,
+        initialized: fs.existsSync(globalDir) && fs.existsSync(globalMemFile)
+      }
+    } catch (error) {
+      logger.error('Error checking memory initialized:', error)
+      return { configured: false, initialized: false }
+    }
+  })
+
+  // 为指定子Agent创建记忆目录
+  ipcMain.handle(
+    'chat-init-subagent-memory-dirs',
+    async (_event, workspaceId: number, agentName: string) => {
+      try {
+        const path = await import('path')
+        const settings = settingsStore.store
+        const memoryPath = (settings.chat as ChatSettings)?.memoryPath
+        if (!memoryPath) return { success: false, error: '未配置记忆存储目录' }
+
+        const SUB_DIRS = ['memories', 'peers', 'privacy', 'resources', 'sessions', 'skills']
+        const agentDir = path.join(memoryPath, `workspace-${workspaceId}`, 'sub-agents', agentName)
+        for (const sub of SUB_DIRS) {
+          const subPath = path.join(agentDir, sub)
+          if (!fs.existsSync(subPath)) {
+            fs.mkdirSync(subPath, { recursive: true })
+          }
+        }
+        // 创建记忆模板文件
+        const memFile = path.join(agentDir, 'memories', 'AGENTS.md')
+        if (!fs.existsSync(memFile)) {
+          const templatePath = path.resolve(
+            __dirname,
+            '..',
+            '..',
+            'src',
+            'main',
+            'memory',
+            'AGENTS.md.template'
+          )
+          fs.copyFileSync(templatePath, memFile)
+        }
+        logger.info(`Created memory directories for sub-agent: ${agentName}`)
+        return { success: true }
+      } catch (error) {
+        logger.error('Error creating sub-agent memory directories:', error)
+        return { success: false, error: String(error) }
+      }
+    }
+  )
+
+  // 删除指定子Agent的记忆目录
+  ipcMain.handle(
+    'chat-remove-subagent-memory-dirs',
+    async (_event, workspaceId: number, agentName: string) => {
+      try {
+        const path = await import('path')
+        const settings = settingsStore.store
+        const memoryPath = (settings.chat as ChatSettings)?.memoryPath
+        if (!memoryPath) return { success: false, error: '未配置记忆存储目录' }
+
+        const agentDir = path.join(memoryPath, `workspace-${workspaceId}`, 'sub-agents', agentName)
+        if (fs.existsSync(agentDir)) {
+          fs.rmSync(agentDir, { recursive: true, force: true })
+          logger.info(`Removed memory directories for sub-agent: ${agentName}`)
+        }
+        return { success: true }
+      } catch (error) {
+        logger.error('Error removing sub-agent memory directories:', error)
+        return { success: false, error: String(error) }
+      }
+    }
+  )
 
   // 选择技能（Skills）存储目录
   ipcMain.handle('chat-select-skills-directory', async () => {
@@ -2740,6 +3134,44 @@ app.whenReady().then(async () => {
     try {
       const id = await createAgent(input)
       clearAgentCache()
+      // 自动创建子Agent记忆目录
+      const settings = settingsStore.store
+      const memoryPath = (settings.chat as ChatSettings)?.memoryPath
+      if (memoryPath) {
+        try {
+          const path = await import('path')
+          const SUB_DIRS = ['memories', 'peers', 'privacy', 'resources', 'sessions', 'skills']
+          const agentDir = path.join(
+            memoryPath,
+            `workspace-${input.workspace_id}`,
+            'sub-agents',
+            input.name
+          )
+          for (const sub of SUB_DIRS) {
+            const subPath = path.join(agentDir, sub)
+            if (!fs.existsSync(subPath)) {
+              fs.mkdirSync(subPath, { recursive: true })
+            }
+          }
+          // 创建子Agent记忆模板文件
+          const memFile = path.join(agentDir, 'memories', 'AGENTS.md')
+          if (!fs.existsSync(memFile)) {
+            const templatePath = path.resolve(
+              __dirname,
+              '..',
+              '..',
+              'src',
+              'main',
+              'memory',
+              'AGENTS.md.template'
+            )
+            fs.copyFileSync(templatePath, memFile)
+          }
+          logger.info(`Auto-created memory directories for sub-agent: ${input.name}`)
+        } catch (memErr) {
+          logger.warn('Failed to auto-create sub-agent memory directories:', memErr)
+        }
+      }
       return id
     } catch (error) {
       logger.error('Error in agent-create:', error)
@@ -2763,8 +3195,32 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('agent-delete', async (_event, workspaceId: number, id: number) => {
     try {
+      // 先获取 agent 信息（需要 name 来删除记忆目录）
+      const agent = await getAgentById(workspaceId, id)
       await deleteAgent(workspaceId, id)
       clearAgentCache()
+      // 自动删除子Agent记忆目录
+      if (agent) {
+        const settings = settingsStore.store
+        const memoryPath = (settings.chat as ChatSettings)?.memoryPath
+        if (memoryPath) {
+          try {
+            const path = await import('path')
+            const agentDir = path.join(
+              memoryPath,
+              `workspace-${workspaceId}`,
+              'sub-agents',
+              agent.name
+            )
+            if (fs.existsSync(agentDir)) {
+              fs.rmSync(agentDir, { recursive: true, force: true })
+              logger.info(`Auto-removed memory directories for sub-agent: ${agent.name}`)
+            }
+          } catch (memErr) {
+            logger.warn('Failed to auto-remove sub-agent memory directories:', memErr)
+          }
+        }
+      }
       return true
     } catch (error) {
       logger.error('Error in agent-delete:', error)

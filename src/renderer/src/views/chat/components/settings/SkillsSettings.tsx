@@ -24,6 +24,7 @@ const SkillsSettings: React.FC = () => {
   const [loadingSkills, setLoadingSkills] = useState(false)
   const [savingPath, setSavingPath] = useState(false)
   const [currentPage, setCurrentPage] = useState(1)
+  const [skillsRefreshKey, setSkillsRefreshKey] = useState(0)
   const PAGE_SIZE = 5
 
   const enabledSkills = settings?.chat?.enabledSkills
@@ -56,7 +57,7 @@ const SkillsSettings: React.FC = () => {
       .then((list: SkillInfo[]) => setSkills(list))
       .catch(() => setSkills([]))
       .finally(() => setLoadingSkills(false))
-  }, [skillsPath])
+  }, [skillsPath, skillsRefreshKey])
 
   const handleBrowsePath = async (): Promise<void> => {
     try {
@@ -82,6 +83,7 @@ const SkillsSettings: React.FC = () => {
       await (window as unknown as Window).api.systemSettings.update({ chat: nextChat })
       setSettings((prev) => (prev ? { ...prev, chat: nextChat } : prev))
       setSkillsPath(trimmed)
+      setSkillsRefreshKey((k) => k + 1)
       viewMessage(msgKey, 'success', trimmed ? '技能目录已保存' : '已清空技能目录', 2)
     } catch (error) {
       viewMessage(msgKey, 'error', `保存失败: ${error}`)
@@ -130,7 +132,7 @@ const SkillsSettings: React.FC = () => {
         技能（Skills）
       </h3>
       <p className="text-sm mt-1 mb-4" style={{ color: colorTextSecondary }}>
-        配置技能存储目录后，子文件夹将作为独立技能加载；可单独启停每个技能。留空则不启用。
+        配置全局技能存储目录，所有工作区共享。子文件夹将作为独立技能加载；可单独启停每个技能。留空则不启用。
       </p>
 
       {/* 目录选择 */}

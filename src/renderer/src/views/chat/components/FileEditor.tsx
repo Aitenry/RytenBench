@@ -133,15 +133,19 @@ const FileEditor: React.FC<FileEditorProps> = ({
     []
   )
 
-  const handleEditorMount: OnMount = useCallback(
-    (editorInstance, monaco) => {
-      editorInstance.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
-        const path = activeFilePath
-        if (path) onSaveFile(path)
-      })
-    },
-    [activeFilePath, onSaveFile]
-  )
+  // Use refs so the Monaco command always calls the latest callbacks
+  // even though onMount only runs once per editor instance.
+  const activeFilePathRef = useRef(activeFilePath)
+  activeFilePathRef.current = activeFilePath
+  const onSaveFileRef = useRef(onSaveFile)
+  onSaveFileRef.current = onSaveFile
+
+  const handleEditorMount: OnMount = useCallback((editorInstance, monaco) => {
+    editorInstance.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+      const path = activeFilePathRef.current
+      if (path) onSaveFileRef.current(path)
+    })
+  }, [])
 
   useEffect(() => {
     const existingStyle = document.getElementById('monaco-scrollbar-style')

@@ -102,12 +102,32 @@ const FileExplorer: React.FC<FileExplorerProps> = ({
   const hoverBg = isDarkMode ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)'
   const activeBg = isDarkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'
 
+  const getRelativePath = (absPath: string): string => {
+    const normalizedWs = workspacePath.replace(/\\/g, '/').replace(/\/$/, '')
+    const normalizedPath = absPath.replace(/\\/g, '/')
+    if (normalizedPath.startsWith(normalizedWs)) {
+      return normalizedPath.slice(normalizedWs.length) || '/'
+    }
+    return '/' + normalizedPath.replace(/^\/+/, '')
+  }
+
+  const handleDragStart = (e: React.DragEvent, node: TreeNode): void => {
+    const relativePath = getRelativePath(node.path)
+    e.dataTransfer.setData('text/plain', relativePath)
+    e.dataTransfer.setData(
+      'application/json',
+      JSON.stringify({ path: relativePath, isDirectory: node.isDirectory })
+    )
+    e.dataTransfer.effectAllowed = 'copy'
+  }
+
   const renderNode = (node: TreeNode, depth: number): React.ReactNode => {
     const padLeft = 8 + depth * 16
     const isActiveFile = !node.isDirectory && activeFilePath === node.path
     return (
       <React.Fragment key={node.path}>
         <div
+          draggable
           className="flex items-center gap-0.5 py-[2px] cursor-pointer select-none text-[13px]"
           style={{
             paddingLeft: padLeft,
@@ -116,6 +136,7 @@ const FileExplorer: React.FC<FileExplorerProps> = ({
             background: isActiveFile ? activeBg : 'transparent'
           }}
           onClick={() => toggleExpand(node)}
+          onDragStart={(e) => handleDragStart(e, node)}
           onMouseEnter={(e) => {
             if (!isActiveFile) e.currentTarget.style.background = hoverBg
           }}
