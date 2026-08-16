@@ -1,6 +1,7 @@
 -- 知识库表
 CREATE TABLE IF NOT EXISTS wiki (
     id         SERIAL PRIMARY KEY,
+    workspace_id INTEGER,
     title      TEXT      NOT NULL,
     summary    TEXT,
     tags       TEXT,
@@ -12,6 +13,10 @@ CREATE TABLE IF NOT EXISTS wiki (
 -- 知识库表索引
 CREATE INDEX IF NOT EXISTS idx_wiki_title       ON wiki (title);
 CREATE INDEX IF NOT EXISTS idx_wiki_created_at  ON wiki (created_at);
+CREATE INDEX IF NOT EXISTS idx_wiki_workspace   ON wiki (workspace_id);
+
+-- 迁移：为已有数据库添加 workspace_id 列
+ALTER TABLE wiki ADD COLUMN IF NOT EXISTS workspace_id INTEGER;
 
 -- 知识库目录表
 CREATE TABLE IF NOT EXISTS wiki_directories (
@@ -34,6 +39,7 @@ CREATE INDEX IF NOT EXISTS idx_wiki_directories_sort_order  ON wiki_directories 
 -- 文档表
 CREATE TABLE IF NOT EXISTS documents (
     id         SERIAL PRIMARY KEY,
+    workspace_id INTEGER,
     title      TEXT      NOT NULL,
     summary    TEXT,
     tags       TEXT,
@@ -45,6 +51,10 @@ CREATE TABLE IF NOT EXISTS documents (
 CREATE INDEX IF NOT EXISTS idx_documents_title      ON documents (title);
 CREATE INDEX IF NOT EXISTS idx_documents_created_at ON documents (created_at);
 CREATE INDEX IF NOT EXISTS idx_documents_updated_at ON documents (updated_at);
+CREATE INDEX IF NOT EXISTS idx_documents_workspace  ON documents (workspace_id);
+
+-- 迁移：为已有数据库添加 workspace_id 列
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS workspace_id INTEGER;
 
 -- 文档内容表
 CREATE TABLE IF NOT EXISTS documents_content (

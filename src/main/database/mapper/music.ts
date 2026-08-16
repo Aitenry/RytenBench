@@ -71,13 +71,14 @@ const TRACK_SELECT = `
   LEFT JOIN images i ON t.image_id = i.id
 `
 
-export async function getAllFolders(): Promise<
-  (MusicFolderRow & { cover_data_url: string | null })[]
-> {
+export async function getAllFolders(
+  workspaceId: number
+): Promise<(MusicFolderRow & { cover_data_url: string | null })[]> {
   try {
     const db = (await getDatabaseInstance()).getDatabase()
     const result = await db.query<MusicFolderRow & { cover_data_url: string | null }>(
-      `${FOLDER_SELECT} ORDER BY f.created_at`
+      `${FOLDER_SELECT} WHERE f.workspace_id = $1 ORDER BY f.created_at`,
+      [workspaceId]
     )
     return result.rows
   } catch (error) {
@@ -103,6 +104,7 @@ export async function getFolderById(
 }
 
 export async function upsertFolder(
+  workspaceId: number,
   id: string,
   path: string,
   name: string,
@@ -113,10 +115,10 @@ export async function upsertFolder(
   try {
     const db = (await getDatabaseInstance()).getDatabase()
     await db.query(
-      `INSERT INTO music_folders (id, path, name, track_count, description, image_id)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       ON CONFLICT (id) DO UPDATE SET path = $2, name = $3, track_count = $4, description = $5, image_id = $6, updated_at = NOW()`,
-      [id, path, name, trackCount, description ?? null, imageId ?? null]
+      `INSERT INTO music_folders (workspace_id, id, path, name, track_count, description, image_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       ON CONFLICT (id) DO UPDATE SET path = $3, name = $4, track_count = $5, description = $6, image_id = $7, updated_at = NOW()`,
+      [workspaceId, id, path, name, trackCount, description ?? null, imageId ?? null]
     )
   } catch (error) {
     logger.error('Failed to upsert music folder:', error)
@@ -407,8 +409,8 @@ export async function getAllTracks(): Promise<
   }
 }
 
-/** 切换曲目的收藏状态（同一文件 hash 的所有曲目同步切换） */
-export async function toggleLikeTrack(trackId: number): Promise<boolean> {
+/** 切换曲目的收藏状态（同一文件 hash 的所有曲目同步切换，仅限本工作区） */
+export async function toggleLikeTrack(workspaceId: number, trackId: number): Promise<boolean> {
   try {
     const db = (await getDatabaseInstance()).getDatabase()
     // 获取该曲目的 file_hash 和当前 liked 状态
@@ -420,8 +422,13 @@ export async function toggleLikeTrack(trackId: number): Promise<boolean> {
     const { file_hash, liked } = trackResult.rows[0]
     const newLiked = !liked
 
-    // 同步切换所有相同 file_hash 的曲目
-    await db.query('UPDATE music_tracks SET liked = $1 WHERE file_hash = $2', [newLiked, file_hash])
+    // 同步切换本工作区内所有相同 file_hash 的曲目
+    await db.query(
+      `UPDATE music_tracks SET liked = $1
+       WHERE file_hash = $2
+         AND folder_id IN (SELECT id FROM music_folders WHERE workspace_id = $3)`,
+      [newLiked, file_hash, workspaceId]
+    )
     return newLiked
   } catch (error) {
     logger.error('Failed to toggle like track:', error)
@@ -440,10 +447,10 @@ export async function updateLastPlayed(trackId: number): Promise<void> {
   }
 }
 
-/** 获取收藏的曲目（同文件去重，取最新） */
-export async function getLikedTracks(): Promise<
-  (MusicTrackRow & { cover_data_url: string | null })[]
-> {
+/** 获取收藏的曲目（同文件去重，取最新，按工作区过滤） */
+export async function getLikedTracks(
+  workspaceId: number
+): Promise<(MusicTrackRow & { cover_data_url: string | null })[]> {
   try {
     const db = (await getDatabaseInstance()).getDatabase()
     const result = await db.query<MusicTrackRow & { cover_data_url: string | null }>(
@@ -453,11 +460,13 @@ export async function getLikedTracks(): Promise<
            t.liked, t.last_played_at, t.image_id, t.created_at,
            i.data AS cover_data_url
          FROM music_tracks t
+         INNER JOIN music_folders f ON t.folder_id = f.id
          LEFT JOIN images i ON t.image_id = i.id
-         WHERE t.liked = TRUE
+         WHERE t.liked = TRUE AND f.workspace_id = $1
          ORDER BY t.file_hash, t.created_at DESC
        ) sub
-       ORDER BY created_at DESC`
+       ORDER BY created_at DESC`,
+      [workspaceId]
     )
     return result.rows
   } catch (error) {
@@ -466,8 +475,9 @@ export async function getLikedTracks(): Promise<
   }
 }
 
-/** 获取最近播放的曲目（同文件去重，取最近播放） */
+/** 获取最近播放的曲目（同文件去重，取最近播放，按工作区过滤） */
 export async function getRecentlyPlayed(
+  workspaceId: number,
   limit: number = 100
 ): Promise<(MusicTrackRow & { cover_data_url: string | null })[]> {
   try {
@@ -479,13 +489,14 @@ export async function getRecentlyPlayed(
            t.liked, t.last_played_at, t.image_id, t.created_at,
            i.data AS cover_data_url
          FROM music_tracks t
+         INNER JOIN music_folders f ON t.folder_id = f.id
          LEFT JOIN images i ON t.image_id = i.id
-         WHERE t.last_played_at IS NOT NULL
+         WHERE t.last_played_at IS NOT NULL AND f.workspace_id = $1
          ORDER BY t.file_hash, t.last_played_at DESC
        ) sub
        ORDER BY last_played_at DESC
-       LIMIT $1`,
-      [limit]
+       LIMIT $2`,
+      [workspaceId, limit]
     )
     return result.rows
   } catch (error) {

@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react'
-import { Button, Modal, Tooltip, theme } from 'antd'
+import { Button, Tooltip, theme, App } from 'antd'
 import {
   RiArrowDownSLine,
   RiArrowRightSLine,
@@ -34,6 +34,7 @@ const TaskTree: React.FC<Props> = ({
 }) => {
   const [hoveredId, setHoveredId] = useState<number | null>(null)
   const { token } = theme.useToken()
+  const { modal } = App.useApp()
 
   const renderRow = useCallback(
     (node: PlannerTreeNode, numberPath: number[]): React.ReactNode => {
@@ -162,7 +163,7 @@ const TaskTree: React.FC<Props> = ({
                   icon={<RiDeleteBinLine size={12} />}
                   style={{ width: 20, height: 20, padding: 0 }}
                   onClick={() => {
-                    Modal.confirm({
+                    modal.confirm({
                       title: '删除任务',
                       content: `确定删除「${node.title}」及其所有子任务吗？`,
                       okText: '删除',
@@ -197,6 +198,7 @@ const TaskTree: React.FC<Props> = ({
       selectedId,
       hoveredId,
       token,
+      modal,
       onSelect,
       onToggleCollapse,
       onAddTask,

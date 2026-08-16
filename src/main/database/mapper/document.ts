@@ -68,6 +68,7 @@ async function getDocById(id: number): Promise<DocWithContent | null> {
 }
 
 async function getAllDocs(
+  workspaceId: number,
   page: number = 1,
   pageSize: number = 10,
   excludeWikiId?: number,
@@ -84,39 +85,41 @@ async function getAllDocs(
     const hasExclude = excludeAllWiki || excludeSpecificWiki
     const excludeWhere = hasExclude ? 'AND dd.doc_id IS NULL' : ''
 
-    // Parameter index for search in count query: $2 if has exclude param, else $1
-    const countSearchParamIdx = hasExclude ? 2 : 1
-    const searchWhereCount = search
-      ? `AND (d.title ILIKE $${countSearchParamIdx} OR d.summary ILIKE $${countSearchParamIdx} OR d.tags ILIKE $${countSearchParamIdx})`
-      : ''
-
-    // Parameter index for search in data query: $4 if has exclude param, else $3
-    const dataSearchParamIdx = hasExclude ? 4 : 3
-    const searchWhereData = search
-      ? `AND (d.title ILIKE $${dataSearchParamIdx} OR d.summary ILIKE $${dataSearchParamIdx} OR d.tags ILIKE $${dataSearchParamIdx})`
-      : ''
-
     const countJoin = hasExclude
       ? excludeSpecificWiki
-        ? 'LEFT JOIN directory_documents dd ON d.id = dd.doc_id LEFT JOIN wiki_directories wd ON dd.directory_id = wd.id AND wd.wiki_id = $1'
+        ? 'LEFT JOIN directory_documents dd ON d.id = dd.doc_id LEFT JOIN wiki_directories wd ON dd.directory_id = wd.id AND wd.wiki_id = $2'
         : 'LEFT JOIN directory_documents dd ON d.id = dd.doc_id LEFT JOIN wiki_directories wd ON dd.directory_id = wd.id'
       : ''
+
+    const countParams: (string | number)[] = [workspaceId]
+    if (excludeSpecificWiki) countParams.push(excludeWikiId)
+    const countSearchIdx = countParams.length + 1
+    const searchWhereCount = search
+      ? `AND (d.title ILIKE $${countSearchIdx} OR d.summary ILIKE $${countSearchIdx} OR d.tags ILIKE $${countSearchIdx})`
+      : ''
+    if (search) countParams.push(`%${search}%`)
+
     const countSql = `
       SELECT COUNT(*) as total FROM documents d
       ${countJoin}
-      WHERE 1=1 ${excludeWhere} ${searchWhereCount}
+      WHERE d.workspace_id = $1 ${excludeWhere} ${searchWhereCount}
     `
-    const countParams: (string | number)[] = []
-    if (excludeSpecificWiki) countParams.push(excludeWikiId)
-    if (search) countParams.push(`%${search}%`)
     const countResult = await db.query<{ total: number }>(countSql, countParams)
     const total = Number(countResult.rows[0]?.total) || 0
 
     const dataJoin = hasExclude
       ? excludeSpecificWiki
-        ? 'LEFT JOIN directory_documents dd ON d.id = dd.doc_id LEFT JOIN wiki_directories wd ON dd.directory_id = wd.id AND wd.wiki_id = $3'
+        ? 'LEFT JOIN directory_documents dd ON d.id = dd.doc_id LEFT JOIN wiki_directories wd ON dd.directory_id = wd.id AND wd.wiki_id = $4'
         : 'LEFT JOIN directory_documents dd ON d.id = dd.doc_id LEFT JOIN wiki_directories wd ON dd.directory_id = wd.id'
       : ''
+    const dataParams: (string | number)[] = [workspaceId, pageSize, offset]
+    if (excludeSpecificWiki) dataParams.push(excludeWikiId)
+    const dataSearchIdx = dataParams.length + 1
+    const searchWhereData = search
+      ? `AND (d.title ILIKE $${dataSearchIdx} OR d.summary ILIKE $${dataSearchIdx} OR d.tags ILIKE $${dataSearchIdx})`
+      : ''
+    if (search) dataParams.push(`%${search}%`)
+
     const dataSql = `
       SELECT
         d.id, d.title, d.summary, d.tags, d.created_at, d.updated_at,
@@ -126,14 +129,11 @@ async function getAllDocs(
       LEFT JOIN documents_content dc ON d.id = dc.doc_id
       LEFT JOIN images img ON dc.image_id = img.id
       ${dataJoin}
-      WHERE 1=1 ${excludeWhere} ${searchWhereData}
+      WHERE d.workspace_id = $1 ${excludeWhere} ${searchWhereData}
       ORDER BY d.updated_at DESC
-      LIMIT $1 OFFSET $2
+      LIMIT $2 OFFSET $3
     `
 
-    const dataParams: (string | number)[] = [pageSize, offset]
-    if (excludeSpecificWiki) dataParams.push(excludeWikiId)
-    if (search) dataParams.push(`%${search}%`)
     const result = await db.query<DocListItem>(dataSql, dataParams)
 
     const items = result.rows.map((row) => ({
@@ -156,6 +156,7 @@ async function getAllDocs(
 }
 
 async function getDocPage(
+  workspaceId: number,
   query: string,
   page: number = 1,
   pageSize: number = 20
@@ -171,12 +172,13 @@ async function getDocPage(
       SELECT COUNT(*) as total
       FROM documents d
       LEFT JOIN documents_content dc ON d.id = dc.doc_id
-      WHERE d.title ILIKE $1
-         OR d.summary ILIKE $1
-         OR d.tags ILIKE $1
-         OR dc.content ILIKE $1
+      WHERE d.workspace_id = $1
+        AND (d.title ILIKE $2
+         OR d.summary ILIKE $2
+         OR d.tags ILIKE $2
+         OR dc.content ILIKE $2)
     `
-    const countResult = await db.query<{ total: number }>(countSql, [searchPattern])
+    const countResult = await db.query<{ total: number }>(countSql, [workspaceId, searchPattern])
     const total = Number(countResult.rows[0]?.total) || 0
 
     if (total === 0) {
@@ -191,15 +193,21 @@ async function getDocPage(
       FROM documents d
       LEFT JOIN documents_content dc ON d.id = dc.doc_id
       LEFT JOIN images img ON dc.image_id = img.id
-      WHERE d.title ILIKE $1
-         OR d.summary ILIKE $1
-         OR d.tags ILIKE $1
-         OR dc.content ILIKE $1
+      WHERE d.workspace_id = $1
+        AND (d.title ILIKE $2
+         OR d.summary ILIKE $2
+         OR d.tags ILIKE $2
+         OR dc.content ILIKE $2)
       ORDER BY d.updated_at DESC
-      LIMIT $2 OFFSET $3
+      LIMIT $3 OFFSET $4
     `
 
-    const result = await db.query<DocListItem>(dataSql, [searchPattern, pageSize, offset])
+    const result = await db.query<DocListItem>(dataSql, [
+      workspaceId,
+      searchPattern,
+      pageSize,
+      offset
+    ])
 
     const items = result.rows.map((row) => ({
       id: row.id,
@@ -221,6 +229,7 @@ async function getDocPage(
 }
 
 async function addDoc(
+  workspaceId: number,
   doc: Omit<DocRow, 'id' | 'created_at' | 'updated_at'> & {
     image?: string | null
     content?: string | null
@@ -233,8 +242,8 @@ async function addDoc(
     const imageId = await saveImage(image ?? null)
 
     const insertResult = await db.query<{ id: number }>(
-      'INSERT INTO documents (title, summary, tags) VALUES ($1, $2, $3) RETURNING id',
-      [title, summary || null, tags || null]
+      'INSERT INTO documents (workspace_id, title, summary, tags) VALUES ($1, $2, $3, $4) RETURNING id',
+      [workspaceId, title, summary || null, tags || null]
     )
 
     const docId = insertResult.rows[0].id
@@ -415,18 +424,22 @@ async function deleteDoc(id: number): Promise<boolean> {
   }
 }
 
-async function deleteDocsByTimeRange(startTime: string, endTime: string): Promise<number> {
+async function deleteDocsByTimeRange(
+  workspaceId: number,
+  startTime: string,
+  endTime: string
+): Promise<number> {
   try {
     const db = (await getDatabaseInstance()).getDatabase()
 
     await db.query(
-      'DELETE FROM documents_content WHERE doc_id IN (SELECT id FROM documents WHERE created_at >= $1 AND created_at <= $2)',
-      [startTime, endTime]
+      'DELETE FROM documents_content WHERE doc_id IN (SELECT id FROM documents WHERE workspace_id = $1 AND created_at >= $2 AND created_at <= $3)',
+      [workspaceId, startTime, endTime]
     )
 
     const result = await db.query(
-      'DELETE FROM documents WHERE created_at >= $1 AND created_at <= $2',
-      [startTime, endTime]
+      'DELETE FROM documents WHERE workspace_id = $1 AND created_at >= $2 AND created_at <= $3',
+      [workspaceId, startTime, endTime]
     )
     const deleted = result.affectedRows ?? 0
     logger.info(`Deleted ${deleted} docs in time range [${startTime}, ${endTime}]`)

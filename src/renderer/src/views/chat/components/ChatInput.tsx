@@ -1,13 +1,6 @@
-import React, { useMemo, useState, useCallback, useEffect } from 'react'
+import React, { useMemo, useState, useCallback, useEffect, useRef } from 'react'
 import { Button, Tooltip, Select } from 'antd'
-import {
-  RiArrowUpLine,
-  RiAttachment2,
-  RiCloseLine,
-  RiStopFill,
-  RiFileLine,
-  RiFolder3Line
-} from '@remixicon/react'
+import { RiArrowUpLine, RiAttachment2, RiCloseLine, RiStopFill } from '@remixicon/react'
 import {
   OpenAIFilled,
   DeepSeekFilled,
@@ -16,8 +9,29 @@ import {
   AnthropicFilled,
   GeminiFilled
 } from '@ant-design/icons'
+import { useEditor, EditorContent, type Editor } from '@tiptap/react'
+import { Extension } from '@tiptap/core'
+import Document from '@tiptap/extension-document'
+import Paragraph from '@tiptap/extension-paragraph'
+import Text from '@tiptap/extension-text'
+import HardBreak from '@tiptap/extension-hard-break'
+import History from '@tiptap/extension-history'
+import Placeholder from '@tiptap/extension-placeholder'
+import { baseKeymap } from '@tiptap/pm/commands'
+import { keymap } from '@tiptap/pm/keymap'
+import { TextSelection } from '@tiptap/pm/state'
+import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
+import FileRef from './FileRefNode'
 import type { Attachment } from '@renderer/types/chat'
 import { Window } from '../../../../resource/types/window'
+
+// TipTap 默认不加载标准键位绑定（退格/删除/回车等），必须显式加载 prosemirror-commands 的 baseKeymap
+const BaseKeymap = Extension.create({
+  name: 'baseKeymap',
+  addProseMirrorPlugins() {
+    return [keymap(baseKeymap)]
+  }
+})
 
 const providerIconMap: Record<string, React.ComponentType<{ style?: React.CSSProperties }> | null> =
   {
@@ -42,6 +56,12 @@ const providerColors: Record<string, string> = {
   'google-vertexai': '#4285f4',
   groq: '#f55036'
 }
+
+// 自定义光标高度（px）：ProseMirror 的原生光标高度跟随行高（19px），
+// 与普通输入框（≈字号高度）不一致，故隐藏原生光标、绘制固定高度光标。
+// 与正文/占位符字号一致（14px），保证空内容时与提示文字同高同位。
+// 如需微调高度改这里即可。
+const CARET_HEIGHT = 14
 
 interface ChatInputProps {
   inputValue: string
@@ -68,30 +88,6 @@ interface ChatInputProps {
   onKeyDown: (e: React.KeyboardEvent<HTMLDivElement>) => void
 }
 
-/** 从 contentEditable div 提取纯文本，chip 取其 data-path */
-const extractPlainText = (el: HTMLDivElement): string => {
-  let text = ''
-  const walk = (node: Node): void => {
-    if (node.nodeType === Node.TEXT_NODE) {
-      text += node.textContent || ''
-    } else if (node instanceof HTMLBRElement) {
-      text += '\n'
-    } else if (node instanceof HTMLDivElement) {
-      // block-level divs created by Enter key
-      walk(node)
-      text += '\n'
-    } else if (node instanceof HTMLElement) {
-      if (node.dataset.path) {
-        text += node.dataset.path
-      } else {
-        node.childNodes.forEach(walk)
-      }
-    }
-  }
-  el.childNodes.forEach(walk)
-  return text.replace(/\n+$/, '')
-}
-
 const ChatInput: React.FC<ChatInputProps> = ({
   inputValue,
   onInputChange,
@@ -113,6 +109,8 @@ const ChatInput: React.FC<ChatInputProps> = ({
   onKeyDown
 }) => {
   const [isDragOver, setIsDragOver] = useState(false)
+  // 自定义光标元素（原生光标已隐藏，见 updateCaret）
+  const caretRef = useRef<HTMLSpanElement | null>(null)
 
   const selectedProviderType = useMemo(() => {
     if (selectedProviderId == null) return ''
@@ -127,120 +125,257 @@ const ChatInput: React.FC<ChatInputProps> = ({
   const SelectedIcon = providerIconMap[selectedProviderType]
   const selectedColor = providerColors[selectedProviderType] || undefined
 
-  // ── 同步纯文本到父组件 ──
-  const syncText = useCallback(() => {
-    const el = textareaRef.current
-    if (!el) return
-    onInputChange(extractPlainText(el))
-  }, [onInputChange, textareaRef])
+  // 外部回调走 ref：editor 只创建一次，避免 props 变化导致重建
+  const onInputChangeRef = useRef(onInputChange)
+  onInputChangeRef.current = onInputChange
+  const onKeyDownRef = useRef(onKeyDown)
+  onKeyDownRef.current = onKeyDown
 
-  // 父组件清空 inputValue 时（发送后），同步清空 contentEditable
-  useEffect(() => {
-    if (inputValue === '' && textareaRef.current) {
-      const el = textareaRef.current
-      if (el.textContent !== '') {
-        el.innerHTML = ''
+  const editorRef = useRef<Editor | null>(null)
+
+  const editor = useEditor({
+    extensions: [
+      Document,
+      Paragraph,
+      Text,
+      HardBreak,
+      History,
+      Placeholder.configure({ placeholder: '给 Rita 发送消息' }),
+      BaseKeymap,
+      FileRef
+    ],
+    content: '',
+    editorProps: {
+      // Enter 发送（Shift+Enter 由 HardBreak 处理换行）；输入法组合期间不拦截
+      handleKeyDown: (view, event) => {
+        if (event.isComposing || event.keyCode === 229) return false
+        if (event.key === 'Enter' && !event.shiftKey) {
+          event.preventDefault()
+          onKeyDownRef.current(event as unknown as React.KeyboardEvent<HTMLDivElement>)
+          return true
+        }
+        // 光标紧贴文件引用 chip 时，退格/删除一次删掉（ProseMirror 默认是先选中再删）
+        if ((event.key === 'Backspace' || event.key === 'Delete') && view.state.selection.empty) {
+          const { $from } = view.state.selection
+          const node = event.key === 'Backspace' ? $from.nodeBefore : $from.nodeAfter
+          if (node && node.isAtom && node.type.name === 'fileRef') {
+            event.preventDefault()
+            const from = event.key === 'Backspace' ? $from.pos - node.nodeSize : $from.pos
+            view.dispatch(view.state.tr.deleteRange(from, from + node.nodeSize))
+            return true
+          }
+        }
+        // 左右方向键直接跨过 chip（ProseMirror 对 selectable atom 默认是先选中再跳，
+        // 需要按两下；这里在光标紧贴 chip 时一次跨过；Shift+方向键保留默认的选区扩展）
+        if (
+          !event.shiftKey &&
+          (event.key === 'ArrowRight' || event.key === 'ArrowLeft') &&
+          view.state.selection.empty
+        ) {
+          const { $from } = view.state.selection
+          const node = event.key === 'ArrowRight' ? $from.nodeAfter : $from.nodeBefore
+          if (node && node.isAtom && node.type.name === 'fileRef') {
+            event.preventDefault()
+            const delta = event.key === 'ArrowRight' ? node.nodeSize : -node.nodeSize
+            view.dispatch(
+              view.state.tr.setSelection(
+                TextSelection.near(view.state.doc.resolve($from.pos + delta))
+              )
+            )
+            return true
+          }
+        }
+        return false
+      },
+      // 完全接管 drop：拖入的文件引用统一由容器 onDrop 插入 chip，
+      // 避免 ProseMirror 默认把 text/plain 当文本插入造成双重插入
+      handleDrop: () => true,
+      // 粘贴强制纯文本：按 \n 拆行插入（换行用 hardBreak，保持 DOM 扁平）
+      // 注意：不能使用 insertContent(数组)（会丢弃 hardBreak），必须走原生 tr.insert
+      handlePaste: (_view, event) => {
+        const text = event.clipboardData?.getData('text/plain')
+        if (text === undefined) return false
+        event.preventDefault()
+        const ed = editorRef.current
+        if (!ed || !text) return true
+        const lines = text.replace(/\r\n?/g, '\n').split('\n')
+        const content: ProseMirrorNode[] = []
+        lines.forEach((line, i) => {
+          if (i > 0) content.push(ed.schema.nodes.hardBreak.create())
+          if (line) content.push(ed.schema.text(line))
+        })
+        let tr = ed.state.tr
+        if (!ed.state.selection.empty) tr = tr.deleteSelection()
+        tr = tr.insert(tr.selection.from, content)
+        ed.view.dispatch(tr)
+        return true
+      }
+    },
+    onUpdate: ({ editor }) => {
+      // textSerializers：hardBreak 输出换行、fileRef 输出路径，保证发送文本与所见一致
+      // 注意：v3 的 serializer 参数是 { node } 对象，不是节点本身
+      const text = editor
+        .getText({
+          blockSeparator: '\n',
+          textSerializers: {
+            hardBreak: () => '\n',
+            fileRef: ({ node }) => node.attrs.path ?? ''
+          }
+        })
+        .replace(/\n+$/, '')
+      onInputChangeRef.current(text)
+    }
+  })
+  editorRef.current = editor ?? null
+
+  // ── 自定义光标：跟随 collapsed selection 的位置，固定 CARET_HEIGHT 高度 ──
+  // 原生 contentEditable 光标高度 = 行高（19px），普通输入框光标 ≈ 字号（14px），
+  // 用 caret-color: transparent 隐藏原生光标后，在此绘制固定高度光标。
+  const updateCaret = useCallback(() => {
+    const ed = editorRef.current
+    const caret = caretRef.current
+    if (!ed || !caret) return
+    const el = ed.view.dom as HTMLDivElement
+
+    const sel = window.getSelection()
+    const show =
+      document.activeElement === el &&
+      !!sel &&
+      sel.rangeCount > 0 &&
+      sel.isCollapsed &&
+      el.contains(sel.getRangeAt(0).commonAncestorContainer)
+    if (!show) {
+      caret.style.display = 'none'
+      return
+    }
+
+    const range = sel.getRangeAt(0)
+    const wrap = caret.parentElement
+    if (!wrap) return
+    const wrapRect = wrap.getBoundingClientRect()
+    const elRect = el.getBoundingClientRect()
+    const lineHeight = parseFloat(getComputedStyle(el).lineHeight) || 19
+    // 空内容时定位到内容区左上角（首行行首），与占位符文字（同字号、垂直居中于行）对齐
+    const caretAtContentStart = (): { top: number; left: number } => ({
+      top: elRect.top - wrapRect.top + (lineHeight - CARET_HEIGHT) / 2,
+      left: elRect.left - wrapRect.left
+    })
+
+    // 真正的"空文档"以 editor.isEmpty 为准
+    const isEmpty = ed.isEmpty
+
+    // 紧贴 inline atom（chip）后的 collapsed range，Chromium 会返回 0 高 rect，
+    // 此时用 selection 前一个可测量元素（chip）的右缘定位光标
+    const measurePrev = (r: Range): { right: number; top: number; height: number } | null => {
+      const node = r.startContainer
+      const offset = r.startOffset
+      if (node.nodeType !== Node.ELEMENT_NODE) return null
+      const children = node.childNodes
+      for (let i = offset - 1; i >= 0; i--) {
+        const c = children[i]
+        if (c.nodeType === Node.TEXT_NODE) {
+          if (c.textContent && c.textContent.length > 0) {
+            const tr = document.createRange()
+            tr.setStart(c, c.textContent.length)
+            tr.collapse(true)
+            const cr = tr.getBoundingClientRect()
+            if (cr.height > 0) return { right: cr.left, top: cr.top, height: cr.height }
+          }
+        } else if (c instanceof HTMLElement) {
+          const cr = c.getBoundingClientRect()
+          if (cr.width > 0 || cr.height > 0) {
+            return { right: cr.right, top: cr.top, height: cr.height }
+          }
+        }
+      }
+      return null
+    }
+
+    let top: number
+    let left: number
+    const rect = range.getBoundingClientRect()
+    if (isEmpty) {
+      const p = caretAtContentStart()
+      top = p.top
+      left = p.left
+    } else if (rect.height > 0) {
+      // 正常路径：用 selection rect，短光标垂直居中于行内
+      top = rect.top - wrapRect.top
+      if (rect.height > CARET_HEIGHT) {
+        top += (rect.height - CARET_HEIGHT) / 2
+      }
+      left = rect.left - wrapRect.left
+    } else {
+      // rect 失效（紧贴 atom）：用前一个可测量元素（chip）的右缘
+      const prev = measurePrev(range)
+      if (prev) {
+        top = prev.top - wrapRect.top + (prev.height - CARET_HEIGHT) / 2
+        left = prev.right - wrapRect.left
+      } else {
+        const p = caretAtContentStart()
+        top = p.top
+        left = p.left
       }
     }
-  }, [inputValue, textareaRef])
+    caret.style.display = 'block'
+    caret.style.top = `${Math.round(top)}px`
+    caret.style.left = `${Math.round(left)}px`
+  }, [])
 
-  // ── Chip 样式 ──
-  const chipBg = isDarkMode ? '#1a2744' : '#eff6ff'
-  const chipColor = isDarkMode ? '#93c5fd' : '#1d4ed8'
-  const chipBorder = isDarkMode ? '#1e3a5f' : '#bfdbfe'
+  // 父组件清空 inputValue 时（发送后），同步清空编辑器
+  useEffect(() => {
+    const ed = editorRef.current
+    if (!ed) return
+    if (inputValue === '' && !ed.isEmpty) {
+      ed.commands.clearContent()
+      ed.commands.focus()
+    }
+    updateCaret()
+  }, [inputValue, updateCaret])
 
-  // ── 在光标位置插入 chip ──
-  const insertChipAtCursor = useCallback(
+  // 光标位置随选区/窗口尺寸变化而更新
+  useEffect(() => {
+    const onSelectionChange = (): void => updateCaret()
+    const onResize = (): void => updateCaret()
+    document.addEventListener('selectionchange', onSelectionChange)
+    window.addEventListener('resize', onResize)
+    updateCaret()
+    return () => {
+      document.removeEventListener('selectionchange', onSelectionChange)
+      window.removeEventListener('resize', onResize)
+    }
+  }, [updateCaret])
+
+  // 编辑器内部滚动时更新光标位置
+  useEffect(() => {
+    const ed = editor
+    if (!ed) return
+    const dom = ed.view.dom
+    dom.addEventListener('scroll', updateCaret)
+    return () => dom.removeEventListener('scroll', updateCaret)
+  }, [editor, updateCaret])
+
+  // ── 在光标位置插入文件引用 chip ──
+  const insertFileRef = useCallback(
     (path: string) => {
-      const el = textareaRef.current
-      if (!el) return
-      el.focus()
-
-      const selection = window.getSelection()
-      if (!selection || !selection.rangeCount) return
-
-      const range = selection.getRangeAt(0)
-      if (!el.contains(range.commonAncestorContainer)) {
-        range.selectNodeContents(el)
-        range.collapse(false)
-      }
-
-      // 提取显示名称：路径最后一段
-      const cleanPath = path.replace(/\/$/, '')
-      const segments = cleanPath.split('/')
-      const displayName = segments[segments.length - 1] || path
-
-      // 创建 chip DOM
-      const chip = document.createElement('span')
-      chip.contentEditable = 'false'
-      chip.dataset.path = path
-      chip.title = path
-      chip.setAttribute(
-        'style',
-        [
-          'display:inline-flex',
-          'align-items:center',
-          'gap:2px',
-          'font-size:13px',
-          'line-height:1',
-          'padding: 4px',
-          'border-radius:3px',
-          'vertical-align:middle',
-          'margin:0 1px',
-          'white-space:nowrap',
-          'cursor:default',
-          'user-select:none',
-          `background:${chipBg}`,
-          `color:${chipColor}`,
-          `border:1px solid ${chipBorder}`
-        ].join(';')
-      )
-
-      const isDir = path.endsWith('/') || !path.includes('.')
-      const icon = document.createElement('span')
-      icon.style.cssText = 'display:inline-flex;align-items:center;flex-shrink:0;line-height:0'
-      icon.innerHTML = isDir
-        ? '<svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M12.414 5H21C21.5523 5 22 5.44772 22 6V20C22 20.5523 21.5523 21 21 21H3C2.44772 21 2 20.5523 2 20V4C2 3.44772 2.44772 3 3 3H10.414L12.414 5Z"/></svg>'
-        : '<svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M3 8L9.00319 2H19.9978C20.5513 2 21 2.45531 21 2.99078V21.0092C21 21.556 20.5551 22 20.0066 22H3.9934C3.44476 22 3 21.5501 3 20.9932V8ZM10 4V9H5V20H19V4H10Z"/></svg>'
-
-      const text = document.createElement('span')
-      text.style.cssText = 'max-width:160px;overflow:hidden;text-overflow:ellipsis'
-      text.textContent = displayName
-
-      const closeBtn = document.createElement('span')
-      closeBtn.style.cssText =
-        'display:inline-flex;align-items:center;cursor:pointer;margin-left:1px;line-height:0;opacity:0.7'
-      closeBtn.innerHTML =
-        '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M12 10.586L17.95 4.636L19.364 6.05L13.414 12L19.364 17.95L17.95 19.364L12 13.414L6.05 19.364L4.636 17.95L10.586 12L4.636 6.05L6.05 4.636L12 10.586Z"/></svg>'
-      closeBtn.addEventListener('click', (e) => {
-        e.stopPropagation()
-        chip.remove()
-        syncText()
-        el.focus()
+      const ed = editorRef.current
+      if (!ed) return
+      ed.commands.focus()
+      const cleanPath = path.replace(/\/+$/, '')
+      const label = cleanPath.split('/').filter(Boolean).pop() || path
+      const pos = ed.state.selection.from
+      ed.commands.insertContent({ type: 'fileRef', attrs: { path, label } })
+      // 显式把光标放到 chip 之后（inline atom 的 nodeSize 为 1）
+      ed.commands.setTextSelection(pos + 1)
+      // 刷新自定义光标：chip 是 React NodeView 异步渲染的，插入后立即读 rect
+      // 会拿到占位宽度（0）导致光标位置偏前，必须等渲染完成（双 rAF）再刷新
+      updateCaret()
+      requestAnimationFrame(() => {
+        updateCaret()
+        requestAnimationFrame(updateCaret)
       })
-
-      chip.appendChild(icon)
-      chip.appendChild(text)
-      chip.appendChild(closeBtn)
-
-      // 插入到光标位置
-      range.deleteContents()
-      range.insertNode(chip)
-
-      // 在 chip 后面插入一个空格，光标移到空格后
-      const space = document.createTextNode('\u00A0')
-      range.setStartAfter(chip)
-      range.collapse(true)
-      range.insertNode(space)
-
-      range.setStartAfter(space)
-      range.collapse(true)
-      selection.removeAllRanges()
-      selection.addRange(range)
-
-      syncText()
     },
-    [textareaRef, chipBg, chipColor, chipBorder, syncText]
+    [updateCaret]
   )
 
   // ── 拖拽处理 ──
@@ -259,42 +394,33 @@ const ChatInput: React.FC<ChatInputProps> = ({
     (e: React.DragEvent) => {
       e.preventDefault()
       setIsDragOver(false)
-      const relativePath = e.dataTransfer.getData('text/plain')
-      if (!relativePath) return
-      insertChipAtCursor(relativePath)
+      const path = e.dataTransfer.getData('text/plain')
+      if (!path) return
+      insertFileRef(path)
     },
-    [insertChipAtCursor]
+    [insertFileRef]
   )
 
-  // ── 键盘处理：Enter 发送，Shift+Enter 换行 ──
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLDivElement>) => {
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault()
-        onKeyDown(e)
-      } else {
-        onKeyDown(e)
-      }
-    },
-    [onKeyDown]
-  )
-
-  // ── 点击 chip 关闭按钮时移除 chip ──
-  const handleClick = useCallback(
-    (e: React.MouseEvent) => {
-      const target = e.target as HTMLElement
-      const chip = target.closest('[data-path]') as HTMLElement | null
-      if (chip && target.closest('[data-close]')) {
-        e.preventDefault()
-        chip.remove()
-        syncText()
-        textareaRef.current?.focus()
-      }
-    },
-    [syncText, textareaRef]
-  )
+  // ── 点击输入区空白处聚焦并移光标到末尾（与普通输入框一致）──
+  const handleContainerClick = useCallback((e: React.MouseEvent) => {
+    const ed = editorRef.current
+    if (!ed) return
+    if (ed.view.dom.contains(e.target as Node)) return
+    ed.commands.focus('end')
+  }, [])
 
   const hasContent = inputValue.trim().length > 0
+
+  // chip 主题色经 CSS 变量注入 FileRef NodeView
+  const chipCssVars = useMemo(
+    () =>
+      ({
+        '--file-chip-bg': isDarkMode ? '#1a2744' : '#eff6ff',
+        '--file-chip-color': isDarkMode ? '#93c5fd' : '#1d4ed8',
+        '--file-chip-border': isDarkMode ? '#1e3a5f' : '#bfdbfe'
+      }) as React.CSSProperties,
+    [isDarkMode]
+  )
 
   return (
     <div
@@ -302,40 +428,106 @@ const ChatInput: React.FC<ChatInputProps> = ({
       style={{
         background: colorBgLayout,
         border: `1px solid ${isDragOver ? '#4d6bfe' : colorBorder}`,
-        transition: 'border-color 0.2s'
+        transition: 'border-color 0.2s',
+        ...chipCssVars
       }}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      <div className="p-4">
-        <div
-          ref={textareaRef}
-          contentEditable
-          suppressContentEditableWarning
-          className="outline-none whitespace-pre-wrap break-words overflow-y-auto"
+      {/* overflow hidden：光标滚出编辑区可视范围时被裁切 */}
+      <div
+        className="p-4 relative overflow-hidden"
+        onClick={handleContainerClick}
+        ref={textareaRef}
+      >
+        <EditorContent editor={editor} className="chat-input-editor" />
+        {/* 自定义光标：固定高度、随光标位置移动、闪烁动画 */}
+        <span
+          ref={caretRef}
+          className="chat-input-caret"
           style={{
-            color: colorText,
-            backgroundColor: 'transparent',
-            border: 'none',
-            boxShadow: 'none',
-            padding: 0,
-            minHeight: '24px',
-            maxHeight: '200px',
-            fontSize: '14px',
-            lineHeight: '19px'
+            position: 'absolute',
+            width: 2,
+            height: CARET_HEIGHT,
+            borderRadius: 1,
+            background: colorText,
+            pointerEvents: 'none',
+            display: 'none',
+            zIndex: 1
           }}
-          data-placeholder="给 Rita 发送消息"
-          onInput={syncText}
-          onKeyDown={handleKeyDown}
-          onClick={handleClick}
-          onBlur={syncText}
         />
         <style>{`
-          [data-placeholder]:empty::before {
+          .chat-input-editor .ProseMirror {
+            outline: none;
+            white-space: pre-wrap;
+            word-break: break-word;
+            min-height: 24px;
+            max-height: 200px;
+            overflow-y: auto;
+            font-size: 14px;
+            line-height: 19px;
+            caret-color: transparent;
+          }
+          .chat-input-editor .ProseMirror p { margin: 0; }
+          .chat-input-editor .ProseMirror p.is-editor-empty:first-child::before {
             content: attr(data-placeholder);
             color: #bfbfbf;
             pointer-events: none;
+            float: left;
+            height: 0;
+          }
+          .chat-input-editor .ProseMirror::-webkit-scrollbar { width: 4px; }
+          .chat-input-editor .ProseMirror::-webkit-scrollbar-track { background: transparent; }
+          .chat-input-editor .ProseMirror::-webkit-scrollbar-thumb {
+            background: rgba(128, 128, 128, 0.4);
+            border-radius: 2px;
+          }
+          .file-ref-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 2px;
+            font-size: 13px;
+            line-height: 1;
+            padding: 2px 4px;
+            border-radius: 3px;
+            vertical-align: -1px;
+            margin: 0 1px;
+            white-space: nowrap;
+            cursor: default;
+            user-select: none;
+            background: var(--file-chip-bg);
+            color: var(--file-chip-color);
+            border: 1px solid var(--file-chip-border);
+          }
+          .file-ref-chip .file-ref-icon {
+            display: inline-flex;
+            align-items: center;
+            flex-shrink: 0;
+            line-height: 0;
+          }
+          .file-ref-chip .file-ref-label {
+            max-width: 160px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+          }
+          .file-ref-chip .file-ref-close {
+            display: inline-flex;
+            align-items: center;
+            cursor: pointer;
+            margin-left: 1px;
+            line-height: 0;
+            opacity: 0.7;
+          }
+          .file-ref-chip.ProseMirror-selectednode {
+            box-shadow: 0 0 0 1px var(--file-chip-border);
+          }
+          .chat-input-caret {
+            animation: chat-input-caret-blink 1.06s steps(1) infinite;
+          }
+          @keyframes chat-input-caret-blink {
+            0%, 45% { opacity: 1; }
+            50%, 95% { opacity: 0; }
           }
         `}</style>
       </div>

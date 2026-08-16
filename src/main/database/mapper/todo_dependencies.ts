@@ -89,12 +89,17 @@ async function getDependents(taskId: number): Promise<TaskDependencyRow[]> {
   }
 }
 
-// --- 获取所有依赖关系 ---
-async function getAllDependencies(): Promise<TaskDependencyRow[]> {
+// --- 获取所有依赖关系（按工作区过滤） ---
+async function getAllDependencies(workspaceId: number): Promise<TaskDependencyRow[]> {
   try {
     const db = (await getDatabaseInstance()).getDatabase()
-    const sql = 'SELECT * FROM task_dependencies ORDER BY task_id'
-    const result = await db.query<TaskDependencyRow>(sql)
+    const sql = `
+      SELECT d.* FROM task_dependencies d
+      INNER JOIN todo_items t ON t.id = d.task_id
+      WHERE t.workspace_id = $1
+      ORDER BY d.task_id
+    `
+    const result = await db.query<TaskDependencyRow>(sql, [workspaceId])
     return result.rows
   } catch (error) {
     logger.error('Failed to get all dependencies:', error)
@@ -102,17 +107,23 @@ async function getAllDependencies(): Promise<TaskDependencyRow[]> {
   }
 }
 
-// --- 获取所有任务及其依赖关系（用于甘特图） ---
-async function getAllTasksWithDependencies(): Promise<TaskWithDependencies[]> {
+// --- 获取所有任务及其依赖关系（用于甘特图，按工作区过滤） ---
+async function getAllTasksWithDependencies(workspaceId: number): Promise<TaskWithDependencies[]> {
   try {
     const db = (await getDatabaseInstance()).getDatabase()
 
     const tasksResult = await db.query<TodoItemRow>(
-      'SELECT * FROM todo_items ORDER BY priority ASC, due_date ASC'
+      'SELECT * FROM todo_items WHERE workspace_id = $1 ORDER BY priority ASC, due_date ASC',
+      [workspaceId]
     )
     const tasks = tasksResult.rows
 
-    const depsResult = await db.query<TaskDependencyRow>('SELECT * FROM task_dependencies')
+    const depsResult = await db.query<TaskDependencyRow>(
+      `SELECT d.* FROM task_dependencies d
+       INNER JOIN todo_items t ON t.id = d.task_id
+       WHERE t.workspace_id = $1`,
+      [workspaceId]
+    )
     const allDeps = depsResult.rows
 
     const taskMap = new Map<number, TaskWithDependencies>()

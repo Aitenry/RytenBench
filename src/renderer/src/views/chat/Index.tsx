@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { theme } from 'antd'
-import GuideSetupPanel from './components/GuideSetupPanel'
 import { useTheme } from '@renderer/contexts/useTheme'
 import { useChat } from '@renderer/contexts/ChatContextCore'
 import type { Window } from '../../../resource/types/window'
@@ -40,7 +39,6 @@ const Index: React.FC = () => {
     setSelectedProviderId,
     attachments,
     setAttachments,
-    providers,
     isLoading,
     loadingTopicIds,
     messagesEndRef,
@@ -69,9 +67,8 @@ const Index: React.FC = () => {
     refreshTopics
   } = useChat()
 
-  // 就绪状态：providers 已由 ChatProvider 预加载，直接同步判断模型是否配置
-  const hasModels = providers.length > 0
-  const [hasWorkspace, setHasWorkspace] = useState<boolean | null>(null)
+  // 工作区/模型就绪检查已提升到应用级引导（CustomFrame/OnboardingGuide），
+  // 聊天页直接进入可用状态
   const [workspacePath, setWorkspacePath] = useState<string>('')
   const [panelOpen, setPanelOpen] = useState(false)
   const [panelHasEditor, setPanelHasEditor] = useState(false)
@@ -88,71 +85,35 @@ const Index: React.FC = () => {
   }, [])
 
   useEffect(() => {
-    checkWorkspace().then(setHasWorkspace)
+    checkWorkspace().then()
   }, [checkWorkspace])
 
-  // 工作区切换后重新检查并刷新话题
+  // 工作区切换后刷新工作区路径与话题列表
   const handleWorkspaceChange = useCallback(async () => {
-    const ws = await checkWorkspace()
-    setHasWorkspace(ws)
+    await checkWorkspace()
     refreshTopics().then()
   }, [checkWorkspace, refreshTopics])
 
-  // null = 检查中不显示引导页，只有确认缺失时才显示
-  const showGuide = hasWorkspace === false || (hasWorkspace === true && !hasModels)
-  // 引导页中 workspace 行仅当确认为 true 时才显示"已完成"
-  const guideWorkspaceDone = hasWorkspace === true
-
-  // 延迟显示引导页，避免 hasWorkspace 先于 providers 就绪时短暂闪现
-  const [guideVisible, setGuideVisible] = useState(false)
+  // 全局工作区切换：清空当前会话回到空白欢迎态，再刷新话题列表
+  const handleWorkspaceChangedRef = useRef<() => void>(() => {})
   useEffect(() => {
-    if (showGuide) {
-      const timer = setTimeout(() => setGuideVisible(true), 120)
-      return () => clearTimeout(timer)
+    handleWorkspaceChangedRef.current = () => {
+      handleNewChat()
+      handleWorkspaceChange().then()
     }
-    setGuideVisible(false)
-    return undefined
-  }, [showGuide])
-  // 触发 ChatHeader 刷新工作区列表
-  const [headerRefreshKey, setHeaderRefreshKey] = useState(0)
-
-  // 引导项：选择目录创建/切换工作区
-  const handleWorkspaceSetup = useCallback(async () => {
-    try {
-      const win = window as unknown as Window
-      const dir = await win.api.chat.selectWorkspace()
-      if (!dir) return
-      const name =
-        dir
-          .replace(/[/\\]$/, '')
-          .split(/[/\\]/)
-          .pop() || dir
-      const id = await win.api.chat.createWorkspace(name, dir)
-      await win.api.systemSettings.update({
-        chat: {
-          workspacePath: dir,
-          activeWorkspaceId: id
-        } as Parameters<typeof win.api.systemSettings.update>[0]['chat']
-      })
-      setHasWorkspace(true)
-      setHeaderRefreshKey((k) => k + 1)
-      refreshTopics()
-    } catch (err) {
-      console.error('Failed to setup workspace:', err)
+  })
+  useEffect(() => {
+    const onWorkspaceChanged = (): void => {
+      handleWorkspaceChangedRef.current()
     }
-  }, [refreshTopics])
-
-  // 引导项：打开模型配置
-  const handleModelSetup = useCallback(() => {
-    window.dispatchEvent(new CustomEvent('open-system-settings', { detail: { tab: 'model' } }))
+    window.addEventListener('workspace-changed', onWorkspaceChanged)
+    return () => window.removeEventListener('workspace-changed', onWorkspaceChanged)
   }, [])
 
   const scrollbarThumbColor = isDarkMode ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.15)'
   const scrollbarThumbHoverColor = isDarkMode ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.3)'
   const inputScrollbarThumbColor = isDarkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'
   const inputScrollbarThumbHoverColor = isDarkMode ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.2)'
-
-  const isReady = !showGuide
 
   // 自定义分栏拖拽
   const [sidebarWidth, setSidebarWidth] = useState(230)
@@ -301,7 +262,7 @@ const Index: React.FC = () => {
       `}</style>
 
       <div className="chat-layout" style={{ height: '100%', display: 'flex' }}>
-        {hasWorkspace !== null && isReady && sidebarOpen && (
+        {sidebarOpen && (
           <>
             <div style={{ width: sidebarWidth, minWidth: 200, maxWidth: 239, flexShrink: 0 }}>
               <ChatSidebar
@@ -343,75 +304,60 @@ const Index: React.FC = () => {
             onTogglePanel={() => setPanelOpen(!panelOpen)}
             colorBorderSecondary={colorBorderSecondary}
             onNewChat={handleNewChat}
-            onWorkspaceChange={handleWorkspaceChange}
-            refreshTrigger={headerRefreshKey}
           />
 
-          {hasWorkspace === null ? null : isReady ? (
-            <>
-              <ChatMessageArea
-                messages={messages}
-                isDarkMode={isDarkMode}
-                colorText={colorText}
-                colorTextSecondary={colorTextSecondary}
-                colorTextTertiary={colorTextTertiary}
-                colorFillAlter={colorFillAlter}
-                colorBorderSecondary={colorBorderSecondary}
-                titleDisplayed={titleDisplayed}
-                titleDone={titleDone}
-                subtitleDisplayed={subtitleDisplayed}
-                subtitleDone={subtitleDone}
-                copiedId={copiedId}
-                hasMoreMessages={messagesHasMore}
-                isLoadingMoreMessages={messagesLoadingMore}
-                onCopy={handleCopy}
-                onDelete={handleDeleteMessagePair}
-                onLoadMoreMessages={handleLoadMoreMessages}
-                messagesEndRef={messagesEndRef}
-              />
-
-              <div className="px-16 pb-8">
-                <div className="max-w-4xl mx-auto">
-                  <ChatInput
-                    inputValue={inputValue}
-                    onInputChange={setInputValue}
-                    textareaRef={textareaRef}
-                    attachments={attachments}
-                    onAttachmentsChange={setAttachments}
-                    isLoading={isLoading}
-                    selectedProviderId={selectedProviderId}
-                    onSelectProvider={(value) => setSelectedProviderId(value)}
-                    groupedProviderOptions={groupedProviderOptions}
-                    modelSupportsTools={modelSupportsTools}
-                    modelSupportsVision={modelSupportsVision}
-                    isDarkMode={isDarkMode}
-                    colorBgLayout={colorBgLayout}
-                    colorBorder={colorBorder}
-                    colorText={colorText}
-                    colorBorderSecondary={colorBorderSecondary}
-                    onSend={handleSend}
-                    onStop={handleStop}
-                    onKeyDown={handleKeyDown}
-                  />
-                </div>
-              </div>
-            </>
-          ) : guideVisible ? (
-            <GuideSetupPanel
-              guideWorkspaceDone={guideWorkspaceDone}
-              hasModels={hasModels}
-              colorFillAlter={colorFillAlter}
+          <>
+            <ChatMessageArea
+              messages={messages}
+              isDarkMode={isDarkMode}
               colorText={colorText}
               colorTextSecondary={colorTextSecondary}
               colorTextTertiary={colorTextTertiary}
-              onWorkspaceSetup={handleWorkspaceSetup}
-              onModelSetup={handleModelSetup}
+              colorFillAlter={colorFillAlter}
+              colorBorderSecondary={colorBorderSecondary}
+              titleDisplayed={titleDisplayed}
+              titleDone={titleDone}
+              subtitleDisplayed={subtitleDisplayed}
+              subtitleDone={subtitleDone}
+              copiedId={copiedId}
+              hasMoreMessages={messagesHasMore}
+              isLoadingMoreMessages={messagesLoadingMore}
+              onCopy={handleCopy}
+              onDelete={handleDeleteMessagePair}
+              onLoadMoreMessages={handleLoadMoreMessages}
+              messagesEndRef={messagesEndRef}
             />
-          ) : null}
+
+            <div className="px-16 pb-8">
+              <div className="max-w-4xl mx-auto">
+                <ChatInput
+                  inputValue={inputValue}
+                  onInputChange={setInputValue}
+                  textareaRef={textareaRef}
+                  attachments={attachments}
+                  onAttachmentsChange={setAttachments}
+                  isLoading={isLoading}
+                  selectedProviderId={selectedProviderId}
+                  onSelectProvider={(value) => setSelectedProviderId(value)}
+                  groupedProviderOptions={groupedProviderOptions}
+                  modelSupportsTools={modelSupportsTools}
+                  modelSupportsVision={modelSupportsVision}
+                  isDarkMode={isDarkMode}
+                  colorBgLayout={colorBgLayout}
+                  colorBorder={colorBorder}
+                  colorText={colorText}
+                  colorBorderSecondary={colorBorderSecondary}
+                  onSend={handleSend}
+                  onStop={handleStop}
+                  onKeyDown={handleKeyDown}
+                />
+              </div>
+            </div>
+          </>
         </main>
 
         {/* Workspace panel resizer */}
-        {hasWorkspace !== null && isReady && panelOpen && (
+        {panelOpen && (
           <>
             <div className="chat-resizer" onMouseDown={handlePanelResizerMouseDown}>
               <div className="chat-resizer-dragger" />

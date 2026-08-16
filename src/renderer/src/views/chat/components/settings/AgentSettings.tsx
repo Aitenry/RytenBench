@@ -10,7 +10,8 @@ import {
   Select,
   Pagination,
   Tag,
-  Divider
+  Divider,
+  App
 } from 'antd'
 import {
   LoadingOutlined,
@@ -36,6 +37,7 @@ const AgentSettings: React.FC = () => {
   } = theme.useToken()
 
   const { viewMessage } = useMessage()
+  const { modal } = App.useApp()
 
   // 当前工作区 ID
   const [workspaceId, setWorkspaceId] = useState(0)
@@ -219,7 +221,7 @@ const AgentSettings: React.FC = () => {
   }
 
   const handleDelete = async (agent: AgentConfigRow): Promise<void> => {
-    Modal.confirm({
+    modal.confirm({
       title: `确认删除智能体"${agent.rename || agent.name}"？`,
       content: '删除后不可恢复。',
       okText: '确认删除',
@@ -362,7 +364,7 @@ const AgentSettings: React.FC = () => {
     // 逐条展示剔除提示
     if (stripped.length > 0) {
       setTimeout(() => {
-        Modal.info({
+        modal.info({
           title: '以下字段已自动剔除不存在的项',
           content: (
             <ul className="pl-4 m-0 text-sm">

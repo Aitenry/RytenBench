@@ -373,7 +373,8 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
                     tool: {
                       ...b.tool,
                       output: chunk.tool.output,
-                      status: chunk.tool.status
+                      status: chunk.tool.status,
+                      card: chunk.tool.card
                     }
                   }
                   break
@@ -562,7 +563,8 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
                         tool: {
                           ...c.tool,
                           output: sa.tool.output,
-                          status: sa.tool.status
+                          status: sa.tool.status,
+                          card: sa.tool.card
                         }
                       }
                       break

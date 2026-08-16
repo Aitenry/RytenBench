@@ -310,7 +310,7 @@ export interface Window {
         providerType: string,
         baseUrl?: string,
         apiKey?: string
-      ) => Promise<{ id: string }[]>
+      ) => Promise<{ id: string; tags: string[] }[]>
       onChanged: (callback: () => void) => () => void
     }
     agents: {

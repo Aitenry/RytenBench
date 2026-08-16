@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect } from 'react'
-import { theme, Modal, App } from 'antd'
+import { theme, App } from 'antd'
 import { useAudioState } from '../../contexts/AudioContext'
 import type { MusicFolder, Track } from '../../types/music'
 import MusicSidebar from './components/MusicSidebar'
@@ -13,7 +13,7 @@ const RECENTLY_PLAYED_ID = '__recent__'
 const LIKED_TRACKS_ID = '__liked__'
 
 const Index: React.FC = () => {
-  const { message } = App.useApp()
+  const { message, modal } = App.useApp()
   const {
     token: { colorBgContainer, borderRadiusLG }
   } = theme.useToken()
@@ -99,7 +99,7 @@ const Index: React.FC = () => {
     async (folderId: string) => {
       // 内置歌单不能删除
       if (folderId === RECENTLY_PLAYED_ID || folderId === LIKED_TRACKS_ID) return
-      Modal.confirm({
+      modal.confirm({
         title: '删除歌单',
         content: '确定要删除此歌单吗？',
         okText: '删除',
@@ -120,7 +120,7 @@ const Index: React.FC = () => {
         }
       })
     },
-    [selectedFolderId, clearPlaylist, setSelectedFolderId]
+    [selectedFolderId, clearPlaylist, setSelectedFolderId, modal]
   )
 
   /** 切换收藏状态 */
@@ -248,22 +248,41 @@ const Index: React.FC = () => {
     [playlist, selectedFolderId, removeFromPlaylist]
   )
 
-  const handleUpdateTrack = useCallback(async () => {
+  /** 重新加载当前歌单数据（手动刷新 / 工作区切换共用） */
+  const reloadCurrentPlaylist = useCallback(async (): Promise<void> => {
     if (!selectedFolderId) return
+    let tracks: Track[] = []
+    if (selectedFolderId === RECENTLY_PLAYED_ID) {
+      tracks = await window.api.music.getRecentlyPlayed()
+    } else if (selectedFolderId === LIKED_TRACKS_ID) {
+      tracks = await window.api.music.getLikedTracks()
+    } else {
+      tracks = await window.api.music.getTracks(selectedFolderId)
+    }
+    updatePlaylist(tracks, selectedFolderId)
+  }, [selectedFolderId, updatePlaylist])
+
+  // 工作区切换：歌单列表与当前歌单内容均按新工作区重新加载
+  useEffect(() => {
+    const handleWorkspaceChanged = (): void => {
+      window.api.music.getFolders().then(setFolders).catch(console.error)
+      reloadCurrentPlaylist().catch(() => {
+        // 原歌单在新工作区不存在时清空视图
+        setSelectedFolderId(null)
+        clearPlaylist()
+      })
+    }
+    window.addEventListener('workspace-changed', handleWorkspaceChanged)
+    return () => window.removeEventListener('workspace-changed', handleWorkspaceChanged)
+  }, [reloadCurrentPlaylist, clearPlaylist, setSelectedFolderId])
+
+  const handleUpdateTrack = useCallback(async (): Promise<void> => {
     try {
-      let tracks: Track[] = []
-      if (selectedFolderId === RECENTLY_PLAYED_ID) {
-        tracks = await window.api.music.getRecentlyPlayed()
-      } else if (selectedFolderId === LIKED_TRACKS_ID) {
-        tracks = await window.api.music.getLikedTracks()
-      } else {
-        tracks = await window.api.music.getTracks(selectedFolderId)
-      }
-      updatePlaylist(tracks)
+      await reloadCurrentPlaylist()
     } catch {
       message.error('刷新曲目失败')
     }
-  }, [selectedFolderId, updatePlaylist])
+  }, [reloadCurrentPlaylist])
 
   return (
     <div className="h-full flex-1 flex flex-row gap-2.5">

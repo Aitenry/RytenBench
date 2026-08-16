@@ -3,6 +3,8 @@ import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { createDatabase, Database } from './database/loading'
+import { migrateWorkspaceData } from './database/workspace-migration'
+import { getActiveWorkspaceId, setActiveWorkspaceIdProvider } from './database/workspace-context'
 import { getIp } from './address'
 import _Store from 'electron-store'
 import logger from 'electron-log'
@@ -99,6 +101,15 @@ import type { BaseChatModel } from '@langchain/core/language_models/chat_models'
 import { KnowledgeGraphService, BuildConfig } from './graph'
 import { getProviderService } from './provider/service'
 import {
+  deriveModelTags,
+  type FetchedModelInfo,
+  tagsFromOllamaCapabilities,
+  tagsFromOpenRouterArchitecture,
+  tagsFromMistralCapabilities,
+  tagsFromGeminiModel,
+  geminiModelId
+} from './provider/model-tags'
+import {
   getAllProviders,
   getProviderById,
   getDefaultProvider,
@@ -175,6 +186,11 @@ logger.transports.file.fileName = 'main.log'
 
 const Store = _Store['default'] || _Store
 const settingsStore = new Store({ name: 'settings' })
+// 全局活动工作区读取器（IPC 层与 AI 工具层共用）
+setActiveWorkspaceIdProvider(() => {
+  const chat = settingsStore.get('chat') as ChatSettings | undefined
+  return chat?.activeWorkspaceId ?? 0
+})
 let loadingWindow: BrowserWindow | null = null
 let database: Database | null = null // 保持模块级变量
 const streamAbortControllers = new Map<number, AbortController>() // 流式输出取消控制器
@@ -265,7 +281,25 @@ async function performInitializationTasks(): Promise<void> {
         initKeystore()
       }
     },
-    { name: '初始化数据库', execute: async () => (database = await createDatabase()) }
+    { name: '初始化数据库', execute: async () => (database = await createDatabase()) },
+    {
+      name: '初始化工作区',
+      execute: async () => {
+        if (!database) return
+        const result = await migrateWorkspaceData(database.getDatabase(), () => {
+          const chat = settingsStore.get('chat') as ChatSettings | undefined
+          return chat?.activeWorkspaceId
+        })
+        // 把迁移确定的活动工作区写回设置（0 = 暂无工作区，等用户自选路径创建）
+        const chat = settingsStore.get('chat') as ChatSettings | undefined
+        const next: ChatSettings = { ...(chat ?? ({} as ChatSettings)) }
+        if (next.activeWorkspaceId !== result.activeWorkspaceId) {
+          next.activeWorkspaceId = result.activeWorkspaceId
+          settingsStore.set('chat', next)
+        }
+        logger.info(`[Init] Workspace migration done, active workspace=${result.activeWorkspaceId}`)
+      }
+    }
   ]
 
   for (let i = 0; i < tasks.length; i++) {
@@ -639,7 +673,7 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('todo-items-get-by-title', async (_event, title: string) => {
     try {
-      return await getTodoItemByTitle(title)
+      return await getTodoItemByTitle(getActiveWorkspaceId(), title)
     } catch (error) {
       console.error('Error in todo-items-get-by-title:', error)
       throw error
@@ -648,7 +682,7 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('todo-items-get-by-priority', async (_event, priority: number) => {
     try {
-      return await getTodoItemsByPriority(priority)
+      return await getTodoItemsByPriority(getActiveWorkspaceId(), priority)
     } catch (error) {
       console.error('Error in todo-items-get-by-priority:', error)
       throw error
@@ -657,7 +691,7 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('todo-items-get-by-completed-status', async (_event, status: number) => {
     try {
-      return await getTodoItemsByPriority(status)
+      return await getTodoItemsByPriority(getActiveWorkspaceId(), status)
     } catch (error) {
       console.error('Error in todo-items-get-by-completed-status:', error)
       throw error
@@ -666,7 +700,7 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('todo-items-get-schedule', async () => {
     try {
-      return await getAllTodoItems()
+      return await getAllTodoItems(getActiveWorkspaceId())
     } catch (error) {
       console.error('Error in todo-items-get-schedule:', error)
       throw error
@@ -675,7 +709,7 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('todo-items-get-paginated', async (_event, page: number, pageSize: number) => {
     try {
-      return await getTodoItemsPaginated(page, pageSize)
+      return await getTodoItemsPaginated(getActiveWorkspaceId(), page, pageSize)
     } catch (error) {
       console.error('Error in todo-items-get-paginated:', error)
       throw error
@@ -684,7 +718,7 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('todo-items-get-by-due-date', async (_event, dueDate: string) => {
     try {
-      return await getTodoItemsByDueDate(dueDate)
+      return await getTodoItemsByDueDate(getActiveWorkspaceId(), dueDate)
     } catch (error) {
       console.error('Error in todo-items-get-by-due-date:', error)
       throw error
@@ -693,7 +727,7 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('todo-items-add', async (_event, todoItem: Omit<TodoItemRow, 'id'>) => {
     try {
-      return await addTodoItem(todoItem)
+      return await addTodoItem(getActiveWorkspaceId(), todoItem)
     } catch (error) {
       console.error('Error in todo-items-add:', error)
       throw error
@@ -750,7 +784,7 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('task-deps-get-all', async () => {
     try {
-      return await getAllDependencies()
+      return await getAllDependencies(getActiveWorkspaceId())
     } catch (error) {
       console.error('Error in task-deps-get-all:', error)
       throw error
@@ -759,7 +793,7 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('task-deps-get-with-tasks', async () => {
     try {
-      return await getAllTasksWithDependencies()
+      return await getAllTasksWithDependencies(getActiveWorkspaceId())
     } catch (error) {
       console.error('Error in task-deps-get-with-tasks:', error)
       throw error
@@ -769,7 +803,7 @@ app.whenReady().then(async () => {
   // --- Planner (甘特图) IPC handlers ---
   ipcMain.handle('planner-tasks-get-all', async () => {
     try {
-      return await getAllPlannerTasks()
+      return await getAllPlannerTasks(getActiveWorkspaceId())
     } catch (error) {
       console.error('Error in planner-tasks-get-all:', error)
       throw error
@@ -787,7 +821,7 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('planner-tasks-get-tree', async () => {
     try {
-      return await getPlannerTaskTree()
+      return await getPlannerTaskTree(getActiveWorkspaceId())
     } catch (error) {
       console.error('Error in planner-tasks-get-tree:', error)
       throw error
@@ -796,7 +830,7 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('planner-tasks-add', async (_event, task) => {
     try {
-      return await addPlannerTask(task)
+      return await addPlannerTask(getActiveWorkspaceId(), task)
     } catch (error) {
       console.error('Error in planner-tasks-add:', error)
       throw error
@@ -850,7 +884,7 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('planner-deps-get-all', async () => {
     try {
-      return await getAllPlannerDependencies()
+      return await getAllPlannerDependencies(getActiveWorkspaceId())
     } catch (error) {
       console.error('Error in planner-deps-get-all:', error)
       throw error
@@ -977,7 +1011,7 @@ app.whenReady().then(async () => {
   })
 
   ipcMain.handle('music-get-folders', async () => {
-    const rows = await getAllFolders()
+    const rows = await getAllFolders(getActiveWorkspaceId())
     return rows.map((row) => ({
       id: row.id,
       path: row.path,
@@ -1022,7 +1056,7 @@ app.whenReady().then(async () => {
     const folderId = crypto.randomUUID()
     const folderPath = `${musicDir}\\${folderId}`.replace(/\//g, '\\')
     fs.mkdirSync(folderPath, { recursive: true })
-    await upsertFolder(folderId, folderPath, name, 0, description || '')
+    await upsertFolder(getActiveWorkspaceId(), folderId, folderPath, name, 0, description || '')
     const desc = description || ''
     return {
       id: folderId,
@@ -1186,6 +1220,7 @@ app.whenReady().then(async () => {
         const allTracks = [...existingTracks, ...tracks]
         await upsertTracks(folderId, allTracks)
         await upsertFolder(
+          getActiveWorkspaceId(),
           folderId,
           folder.path,
           folder.name,
@@ -1217,6 +1252,7 @@ app.whenReady().then(async () => {
       if (folder) {
         const tracks = await getTracksByFolder(result.folderId)
         await upsertFolder(
+          getActiveWorkspaceId(),
           result.folderId,
           folder.path,
           folder.name,
@@ -1269,7 +1305,7 @@ app.whenReady().then(async () => {
   })
 
   ipcMain.handle('music-toggle-like', async (_event, trackId: number) => {
-    return await toggleLikeTrack(trackId)
+    return await toggleLikeTrack(getActiveWorkspaceId(), trackId)
   })
 
   ipcMain.handle('music-update-last-played', async (_event, trackId: number) => {
@@ -1277,7 +1313,7 @@ app.whenReady().then(async () => {
   })
 
   ipcMain.handle('music-get-liked-tracks', async () => {
-    const rows = await getLikedTracks()
+    const rows = await getLikedTracks(getActiveWorkspaceId())
     return rows.map((row) => ({
       id: String(row.id),
       filePath: row.file_path,
@@ -1291,7 +1327,7 @@ app.whenReady().then(async () => {
   })
 
   ipcMain.handle('music-get-recently-played', async () => {
-    const rows = await getRecentlyPlayed(100)
+    const rows = await getRecentlyPlayed(getActiveWorkspaceId(), 100)
     return rows.map((row) => ({
       id: String(row.id),
       filePath: row.file_path,
@@ -1317,7 +1353,7 @@ app.whenReady().then(async () => {
     'doc-get-all',
     async (_event, page?: number, pageSize?: number, excludeWikiId?: number, search?: string) => {
       try {
-        return await getAllDocs(page, pageSize, excludeWikiId, search)
+        return await getAllDocs(getActiveWorkspaceId(), page, pageSize, excludeWikiId, search)
       } catch (error) {
         console.error('Error in doc-get-all:', error)
         throw error
@@ -1329,7 +1365,7 @@ app.whenReady().then(async () => {
     'doc-page-get',
     async (_event, query: string, page?: number, pageSize?: number) => {
       try {
-        return await getDocPage(query, page, pageSize)
+        return await getDocPage(getActiveWorkspaceId(), query, page, pageSize)
       } catch (error) {
         console.error('Error in doc-get-by-title:', error)
         throw error
@@ -1347,7 +1383,7 @@ app.whenReady().then(async () => {
       }
     ) => {
       try {
-        return await addDoc(doc)
+        return await addDoc(getActiveWorkspaceId(), doc)
       } catch (error) {
         console.error('Error in doc-add:', error)
         throw error
@@ -1392,12 +1428,12 @@ app.whenReady().then(async () => {
       // 先查询将要被删除的文档 ID，用于清理节点位置
       const db = (await getDatabaseInstance()).getDatabase()
       const idsResult = await db.query<{ id: number }>(
-        'SELECT id FROM documents WHERE created_at >= $1 AND created_at <= $2',
-        [startTime, endTime]
+        'SELECT id FROM documents WHERE workspace_id = $1 AND created_at >= $2 AND created_at <= $3',
+        [getActiveWorkspaceId(), startTime, endTime]
       )
       const deletedIds = idsResult.rows.map((r) => r.id)
 
-      const result = await deleteDocsByTimeRange(startTime, endTime)
+      const result = await deleteDocsByTimeRange(getActiveWorkspaceId(), startTime, endTime)
 
       // 清理对应的节点位置
       for (const id of deletedIds) {
@@ -1514,7 +1550,7 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('wiki-get-all', async (_event, page?: number, pageSize?: number) => {
     try {
-      return await getAllWikis(page, pageSize)
+      return await getAllWikis(getActiveWorkspaceId(), page, pageSize)
     } catch (error) {
       console.error('Error in wiki-get-all:', error)
       throw error
@@ -1525,7 +1561,7 @@ app.whenReady().then(async () => {
     'wiki-add',
     async (_event, wiki: Omit<WikiRow, 'id' | 'doc_count' | 'created_at' | 'updated_at'>) => {
       try {
-        return await addWiki(wiki)
+        return await addWiki(getActiveWorkspaceId(), wiki)
       } catch (error) {
         console.error('Error in wiki-add:', error)
         throw error
@@ -1969,6 +2005,7 @@ app.whenReady().then(async () => {
                     ) {
                       b.tool.output = chunk.tool.output
                       b.tool.status = chunk.tool.status
+                      b.tool.card = chunk.tool.card
                       break
                     }
                   }
@@ -2114,6 +2151,7 @@ app.whenReady().then(async () => {
                       ) {
                         c.tool.output = sa.tool.output
                         c.tool.status = 'completed'
+                        c.tool.card = sa.tool.card
                         break
                       }
                     }
@@ -2677,6 +2715,21 @@ app.whenReady().then(async () => {
   ipcMain.handle('workspace-delete', async (_event, id: number) => {
     try {
       clearTopicCache()
+      // 删除该工作区音乐歌单的物理目录（与 music-delete-folder 行为一致）
+      try {
+        const db = (await getDatabaseInstance()).getDatabase()
+        const folders = await db.query<{ path: string }>(
+          'SELECT path FROM music_folders WHERE workspace_id = $1',
+          [id]
+        )
+        for (const folder of folders.rows) {
+          if (folder.path && fs.existsSync(folder.path)) {
+            fs.rmSync(folder.path, { recursive: true, force: true })
+          }
+        }
+      } catch (err) {
+        logger.warn('Failed to clean music folder dirs for workspace:', err)
+      }
       return await deleteWorkspace(id)
     } catch (error) {
       logger.error('Error in workspace-delete:', error)
@@ -3238,12 +3291,12 @@ app.whenReady().then(async () => {
     return true
   })
 
-  // 拉取供应商的模型列表
+  // 拉取供应商的模型列表（标签优先取接口元数据，缺失时回退名称推导）
   ipcMain.handle(
     'provider-fetch-models',
     async (_event, providerType: string, baseUrl?: string, apiKey?: string) => {
       try {
-        const models: { id: string }[] = []
+        const models: FetchedModelInfo[] = []
 
         if (providerType === 'ollama') {
           const url = (baseUrl || 'http://localhost:11434').replace(/\/+$/, '') + '/api/tags'
@@ -3255,12 +3308,36 @@ app.whenReady().then(async () => {
           if (!res.ok) {
             throw new Error(`Ollama 返回 HTTP ${res.status}`)
           }
-          const data = (await res.json()) as { models?: { name: string }[] }
+          const data = (await res.json()) as { models?: Record<string, unknown>[] }
           for (const m of data.models || []) {
-            models.push({ id: m.name })
+            const id = typeof m.name === 'string' ? m.name : ''
+            if (!id) continue
+            models.push({
+              id,
+              tags: tagsFromOllamaCapabilities(m) ?? deriveModelTags(id)
+            })
+          }
+        } else if (providerType === 'google-genai') {
+          // Gemini 原生接口: GET /v1beta/models?key=...
+          const base = (baseUrl || 'https://generativelanguage.googleapis.com').replace(/\/+$/, '')
+          const url = `${base}/v1beta/models` + (apiKey ? `?key=${encodeURIComponent(apiKey)}` : '')
+          logger.info(`[FetchModels] Gemini: ${url}`)
+          const controller = new AbortController()
+          const timeout = setTimeout(() => controller.abort(), 15000)
+          const res = await fetch(url, { signal: controller.signal })
+          clearTimeout(timeout)
+          if (!res.ok) {
+            throw new Error(`Gemini 返回 HTTP ${res.status}`)
+          }
+          const data = (await res.json()) as { models?: Record<string, unknown>[] }
+          for (const m of data.models || []) {
+            const id = geminiModelId(m)
+            if (!id) continue
+            models.push({ id, tags: tagsFromGeminiModel(m, id) ?? deriveModelTags(id) })
           }
         } else {
           // OpenAI 兼容协议: GET /v1/models
+          // OpenRouter / Mistral 在同样的响应里附带能力元数据，能解析则优先取接口数据
           const base = (baseUrl || 'https://api.openai.com/v1').replace(/\/+$/, '')
           const url = base.endsWith('/v1') ? `${base}/models` : `${base}/v1/models`
           logger.info(`[FetchModels] OpenAI-compatible: ${url}`)
@@ -3273,9 +3350,17 @@ app.whenReady().then(async () => {
           if (!res.ok) {
             throw new Error(`API 返回 HTTP ${res.status}`)
           }
-          const data = (await res.json()) as { data?: { id: string }[] }
+          const data = (await res.json()) as { data?: Record<string, unknown>[] }
           for (const m of data.data || []) {
-            models.push({ id: m.id })
+            const id = typeof m.id === 'string' ? m.id : ''
+            if (!id) continue
+            models.push({
+              id,
+              tags:
+                tagsFromMistralCapabilities(m) ??
+                tagsFromOpenRouterArchitecture(m) ??
+                deriveModelTags(id)
+            })
           }
         }
 

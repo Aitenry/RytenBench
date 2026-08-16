@@ -62,6 +62,7 @@ async function getWikiById(id: number): Promise<WikiRow | null> {
 }
 
 async function getAllWikis(
+  workspaceId: number,
   page: number = 1,
   pageSize: number = 10
 ): Promise<PaginatedResult<WikiRow>> {
@@ -69,7 +70,10 @@ async function getAllWikis(
     const db = (await getDatabaseInstance()).getDatabase()
     const offset = (page - 1) * pageSize
 
-    const countResult = await db.query<{ total: number }>('SELECT COUNT(*) as total FROM wiki')
+    const countResult = await db.query<{ total: number }>(
+      'SELECT COUNT(*) as total FROM wiki WHERE workspace_id = $1',
+      [workspaceId]
+    )
     const total = Number(countResult.rows[0]?.total) || 0
 
     const dataSql = `
@@ -80,12 +84,13 @@ async function getAllWikis(
       LEFT JOIN images img ON w.image_id = img.id
       LEFT JOIN wiki_directories wd ON w.id = wd.wiki_id
       LEFT JOIN directory_documents dd ON wd.id = dd.directory_id
+      WHERE w.workspace_id = $1
       GROUP BY w.id, img.data
       ORDER BY w.updated_at DESC
-      LIMIT $1 OFFSET $2
+      LIMIT $2 OFFSET $3
     `
 
-    const result = await db.query<WikiRow>(dataSql, [pageSize, offset])
+    const result = await db.query<WikiRow>(dataSql, [workspaceId, pageSize, offset])
 
     const items = result.rows.map((row) => ({
       ...row,
@@ -100,6 +105,7 @@ async function getAllWikis(
 }
 
 async function addWiki(
+  workspaceId: number,
   wiki: Omit<WikiBaseRow, 'id' | 'created_at' | 'updated_at'>
 ): Promise<number> {
   try {
@@ -109,8 +115,8 @@ async function addWiki(
     const imageId = await saveImage(image ?? null)
 
     const result = await db.query<{ id: number }>(
-      'INSERT INTO wiki (title, summary, tags, image_id) VALUES ($1, $2, $3, $4) RETURNING id',
-      [title, summary || null, tags || null, imageId]
+      'INSERT INTO wiki (workspace_id, title, summary, tags, image_id) VALUES ($1, $2, $3, $4, $5) RETURNING id',
+      [workspaceId, title, summary || null, tags || null, imageId]
     )
     logger.info(`Inserted new wiki with ID: ${result.rows[0].id}`)
     return result.rows[0].id

@@ -1,6 +1,7 @@
 import { tool } from '@langchain/core/tools'
 import type { StructuredToolInterface } from '@langchain/core/tools'
 import * as z from 'zod/v4'
+import { getActiveWorkspaceId } from '../../database/workspace-context'
 
 // ============================================================================
 // Todo Handlers
@@ -23,10 +24,10 @@ async function listTodosHandler(params: {
     category: string | null
   }>
   if (status !== undefined || priority !== undefined || page > 1) {
-    const result = await getTodoItemsPaginated(page, pageSize)
+    const result = await getTodoItemsPaginated(getActiveWorkspaceId(), page, pageSize)
     items = result.items
   } else {
-    items = await getAllTodoItems()
+    items = await getAllTodoItems(getActiveWorkspaceId())
   }
   if (status !== undefined) items = items.filter((t) => t.status === status)
   if (priority !== undefined) items = items.filter((t) => t.priority === priority)
@@ -55,7 +56,7 @@ async function addTodoHandler(params: {
   category?: string
 }): Promise<string> {
   const { addTodoItem, getTodoItemById } = await import('../../database/mapper/todo')
-  const newId = await addTodoItem({
+  const newId = await addTodoItem(getActiveWorkspaceId(), {
     title: params.title,
     description: params.description || '',
     due_date: params.due_date || null,

@@ -1,3 +1,11 @@
+/** 工具定制化卡片数据 */
+export interface ToolCard {
+  path?: string
+  pattern?: string
+  count?: number
+  command?: string
+}
+
 /** 工具调用 */
 export interface ToolCall {
   name: string
@@ -5,6 +13,7 @@ export interface ToolCall {
   output: string
   status?: 'preparing' | 'executing' | 'completed'
   id?: string
+  card?: ToolCard
 }
 
 /** 智能体活动事件 */

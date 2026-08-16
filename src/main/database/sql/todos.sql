@@ -1,6 +1,7 @@
 -- 代办事项表
 CREATE TABLE IF NOT EXISTS todo_items (
     id           SERIAL PRIMARY KEY,
+    workspace_id INTEGER,
     title        TEXT      NOT NULL,
     description  TEXT,
     due_date     DATE,
@@ -12,6 +13,12 @@ CREATE TABLE IF NOT EXISTS todo_items (
     started_at   TIMESTAMP,
     completed_at TIMESTAMP
 );
+
+-- 工作区隔离索引
+CREATE INDEX IF NOT EXISTS idx_todo_workspace ON todo_items (workspace_id);
+
+-- 迁移：为已有数据库添加 workspace_id 列
+ALTER TABLE todo_items ADD COLUMN IF NOT EXISTS workspace_id INTEGER;
 
 -- 代办事项表索引
 CREATE INDEX IF NOT EXISTS idx_todo_priority   ON todo_items (priority);

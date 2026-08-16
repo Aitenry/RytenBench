@@ -347,7 +347,7 @@ const api = {
       providerType: string,
       baseUrl?: string,
       apiKey?: string
-    ): Promise<{ id: string }[]> =>
+    ): Promise<{ id: string; tags: string[] }[]> =>
       ipcRenderer.invoke('provider-fetch-models', providerType, baseUrl, apiKey),
     onChanged: (callback: () => void) => {
       const handler = (): void => callback()

@@ -3,20 +3,9 @@ import type { MenuProps } from 'antd'
 import type { MessageInstance } from 'antd/es/message/interface'
 import type { Track, MusicFolder, RepeatMode } from './music'
 import type { DocItem, WikiRow, TodoItem, DocOption } from './models'
-import type {
-  DirectoryWithChildren,
-  GraphEntity,
-  GraphRelation,
-  GraphChartData,
-  WikiEditData
-} from './knowledge'
+import type { GraphEntity, GraphRelation, GraphChartData, WikiEditData } from './knowledge'
 
 /* ── Markdown ── */
-
-export interface MarkdownEditorProps {
-  initialValue?: string
-  onSave?: (content: string) => void
-}
 
 export interface MarkdownViewProps {
   content: string
@@ -46,13 +35,6 @@ export interface TableOfContentsProps {
 
 /* ── Doc ── */
 
-export interface DocCardProps {
-  item: DocItem
-  onClick?: () => void
-  actions?: React.ReactNode[]
-  showContentPreview?: boolean
-}
-
 export interface DocPreviewModalProps {
   open: boolean
   onCancel: () => void
@@ -69,19 +51,6 @@ export interface WikiEditModalProps {
   initialTags?: string
   initialImage?: string | null
   onSave: (data: WikiEditData) => Promise<void>
-  onCancel: () => void
-}
-
-export interface WikiPreviewModalProps {
-  wiki: WikiRow | null
-  open: boolean
-  onClose: () => void
-}
-
-export interface WikiArchiveModalProps {
-  open: boolean
-  wikiId: number | undefined
-  onArchive: (docIds: number[]) => Promise<void>
   onCancel: () => void
 }
 
@@ -191,19 +160,6 @@ export interface GraphViewProps {
   selectedWiki: WikiRow
 }
 
-/* ── Directory Tree ── */
-
-export interface DirectoryTreeProps {
-  directoryTree: DirectoryWithChildren[]
-  expandedKeys: React.Key[]
-  onExpand: (keys: React.Key[]) => void
-  onSelect: (keys: React.Key[]) => void
-  selectedKeys: React.Key[]
-  onCreateDirectory: (parentId: number) => void
-  onEditDirectory: (dir: DirectoryWithChildren) => void
-  onDeleteDirectory: (dir: DirectoryWithChildren) => void
-}
-
 /* ── Home / Dashboard ── */
 
 export interface WeatherData {
@@ -235,31 +191,6 @@ export interface TodoListProps {
 export interface StatusOption {
   value: number
   label: string
-}
-
-/* ── Home ThemePalette ── */
-
-export interface StickyPalette {
-  bg: string
-  shadow: string
-  tape: string
-}
-
-export interface ThemePalette {
-  wikiStackOuter: string
-  wikiStackInner: string
-  wikiStackShadow: string
-  wikiCardBg: string
-  wikiCardShadow: string
-  wikiIconColor: string
-  stickyColors: StickyPalette[]
-  docCardBg: string
-  docCardBorder: string
-  docCardShadow: string
-  docIconColor: string
-  todoDescColor: string
-  textColor: string
-  textSecondary: string
 }
 
 /* ── Music ── */

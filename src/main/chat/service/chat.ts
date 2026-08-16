@@ -125,7 +125,7 @@ class ChatService {
     if (this.memoryPath) {
       const posixMemoryPath = this.memoryPath.replace(/\\/g, '/')
       const pathBackends: Record<string, AnyBackendProtocol> = {
-        '/memories/': new FilesystemBackend({ rootDir: posixMemoryPath })
+        '/memories/': new FilesystemBackend({ rootDir: posixMemoryPath, virtualMode: true })
       }
       if (backendRoot) {
         const posixPath = backendRoot.replace(/\\/g, '/')

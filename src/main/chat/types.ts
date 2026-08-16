@@ -12,12 +12,26 @@ export interface ChatMessage {
   content: string
 }
 
+/** 工具定制化卡片数据（deepagent 内置工具专用） */
+export interface ToolCard {
+  /** 文件/目录路径（read_file / write_file / edit_file / ls） */
+  path?: string
+  /** 搜索模式（glob / grep） */
+  pattern?: string
+  /** 结果数量（ls / glob / grep） */
+  count?: number
+  /** 执行命令（execute） */
+  command?: string
+}
+
 export interface ToolCallDetail {
   name: string
   input: Record<string, unknown>
   output: string
   status?: 'preparing' | 'executing' | 'completed'
   id?: string
+  /** 定制化卡片数据，仅 deepagent 内置工具设置 */
+  card?: ToolCard
 }
 
 export interface StructuredMessage {

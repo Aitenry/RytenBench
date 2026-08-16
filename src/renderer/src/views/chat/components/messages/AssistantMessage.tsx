@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useCallback } from 'react'
-import { Tooltip, Collapse, Modal } from 'antd'
+import { Tooltip, Collapse, App } from 'antd'
 import {
   RiFileCopyLine,
   RiCheckLine,
@@ -9,7 +9,13 @@ import {
   RiAiAgentLine,
   RiListCheck,
   RiCheckboxCircleLine,
-  RiCheckboxBlankCircleLine
+  RiCheckboxBlankCircleLine,
+  RiFileSearchLine,
+  RiFileEditLine,
+  RiPencilLine,
+  RiFolderOpenLine,
+  RiSearchLine,
+  RiTerminalBoxLine
 } from '@remixicon/react'
 import MarkdownLoad from '@renderer/components/markdown/MarkdownLoad'
 import LoadingMessage from './LoadingMessage'
@@ -43,6 +49,7 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
     onCopy,
     onDelete
   }) => {
+    const { modal } = App.useApp()
     const isCopied = copiedId === message.id
 
     // 折叠内容滚动容器管理 & 流式输出时自动滚动到底部
@@ -195,6 +202,101 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
       )
     }
 
+    /** 渲染 deepagent 内置工具为定制化卡片（非折叠）
+     *  扁平布局，border / 背景色与 Collapse 工具块一致 */
+    const renderToolCard = (
+      tool: ToolCall,
+      key: string | number,
+      isNested = false
+    ): React.ReactNode => {
+      const card = tool.card
+      if (!card) return null
+
+      const size = isNested ? 14 : 16
+      const fontSize = isNested ? '12px' : '13px'
+
+      const iconStyle = { color: colorTextSecondary, flexShrink: 0 }
+
+      const renderPathRow = (
+        icon: React.ReactNode,
+        label: string,
+        extra?: React.ReactNode
+      ): React.ReactNode => (
+        <div
+          key={key}
+          style={{
+            background: collapseBg,
+            border: 'var(--ant-line-width) var(--ant-line-type) var(--ant-color-border)',
+            marginBottom: isNested ? '4px' : '6px',
+            borderRadius: '8px',
+            padding: '9px 12px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px'
+          }}
+        >
+          {icon}
+          <span
+            style={{
+              color: colorText,
+              fontSize,
+              wordBreak: 'break-all',
+              flex: 1
+            }}
+          >
+            {label}
+          </span>
+          {extra}
+        </div>
+      )
+
+      switch (tool.name) {
+        case 'read_file':
+          return renderPathRow(<RiFileSearchLine size={size} style={iconStyle} />, card.path || '')
+        case 'write_file':
+          return renderPathRow(<RiFileEditLine size={size} style={iconStyle} />, card.path || '')
+        case 'edit_file':
+          return renderPathRow(<RiPencilLine size={size} style={iconStyle} />, card.path || '')
+        case 'ls':
+          return renderPathRow(
+            <RiFolderOpenLine size={size} style={iconStyle} />,
+            card.path || '/',
+            card.count !== undefined ? (
+              <span style={{ color: colorTextTertiary, fontSize, flexShrink: 0 }}>
+                {card.count} 项
+              </span>
+            ) : undefined
+          )
+        case 'glob':
+          return renderPathRow(
+            <RiSearchLine size={size} style={iconStyle} />,
+            card.pattern || '',
+            card.count !== undefined ? (
+              <span style={{ color: colorTextTertiary, fontSize, flexShrink: 0 }}>
+                {card.count} 项
+              </span>
+            ) : undefined
+          )
+        case 'grep':
+          return renderPathRow(
+            <RiSearchLine size={size} style={iconStyle} />,
+            card.pattern || '',
+            card.count !== undefined ? (
+              <span style={{ color: colorTextTertiary, fontSize, flexShrink: 0 }}>
+                {card.count} 条
+              </span>
+            ) : undefined
+          )
+        case 'execute':
+          return renderPathRow(
+            <RiTerminalBoxLine size={size} style={iconStyle} />,
+            card.command || ''
+          )
+        default:
+          return null
+      }
+    }
+
     const renderBlocks = (): React.ReactNode => {
       if (message.blocks.length === 0) {
         if (message.content) {
@@ -290,6 +392,10 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
         if (block.type === 'tool' && block.tool) {
           if (block.tool.name === 'write_todos') {
             return renderWriteTodos(block.tool, blockIndex)
+          }
+          // 定制化卡片：deepagent 内置工具（ls / read_file / write_file / edit_file / glob / grep / execute）
+          if (block.tool.card && block.tool.status === 'completed') {
+            return renderToolCard(block.tool, blockIndex)
           }
           const isPreparing = block.tool.status === 'preparing'
           const isExecuting =
@@ -428,6 +534,10 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
               if (child.type === 'tool' && child.tool) {
                 if (child.tool.name === 'write_todos') {
                   return renderWriteTodos(child.tool, ci, true)
+                }
+                // 定制化卡片：deepagent 内置工具
+                if (child.tool.card && child.tool.status === 'completed') {
+                  return renderToolCard(child.tool, ci, true)
                 }
                 const isPreparing = child.tool.status === 'preparing'
                 const isExecuting =
@@ -686,7 +796,7 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
             <Tooltip title="删除此轮对话">
               <button
                 onClick={() =>
-                  Modal.confirm({
+                  modal.confirm({
                     title: '确认删除',
                     content: '将删除这一轮对话，删除后不可恢复。',
                     okText: '删除',

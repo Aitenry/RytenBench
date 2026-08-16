@@ -42,6 +42,17 @@ const Index: React.FC = () => {
     })()
   }, [])
 
+  // 工作区切换：重新加载任务树，并清空旧工作区的选中/折叠状态
+  useEffect(() => {
+    const handleWorkspaceChanged = (): void => {
+      setSelectedId(null)
+      setCollapsedIds(new Set())
+      loadTree().catch(console.error)
+    }
+    window.addEventListener('workspace-changed', handleWorkspaceChanged)
+    return () => window.removeEventListener('workspace-changed', handleWorkspaceChanged)
+  }, [loadTree])
+
   const handleToggleCollapse = useCallback((id: number) => {
     setCollapsedIds((prev) => {
       const next = new Set(prev)

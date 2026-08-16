@@ -1,5 +1,5 @@
 import logger from 'electron-log'
-import { StructuredMessage } from '../types'
+import { StructuredMessage, ToolCard } from '../types'
 
 /** deepagents streamEvents 返回的 run 对象的结构化契约 */
 export interface StreamRun {
@@ -38,6 +38,84 @@ interface StreamSubAgent {
 type EnqueueFn = (item: StructuredMessage) => void
 type MarkDoneFn = () => void
 type SafeGetOutputFn = (call: { output: unknown }) => Promise<unknown>
+
+// ============================================================================
+// 定制化工具卡片生成
+// ============================================================================
+
+/** 从工具名称、输入和输出中提取定制化卡片数据 */
+function buildToolCard(
+  name: string,
+  input: Record<string, unknown>,
+  output: string
+): ToolCard | undefined {
+  switch (name) {
+    case 'read_file':
+    case 'write_file':
+    case 'edit_file': {
+      const filePath = typeof input.file_path === 'string' ? input.file_path : undefined
+      if (!filePath) return undefined
+      return { path: filePath }
+    }
+    case 'ls': {
+      const dirPath = typeof input.path === 'string' ? input.path : '/'
+      let count: number | undefined
+      try {
+        const parsed = JSON.parse(output)
+        if (Array.isArray(parsed.files)) {
+          count = parsed.files.length
+        } else if (parsed.files === undefined && parsed.error) {
+          // 失败时不显示计数
+        }
+      } catch {
+        // 非 JSON 输出（字符串列表），按行估算
+        const trimmed = output.trim()
+        if (trimmed) {
+          count = trimmed.split('\n').length
+        }
+      }
+      return { path: dirPath, count }
+    }
+    case 'glob': {
+      const pattern = typeof input.pattern === 'string' ? input.pattern : undefined
+      let count: number | undefined
+      try {
+        const parsed = JSON.parse(output)
+        if (Array.isArray(parsed.files)) {
+          count = parsed.files.length
+        }
+      } catch {
+        const trimmed = output.trim()
+        if (trimmed) {
+          count = trimmed.split('\n').length
+        }
+      }
+      return { pattern, count }
+    }
+    case 'grep': {
+      const pattern = typeof input.pattern === 'string' ? input.pattern : undefined
+      let count: number | undefined
+      try {
+        const parsed = JSON.parse(output)
+        if (Array.isArray(parsed.matches)) {
+          count = parsed.matches.length
+        }
+      } catch {
+        const trimmed = output.trim()
+        if (trimmed) {
+          count = trimmed.split('\n').length
+        }
+      }
+      return { pattern, count }
+    }
+    case 'execute': {
+      const command = typeof input.command === 'string' ? input.command : undefined
+      return command ? { command } : undefined
+    }
+    default:
+      return undefined
+  }
+}
 
 /**
  * 生产者1：流式输出文本和推理内容
@@ -211,7 +289,8 @@ export async function produceToolCalls(
           input,
           output,
           status: 'completed',
-          id: call.callId
+          id: call.callId,
+          card: buildToolCard(call.name, input, output)
         }
       })
     }
@@ -414,7 +493,8 @@ export async function produceSubAgents(
                         input,
                         output,
                         status: 'completed',
-                        id: call.callId
+                        id: call.callId,
+                        card: buildToolCard(call.name, input, output)
                       }
                     }
                   })

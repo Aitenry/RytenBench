@@ -58,6 +58,18 @@ async function createWorkspace(name: string, path: string): Promise<number> {
     const result = await db.query<{ id: number }>(sql, [name, path])
     const newId = result.rows[0].id
     logger.info(`Created workspace ID=${newId}, name="${name}", path="${path}"`)
+    // 首个工作区承接历史存量数据（workspace_id 为 NULL 的旧数据归入其中）
+    const tables = ['documents', 'wiki', 'todo_items', 'planner_tasks', 'music_folders']
+    for (const table of tables) {
+      const backfill = await db.query(
+        `UPDATE ${table} SET workspace_id = $1 WHERE workspace_id IS NULL`,
+        [newId]
+      )
+      const count = backfill.affectedRows ?? 0
+      if (count > 0) {
+        logger.info(`Backfilled ${count} rows of ${table} to new workspace ${newId}`)
+      }
+    }
     return newId
   } catch (error) {
     logger.error('Failed to create workspace:', error)
@@ -68,11 +80,20 @@ async function createWorkspace(name: string, path: string): Promise<number> {
 async function deleteWorkspace(id: number): Promise<boolean> {
   try {
     const db = (await getDatabaseInstance()).getDatabase()
-    const sql = 'DELETE FROM workspace WHERE id = $1'
-    const result = await db.query(sql, [id])
-    const changes = result.affectedRows ?? 0
-    logger.info(`Deleted workspace ID=${id}, ${changes} row(s) affected.`)
-    return changes > 0
+    await db.transaction(async (tx) => {
+      // 级联清理该工作区的全部内容（顺序满足外键依赖）：
+      // 文档（级联删除内容与目录关联）→ 知识库（级联删除目录、目录关联、图谱）→ 待办（级联删除依赖）→ 计划任务（级联删除依赖）→ 歌单（级联删除曲目）
+      await tx.query('DELETE FROM documents WHERE workspace_id = $1', [id])
+      await tx.query('DELETE FROM wiki WHERE workspace_id = $1', [id])
+      await tx.query('DELETE FROM todo_items WHERE workspace_id = $1', [id])
+      await tx.query('DELETE FROM planner_tasks WHERE workspace_id = $1', [id])
+      await tx.query('DELETE FROM music_folders WHERE workspace_id = $1', [id])
+      // 聊天话题与子代理配置有外键级联，删除工作区行即可
+      const result = await tx.query('DELETE FROM workspace WHERE id = $1', [id])
+      const changes = result.affectedRows ?? 0
+      logger.info(`Deleted workspace ID=${id}, ${changes} row(s) affected.`)
+    })
+    return true
   } catch (error) {
     logger.error('Failed to delete workspace:', error)
     throw error

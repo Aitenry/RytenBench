@@ -1,6 +1,7 @@
 -- 音乐歌单表
 CREATE TABLE IF NOT EXISTS music_folders (
     id          TEXT PRIMARY KEY,
+    workspace_id INTEGER,
     path        TEXT NOT NULL UNIQUE,
     name        TEXT NOT NULL,
     description TEXT,
@@ -9,6 +10,11 @@ CREATE TABLE IF NOT EXISTS music_folders (
     created_at  TIMESTAMP DEFAULT NOW(),
     updated_at  TIMESTAMP DEFAULT NOW()
 );
+
+CREATE INDEX IF NOT EXISTS idx_music_folders_workspace ON music_folders (workspace_id);
+
+-- 迁移：为已有数据库添加 workspace_id 列
+ALTER TABLE music_folders ADD COLUMN IF NOT EXISTS workspace_id INTEGER;
 
 -- 音乐曲目表
 CREATE TABLE IF NOT EXISTS music_tracks (

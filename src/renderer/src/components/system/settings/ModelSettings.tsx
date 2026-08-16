@@ -106,10 +106,12 @@ const ProviderLogo: React.FC<{ provider: string; size?: number }> = ({ provider,
 }
 
 const MODEL_TAGS = [
-  { value: 'embedding', label: 'Embedding', color: 'purple' },
-  { value: 'vision', label: 'Vision', color: 'cyan' },
-  { value: 'tools', label: 'Tools', color: 'green' },
-  { value: 'thinking', label: 'Thinking', color: 'orange' }
+  { value: 'chat', label: '对话', color: 'blue' },
+  { value: 'embedding', label: '嵌入', color: 'purple' },
+  { value: 'vision', label: '视觉', color: 'cyan' },
+  { value: 'tools', label: '工具', color: 'green' },
+  { value: 'thinking', label: '思考', color: 'orange' },
+  { value: 'other', label: '非对话', color: 'default' }
 ]
 
 /** 判断是否为向量/嵌入模型：标签含 embedding，或名称/模型名含 embedding */
@@ -137,7 +139,7 @@ const ModelSettings: React.FC = () => {
   const [fetchProviderType, setFetchProviderType] = useState('ollama')
   const [fetchBaseUrl, setFetchBaseUrl] = useState('http://localhost:11434')
   const [fetchApiKey, setFetchApiKey] = useState('')
-  const [fetchModels, setFetchModels] = useState<{ id: string }[]>([])
+  const [fetchModels, setFetchModels] = useState<{ id: string; tags: string[] }[]>([])
   const [fetchLoading, setFetchLoading] = useState(false)
   const [checkedModels, setCheckedModels] = useState<string[]>([])
   const [addingModels, setAddingModels] = useState(false)
@@ -286,6 +288,8 @@ const ModelSettings: React.FC = () => {
       const existingIds = new Set(providers.map((p) => p.model))
       const newModels = result.filter((m) => !existingIds.has(m.id))
       setFetchModels(newModels)
+      // 默认勾选对话/嵌入等可用模型，跳过非对话模型（图像生成、语音等）
+      setCheckedModels(newModels.filter((m) => !m.tags.includes('other')).map((m) => m.id))
     } catch (error) {
       viewMessage('fetch-models', 'error', `拉取失败: ${error}`)
     } finally {
@@ -304,13 +308,14 @@ const ModelSettings: React.FC = () => {
     }
   }
 
-  // 一键添加选中的模型
+  // 一键添加选中的模型（携带拉取时推导出的能力标签）
   const handleBatchAdd = async (): Promise<void> => {
     const msgKey = 'batch-add'
     if (checkedModels.length === 0) {
       viewMessage(msgKey, 'warning', '请至少选择一个模型')
       return
     }
+    const tagMap = new Map(fetchModels.map((m) => [m.id, m.tags]))
     setAddingModels(true)
     try {
       let added = 0
@@ -322,7 +327,7 @@ const ModelSettings: React.FC = () => {
             base_url: fetchBaseUrl || undefined,
             api_key: fetchApiKey || undefined,
             model: modelId,
-            tags: [],
+            tags: tagMap.get(modelId) ?? [],
             is_enabled: true,
             is_default: false
           })
@@ -364,6 +369,24 @@ const ModelSettings: React.FC = () => {
       key: 'provider',
       width: 120,
       render: (type: string) => getProviderConfig(type)?.label || type
+    },
+    {
+      title: '标签',
+      dataIndex: 'tags',
+      key: 'tags',
+      width: 150,
+      render: (tags: string[] | null) => (
+        <Space size={4} wrap>
+          {(tags ?? []).map((t) => {
+            const cfg = MODEL_TAGS.find((x) => x.value === t)
+            return cfg ? (
+              <Tag key={t} color={cfg.color} style={{ margin: 0, fontSize: 11 }}>
+                {cfg.label}
+              </Tag>
+            ) : null
+          })}
+        </Space>
+      )
     },
     {
       title: '操作',
@@ -508,7 +531,7 @@ const ModelSettings: React.FC = () => {
           <Form.Item
             name="tags"
             label="模型标签"
-            tooltip="Embedding 模型只能选择 Embedding 标签，其他标签互不影响"
+            tooltip="嵌入模型只能选择嵌入标签，其他标签互不影响"
           >
             <Select
               mode="multiple"
@@ -662,8 +685,36 @@ const ModelSettings: React.FC = () => {
               >
                 <div style={{ display: 'flex', flexDirection: 'column' }}>
                   {fetchModels.map((m) => (
-                    <div key={m.id} style={{ padding: '4px 0' }}>
-                      <Checkbox value={m.id}>{m.id}</Checkbox>
+                    <div
+                      key={m.id}
+                      style={{
+                        padding: '4px 0',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: 8
+                      }}
+                    >
+                      <Checkbox value={m.id} style={{ minWidth: 0, overflow: 'hidden' }}>
+                        <span style={{ wordBreak: 'break-all' }}>{m.id}</span>
+                      </Checkbox>
+                      <span
+                        style={{
+                          flexShrink: 0,
+                          display: 'flex',
+                          gap: 4,
+                          flexWrap: 'nowrap'
+                        }}
+                      >
+                        {m.tags.map((t) => {
+                          const cfg = MODEL_TAGS.find((x) => x.value === t)
+                          return cfg ? (
+                            <Tag key={t} color={cfg.color} style={{ margin: 0, fontSize: 11 }}>
+                              {cfg.label}
+                            </Tag>
+                          ) : null
+                        })}
+                      </span>
                     </div>
                   ))}
                 </div>

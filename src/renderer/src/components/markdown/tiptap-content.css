@@ -1,0 +1,662 @@
+/* ============================================================
+   TipTap 所见即所得 Markdown 编辑器内容样式
+   颜色全部走 CSS 变量（由组件按 antd token 注入），
+   仅代码高亮配色需要显式区分亮/暗（.dark 挂载在 documentElement）
+   ============================================================ */
+
+.tiptap-editor-root {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* ── 工具栏 ── */
+.tiptap-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--ed-border);
+  background: var(--ed-toolbar-bg);
+  user-select: none;
+  flex-shrink: 0;
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+
+.tiptap-toolbar-divider {
+  width: 1px;
+  height: 18px;
+  background: var(--ed-border);
+  margin: 0 6px;
+  flex-shrink: 0;
+}
+
+.tiptap-toolbar-spacer {
+  flex: 1;
+  min-width: 8px;
+}
+
+.tiptap-toolbar-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 6px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ed-text-secondary);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.tiptap-toolbar-btn:hover {
+  background: var(--ed-hover-bg);
+  color: var(--ed-text);
+}
+
+.tiptap-toolbar-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.tiptap-toolbar-btn.tiptap-toolbar-btn-active {
+  background: var(--ed-accent-soft);
+  color: var(--ed-accent);
+}
+
+.tiptap-toolbar-btn svg {
+  display: block;
+}
+
+.tiptap-toolbar-label {
+  font-size: 12px;
+  color: var(--ed-text-tertiary);
+  padding: 0 6px;
+  white-space: nowrap;
+}
+
+/* ── 正文编辑区 ── */
+.tiptap-editor-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scroll-behavior: auto;
+}
+
+.tiptap-editor-body {
+  max-width: 780px;
+  margin: 0 auto;
+  padding: var(--ed-body-pad-top, 32px) 48px 96px;
+}
+
+/* 保存中旋转图标 */
+.spin-anim {
+  animation: tiptap-spin 1s linear infinite;
+}
+
+@keyframes tiptap-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.tiptap-editor {
+  outline: none;
+  min-height: 60vh;
+  color: var(--ed-text);
+  font-size: 15px;
+  line-height: 1.75;
+  caret-color: var(--ed-accent);
+}
+
+.tiptap-editor > * + * {
+  margin-top: 0.75em;
+}
+
+/* 占位符 */
+.tiptap-editor p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+  color: var(--ed-text-tertiary);
+}
+
+/* ── 标题 ── */
+.tiptap-editor h1 {
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1.35;
+  margin: 1.4em 0 0.5em;
+  letter-spacing: -0.01em;
+}
+
+.tiptap-editor h2 {
+  font-size: 22px;
+  font-weight: 650;
+  line-height: 1.4;
+  margin: 1.3em 0 0.45em;
+}
+
+.tiptap-editor h3 {
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.45;
+  margin: 1.15em 0 0.4em;
+}
+
+.tiptap-editor h4 {
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.5;
+  margin: 1em 0 0.35em;
+}
+
+.tiptap-editor h1:first-child,
+.tiptap-editor h2:first-child,
+.tiptap-editor h3:first-child,
+.tiptap-editor h4:first-child {
+  margin-top: 0;
+}
+
+/* ── 段落 / 列表 ── */
+.tiptap-editor p {
+  margin: 0.5em 0;
+}
+
+.tiptap-editor ul,
+.tiptap-editor ol {
+  padding-left: 1.6em;
+  margin: 0.5em 0;
+}
+
+.tiptap-editor li {
+  margin: 0.22em 0;
+}
+
+.tiptap-editor li p {
+  margin: 0.15em 0;
+}
+
+.tiptap-editor ul[data-type='taskList'] {
+  list-style: none;
+  padding-left: 0.3em;
+}
+
+.tiptap-editor ul[data-type='taskList'] li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.tiptap-editor ul[data-type='taskList'] li > label {
+  flex-shrink: 0;
+  margin-top: 5px;
+  user-select: none;
+}
+
+.tiptap-editor ul[data-type='taskList'] li > label input[type='checkbox'] {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--ed-accent);
+  cursor: pointer;
+}
+
+.tiptap-editor ul[data-type='taskList'] li > div {
+  flex: 1;
+  min-width: 0;
+}
+
+.tiptap-editor ul[data-type='taskList'] li[data-checked='true'] > div {
+  color: var(--ed-text-tertiary);
+  text-decoration: line-through;
+  text-decoration-color: var(--ed-text-tertiary);
+}
+
+/* 嵌套列表紧凑化 */
+.tiptap-editor ul ul,
+.tiptap-editor ol ol,
+.tiptap-editor ul ol,
+.tiptap-editor ol ul {
+  margin: 0.15em 0;
+}
+
+/* ── 引用 ── */
+.tiptap-editor blockquote {
+  border-left: 3px solid var(--ed-accent);
+  background: var(--ed-quote-bg);
+  border-radius: 0 8px 8px 0;
+  margin: 0.8em 0;
+  padding: 10px 16px;
+  color: var(--ed-text-secondary);
+}
+
+.tiptap-editor blockquote p {
+  margin: 0.25em 0;
+}
+
+/* ── 行内代码 / 代码块 ── */
+.tiptap-editor code {
+  font-family: 'JetBrains Mono', 'Cascadia Code', Consolas, 'Courier New', monospace;
+  font-size: 0.88em;
+  background: var(--ed-code-inline-bg);
+  color: var(--ed-code-inline-text);
+  border-radius: 4px;
+  padding: 0.15em 0.42em;
+}
+
+.tiptap-editor pre {
+  background: var(--ed-code-bg);
+  border: 1px solid var(--ed-code-border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin: 0.9em 0;
+  overflow-x: auto;
+  position: relative;
+}
+
+.tiptap-editor pre code {
+  background: transparent;
+  color: var(--ed-code-text);
+  font-size: 13px;
+  line-height: 1.65;
+  padding: 0;
+  display: block;
+}
+
+/* ── 链接 / 图片 ── */
+.tiptap-editor a {
+  color: var(--ed-accent);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--ed-accent) 40%, transparent);
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.tiptap-editor a:hover {
+  text-decoration-color: var(--ed-accent);
+}
+
+.tiptap-editor img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: 8px;
+  margin: 0.8em auto;
+}
+
+.tiptap-editor img.ProseMirror-selectednode {
+  outline: 2px solid var(--ed-accent);
+  outline-offset: 2px;
+}
+
+/* ── 分割线 ── */
+.tiptap-editor hr {
+  border: none;
+  border-top: 1px solid var(--ed-border);
+  margin: 1.6em 0;
+}
+
+/* ── 高亮 / 下划线 / 删除线 ── */
+.tiptap-editor mark {
+  background: var(--ed-mark-bg);
+  color: inherit;
+  border-radius: 3px;
+  padding: 0 2px;
+}
+
+.tiptap-editor u {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.tiptap-editor s {
+  color: var(--ed-text-tertiary);
+}
+
+/* ── 表格 ── */
+.tiptap-editor table {
+  border-collapse: collapse;
+  table-layout: fixed;
+  width: 100%;
+  margin: 0.9em 0;
+  overflow: hidden;
+  border-radius: 8px;
+}
+
+.tiptap-editor th,
+.tiptap-editor td {
+  border: 1px solid var(--ed-border);
+  padding: 8px 12px;
+  vertical-align: top;
+  position: relative;
+  min-width: 60px;
+}
+
+.tiptap-editor th {
+  background: var(--ed-th-bg);
+  font-weight: 600;
+  text-align: left;
+}
+
+.tiptap-editor .selectedCell {
+  background: var(--ed-accent-soft);
+}
+
+.tiptap-editor .column-resize-handle {
+  position: absolute;
+  right: -2px;
+  top: 0;
+  bottom: -2px;
+  width: 4px;
+  background-color: var(--ed-accent);
+  pointer-events: none;
+}
+
+.tiptap-editor .tableWrapper {
+  overflow-x: auto;
+}
+
+/* ── 选区 ── */
+.tiptap-editor ::selection {
+  background: var(--ed-selection-bg);
+}
+
+/* ============================================================
+   代码高亮配色（highlight.js 风格，light / dark 两套）
+   ============================================================ */
+.tiptap-editor .hljs-comment,
+.tiptap-editor .hljs-quote {
+  color: #6a737d;
+  font-style: italic;
+}
+
+.tiptap-editor .hljs-keyword,
+.tiptap-editor .hljs-selector-tag,
+.tiptap-editor .hljs-tag {
+  color: #d73a49;
+}
+
+.tiptap-editor .hljs-string,
+.tiptap-editor .hljs-attr,
+.tiptap-editor .hljs-regexp {
+  color: #032f62;
+}
+
+.tiptap-editor .hljs-number,
+.tiptap-editor .hljs-literal {
+  color: #005cc5;
+}
+
+.tiptap-editor .hljs-title,
+.tiptap-editor .hljs-section,
+.tiptap-editor .hljs-function .hljs-title {
+  color: #6f42c1;
+}
+
+.tiptap-editor .hljs-built_in,
+.tiptap-editor .hljs-type,
+.tiptap-editor .hljs-class .hljs-title {
+  color: #e36209;
+}
+
+.tiptap-editor .hljs-variable,
+.tiptap-editor .hljs-template-variable,
+.tiptap-editor .hljs-name {
+  color: #24292e;
+}
+
+.tiptap-editor .hljs-symbol,
+.tiptap-editor .hljs-bullet,
+.tiptap-editor .hljs-meta {
+  color: #005cc5;
+}
+
+.tiptap-editor .hljs-emphasis {
+  font-style: italic;
+}
+
+.tiptap-editor .hljs-strong {
+  font-weight: 700;
+}
+
+.tiptap-editor .hljs-deletion {
+  background: #ffeef0;
+}
+
+.tiptap-editor .hljs-addition {
+  background: #e6ffed;
+}
+
+/* 暗色模式 */
+.dark .tiptap-editor .hljs-comment,
+.dark .tiptap-editor .hljs-quote {
+  color: #8b949e;
+}
+
+.dark .tiptap-editor .hljs-keyword,
+.dark .tiptap-editor .hljs-selector-tag,
+.dark .tiptap-editor .hljs-tag {
+  color: #ff7b72;
+}
+
+.dark .tiptap-editor .hljs-string,
+.dark .tiptap-editor .hljs-attr,
+.dark .tiptap-editor .hljs-regexp {
+  color: #a5d6ff;
+}
+
+.dark .tiptap-editor .hljs-number,
+.dark .tiptap-editor .hljs-literal {
+  color: #79c0ff;
+}
+
+.dark .tiptap-editor .hljs-title,
+.dark .tiptap-editor .hljs-section,
+.dark .tiptap-editor .hljs-function .hljs-title {
+  color: #d2a8ff;
+}
+
+.dark .tiptap-editor .hljs-built_in,
+.dark .tiptap-editor .hljs-type,
+.dark .tiptap-editor .hljs-class .hljs-title {
+  color: #ffa657;
+}
+
+.dark .tiptap-editor .hljs-variable,
+.dark .tiptap-editor .hljs-template-variable,
+.dark .tiptap-editor .hljs-name {
+  color: #c9d1d9;
+}
+
+.dark .tiptap-editor .hljs-symbol,
+.dark .tiptap-editor .hljs-bullet,
+.dark .tiptap-editor .hljs-meta {
+  color: #79c0ff;
+}
+
+.dark .tiptap-editor .hljs-deletion {
+  background: rgba(248, 81, 73, 0.15);
+}
+
+.dark .tiptap-editor .hljs-addition {
+  background: rgba(63, 185, 80, 0.15);
+}
+
+/* ── 气泡菜单 ── */
+.tiptap-bubble-menu {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 8px;
+  border: 1px solid var(--ed-border);
+  background: var(--ed-bubble-bg);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.14);
+}
+
+.tiptap-bubble-menu .tiptap-toolbar-btn {
+  min-width: 26px;
+  height: 26px;
+  padding: 0 5px;
+  border-radius: 5px;
+}
+
+/* ── 链接编辑浮层 ── */
+.tiptap-link-pop {
+  position: fixed;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 10px;
+  border: 1px solid var(--ed-border);
+  background: var(--ed-bubble-bg);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+
+.tiptap-link-pop input {
+  width: 260px;
+  border: 1px solid var(--ed-border);
+  border-radius: 6px;
+  padding: 5px 9px;
+  font-size: 13px;
+  color: var(--ed-text);
+  background: var(--ed-input-bg);
+  outline: none;
+}
+
+.tiptap-link-pop input:focus {
+  border-color: var(--ed-accent);
+}
+
+.tiptap-link-pop button {
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 6px;
+  border: none;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.tiptap-link-pop .link-apply {
+  background: var(--ed-accent);
+  color: #fff;
+}
+
+.tiptap-link-pop .link-cancel {
+  background: transparent;
+  color: var(--ed-text-secondary);
+}
+
+.tiptap-link-pop .link-cancel:hover {
+  background: var(--ed-hover-bg);
+}
+
+/* ── Slash 块菜单 ── */
+.slash-menu-wrap {
+  z-index: 1300;
+}
+
+.slash-decoration {
+  color: var(--ed-accent);
+  font-weight: 600;
+}
+
+.slash-menu {
+  width: 264px;
+  max-height: 340px;
+  overflow-y: auto;
+  padding: 5px;
+  border-radius: 10px;
+  border: 1px solid var(--slash-border);
+  background: var(--slash-bg);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.16), 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.slash-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 9px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  color: var(--slash-text);
+}
+
+.slash-item:hover,
+.slash-item.is-active {
+  background: var(--slash-hover);
+}
+
+.slash-item-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  border-radius: 6px;
+  background: var(--slash-accent-soft);
+  color: var(--slash-accent);
+}
+
+.slash-item-texticon {
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.slash-item-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.slash-item-title {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.slash-item-desc {
+  font-size: 11px;
+  color: var(--slash-text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.slash-empty {
+  padding: 14px 10px;
+  text-align: center;
+  font-size: 12.5px;
+  color: var(--slash-text-tertiary);
+}
+
+.slash-menu-footer {
+  padding: 6px 9px 2px;
+  margin-top: 4px;
+  border-top: 1px solid var(--slash-border);
+  font-size: 10.5px;
+  color: var(--slash-text-tertiary);
+}

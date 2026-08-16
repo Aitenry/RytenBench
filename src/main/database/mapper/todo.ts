@@ -36,11 +36,11 @@ async function getTodoItemById(id: number): Promise<TodoItemRow[]> {
 }
 
 // --- 根据 title 查询 ---
-async function getTodoItemByTitle(title: string): Promise<TodoItemRow[]> {
+async function getTodoItemByTitle(workspaceId: number, title: string): Promise<TodoItemRow[]> {
   try {
     const db = (await getDatabaseInstance()).getDatabase()
-    const sql = 'SELECT * FROM todo_items WHERE title = $1'
-    const result = await db.query<TodoItemRow>(sql, [title])
+    const sql = 'SELECT * FROM todo_items WHERE workspace_id = $1 AND title = $2'
+    const result = await db.query<TodoItemRow>(sql, [workspaceId, title])
     logger.info(`Query by title="${title}" returned ${result.rows.length} rows.`)
     return result.rows
   } catch (error) {
@@ -50,11 +50,15 @@ async function getTodoItemByTitle(title: string): Promise<TodoItemRow[]> {
 }
 
 // --- 根据 priority 查询 ---
-async function getTodoItemsByPriority(priority: number): Promise<TodoItemRow[]> {
+async function getTodoItemsByPriority(
+  workspaceId: number,
+  priority: number
+): Promise<TodoItemRow[]> {
   try {
     const db = (await getDatabaseInstance()).getDatabase()
-    const sql = 'SELECT * FROM todo_items WHERE priority = $1 ORDER BY due_date ASC'
-    const result = await db.query<TodoItemRow>(sql, [priority])
+    const sql =
+      'SELECT * FROM todo_items WHERE workspace_id = $1 AND priority = $2 ORDER BY due_date ASC'
+    const result = await db.query<TodoItemRow>(sql, [workspaceId, priority])
     logger.info(`Query by priority=${priority} returned ${result.rows.length} rows.`)
     return result.rows
   } catch (error) {
@@ -64,11 +68,12 @@ async function getTodoItemsByPriority(priority: number): Promise<TodoItemRow[]> 
 }
 
 // --- 根据 status 查询 ---
-async function getTodoItemsByStatus(status: number): Promise<TodoItemRow[]> {
+async function getTodoItemsByStatus(workspaceId: number, status: number): Promise<TodoItemRow[]> {
   try {
     const db = (await getDatabaseInstance()).getDatabase()
-    const sql = 'SELECT * FROM todo_items WHERE status = $1 ORDER BY priority ASC, due_date ASC'
-    const result = await db.query<TodoItemRow>(sql, [status])
+    const sql =
+      'SELECT * FROM todo_items WHERE workspace_id = $1 AND status = $2 ORDER BY priority ASC, due_date ASC'
+    const result = await db.query<TodoItemRow>(sql, [workspaceId, status])
     logger.info(`Query by status=${status} returned ${result.rows.length} rows.`)
     return result.rows
   } catch (error) {
@@ -78,11 +83,12 @@ async function getTodoItemsByStatus(status: number): Promise<TodoItemRow[]> {
 }
 
 // --- 获取所有待办事项 ---
-async function getAllTodoItems(): Promise<TodoItemRow[]> {
+async function getAllTodoItems(workspaceId: number): Promise<TodoItemRow[]> {
   try {
     const db = (await getDatabaseInstance()).getDatabase()
-    const sql = 'SELECT * FROM todo_items ORDER BY priority ASC, due_date ASC'
-    const result = await db.query<TodoItemRow>(sql)
+    const sql =
+      'SELECT * FROM todo_items WHERE workspace_id = $1 ORDER BY priority ASC, due_date ASC'
+    const result = await db.query<TodoItemRow>(sql, [workspaceId])
     logger.info(`Query for all todo items returned ${result.rows.length} rows.`)
     return result.rows
   } catch (error) {
@@ -93,6 +99,7 @@ async function getAllTodoItems(): Promise<TodoItemRow[]> {
 
 // --- 分页获取待办事项（按 updated_at 降序） ---
 async function getTodoItemsPaginated(
+  workspaceId: number,
   page: number = 1,
   pageSize: number = 10
 ): Promise<PaginatedResult<TodoItemRow>> {
@@ -101,17 +108,18 @@ async function getTodoItemsPaginated(
     const offset = (page - 1) * pageSize
 
     const countResult = await db.query<{ total: number }>(
-      'SELECT COUNT(*) as total FROM todo_items WHERE status != 2'
+      'SELECT COUNT(*) as total FROM todo_items WHERE workspace_id = $1 AND status != 2',
+      [workspaceId]
     )
     const total = Number(countResult.rows[0]?.total) || 0
 
     const dataSql = `
       SELECT * FROM todo_items
-      WHERE status != 2
+      WHERE workspace_id = $1 AND status != 2
       ORDER BY updated_at DESC
-      LIMIT $1 OFFSET $2
+      LIMIT $2 OFFSET $3
     `
-    const result = await db.query<TodoItemRow>(dataSql, [pageSize, offset])
+    const result = await db.query<TodoItemRow>(dataSql, [workspaceId, pageSize, offset])
     const hasMore = offset + result.rows.length < total
     logger.info(
       `Paginated todo items page=${page} pageSize=${pageSize}: ${result.rows.length} rows, total=${total}, hasMore=${hasMore}`
@@ -124,11 +132,12 @@ async function getTodoItemsPaginated(
 }
 
 // --- 根据 due_date 查询 ---
-async function getTodoItemsByDueDate(dueDate: string): Promise<TodoItemRow[]> {
+async function getTodoItemsByDueDate(workspaceId: number, dueDate: string): Promise<TodoItemRow[]> {
   try {
     const db = (await getDatabaseInstance()).getDatabase()
-    const sql = 'SELECT * FROM todo_items WHERE due_date = $1 ORDER BY priority ASC'
-    const result = await db.query<TodoItemRow>(sql, [dueDate])
+    const sql =
+      'SELECT * FROM todo_items WHERE workspace_id = $1 AND due_date = $2 ORDER BY priority ASC'
+    const result = await db.query<TodoItemRow>(sql, [workspaceId, dueDate])
     logger.info(`Query by due_date="${dueDate}" returned ${result.rows.length} rows.`)
     return result.rows
   } catch (error) {
@@ -138,11 +147,15 @@ async function getTodoItemsByDueDate(dueDate: string): Promise<TodoItemRow[]> {
 }
 
 // --- 根据 category 查询 ---
-async function getTodoItemsByCategory(category: string): Promise<TodoItemRow[]> {
+async function getTodoItemsByCategory(
+  workspaceId: number,
+  category: string
+): Promise<TodoItemRow[]> {
   try {
     const db = (await getDatabaseInstance()).getDatabase()
-    const sql = 'SELECT * FROM todo_items WHERE category = $1 ORDER BY priority ASC, due_date ASC'
-    const result = await db.query<TodoItemRow>(sql, [category])
+    const sql =
+      'SELECT * FROM todo_items WHERE workspace_id = $1 AND category = $2 ORDER BY priority ASC, due_date ASC'
+    const result = await db.query<TodoItemRow>(sql, [workspaceId, category])
     logger.info(`Query by category="${category}" returned ${result.rows.length} rows.`)
     return result.rows
   } catch (error) {
@@ -153,15 +166,17 @@ async function getTodoItemsByCategory(category: string): Promise<TodoItemRow[]> 
 
 // --- 添加待办事项 ---
 async function addTodoItem(
+  workspaceId: number,
   todoItem: Omit<TodoItemRow, 'id' | 'created_at' | 'updated_at'>
 ): Promise<number> {
   try {
     const db = (await getDatabaseInstance()).getDatabase()
     const { title, description, due_date, priority, status, category, started_at } = todoItem
     const sql =
-      'INSERT INTO todo_items (title, description, due_date, priority, status, category, started_at) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id'
+      'INSERT INTO todo_items (workspace_id, title, description, due_date, priority, status, category, started_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id'
 
     const result = await db.query<{ id: number }>(sql, [
+      workspaceId,
       title,
       description,
       due_date,
