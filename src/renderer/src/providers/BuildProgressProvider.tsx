@@ -1,5 +1,4 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { Window } from '../../resource/types/window'
 import BuildProgress from '@renderer/components/graph/BuildProgress'
 import { BuildProgressContext } from './BuildProgressContext'
@@ -8,10 +7,12 @@ import type { BuildProgressState } from '@renderer/types/build-progress'
 import type { BuildProgressNotification } from '@renderer/types/notification'
 import type { BuildProgressProviderProps } from '@renderer/types/components'
 
+/** 全局事件：请求打开某知识库的图谱视图（首页 HomeView 监听并切换选中） */
+export const OPEN_WIKI_GRAPH_EVENT = 'open-wiki-graph'
+
 export const BuildProgressProvider: React.FC<BuildProgressProviderProps> = ({ children }) => {
   const [buildMap, setBuildMap] = useState<Map<number, BuildProgressState>>(new Map())
   const refreshCallbacks = useRef<Map<number, Set<() => void>>>(new Map())
-  const navigate = useNavigate()
   const { addNotification, updateNotification, removeNotification } = useNotification()
 
   const subscribeToRefresh = (wikiId: number, callback: () => void): (() => void) => {
@@ -95,7 +96,10 @@ export const BuildProgressProvider: React.FC<BuildProgressProviderProps> = ({ ch
 
   const navigateToGraph = useCallback(
     (wikiId: number): void => {
-      navigate(`/knowledge/graph?wikiId=${wikiId}`)
+      /* 原实现 navigate('/knowledge/graph?wikiId=...')，但该路由早已不存在（首页重构后图谱改为工作台视图）——改为派发事件，由首页 HomeView 切换选中 */
+      window.dispatchEvent(
+        new CustomEvent<{ wikiId: number }>(OPEN_WIKI_GRAPH_EVENT, { detail: { wikiId } })
+      )
       removeNotification(`build-${wikiId}`)
       setBuildMap((prev) => {
         const next = new Map(prev)
@@ -103,7 +107,7 @@ export const BuildProgressProvider: React.FC<BuildProgressProviderProps> = ({ ch
         return next
       })
     },
-    [navigate, removeNotification]
+    [removeNotification]
   )
 
   const handleMinimize = (wikiId: number): void => {

@@ -140,6 +140,8 @@ export interface GraphToolbarProps {
   addedDocIds: Set<number>
   isAppending: boolean
   docFilter: number[]
+  /** 文档级子图模式：隐藏搜索框右侧的文档筛选/追加/重建操作 */
+  isDocGraph?: boolean
   onSearchChange: (value: string) => void
   onTypeFilterChange: (value: string | undefined) => void
   onAppendDocs: (docIds: number[]) => void
@@ -158,6 +160,10 @@ export interface EntityDetailProps {
 
 export interface GraphViewProps {
   selectedWiki: WikiRow
+  /** 点击来源文档时直接打开文档编辑器（由宿主传入；不传则回退预览弹窗） */
+  onOpenDocInEditor?: (docId: number) => void
+  /** 初始文档筛选（文档级子图：只显示指定文档抽取的实体） */
+  initialDocFilter?: number[]
 }
 
 /* ── Home / Dashboard ── */

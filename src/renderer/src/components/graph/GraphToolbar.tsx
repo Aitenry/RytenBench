@@ -16,6 +16,7 @@ const GraphToolbar: React.FC<GraphToolbarProps> = ({
   addedDocIds,
   isAppending,
   docFilter,
+  isDocGraph = false,
   onSearchChange,
   onAppendDocs,
   onDocFilterChange,
@@ -84,62 +85,67 @@ const GraphToolbar: React.FC<GraphToolbarProps> = ({
             onChange={(e) => onSearchChange(e.target.value)}
             allowClear
           />
-          <Select
-            mode="multiple"
-            size="small"
-            placeholder="全部文档"
-            style={{ minWidth: 130, maxWidth: 200 }}
-            popupStyle={{ minWidth: 270 }}
-            value={docFilter}
-            onChange={onDocFilterChange}
-            options={docOptions}
-            showSearch
-            maxTagCount={1}
-            allowClear
-            notFoundContent="暂无文档"
-            maxTagPlaceholder={(omitted) => <span>+{omitted.length}</span>}
-            tagRender={(props) => {
-              const { label, closable, onClose } = props
-              return (
-                <Tag
-                  closable={closable}
-                  onClose={onClose}
-                  style={{
-                    marginInlineEnd: 4,
-                    background: '#1677ff12',
-                    border: '1px solid #1677ff30',
-                    color: '#1677ff',
-                    borderRadius: 12,
-                    paddingInline: 8,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    maxWidth: 120
-                  }}
-                >
-                  <span
-                    style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                  >
-                    {label}
-                  </span>
-                </Tag>
-              )
-            }}
-          />
-          <Button
-            size="small"
-            icon={<RiApps2AddLine size={14} />}
-            onClick={handleOpenModal}
-            loading={isAppending}
-          />
-          <Button
-            type="dashed"
-            shape="circle"
-            size="small"
-            icon={<SyncOutlined />}
-            onClick={onBuildGraph}
-            loading={isLoading}
-          />
+          {/* 文档级子图：隐藏右侧操作（文档筛选 / 追加 / 重建） */}
+          {!isDocGraph && (
+            <>
+              <Select
+                mode="multiple"
+                size="small"
+                placeholder="全部文档"
+                style={{ minWidth: 130, maxWidth: 200 }}
+                popupStyle={{ minWidth: 270 }}
+                value={docFilter}
+                onChange={onDocFilterChange}
+                options={docOptions}
+                showSearch
+                maxTagCount={1}
+                allowClear
+                notFoundContent="暂无文档"
+                maxTagPlaceholder={(omitted) => <span>+{omitted.length}</span>}
+                tagRender={(props) => {
+                  const { label, closable, onClose } = props
+                  return (
+                    <Tag
+                      closable={closable}
+                      onClose={onClose}
+                      style={{
+                        marginInlineEnd: 4,
+                        background: '#1677ff12',
+                        border: '1px solid #1677ff30',
+                        color: '#1677ff',
+                        borderRadius: 12,
+                        paddingInline: 8,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        maxWidth: 120
+                      }}
+                    >
+                      <span
+                        style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                      >
+                        {label}
+                      </span>
+                    </Tag>
+                  )
+                }}
+              />
+              <Button
+                size="small"
+                icon={<RiApps2AddLine size={14} />}
+                onClick={handleOpenModal}
+                loading={isAppending}
+              />
+              <Button
+                type="dashed"
+                shape="circle"
+                size="small"
+                icon={<SyncOutlined />}
+                onClick={onBuildGraph}
+                loading={isLoading}
+              />
+            </>
+          )}
         </Flex>
       </div>
 

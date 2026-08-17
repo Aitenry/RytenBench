@@ -1,15 +1,12 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { theme, Form, InputNumber, Switch, Select, Space } from 'antd'
+import { InputNumber, Switch, Select } from 'antd'
 import { useMessage } from '@renderer/hooks/useMessage'
 import { Window } from '../../../../resource/types/window'
 import type { SystemSettings, GraphSettings as GraphSettingsType } from '@renderer/types/settings'
 import type { ProviderOption } from '@renderer/types/components'
+import { SettingsPageHeader, SettingsSection, SettingRow } from './settings-ui'
 
 const GraphSettings: React.FC = () => {
-  const {
-    token: { colorText, colorTextSecondary, colorFillAlter }
-  } = theme.useToken()
-
   const { viewMessage } = useMessage()
 
   const [settings, setSettings] = useState<SystemSettings | null>(null)
@@ -63,23 +60,14 @@ const GraphSettings: React.FC = () => {
 
   return (
     <div>
-      <h3 className="text-base font-semibold m-0" style={{ color: colorText }}>
-        图谱构建设置
-      </h3>
-      <p className="text-sm mt-1 mb-4" style={{ color: colorTextSecondary }}>
-        管理知识图谱构建参数与默认模型配置
-      </p>
+      <SettingsPageHeader title="图谱构建设置" description="管理知识图谱构建参数与默认模型配置" />
 
       {/* 图谱构建参数 */}
-      <div className="p-4 rounded-lg mb-4" style={{ background: colorFillAlter }}>
-        <div className="font-medium mb-3" style={{ color: colorText }}>
-          构建参数
-        </div>
-        <Form layout="vertical" size="small">
-          <Form.Item
-            label="最大并发 LLM 调用数"
-            tooltip="构建知识图谱时同时进行的 LLM 请求数量，值越大构建越快但对 API 压力也越大"
-          >
+      <SettingsSection title="构建参数" bodyPadding={0}>
+        <SettingRow
+          title="最大并发 LLM 调用数"
+          description="构建知识图谱时同时进行的 LLM 请求数量，值越大构建越快但对 API 压力也越大"
+          control={
             <InputNumber
               min={1}
               max={32}
@@ -87,27 +75,22 @@ const GraphSettings: React.FC = () => {
               onChange={(v) => v !== null && handleGraphChange('maxConcurrency', v)}
               style={{ width: 120 }}
             />
-          </Form.Item>
-
-          <Form.Item
-            label="Gleaning 二次扫描"
-            tooltip="实体抽取后再扫描一次，确保遗漏的实体也被发现（文档数量 ≤ 阈值时执行）"
-          >
-            <Space>
-              <Switch
-                checked={settings?.graph.enableGleaning}
-                onChange={(v) => handleGraphChange('enableGleaning', v)}
-              />
-              <span className="text-xs" style={{ color: colorTextSecondary }}>
-                {settings?.graph.enableGleaning ? '已启用' : '已禁用'}
-              </span>
-            </Space>
-          </Form.Item>
-
-          <Form.Item
-            label="Gleaning 文档数阈值"
-            tooltip="仅当知识库文档总数不超过此阈值时才执行 Gleaning，超出则跳过以节省时间"
-          >
+          }
+        />
+        <SettingRow
+          title="Gleaning 二次扫描"
+          description="实体抽取后再扫描一次，确保遗漏的实体也被发现"
+          control={
+            <Switch
+              checked={settings?.graph.enableGleaning}
+              onChange={(v) => handleGraphChange('enableGleaning', v)}
+            />
+          }
+        />
+        <SettingRow
+          title="Gleaning 文档数阈值"
+          description="仅当知识库文档总数不超过此阈值时才执行 Gleaning，超出则跳过以节省时间"
+          control={
             <InputNumber
               min={0}
               max={500}
@@ -116,9 +99,12 @@ const GraphSettings: React.FC = () => {
               style={{ width: 120 }}
               disabled={!settings?.graph.enableGleaning}
             />
-          </Form.Item>
-
-          <Form.Item label="文本分块大小" tooltip="Markdown 文本按标题层级分块时每块的最大字符数">
+          }
+        />
+        <SettingRow
+          title="文本分块大小"
+          description="Markdown 文本按标题层级分块时每块的最大字符数"
+          control={
             <InputNumber
               min={500}
               max={10000}
@@ -127,20 +113,16 @@ const GraphSettings: React.FC = () => {
               onChange={(v) => v !== null && handleGraphChange('maxChunkSize', v)}
               style={{ width: 140 }}
             />
-          </Form.Item>
-        </Form>
-      </div>
+          }
+        />
+      </SettingsSection>
 
       {/* 默认模型 */}
-      <div className="p-4 rounded-lg mb-4" style={{ background: colorFillAlter }}>
-        <div className="font-medium mb-3" style={{ color: colorText }}>
-          默认模型
-        </div>
-        <Form layout="vertical" size="small">
-          <Form.Item
-            label="图谱构建使用模型"
-            tooltip="构建知识图谱时默认使用的大模型，留空则使用供应商默认设置"
-          >
+      <SettingsSection title="默认模型">
+        <SettingRow
+          title="图谱构建使用模型"
+          description="构建知识图谱时默认使用的大模型，留空则使用供应商默认设置"
+          control={
             <Select
               placeholder="使用供应商默认设置"
               value={settings?.defaultModelId}
@@ -150,14 +132,14 @@ const GraphSettings: React.FC = () => {
                 value: p.id,
                 label: `${p.provider.toUpperCase()}: ${p.model}`
               }))}
-              style={{ width: '100%', maxWidth: 400 }}
+              style={{ width: 260 }}
             />
-          </Form.Item>
-
-          <Form.Item
-            label="Embedding 模型"
-            tooltip="用于文本向量化嵌入的模型，仅显示标记为 Embedding 标签的供应商"
-          >
+          }
+        />
+        <SettingRow
+          title="Embedding 模型"
+          description="用于文本向量化嵌入的模型，仅显示标记为嵌入标签的供应商"
+          control={
             <Select
               placeholder="未设置 Embedding 模型"
               value={settings?.defaultEmbeddingModelId}
@@ -168,15 +150,15 @@ const GraphSettings: React.FC = () => {
                 label: `${p.provider.toUpperCase()}: ${p.model}`
               }))}
               notFoundContent={
-                <span style={{ color: colorTextSecondary }}>
-                  暂无 Embedding 模型，请先在供应商设置中添加
+                <span style={{ color: 'inherit', opacity: 0.6 }}>
+                  暂无 Embedding 模型，请先在模型设置中添加
                 </span>
               }
-              style={{ width: '100%', maxWidth: 400 }}
+              style={{ width: 260 }}
             />
-          </Form.Item>
-        </Form>
-      </div>
+          }
+        />
+      </SettingsSection>
     </div>
   )
 }

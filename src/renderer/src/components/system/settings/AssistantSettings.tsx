@@ -1,13 +1,17 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { theme, Form, InputNumber, Spin } from 'antd'
+import { theme, InputNumber, Spin } from 'antd'
 import { LoadingOutlined } from '@ant-design/icons'
 import { useMessage } from '@renderer/hooks/useMessage'
-import { Window } from '../../../../../resource/types/window'
+import { Window } from '../../../../resource/types/window'
 import type { SystemSettings, ChatSettings } from '@renderer/types/settings'
+import { SettingsPageHeader, SettingsSection, SettingRow } from './settings-ui'
 
-const GeneralSettings: React.FC = () => {
+/**
+ * 对话设置（原聊天页「通用设置」，已并入系统设置）
+ */
+const AssistantSettings: React.FC = () => {
   const {
-    token: { colorText, colorTextSecondary, colorTextTertiary, colorFillAlter }
+    token: { colorTextTertiary }
   } = theme.useToken()
 
   const { viewMessage } = useMessage()
@@ -15,7 +19,7 @@ const GeneralSettings: React.FC = () => {
   const [settings, setSettings] = useState<SystemSettings | null>(null)
 
   const loadSettings = useCallback(async () => {
-    const msgKey = 'general-settings-load'
+    const msgKey = 'assistant-settings-load'
     try {
       const result = await (window as unknown as Window).api.systemSettings.getAll()
       setSettings(result)
@@ -29,7 +33,7 @@ const GeneralSettings: React.FC = () => {
   }, [loadSettings])
 
   const updateSettings = async (updates: Partial<SystemSettings>): Promise<void> => {
-    const msgKey = 'general-settings-save'
+    const msgKey = 'assistant-settings-save'
     try {
       viewMessage(msgKey, 'loading', '正在保存...')
       await (window as unknown as Window).api.systemSettings.update(updates)
@@ -57,19 +61,13 @@ const GeneralSettings: React.FC = () => {
 
   return (
     <div>
-      <h3 className="text-base font-semibold m-0 mb-0.5" style={{ color: colorText }}>
-        通用设置
-      </h3>
-      <p className="text-sm m-0 mb-3" style={{ color: colorTextSecondary }}>
-        管理对话的全局配置
-      </p>
+      <SettingsPageHeader title="对话设置" description="配置 AI 对话的全局参数" />
 
-      <div className="p-3 rounded-lg" style={{ background: colorFillAlter }}>
-        <Form size="small" style={{ marginBottom: -8 }}>
-          <Form.Item
-            label="工具调用最大轮次"
-            tooltip="AI 对话中模型调用工具的最大次数，防止无限循环"
-          >
+      <SettingsSection title="对话参数">
+        <SettingRow
+          title="工具调用最大轮次"
+          description="AI 对话中模型调用工具的最大次数，防止无限循环"
+          control={
             <InputNumber
               min={1}
               max={20}
@@ -77,11 +75,12 @@ const GeneralSettings: React.FC = () => {
               onChange={(v) => v !== null && handleChatChange('maxIterations', v)}
               style={{ width: 120 }}
             />
-          </Form.Item>
-          <Form.Item
-            label="历史上下文窗口（轮次）"
-            tooltip="每次对话携带的历史对话轮次数，0 表示不限制。值越大消耗的 token 越多"
-          >
+          }
+        />
+        <SettingRow
+          title="历史上下文窗口（轮次）"
+          description="每次对话携带的历史对话轮次数，0 表示不限制。值越大消耗的 token 越多"
+          control={
             <InputNumber
               min={0}
               max={50}
@@ -89,11 +88,11 @@ const GeneralSettings: React.FC = () => {
               onChange={(v) => v !== null && handleChatChange('historyWindowSize', v)}
               style={{ width: 120 }}
             />
-          </Form.Item>
-        </Form>
-      </div>
+          }
+        />
+      </SettingsSection>
     </div>
   )
 }
 
-export default GeneralSettings
+export default AssistantSettings

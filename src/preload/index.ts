@@ -215,6 +215,8 @@ const api = {
     getAllWorkspaces: () => ipcRenderer.invoke('workspace-get-all') as Promise<WorkspaceRow[]>,
     createWorkspace: (name: string, path: string) =>
       ipcRenderer.invoke('workspace-create', name, path) as Promise<number>,
+    updateWorkspace: (id: number, updates: { name: string }) =>
+      ipcRenderer.invoke('workspace-update', id, updates) as Promise<boolean>,
     deleteWorkspace: (id: number) => ipcRenderer.invoke('workspace-delete', id) as Promise<boolean>,
     // 话题管理
     getAllTopics: (workspaceId: number) => ipcRenderer.invoke('chat-topic-get-all', workspaceId),

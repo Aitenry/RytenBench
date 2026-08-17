@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { theme, Descriptions } from 'antd'
+import { theme } from 'antd'
 import { useMessage } from '@renderer/hooks/useMessage'
 import { Window } from '../../../../resource/types/window'
 import type { SystemSettings } from '@renderer/types/settings'
+import { SettingsPageHeader, SettingsSection, SettingRow } from './settings-ui'
 
 const SystemInfo: React.FC = () => {
   const {
-    token: { colorText, colorTextSecondary, colorTextTertiary, colorFillAlter }
+    token: { colorTextTertiary }
   } = theme.useToken()
 
   const { viewMessage } = useMessage()
@@ -26,39 +27,31 @@ const SystemInfo: React.FC = () => {
     loadSettings().then()
   }, [loadSettings])
 
+  const ipValue = (value: string | undefined): React.ReactNode =>
+    value ? <span>{value}</span> : <span style={{ color: colorTextTertiary }}>未获取</span>
+
   return (
     <div>
-      <h3 className="text-base font-semibold m-0" style={{ color: colorText }}>
-        系统信息
-      </h3>
-      <p className="text-sm mt-1 mb-4" style={{ color: colorTextSecondary }}>
-        当前系统运行环境信息
-      </p>
+      <SettingsPageHeader title="系统信息" description="当前系统运行环境信息" />
 
-      <div className="p-4 rounded-lg" style={{ background: colorFillAlter }}>
-        <Descriptions column={1} size="small">
-          <Descriptions.Item label="本机 IP">
-            {(settings?.ip?.query as string) || (
-              <span style={{ color: colorTextTertiary }}>未获取</span>
-            )}
-          </Descriptions.Item>
-          <Descriptions.Item label="本机位置">
-            {settings?.ip?.city ? (
+      <SettingsSection title="运行环境">
+        <SettingRow title="本机 IP" control={ipValue(settings?.ip?.query as string | undefined)} />
+        <SettingRow
+          title="本机位置"
+          control={
+            settings?.ip?.city ? (
               `${settings.ip.country as string} ${settings.ip.regionName as string} ${settings.ip.city as string}`
             ) : (
               <span style={{ color: colorTextTertiary }}>未获取</span>
-            )}
-          </Descriptions.Item>
-          <Descriptions.Item label="运营商">
-            {(settings?.ip?.isp as string) || (
-              <span style={{ color: colorTextTertiary }}>未获取</span>
-            )}
-          </Descriptions.Item>
-          <Descriptions.Item label="API Key 加密">
-            <span className="text-green-600">AES-256-GCM（机器唯一密钥）</span>
-          </Descriptions.Item>
-        </Descriptions>
-      </div>
+            )
+          }
+        />
+        <SettingRow title="运营商" control={ipValue(settings?.ip?.isp as string | undefined)} />
+        <SettingRow
+          title="API Key 加密"
+          control={<span style={{ color: '#52c41a' }}>AES-256-GCM（机器唯一密钥）</span>}
+        />
+      </SettingsSection>
     </div>
   )
 }

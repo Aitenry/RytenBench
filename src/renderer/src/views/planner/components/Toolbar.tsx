@@ -33,6 +33,7 @@ const Toolbar: React.FC<Props> = ({ viewMode, onViewModeChange, onAddTask }) => 
             type={viewMode === 'list' ? 'primary' : 'text'}
             size="small"
             icon={<RiListCheck2 size={16} />}
+            aria-label="列表视图"
             style={btnStyle}
             onClick={() => onViewModeChange('list')}
           />
@@ -42,6 +43,7 @@ const Toolbar: React.FC<Props> = ({ viewMode, onViewModeChange, onAddTask }) => 
             type={viewMode === 'gantt' ? 'primary' : 'text'}
             size="small"
             icon={<RiBarChartHorizontalLine size={16} />}
+            aria-label="甘特图视图"
             style={btnStyle}
             onClick={() => onViewModeChange('gantt')}
           />
@@ -55,6 +57,7 @@ const Toolbar: React.FC<Props> = ({ viewMode, onViewModeChange, onAddTask }) => 
           type="primary"
           size="small"
           icon={<RiAddLine size={16} />}
+          aria-label="新建项目"
           style={btnStyle}
           onClick={onAddTask}
         />

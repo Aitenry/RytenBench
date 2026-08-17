@@ -1,17 +1,14 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { theme, Switch, Button, Segmented, Modal, Form, Input } from 'antd'
+import { Switch, Button, Segmented, Modal, Form, Input } from 'antd'
 import { LockOutlined, BgColorsOutlined } from '@ant-design/icons'
 import CryptoJS from 'crypto-js'
 import { useMessage } from '@renderer/hooks/useMessage'
 import { useTheme } from '@renderer/contexts/useTheme'
 import { Window } from '../../../../resource/types/window'
 import type { SystemSettings, ThemeMode } from '@renderer/types/settings'
+import { SettingsPageHeader, SettingsSection, SettingRow } from './settings-ui'
 
 const GeneralSettings: React.FC = () => {
-  const {
-    token: { colorText, colorTextSecondary, colorFillAlter }
-  } = theme.useToken()
-
   const { viewMessage } = useMessage()
   const { themeMode, setThemeMode } = useTheme()
 
@@ -76,70 +73,48 @@ const GeneralSettings: React.FC = () => {
 
   return (
     <div>
-      <h3 className="text-base font-semibold m-0" style={{ color: colorText }}>
-        通用设置
-      </h3>
-      <p className="text-sm mt-1 mb-4" style={{ color: colorTextSecondary }}>
-        管理应用的主题与安全配置
-      </p>
+      <SettingsPageHeader title="通用设置" description="管理应用的主题与安全配置" />
 
       {/* 主题设置 */}
-      <div className="p-4 rounded-lg mb-4" style={{ background: colorFillAlter }}>
-        <div className="flex items-center gap-2 mb-3">
-          <BgColorsOutlined style={{ color: colorTextSecondary }} />
-          <span className="font-medium" style={{ color: colorText }}>
-            主题模式
-          </span>
-        </div>
-        <div className="text-xs mb-3" style={{ color: colorTextSecondary }}>
-          自动模式下，6:00 ~ 18:00 为亮色主题，其余时间为暗色主题
-        </div>
-        <Segmented
-          value={themeMode}
-          onChange={handleThemeChange}
-          options={[
-            { label: '亮色', value: 'light' },
-            { label: '暗色', value: 'dark' },
-            { label: '自动', value: 'auto' }
-          ]}
+      <SettingsSection
+        title="主题模式"
+        icon={<BgColorsOutlined size={14} />}
+        description="自动模式下，6:00 ~ 18:00 为亮色主题，其余时间为暗色主题"
+      >
+        <SettingRow
+          title="外观"
+          description="亮色 / 暗色 / 跟随时间段自动切换"
+          control={
+            <Segmented
+              value={themeMode}
+              onChange={handleThemeChange}
+              options={[
+                { label: '亮色', value: 'light' },
+                { label: '暗色', value: 'dark' },
+                { label: '自动', value: 'auto' }
+              ]}
+            />
+          }
         />
-      </div>
+      </SettingsSection>
 
       {/* 锁屏设置 */}
-      <div className="p-4 rounded-lg" style={{ background: colorFillAlter }}>
-        <div className="flex items-center gap-2 mb-3">
-          <LockOutlined style={{ color: colorTextSecondary }} />
-          <span className="font-medium" style={{ color: colorText }}>
-            锁屏设置
-          </span>
-        </div>
-
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <div className="font-medium" style={{ color: colorText }}>
-              启用锁屏
-            </div>
-            <div className="text-xs" style={{ color: colorTextSecondary }}>
-              关闭后锁屏功能将失效
-            </div>
-          </div>
-          <Switch checked={settings?.lock.view} onChange={handleLockViewChange} />
-        </div>
-
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="font-medium" style={{ color: colorText }}>
-              锁屏密码
-            </div>
-            <div className="text-xs" style={{ color: colorTextSecondary }}>
-              6位纯数字密码，修改后旧密码将失效
-            </div>
-          </div>
-          <Button size="small" onClick={() => setPasswordModalOpen(true)}>
-            修改密码
-          </Button>
-        </div>
-      </div>
+      <SettingsSection title="锁屏设置" icon={<LockOutlined size={14} />}>
+        <SettingRow
+          title="启用锁屏"
+          description="关闭后锁屏功能将失效"
+          control={<Switch checked={settings?.lock.view} onChange={handleLockViewChange} />}
+        />
+        <SettingRow
+          title="锁屏密码"
+          description="6 位纯数字密码，修改后旧密码将失效"
+          control={
+            <Button size="small" onClick={() => setPasswordModalOpen(true)}>
+              修改密码
+            </Button>
+          }
+        />
+      </SettingsSection>
 
       {/* 修改密码弹窗 */}
       <Modal

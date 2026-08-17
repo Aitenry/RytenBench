@@ -2,7 +2,6 @@ import { BrowserWindow } from 'electron'
 import { tool } from '@langchain/core/tools'
 import type { StructuredToolInterface } from '@langchain/core/tools'
 import * as z from 'zod/v4'
-import { getActiveWorkspaceId } from '../../database/workspace-context'
 
 // ============================================================================
 // Music Handlers — 渐进式：playlists → tracks
@@ -10,7 +9,7 @@ import { getActiveWorkspaceId } from '../../database/workspace-context'
 
 async function listPlaylistsHandler(): Promise<string> {
   const { getAllFolders } = await import('../../database/mapper/music')
-  const folders = await getAllFolders(getActiveWorkspaceId())
+  const folders = await getAllFolders()
   if (!folders.length) return '还没有任何歌单。'
   const lines = ['🎵 **歌单列表**\n']
   for (const f of folders) {
@@ -27,7 +26,7 @@ async function listTracksHandler(params: {
 }): Promise<string> {
   const { getAllFolders, getTracksByFolder } = await import('../../database/mapper/music')
   const limit = params.limit ?? 20
-  const folders = await getAllFolders(getActiveWorkspaceId())
+  const folders = await getAllFolders()
   if (!folders.length) return '还没有任何歌单。'
   let targetFolder = folders[0]
   const playlistName = params.playlistName

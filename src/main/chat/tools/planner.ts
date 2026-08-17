@@ -1,7 +1,6 @@
 import { tool } from '@langchain/core/tools'
 import type { StructuredToolInterface } from '@langchain/core/tools'
 import * as z from 'zod/v4'
-import { getActiveWorkspaceId } from '../../database/workspace-context'
 import type { PlannerTreeNode } from '../../database/mapper/planner'
 
 // ============================================================================
@@ -35,7 +34,7 @@ const TYPE_LABELS: Record<string, string> = { project: '项目', phase: '阶段'
 
 async function listPlannerTasksHandler(params: { type?: string }): Promise<string> {
   const { getTaskTree } = await import('../../database/mapper/planner')
-  const tree = await getTaskTree(getActiveWorkspaceId())
+  const tree = await getTaskTree()
   if (!tree.length) return '还没有规划任务。'
 
   const flatNodes: { node: PlannerTreeNode; aggregateProgress: number }[] = []
@@ -75,7 +74,7 @@ async function listPlannerTasksHandler(params: { type?: string }): Promise<strin
 
 async function getPlannerTreeHandler(): Promise<string> {
   const { getTaskTree } = await import('../../database/mapper/planner')
-  const tree = await getTaskTree(getActiveWorkspaceId())
+  const tree = await getTaskTree()
   if (!tree.length) return '还没有规划任务。'
   const lines = ['**规划任务树**\n']
 
@@ -152,7 +151,7 @@ async function createTaskHandler(params: {
 
   const priority = params.priority
 
-  const id = await addTask(getActiveWorkspaceId(), {
+  const id = await addTask({
     parent_id: params.parent_id ?? null,
     title: params.title,
     type: params.type,
@@ -164,7 +163,7 @@ async function createTaskHandler(params: {
     sort_order: 0
   })
 
-  const tree = await getTaskTree(getActiveWorkspaceId())
+  const tree = await getTaskTree()
 
   // 查找新建节点的路径用于展示
   function findPath(nodes: PlannerTreeNode[], targetId: number, prefix: string[]): string[] | null {
@@ -254,7 +253,7 @@ async function updateTaskHandler(params: {
 async function deleteTaskHandler(params: { id: number }): Promise<string> {
   const { deleteTask, getTaskTree } = await import('../../database/mapper/planner')
 
-  const tree = await getTaskTree(getActiveWorkspaceId())
+  const tree = await getTaskTree()
 
   function findNode(nodes: PlannerTreeNode[], targetId: number): PlannerTreeNode | null {
     for (const n of nodes) {
@@ -292,9 +291,9 @@ async function manageDepsHandler(params: {
 
   switch (params.subcommand) {
     case 'list': {
-      const deps = await getAllDependencies(getActiveWorkspaceId())
+      const deps = await getAllDependencies()
       if (!deps.length) return '还没有任务依赖关系。'
-      const tree = await getTaskTree(getActiveWorkspaceId())
+      const tree = await getTaskTree()
 
       function getTitle(nodes: PlannerTreeNode[], id: number): string {
         for (const n of nodes) {

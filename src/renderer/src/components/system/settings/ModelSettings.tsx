@@ -32,6 +32,7 @@ import {
 import { useMessage } from '@renderer/hooks/useMessage'
 import { Window } from '../../../../resource/types/window'
 import type { LlmProviderConfig, LlmProviderInput } from '@renderer/types/provider'
+import { SettingsPageHeader, SettingsSection } from './settings-ui'
 
 const PROVIDER_TYPES = [
   { value: 'openai', label: 'OpenAI', baseURL: 'https://api.openai.com/v1', color: '#10a37f' },
@@ -123,7 +124,7 @@ const isEmbeddingModel = (p: LlmProviderConfig): boolean => {
 
 const ModelSettings: React.FC = () => {
   const {
-    token: { colorText, colorTextSecondary }
+    token: { colorTextSecondary }
   } = theme.useToken()
 
   const { viewMessage } = useMessage()
@@ -439,34 +440,33 @@ const ModelSettings: React.FC = () => {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <h3 className="text-base font-semibold m-0" style={{ color: colorText }}>
-            大模型供应商
-          </h3>
-          <p className="text-sm mt-1" style={{ color: colorTextSecondary }}>
-            管理 AI 聊天和知识图谱使用的模型供应商配置
-          </p>
-        </div>
-        <Space>
-          <Button icon={<DownloadOutlined />} onClick={() => setFetchModalOpen(true)}>
-            拉取模型
-          </Button>
-          <Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>
-            添加模型
-          </Button>
-        </Space>
-      </div>
-
-      <Table
-        dataSource={providers}
-        columns={columns}
-        rowKey="id"
-        loading={loading}
-        pagination={false}
-        size="middle"
-        locale={{ emptyText: '暂无供应商，点击上方按钮添加' }}
+      <SettingsPageHeader
+        title="大模型供应商"
+        description="管理 AI 聊天和知识图谱使用的模型供应商配置"
+        extra={
+          <>
+            <Button icon={<DownloadOutlined />} onClick={() => setFetchModalOpen(true)}>
+              拉取模型
+            </Button>
+            <Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>
+              添加模型
+            </Button>
+          </>
+        }
       />
+
+      <SettingsSection bodyPadding={0}>
+        <Table
+          dataSource={providers}
+          columns={columns}
+          rowKey="id"
+          loading={loading}
+          pagination={false}
+          size="middle"
+          locale={{ emptyText: '暂无供应商，点击右上角按钮添加' }}
+          style={{ borderRadius: 12 }}
+        />
+      </SettingsSection>
 
       <Modal
         title={editingProvider ? `编辑供应商 — ${editingProvider.name}` : '添加供应商'}

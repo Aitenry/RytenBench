@@ -142,6 +142,7 @@ import {
 import {
   getAllWorkspaces,
   createWorkspace,
+  updateWorkspace,
   deleteWorkspace,
   getAllTopics,
   getAllTopicsPaginated,
@@ -290,11 +291,17 @@ async function performInitializationTasks(): Promise<void> {
           const chat = settingsStore.get('chat') as ChatSettings | undefined
           return chat?.activeWorkspaceId
         })
-        // 把迁移确定的活动工作区写回设置（0 = 暂无工作区，等用户自选路径创建）
+        // 把迁移确定的活动工作区写回设置（自动创建的默认工作区同时写入路径）
         const chat = settingsStore.get('chat') as ChatSettings | undefined
         const next: ChatSettings = { ...(chat ?? ({} as ChatSettings)) }
-        if (next.activeWorkspaceId !== result.activeWorkspaceId) {
+        if (
+          next.activeWorkspaceId !== result.activeWorkspaceId ||
+          (result.defaultPath && !next.workspacePath)
+        ) {
           next.activeWorkspaceId = result.activeWorkspaceId
+          if (result.defaultPath && !next.workspacePath) {
+            next.workspacePath = result.defaultPath
+          }
           settingsStore.set('chat', next)
         }
         logger.info(`[Init] Workspace migration done, active workspace=${result.activeWorkspaceId}`)
@@ -803,7 +810,7 @@ app.whenReady().then(async () => {
   // --- Planner (甘特图) IPC handlers ---
   ipcMain.handle('planner-tasks-get-all', async () => {
     try {
-      return await getAllPlannerTasks(getActiveWorkspaceId())
+      return await getAllPlannerTasks()
     } catch (error) {
       console.error('Error in planner-tasks-get-all:', error)
       throw error
@@ -821,7 +828,7 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('planner-tasks-get-tree', async () => {
     try {
-      return await getPlannerTaskTree(getActiveWorkspaceId())
+      return await getPlannerTaskTree()
     } catch (error) {
       console.error('Error in planner-tasks-get-tree:', error)
       throw error
@@ -830,7 +837,7 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('planner-tasks-add', async (_event, task) => {
     try {
-      return await addPlannerTask(getActiveWorkspaceId(), task)
+      return await addPlannerTask(task)
     } catch (error) {
       console.error('Error in planner-tasks-add:', error)
       throw error
@@ -884,7 +891,7 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('planner-deps-get-all', async () => {
     try {
-      return await getAllPlannerDependencies(getActiveWorkspaceId())
+      return await getAllPlannerDependencies()
     } catch (error) {
       console.error('Error in planner-deps-get-all:', error)
       throw error
@@ -1011,7 +1018,7 @@ app.whenReady().then(async () => {
   })
 
   ipcMain.handle('music-get-folders', async () => {
-    const rows = await getAllFolders(getActiveWorkspaceId())
+    const rows = await getAllFolders()
     return rows.map((row) => ({
       id: row.id,
       path: row.path,
@@ -1056,7 +1063,7 @@ app.whenReady().then(async () => {
     const folderId = crypto.randomUUID()
     const folderPath = `${musicDir}\\${folderId}`.replace(/\//g, '\\')
     fs.mkdirSync(folderPath, { recursive: true })
-    await upsertFolder(getActiveWorkspaceId(), folderId, folderPath, name, 0, description || '')
+    await upsertFolder(folderId, folderPath, name, 0, description || '')
     const desc = description || ''
     return {
       id: folderId,
@@ -1220,7 +1227,6 @@ app.whenReady().then(async () => {
         const allTracks = [...existingTracks, ...tracks]
         await upsertTracks(folderId, allTracks)
         await upsertFolder(
-          getActiveWorkspaceId(),
           folderId,
           folder.path,
           folder.name,
@@ -1252,7 +1258,6 @@ app.whenReady().then(async () => {
       if (folder) {
         const tracks = await getTracksByFolder(result.folderId)
         await upsertFolder(
-          getActiveWorkspaceId(),
           result.folderId,
           folder.path,
           folder.name,
@@ -1305,7 +1310,7 @@ app.whenReady().then(async () => {
   })
 
   ipcMain.handle('music-toggle-like', async (_event, trackId: number) => {
-    return await toggleLikeTrack(getActiveWorkspaceId(), trackId)
+    return await toggleLikeTrack(trackId)
   })
 
   ipcMain.handle('music-update-last-played', async (_event, trackId: number) => {
@@ -1313,7 +1318,7 @@ app.whenReady().then(async () => {
   })
 
   ipcMain.handle('music-get-liked-tracks', async () => {
-    const rows = await getLikedTracks(getActiveWorkspaceId())
+    const rows = await getLikedTracks()
     return rows.map((row) => ({
       id: String(row.id),
       filePath: row.file_path,
@@ -1327,7 +1332,7 @@ app.whenReady().then(async () => {
   })
 
   ipcMain.handle('music-get-recently-played', async () => {
-    const rows = await getRecentlyPlayed(getActiveWorkspaceId(), 100)
+    const rows = await getRecentlyPlayed(100)
     return rows.map((row) => ({
       id: String(row.id),
       filePath: row.file_path,
@@ -2712,24 +2717,18 @@ app.whenReady().then(async () => {
     }
   })
 
+  ipcMain.handle('workspace-update', async (_event, id: number, updates: { name: string }) => {
+    try {
+      return await updateWorkspace(id, updates)
+    } catch (error) {
+      logger.error('Error in workspace-update:', error)
+      throw error
+    }
+  })
+
   ipcMain.handle('workspace-delete', async (_event, id: number) => {
     try {
       clearTopicCache()
-      // 删除该工作区音乐歌单的物理目录（与 music-delete-folder 行为一致）
-      try {
-        const db = (await getDatabaseInstance()).getDatabase()
-        const folders = await db.query<{ path: string }>(
-          'SELECT path FROM music_folders WHERE workspace_id = $1',
-          [id]
-        )
-        for (const folder of folders.rows) {
-          if (folder.path && fs.existsSync(folder.path)) {
-            fs.rmSync(folder.path, { recursive: true, force: true })
-          }
-        }
-      } catch (err) {
-        logger.warn('Failed to clean music folder dirs for workspace:', err)
-      }
       return await deleteWorkspace(id)
     } catch (error) {
       logger.error('Error in workspace-delete:', error)
@@ -2978,8 +2977,19 @@ app.whenReady().then(async () => {
   ipcMain.on(
     'graph-build-start',
     async (event, wikiId: number, config?: Record<string, unknown>) => {
-      const defaultModelId = settingsStore.get('defaultModelId') as number | undefined
-      const model = await getProviderService().createModel(defaultModelId)
+      // 未配置图谱构建模型时，不进入构建流程——通过错误事件通知渲染层弹出友好提醒
+      let model: BaseChatModel
+      try {
+        const defaultModelId = settingsStore.get('defaultModelId') as number | undefined
+        model = await getProviderService().createModel(defaultModelId)
+      } catch (error) {
+        logger.error('Error in graph-build-start (model):', error)
+        event.sender.send('graph-build-error', {
+          wikiId,
+          error: '未配置图谱构建模型：请先到「系统设置 → 图谱」中选择用于构建知识图谱的大模型。'
+        })
+        return
+      }
       const graphService = new KnowledgeGraphService(model)
       // 从系统设置读取图谱构建默认值，用户传入的config可覆盖
       const graphSettings = settingsStore.get('graph') as GraphSettings | undefined
@@ -3029,8 +3039,19 @@ app.whenReady().then(async () => {
   })
 
   ipcMain.handle('graph-docs-append', async (event, wikiId: number, docIds: number[]) => {
-    const defaultModelId = settingsStore.get('defaultModelId') as number | undefined
-    const model = await getProviderService().createModel(defaultModelId)
+    // 未配置图谱构建模型时，不进入追加流程——通过错误事件通知渲染层弹出友好提醒
+    let model: BaseChatModel
+    try {
+      const defaultModelId = settingsStore.get('defaultModelId') as number | undefined
+      model = await getProviderService().createModel(defaultModelId)
+    } catch (error) {
+      logger.error('Error in graph-docs-append (model):', error)
+      event.sender.send('graph-build-error', {
+        wikiId,
+        error: '未配置图谱构建模型：请先到「系统设置 → 图谱」中选择用于构建知识图谱的大模型。'
+      })
+      return { entitiesAdded: 0, relationsAdded: 0 }
+    }
     const graphService = new KnowledgeGraphService(model)
     try {
       const result = await graphService.appendDocs(wikiId, docIds, (progress) => {

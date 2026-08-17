@@ -5,6 +5,7 @@ import {
   RiFileTextLine,
   RiCheckboxCircleLine,
   RiBook2Line,
+  RiArchiveStackLine,
   RiFolder2Line,
   RiAddLine,
   RiSearchLine,
@@ -19,7 +20,9 @@ import {
   RiFolderAddLine,
   RiFileAddLine,
   RiFolderTransferLine,
-  RiExternalLinkLine
+  RiExternalLinkLine,
+  RiUpload2Line,
+  RiMindMap
 } from '@remixicon/react'
 import { Window } from '../../../../resource/types/window'
 import { useMessage } from '@renderer/hooks/useMessage'
@@ -63,12 +66,21 @@ export interface DocTreePanelProps {
   onEditWiki: (wiki: WikiRow) => void
   /** 删除知识库（⋯ 菜单） */
   onDeleteWiki: (wiki: WikiRow) => void
+  /** 打开知识库图谱视图（⋯ 菜单） */
+  onOpenGraph: (wiki: WikiRow) => void
+  /** 打开单篇文档的图谱子图（⋯ 菜单） */
+  onOpenDocGraph: (wikiId: number, docId: number) => void
   /** 删除文档（⋯ 菜单） */
   onDeleteDoc: (doc: DocListItem) => void
   /** 归档文档（⋯ 菜单） */
   onArchiveDoc: (doc: DocListItem) => void
   /** 在目录中新建文档（⋯ 菜单） */
   onCreateDocInDirectory: (
+    directoryId: number,
+    context?: { wikiId: number; dirName: string }
+  ) => void
+  /** 从本地文件导入文档到目录（⋯ 菜单） */
+  onImportDocToDirectory?: (
     directoryId: number,
     context?: { wikiId: number; dirName: string }
   ) => void
@@ -94,9 +106,12 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
   onCreateWiki,
   onEditWiki,
   onDeleteWiki,
+  onOpenGraph,
+  onOpenDocGraph,
   onDeleteDoc,
   onArchiveDoc,
   onCreateDocInDirectory,
+  onImportDocToDirectory,
   onDocsChanged,
   refreshKey = 0,
   width = 252
@@ -353,7 +368,7 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
     alignItems: 'center',
     gap: 6,
     height: 28,
-    padding: `0 6px 0 ${8 + indent * 16}px`,
+    padding: `0 7px 0 ${8 + indent * 16}px`,
     borderRadius: 6,
     cursor: 'pointer',
     fontSize: 13,
@@ -468,24 +483,19 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
         style={{
           display: 'flex',
           alignItems: 'center',
+          gap: 6,
           height: 30,
-          padding: '0 8px 0 4px',
+          /* 与树行 rowStyle(indent=0) 的左侧内边距一致，保证箭头/图标/文字水平对齐 */
+          padding: '0 6px 0 8px',
           cursor: 'pointer',
           userSelect: 'none'
         }}
         onClick={() => setSectionOpen((prev) => ({ ...prev, [key]: !prev[key] }))}
       >
-        <RiArrowRightSLine
-          size={14}
-          style={{
-            color: token.colorTextTertiary,
-            transform: open ? 'rotate(90deg)' : 'none',
-            transition: 'transform 0.15s'
-          }}
-        />
+        {/* 复用树行同款折叠箭头（18px 容器），对齐下方行首箭头 */}
+        {toggleArrow(open, () => setSectionOpen((prev) => ({ ...prev, [key]: !prev[key] })))}
         <span
           style={{
-            marginLeft: 2,
             color: token.colorTextSecondary,
             display: 'flex',
             alignItems: 'center',
@@ -497,7 +507,7 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
           {icon}
           {label}
         </span>
-        <span style={{ marginLeft: 6, fontSize: 11, color: token.colorTextTertiary }}>{count}</span>
+        <span style={{ marginLeft: 2, fontSize: 11, color: token.colorTextTertiary }}>{count}</span>
         <span style={{ flex: 1 }} />
         <Tooltip title={`新建${label}`}>
           <button
@@ -548,12 +558,12 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
         const dirOpen = expandedDirs.has(dir.id)
         const noteIds = tree.notesByDir.get(dir.id) ?? []
         const dirRow = (
-          <div key={`dir-${dir.id}`} style={rowStyle(false, 2 + depth)}>
+          <div key={`dir-${dir.id}`} style={rowStyle(false, 1 + depth)}>
             {depth > 0 && (
               <span
                 style={{
                   position: 'absolute',
-                  left: 8 + (2 + depth - 1) * 16 + 9,
+                  left: 8 + (1 + depth - 1) * 16 + 9,
                   top: 0,
                   bottom: 0,
                   borderLeft: `1px dashed ${token.colorBorderSecondary}`
@@ -590,6 +600,16 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
                 icon: <RiFileAddLine size={14} />,
                 onClick: () => onCreateDocInDirectory(dir.id, { wikiId, dirName: dir.name })
               },
+              ...(onImportDocToDirectory
+                ? [
+                    {
+                      key: 'import-doc',
+                      label: '导入文档',
+                      icon: <RiUpload2Line size={14} />,
+                      onClick: () => onImportDocToDirectory(dir.id, { wikiId, dirName: dir.name })
+                    }
+                  ]
+                : []),
               {
                 key: 'new-subdir',
                 label: '新建子目录',
@@ -620,12 +640,12 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
             const isSel = selection?.kind === 'doc' && selection.docId === noteId
             const title = docTitle(noteId)
             children.push(
-              <div key={`doc-${noteId}`} style={rowStyle(isSel, 3 + depth)}>
+              <div key={`doc-${noteId}`} style={rowStyle(isSel, 1 + depth)}>
                 {accentBar(isSel)}
                 <span
                   style={{
                     position: 'absolute',
-                    left: 8 + (3 + depth - 1) * 16 + 9,
+                    left: 8 + (1 + depth - 1) * 16 + 9,
                     top: 0,
                     bottom: 0,
                     borderLeft: `1px dashed ${token.colorBorderSecondary}`
@@ -661,6 +681,12 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
                       })
                   },
                   {
+                    key: 'doc-graph',
+                    label: '查看图谱',
+                    icon: <RiMindMap size={14} />,
+                    onClick: () => onOpenDocGraph(wikiId, noteId)
+                  },
+                  {
                     key: 'remove',
                     label: '从目录移除',
                     icon: <RiFolderTransferLine size={14} />,
@@ -671,7 +697,8 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
                     label: '归档到其他目录',
                     icon: <RiInboxArchiveLine size={14} />,
                     onClick: () => {
-                      const doc = docs.find((d) => d.id === noteId)
+                      /* 目录内文档不在 docs（未归档列表）里，必须从 allDocs 查 */
+                      const doc = allDocs.find((d) => d.id === noteId)
                       if (doc) onArchiveDoc(doc)
                     }
                   },
@@ -682,7 +709,8 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
                     danger: true,
                     icon: <RiDeleteBinLine size={14} />,
                     onClick: () => {
-                      const doc = docs.find((d) => d.id === noteId)
+                      /* 目录内文档不在 docs（未归档列表）里，必须从 allDocs 查 */
+                      const doc = allDocs.find((d) => d.id === noteId)
                       if (doc) onDeleteDoc(doc)
                     }
                   }
@@ -804,6 +832,12 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
                   {w.title}
                 </span>
                 {rowMenu([
+                  {
+                    key: 'graph',
+                    label: '查看图谱',
+                    icon: <RiMindMap size={14} />,
+                    onClick: () => onOpenGraph(w)
+                  },
                   { key: 'edit', label: '编辑知识库', onClick: () => onEditWiki(w) },
                   {
                     key: 'delete',
@@ -905,7 +939,7 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
                   return (
                     <div
                       key={`doc-${d.id}`}
-                      style={rowStyle(isSel, 1)}
+                      style={rowStyle(isSel, 0)}
                       onClick={() => onSelect({ kind: 'doc', docId: d.id })}
                       onMouseEnter={(e) => {
                         if (!isSel) e.currentTarget.style.background = token.colorFillQuaternary
@@ -1053,7 +1087,7 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
 
             {renderSectionHeader(
               'wikis',
-              <RiBook2Line size={13} />,
+              <RiArchiveStackLine size={13} />,
               '知识库',
               wikis.length,
               onCreateWiki
@@ -1078,7 +1112,7 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
                   const isLoading = loadingWikis.has(w.id)
                   return (
                     <div key={w.id}>
-                      <div style={rowStyle(false, 1)}>
+                      <div style={rowStyle(false, 0)}>
                         {toggleArrow(wikiOpen, () => toggleWiki(w.id))}
                         <RiBook2Line
                           size={13}
@@ -1099,6 +1133,12 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
                           <Spin size="small" />
                         ) : (
                           rowMenu([
+                            {
+                              key: 'graph',
+                              label: '查看图谱',
+                              icon: <RiMindMap size={14} />,
+                              onClick: () => onOpenGraph(w)
+                            },
                             {
                               key: 'new-dir',
                               label: '新建目录',

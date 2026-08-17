@@ -248,7 +248,7 @@ const Index: React.FC = () => {
     [playlist, selectedFolderId, removeFromPlaylist]
   )
 
-  /** 重新加载当前歌单数据（手动刷新 / 工作区切换共用） */
+  /** 重新加载当前歌单数据（手动刷新） */
   const reloadCurrentPlaylist = useCallback(async (): Promise<void> => {
     if (!selectedFolderId) return
     let tracks: Track[] = []
@@ -261,20 +261,6 @@ const Index: React.FC = () => {
     }
     updatePlaylist(tracks, selectedFolderId)
   }, [selectedFolderId, updatePlaylist])
-
-  // 工作区切换：歌单列表与当前歌单内容均按新工作区重新加载
-  useEffect(() => {
-    const handleWorkspaceChanged = (): void => {
-      window.api.music.getFolders().then(setFolders).catch(console.error)
-      reloadCurrentPlaylist().catch(() => {
-        // 原歌单在新工作区不存在时清空视图
-        setSelectedFolderId(null)
-        clearPlaylist()
-      })
-    }
-    window.addEventListener('workspace-changed', handleWorkspaceChanged)
-    return () => window.removeEventListener('workspace-changed', handleWorkspaceChanged)
-  }, [reloadCurrentPlaylist, clearPlaylist, setSelectedFolderId])
 
   const handleUpdateTrack = useCallback(async (): Promise<void> => {
     try {

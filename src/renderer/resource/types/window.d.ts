@@ -229,6 +229,7 @@ export interface Window {
       ) => Promise<{ success: boolean; content?: string; error?: string }>
       getAllWorkspaces: () => Promise<WorkspaceRow[]>
       createWorkspace: (name: string, path: string) => Promise<number>
+      updateWorkspace: (id: number, updates: { name: string }) => Promise<boolean>
       deleteWorkspace: (id: number) => Promise<boolean>
       getAllTopics: (workspaceId: number) => Promise<ChatTopicRow[]>
       getAllTopicsPaginated: (

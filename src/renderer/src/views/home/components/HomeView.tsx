@@ -13,6 +13,7 @@ import TodoPane from './TodoPane'
 import EmptyDashboard from './EmptyDashboard'
 import OutlinePanel from './OutlinePanel'
 import ArchiveDocModal from './ArchiveDocModal'
+import GraphView from '@renderer/components/graph/GraphView'
 import type { Selection } from '../types'
 
 const HomeView: React.FC = () => {
@@ -114,6 +115,18 @@ const HomeView: React.FC = () => {
     loadAll().then()
   }, [loadAll])
 
+  /* ── 图谱构建完成通知 → 直达该知识库的图谱视图（BuildProgressProvider 派发） ── */
+  useEffect(() => {
+    const handleOpenGraph = (e: Event): void => {
+      const detail = (e as CustomEvent<{ wikiId: number }>).detail
+      if (detail && typeof detail.wikiId === 'number') {
+        setSelection({ kind: 'wiki-graph', wikiId: detail.wikiId })
+      }
+    }
+    window.addEventListener('open-wiki-graph', handleOpenGraph)
+    return () => window.removeEventListener('open-wiki-graph', handleOpenGraph)
+  }, [])
+
   /* ── 工作区切换：清空选中、失效树缓存并重载数据 ── */
   useEffect(() => {
     const handleWorkspaceChanged = (): void => {
@@ -180,6 +193,45 @@ const HomeView: React.FC = () => {
       } catch (error) {
         console.error('Failed to create doc in directory:', error)
         viewMessage(messageKey, 'error', '创建文档失败')
+      }
+    },
+    [api, viewMessage, loadAll, wikis]
+  )
+
+  /* ── 从本地文件导入文档到知识库目录 ── */
+  const handleImportDocToDirectory = useCallback(
+    async (directoryId: number, context?: { wikiId: number; dirName: string }): Promise<void> => {
+      const messageKey = 'home-import-doc'
+      try {
+        const imported = await api.docs.importDocument()
+        if (!imported) return // 用户取消文件选择
+        viewMessage(messageKey, 'loading', '正在导入文档...')
+        const docId = await api.docs.add({
+          title: imported.title,
+          image: null,
+          summary: null,
+          content: imported.content,
+          tags: null
+        })
+        await api.wikis.addNoteToDirectory(directoryId, docId)
+        viewMessage(messageKey, 'success', '文档导入成功', 2)
+        await loadAll()
+        setTreeRefreshKey((k) => k + 1)
+        setSelection({
+          kind: 'doc',
+          docId,
+          source: context
+            ? {
+                wikiId: context.wikiId,
+                dirId: directoryId,
+                dirName: context.dirName,
+                wikiTitle: wikis.find((w) => w.id === context.wikiId)?.title
+              }
+            : undefined
+        })
+      } catch (error) {
+        console.error('Failed to import doc to directory:', error)
+        viewMessage(messageKey, 'error', '导入文档失败')
       }
     },
     [api, viewMessage, loadAll, wikis]
@@ -276,6 +328,14 @@ const HomeView: React.FC = () => {
             viewMessage(messageKey, 'loading', '正在删除知识库...')
             await api.wikis.delete(wiki.id)
             viewMessage(messageKey, 'success', '知识库已删除', 2)
+            /* 若正在查看该知识库的图谱视图（整库或文档子图），删除后回到仪表盘 */
+            setSelection((sel) =>
+              sel?.kind === 'wiki-graph' && sel.wikiId === wiki.id
+                ? null
+                : sel?.kind === 'doc-graph' && sel.wikiId === wiki.id
+                  ? null
+                  : sel
+            )
             await loadAll()
             setTreeRefreshKey((k) => k + 1)
           } catch (error) {
@@ -311,7 +371,13 @@ const HomeView: React.FC = () => {
             viewMessage(messageKey, 'loading', '正在删除文档...')
             await api.docs.delete(doc.id)
             viewMessage(messageKey, 'success', '文档已删除', 2)
-            setSelection((sel) => (sel?.kind === 'doc' && sel.docId === doc.id ? null : sel))
+            setSelection((sel) =>
+              sel?.kind === 'doc' && sel.docId === doc.id
+                ? null
+                : sel?.kind === 'doc-graph' && sel.docId === doc.id
+                  ? null
+                  : sel
+            )
             await loadAll()
             setTreeRefreshKey((k) => k + 1)
           } catch (error) {
@@ -359,6 +425,16 @@ const HomeView: React.FC = () => {
         items.push({ label: '文档库' })
       }
       items.push({ label: doc?.title ?? `文档 ${selection.docId}` })
+    } else if (selection.kind === 'wiki-graph') {
+      const wiki = wikis.find((w) => w.id === selection.wikiId)
+      items.push({ label: wiki?.title ?? '知识库' })
+      items.push({ label: '知识图谱' })
+    } else if (selection.kind === 'doc-graph') {
+      const wiki = wikis.find((w) => w.id === selection.wikiId)
+      const doc = allDocs.find((d) => d.id === selection.docId)
+      items.push({ label: wiki?.title ?? '知识库' })
+      items.push({ label: doc?.title ?? `文档 ${selection.docId}` })
+      items.push({ label: '知识图谱' })
     } else {
       const todo = todos.find((t) => t.id === selection.todoId)
       items.push({ label: '待办' })
@@ -413,6 +489,46 @@ const HomeView: React.FC = () => {
         />
       )
     }
+    if (selection.kind === 'wiki-graph' || selection.kind === 'doc-graph') {
+      const wiki = wikis.find((w) => w.id === selection.wikiId)
+      if (!wiki) {
+        return (
+          <div
+            style={{
+              flex: 1,
+              minHeight: 0,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: token.colorBgContainer,
+              border: `1px solid ${token.colorBorderSecondary}`,
+              borderRadius: 12
+            }}
+          >
+            <span style={{ color: token.colorTextTertiary, fontSize: 13 }}>
+              知识库不存在或已被删除
+            </span>
+          </div>
+        )
+      }
+      /* 文档级子图：带 initialDocFilter，key 用 docId 保证切换文档时重建筛选 */
+      return (
+        <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
+          <GraphView
+            key={selection.kind === 'doc-graph' ? `doc-graph-${selection.docId}` : `wiki-graph-${selection.wikiId}`}
+            selectedWiki={wiki}
+            initialDocFilter={selection.kind === 'doc-graph' ? [selection.docId] : undefined}
+            onOpenDocInEditor={(docId) =>
+              setSelection({
+                kind: 'doc',
+                docId,
+                source: { wikiId: wiki.id, wikiTitle: wiki.title }
+              })
+            }
+          />
+        </div>
+      )
+    }
     return (
       <TodoPane key={selection.todoId} todoId={selection.todoId} onChanged={handleTodoChanged} />
     )
@@ -445,9 +561,14 @@ const HomeView: React.FC = () => {
         onCreateWiki={() => setNewWikiOpen(true)}
         onEditWiki={setEditWiki}
         onDeleteWiki={handleDeleteWiki}
+        onOpenGraph={(wiki) => setSelection({ kind: 'wiki-graph', wikiId: wiki.id })}
+        onOpenDocGraph={(wikiId, docId) =>
+          setSelection({ kind: 'doc-graph', wikiId, docId })
+        }
         onDeleteDoc={handleDeleteDoc}
         onArchiveDoc={setArchiveDoc}
         onCreateDocInDirectory={handleCreateDocInDirectory}
+        onImportDocToDirectory={handleImportDocToDirectory}
         onDocsChanged={handleTreeDocsChanged}
         refreshKey={treeRefreshKey}
       />

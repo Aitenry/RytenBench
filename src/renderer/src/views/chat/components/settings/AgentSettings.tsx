@@ -10,7 +10,7 @@ import {
   Select,
   Pagination,
   Tag,
-  Divider,
+  Badge,
   App
 } from 'antd'
 import {
@@ -18,7 +18,9 @@ import {
   PlusOutlined,
   EditOutlined,
   DeleteOutlined,
-  ImportOutlined
+  ImportOutlined,
+  RobotOutlined,
+  TeamOutlined
 } from '@ant-design/icons'
 import { useMessage } from '@renderer/hooks/useMessage'
 import { Window } from '../../../../../resource/types/window'
@@ -26,6 +28,11 @@ import type { AgentConfigRow, AgentConfigInput } from '../../../../../../main/da
 import type { ProviderOption } from '@renderer/types/components'
 import type { ToolInfo } from '../../../../../resource/types/window'
 import { toolIconMap } from '../ChatConstants'
+import {
+  SettingsPageHeader,
+  SettingsSection,
+  SettingRow
+} from '../../../../components/system/settings/settings-ui'
 
 const { TextArea } = Input
 
@@ -33,7 +40,7 @@ const PAGE_SIZE = 5
 
 const AgentSettings: React.FC = () => {
   const {
-    token: { colorText, colorTextSecondary, colorTextTertiary, colorFillAlter }
+    token: { colorTextSecondary, colorTextTertiary, colorFillAlter }
   } = theme.useToken()
 
   const { viewMessage } = useMessage()
@@ -407,251 +414,241 @@ const AgentSettings: React.FC = () => {
 
   return (
     <div>
+      <SettingsPageHeader
+        title="智能体"
+        description="配置主智能体的默认工具与技能，以及可委托任务的子智能体"
+      />
+
       {/* ====== 主智能体 ====== */}
-      <div className="mb-4">
-        <div className="flex items-center justify-between mb-3">
-          <div>
-            <h3 className="text-base font-semibold m-0" style={{ color: colorText }}>
-              主智能体
-            </h3>
-            <p className="text-sm mt-1 mb-0" style={{ color: colorTextSecondary }}>
-              配置主智能体的默认工具和技能
-            </p>
-          </div>
+      <SettingsSection
+        title="主智能体"
+        icon={<RobotOutlined size={14} />}
+        extra={
           <Button type="primary" size="small" loading={mainSaving} onClick={handleMainSave}>
             保存
           </Button>
-        </div>
-
-        <div className="p-4 rounded-lg" style={{ background: colorFillAlter }}>
-          <Form layout="vertical" size="small">
-            <Form.Item label="默认工具" tooltip="选择主智能体可用的系统工具">
-              <Select
-                mode="multiple"
-                size="small"
-                placeholder="选择工具"
-                value={mainAgent.tools}
-                onChange={(value) => setMainAgent((prev) => ({ ...prev, tools: value }))}
-                allowClear
-                maxTagCount="responsive"
-                optionRender={(option) => {
-                  const tool = availableTools.find((t) => t.name === option.value)
-                  if (!tool) return option.label as React.ReactNode
-                  return (
-                    <div className="flex items-center gap-2">
-                      <span style={{ color: tool.color }}>{toolIconMap[tool.icon]}</span>
-                      <span>{tool.label}</span>
-                    </div>
-                  )
-                }}
-                tagRender={(props) => {
-                  const tool = availableTools.find((t) => t.name === props.value)
-                  const { label, closable, onClose } = props
-                  return (
-                    <Tag
-                      closable={closable}
-                      onClose={onClose}
-                      style={{
-                        marginInlineEnd: 4,
-                        background: tool ? `${tool.color}12` : undefined,
-                        border: tool ? `1px solid ${tool.color}30` : undefined,
-                        color: tool?.color,
-                        borderRadius: 12,
-                        paddingInline: 8,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between'
-                      }}
-                    >
-                      <span style={{ marginRight: 4 }}>{tool ? toolIconMap[tool.icon] : null}</span>
-                      {label}
-                    </Tag>
-                  )
-                }}
-                options={availableTools.map((t) => ({
-                  value: t.name,
-                  label: t.label,
-                  icon: t.icon,
-                  color: t.color
-                }))}
-              />
-            </Form.Item>
-
-            <Form.Item label="默认技能" tooltip="选择主智能体可用的技能">
-              <Select
-                mode="multiple"
-                size="small"
-                placeholder="选择技能（不选则无技能）"
-                value={mainAgent.skills}
-                onChange={(value) => setMainAgent((prev) => ({ ...prev, skills: value }))}
-                allowClear
-                disabled={skills.length === 0}
-                notFoundContent={
-                  skills.length === 0 ? '未找到技能，请先在技能设置中配置目录' : '无匹配技能'
-                }
-                maxTagCount="responsive"
-                options={skills.map((s) => ({
-                  value: s.id,
-                  label: `${s.name}${s.description ? ` — ${s.description}` : ''}`
-                }))}
-              />
-            </Form.Item>
-          </Form>
-        </div>
-      </div>
-
-      <Divider style={{ margin: '16px 0' }} />
+        }
+      >
+        <SettingRow
+          title="默认工具"
+          description="选择主智能体可用的系统工具"
+          control={
+            <Select
+              mode="multiple"
+              size="small"
+              placeholder="选择工具"
+              value={mainAgent.tools}
+              onChange={(value) => setMainAgent((prev) => ({ ...prev, tools: value }))}
+              allowClear
+              maxTagCount="responsive"
+              style={{ minWidth: 280 }}
+              optionRender={(option) => {
+                const tool = availableTools.find((t) => t.name === option.value)
+                if (!tool) return option.label as React.ReactNode
+                return (
+                  <div className="flex items-center gap-2">
+                    <span style={{ color: tool.color }}>{toolIconMap[tool.icon]}</span>
+                    <span>{tool.label}</span>
+                  </div>
+                )
+              }}
+              tagRender={(props) => {
+                const tool = availableTools.find((t) => t.name === props.value)
+                const { label, closable, onClose } = props
+                return (
+                  <Tag
+                    closable={closable}
+                    onClose={onClose}
+                    style={{
+                      marginInlineEnd: 4,
+                      background: tool ? `${tool.color}12` : undefined,
+                      border: tool ? `1px solid ${tool.color}30` : undefined,
+                      color: tool?.color,
+                      borderRadius: 12,
+                      paddingInline: 8,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between'
+                    }}
+                  >
+                    <span style={{ marginRight: 4 }}>{tool ? toolIconMap[tool.icon] : null}</span>
+                    {label}
+                  </Tag>
+                )
+              }}
+              options={availableTools.map((t) => ({
+                value: t.name,
+                label: t.label,
+                icon: t.icon,
+                color: t.color
+              }))}
+            />
+          }
+        />
+        <SettingRow
+          title="默认技能"
+          description="选择主智能体可用的技能"
+          control={
+            <Select
+              mode="multiple"
+              size="small"
+              placeholder="选择技能（不选则无技能）"
+              value={mainAgent.skills}
+              onChange={(value) => setMainAgent((prev) => ({ ...prev, skills: value }))}
+              allowClear
+              disabled={skills.length === 0}
+              style={{ minWidth: 280 }}
+              notFoundContent={
+                skills.length === 0 ? '未找到技能，请先在技能设置中配置目录' : '无匹配技能'
+              }
+              maxTagCount="responsive"
+              options={skills.map((s) => ({
+                value: s.id,
+                label: `${s.name}${s.description ? ` — ${s.description}` : ''}`
+              }))}
+            />
+          }
+        />
+      </SettingsSection>
 
       {/* ====== 子智能体列表 ====== */}
-      <div className="flex items-center justify-between mb-3">
-        <div>
-          <h3 className="text-base font-semibold m-0" style={{ color: colorText }}>
-            子智能体
-          </h3>
-          <p className="text-sm mt-1 mb-0" style={{ color: colorTextSecondary }}>
-            管理子智能体配置，只有开启的智能体才会在对话中生效
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button
-            icon={<ImportOutlined />}
-            size="small"
-            loading={importLoading}
-            onClick={() => fileInputRef.current?.click()}
-          >
-            导入
-          </Button>
-          <Button
-            type="primary"
-            icon={<PlusOutlined />}
-            size="small"
-            onClick={() => openEditModal()}
-          >
-            新建
-          </Button>
-        </div>
-      </div>
-
-      {loading ? (
-        <div
-          className="p-6 rounded-lg flex items-center justify-center"
-          style={{ background: colorFillAlter }}
-        >
-          <Spin
-            indicator={<LoadingOutlined spin style={{ fontSize: 20, color: colorTextTertiary }} />}
-          />
-        </div>
-      ) : agents.length > 0 ? (
-        <div className="p-4 rounded-lg" style={{ background: colorFillAlter }}>
-          <div className="font-medium mb-2" style={{ color: colorText }}>
-            智能体列表（{total}）
+      <SettingsSection
+        title="子智能体"
+        icon={<TeamOutlined size={14} />}
+        description={`共 ${total} 个，只有开启的智能体才会在对话中生效`}
+        extra={
+          <>
+            <Button
+              icon={<ImportOutlined />}
+              size="small"
+              loading={importLoading}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              导入
+            </Button>
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              size="small"
+              onClick={() => openEditModal()}
+            >
+              新建
+            </Button>
+          </>
+        }
+      >
+        {loading ? (
+          <div className="flex items-center justify-center" style={{ padding: '36px 0' }}>
+            <Spin
+              indicator={
+                <LoadingOutlined spin style={{ fontSize: 20, color: colorTextTertiary }} />
+              }
+            />
           </div>
-          <div className="flex flex-col">
-            {agents.map((agent, idx) => (
-              <div
+        ) : agents.length > 0 ? (
+          <>
+            {agents.map((agent) => (
+              <SettingRow
                 key={agent.id}
-                className="flex items-center justify-between py-2.5 gap-3"
-                style={{
-                  borderBottom: idx < agents.length - 1 ? `1px solid ${colorTextTertiary}` : 'none'
-                }}
-              >
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium" style={{ color: colorText }}>
-                      {agent.rename || agent.name}
-                    </span>
-                    {agent.rename && (
-                      <span className="text-xs" style={{ color: colorTextTertiary }}>
-                        ({agent.name})
-                      </span>
-                    )}
+                title={agent.rename || agent.name}
+                description={agent.description || undefined}
+                control={
+                  <div className="flex items-center" style={{ gap: 4 }}>
                     <Switch
                       checked={agent.enable}
                       onChange={(checked) => handleToggleEnable(agent, checked)}
                       size="small"
                     />
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<EditOutlined />}
+                      onClick={() => openEditModal(agent)}
+                    />
+                    <Button
+                      type="text"
+                      size="small"
+                      danger
+                      icon={<DeleteOutlined />}
+                      onClick={() => handleDelete(agent)}
+                    />
                   </div>
-                  {agent.description && (
-                    <div
-                      className="text-xs mt-0.5 line-clamp-2"
-                      style={{ color: colorTextSecondary }}
-                    >
-                      {agent.description}
-                    </div>
+                }
+              >
+                {agent.rename && (
+                  <span
+                    style={{
+                      display: 'block',
+                      fontSize: 12,
+                      color: colorTextTertiary,
+                      marginTop: 1
+                    }}
+                  >
+                    {agent.name}
+                  </span>
+                )}
+                <div
+                  className="flex items-center"
+                  style={{ gap: 6, marginTop: 6, flexWrap: 'wrap' }}
+                >
+                  {agent.tools && (
+                    <Badge
+                      count={`${(JSON.parse(agent.tools) as string[]).length} 工具`}
+                      style={{
+                        background: colorFillAlter,
+                        color: colorTextTertiary,
+                        boxShadow: 'none'
+                      }}
+                    />
                   )}
-                  <div className="flex items-center gap-2 mt-1">
-                    {agent.tools && (
-                      <span
-                        className="text-xs px-1.5 py-0.5 rounded"
-                        style={{
-                          background: colorFillAlter,
-                          color: colorTextTertiary
-                        }}
-                      >
-                        {(JSON.parse(agent.tools) as string[]).length} 个工具
-                      </span>
-                    )}
-                    {agent.model && (
-                      <span
-                        className="text-xs px-1.5 py-0.5 rounded"
-                        style={{
-                          background: colorFillAlter,
-                          color: colorTextTertiary
-                        }}
-                      >
-                        {agent.model}
-                      </span>
-                    )}
-                    {agent.skills && JSON.parse(agent.skills).length > 0 && (
-                      <span
-                        className="text-xs px-1.5 py-0.5 rounded"
-                        style={{
-                          background: colorFillAlter,
-                          color: colorTextTertiary
-                        }}
-                      >
-                        {(JSON.parse(agent.skills) as string[]).length} 个技能
-                      </span>
-                    )}
-                  </div>
+                  {agent.model && (
+                    <Badge
+                      count={agent.model}
+                      style={{
+                        background: colorFillAlter,
+                        color: colorTextTertiary,
+                        boxShadow: 'none'
+                      }}
+                    />
+                  )}
+                  {agent.skills && JSON.parse(agent.skills).length > 0 && (
+                    <Badge
+                      count={`${(JSON.parse(agent.skills) as string[]).length} 技能`}
+                      style={{
+                        background: colorFillAlter,
+                        color: colorTextTertiary,
+                        boxShadow: 'none'
+                      }}
+                    />
+                  )}
                 </div>
-                <div className="flex items-center gap-1 flex-shrink-0">
-                  <Button
-                    type="text"
-                    size="small"
-                    icon={<EditOutlined />}
-                    onClick={() => openEditModal(agent)}
-                  />
-                  <Button
-                    type="text"
-                    size="small"
-                    danger
-                    icon={<DeleteOutlined />}
-                    onClick={() => handleDelete(agent)}
-                  />
-                </div>
-              </div>
+              </SettingRow>
             ))}
+            {total > PAGE_SIZE && (
+              <div className="flex justify-center" style={{ padding: '10px 0' }}>
+                <Pagination
+                  current={currentPage}
+                  total={total}
+                  pageSize={PAGE_SIZE}
+                  onChange={(page) => loadPage(page, workspaceId)}
+                  size="small"
+                />
+              </div>
+            )}
+          </>
+        ) : (
+          <div
+            style={{
+              padding: '28px 0',
+              textAlign: 'center',
+              fontSize: 13,
+              color: colorTextSecondary
+            }}
+          >
+            暂无智能体，点击右上角「新建」创建
           </div>
-          {total > PAGE_SIZE && (
-            <div className="mt-3 flex justify-center">
-              <Pagination
-                current={currentPage}
-                total={total}
-                pageSize={PAGE_SIZE}
-                onChange={(page) => loadPage(page, workspaceId)}
-                size="small"
-              />
-            </div>
-          )}
-        </div>
-      ) : (
-        <div className="p-6 rounded-lg text-center" style={{ background: colorFillAlter }}>
-          <p className="text-sm m-0" style={{ color: colorTextSecondary }}>
-            暂无智能体，点击&ldquo;新建&rdquo;创建
-          </p>
-        </div>
-      )}
+        )}
+      </SettingsSection>
 
       {/* 编辑/创建弹窗 */}
       <Modal

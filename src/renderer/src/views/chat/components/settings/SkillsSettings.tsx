@@ -1,9 +1,14 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { theme, Button, Input, Switch, Space, Spin, Pagination } from 'antd'
+import { theme, Button, Input, Switch, Spin, Pagination } from 'antd'
 import { LoadingOutlined, FolderOutlined } from '@ant-design/icons'
 import { useMessage } from '@renderer/hooks/useMessage'
 import { Window } from '../../../../../resource/types/window'
 import type { SystemSettings, ChatSettings } from '@renderer/types/settings'
+import {
+  SettingsPageHeader,
+  SettingsSection,
+  SettingRow
+} from '../../../../components/system/settings/settings-ui'
 
 interface SkillInfo {
   id: string
@@ -13,7 +18,7 @@ interface SkillInfo {
 
 const SkillsSettings: React.FC = () => {
   const {
-    token: { colorText, colorTextSecondary, colorTextTertiary, colorFillAlter }
+    token: { colorTextTertiary }
   } = theme.useToken()
 
   const { viewMessage } = useMessage()
@@ -128,30 +133,25 @@ const SkillsSettings: React.FC = () => {
 
   return (
     <div>
-      <h3 className="text-base font-semibold m-0" style={{ color: colorText }}>
-        技能（Skills）
-      </h3>
-      <p className="text-sm mt-1 mb-4" style={{ color: colorTextSecondary }}>
-        配置全局技能存储目录，所有工作区共享。子文件夹将作为独立技能加载；可单独启停每个技能。留空则不启用。
-      </p>
+      <SettingsPageHeader
+        title="技能（Skills）"
+        description="配置全局技能存储目录，子文件夹将作为独立技能加载；可单独启停每个技能。留空则不启用。"
+      />
 
       {/* 目录选择 */}
-      <div className="p-4 rounded-lg mb-4" style={{ background: colorFillAlter }}>
-        <div className="flex items-center gap-2 mb-3">
-          <FolderOutlined style={{ color: colorTextSecondary }} />
-          <span className="font-medium" style={{ color: colorText }}>
-            技能存储目录
-          </span>
-        </div>
-        <div className="text-xs mb-3" style={{ color: colorTextSecondary }}>
-          每个含 SKILL.md 的子目录即为一个技能
-        </div>
-        <Space.Compact style={{ width: '100%', maxWidth: 560 }}>
+      <SettingsSection
+        title="技能存储目录"
+        icon={<FolderOutlined size={14} />}
+        description="每个含 SKILL.md 的子目录即为一个技能"
+        bodyPadding={16}
+      >
+        <div style={{ display: 'flex', gap: 8, maxWidth: 560 }}>
           <Input
             value={skillsPath}
             onChange={(e) => setSkillsPath(e.target.value)}
             placeholder="例如：D:\skills（留空不启用）"
             allowClear
+            style={{ flex: 1 }}
           />
           <Button onClick={handleBrowsePath}>浏览…</Button>
           <Button
@@ -162,65 +162,49 @@ const SkillsSettings: React.FC = () => {
           >
             保存
           </Button>
-        </Space.Compact>
+        </div>
         {settings?.chat?.skillsPath && (
-          <p className="text-xs mt-2 m-0" style={{ color: colorTextTertiary }}>
+          <p
+            style={{
+              margin: '10px 0 0',
+              fontSize: 12,
+              opacity: 0.65,
+              wordBreak: 'break-all'
+            }}
+          >
             当前已生效：{settings.chat.skillsPath}
           </p>
         )}
-      </div>
+      </SettingsSection>
 
       {/* 技能列表 */}
       {loadingSkills ? (
-        <div
-          className="p-6 rounded-lg flex items-center justify-center"
-          style={{ background: colorFillAlter }}
-        >
+        <div className="flex items-center justify-center" style={{ padding: '40px 0' }}>
           <Spin
             indicator={<LoadingOutlined spin style={{ fontSize: 20, color: colorTextTertiary }} />}
           />
         </div>
       ) : skills.length > 0 ? (
-        <div className="p-4 rounded-lg" style={{ background: colorFillAlter }}>
-          <div className="font-medium mb-2" style={{ color: colorText }}>
-            已发现的技能（{skills.length}）
-          </div>
-          <div className="flex flex-col">
-            {paginatedSkills.map((skill, idx) => {
-              const isEnabled = !enabledSkills || enabledSkills.includes(skill.id)
-              return (
-                <div
-                  key={skill.id}
-                  className="flex items-center justify-between py-2.5 gap-3"
-                  style={{
-                    borderBottom:
-                      idx < skills.length - 1 ? `1px solid ${colorTextTertiary}` : 'none'
-                  }}
-                >
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium truncate" style={{ color: colorText }}>
-                      {skill.name}
-                    </div>
-                    {skill.description && (
-                      <div
-                        className="text-xs mt-0.5 line-clamp-2"
-                        style={{ color: colorTextSecondary }}
-                      >
-                        {skill.description}
-                      </div>
-                    )}
-                  </div>
+        <SettingsSection title={`已发现的技能（${skills.length}）`}>
+          {paginatedSkills.map((skill) => {
+            const isEnabled = !enabledSkills || enabledSkills.includes(skill.id)
+            return (
+              <SettingRow
+                key={skill.id}
+                title={skill.name}
+                description={skill.description || undefined}
+                control={
                   <Switch
                     checked={isEnabled}
                     onChange={(checked) => handleToggleSkill(skill.id, checked)}
                     size="small"
                   />
-                </div>
-              )
-            })}
-          </div>
+                }
+              />
+            )
+          })}
           {skills.length > PAGE_SIZE && (
-            <div className="mt-3 flex justify-center">
+            <div className="flex justify-center" style={{ padding: '10px 0' }}>
               <Pagination
                 current={currentPage}
                 total={skills.length}
@@ -230,12 +214,12 @@ const SkillsSettings: React.FC = () => {
               />
             </div>
           )}
-        </div>
+        </SettingsSection>
       ) : settings?.chat?.skillsPath ? (
-        <div className="p-6 rounded-lg text-center" style={{ background: colorFillAlter }}>
-          <p className="text-sm m-0" style={{ color: colorTextSecondary }}>
-            此目录中未发现任何技能，请确保子目录中包含 SKILL.md 文件
-          </p>
+        <div
+          style={{ padding: '32px 0', textAlign: 'center', fontSize: 13, color: colorTextTertiary }}
+        >
+          此目录中未发现任何技能，请确保子目录中包含 SKILL.md 文件
         </div>
       ) : null}
     </div>

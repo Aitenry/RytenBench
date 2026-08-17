@@ -30,12 +30,12 @@ export interface PlannerTreeNode extends PlannerTaskRow {
   depth: number
 }
 
-// --- 查询所有任务（按工作区过滤） ---
-async function getAllTasks(workspaceId: number): Promise<PlannerTaskRow[]> {
+// --- 查询所有任务 ---
+async function getAllTasks(): Promise<PlannerTaskRow[]> {
   try {
     const db = (await getDatabaseInstance()).getDatabase()
-    const sql = 'SELECT * FROM planner_tasks WHERE workspace_id = $1 ORDER BY sort_order ASC'
-    const result = await db.query<PlannerTaskRow>(sql, [workspaceId])
+    const sql = 'SELECT * FROM planner_tasks ORDER BY sort_order ASC'
+    const result = await db.query<PlannerTaskRow>(sql)
     logger.info(`planner: loaded ${result.rows.length} tasks`)
     return result.rows
   } catch (error) {
@@ -57,23 +57,17 @@ async function getTaskById(id: number): Promise<PlannerTaskRow | null> {
   }
 }
 
-// --- 获取树形结构（含依赖，按工作区过滤） ---
-async function getTaskTree(workspaceId: number): Promise<PlannerTreeNode[]> {
+// --- 获取树形结构（含依赖） ---
+async function getTaskTree(): Promise<PlannerTreeNode[]> {
   try {
     const db = (await getDatabaseInstance()).getDatabase()
 
     const tasksResult = await db.query<PlannerTaskRow>(
-      'SELECT * FROM planner_tasks WHERE workspace_id = $1 ORDER BY start_date ASC NULLS LAST, sort_order ASC',
-      [workspaceId]
+      'SELECT * FROM planner_tasks ORDER BY start_date ASC NULLS LAST, sort_order ASC'
     )
     const tasks = tasksResult.rows
 
-    const depsResult = await db.query<PlannerDependencyRow>(
-      `SELECT d.* FROM planner_dependencies d
-       INNER JOIN planner_tasks t ON t.id = d.task_id
-       WHERE t.workspace_id = $1`,
-      [workspaceId]
-    )
+    const depsResult = await db.query<PlannerDependencyRow>('SELECT * FROM planner_dependencies')
     const allDeps = depsResult.rows
 
     // 构建 taskId -> dependencies[] 映射
@@ -145,13 +139,11 @@ async function getTaskTree(workspaceId: number): Promise<PlannerTreeNode[]> {
 
 // --- 添加任务 ---
 async function addTask(
-  workspaceId: number,
   task: Omit<PlannerTaskRow, 'id' | 'created_at' | 'updated_at'>
 ): Promise<number> {
   try {
     const db = (await getDatabaseInstance()).getDatabase()
     const fields = [
-      'workspace_id',
       'parent_id',
       'title',
       'type',
@@ -165,7 +157,6 @@ async function addTask(
     const placeholders = fields.map((_, i) => `$${i + 1}`)
     const sql = `INSERT INTO planner_tasks (${fields.join(', ')}) VALUES (${placeholders.join(', ')}) RETURNING id`
     const values = [
-      workspaceId,
       task.parent_id,
       task.title,
       task.type,
@@ -298,17 +289,12 @@ async function deleteDependency(taskId: number, dependsOnTaskId: number): Promis
   }
 }
 
-// --- 获取所有依赖（按工作区过滤） ---
-async function getAllDependencies(workspaceId: number): Promise<PlannerDependencyRow[]> {
+// --- 获取所有依赖 ---
+async function getAllDependencies(): Promise<PlannerDependencyRow[]> {
   try {
     const db = (await getDatabaseInstance()).getDatabase()
-    const sql = `
-      SELECT d.* FROM planner_dependencies d
-      INNER JOIN planner_tasks t ON t.id = d.task_id
-      WHERE t.workspace_id = $1
-      ORDER BY d.task_id
-    `
-    const result = await db.query<PlannerDependencyRow>(sql, [workspaceId])
+    const sql = 'SELECT * FROM planner_dependencies ORDER BY task_id'
+    const result = await db.query<PlannerDependencyRow>(sql)
     return result.rows
   } catch (error) {
     logger.error('Failed to get all planner dependencies:', error)

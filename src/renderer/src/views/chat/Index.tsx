@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
-import { theme } from 'antd'
+import { theme, Button } from 'antd'
+import { RiChatAiLine, RiListSettingsLine } from '@remixicon/react'
 import { useTheme } from '@renderer/contexts/useTheme'
 import { useChat } from '@renderer/contexts/ChatContextCore'
 import type { Window } from '../../../resource/types/window'
@@ -20,7 +21,9 @@ const Index: React.FC = () => {
       colorTextSecondary,
       colorTextTertiary,
       colorBorder,
-      colorBorderSecondary
+      colorBorderSecondary,
+      colorPrimary,
+      colorPrimaryBg
     }
   } = theme.useToken()
   const { effectiveTheme } = useTheme()
@@ -39,6 +42,7 @@ const Index: React.FC = () => {
     setSelectedProviderId,
     attachments,
     setAttachments,
+    providers,
     isLoading,
     loadingTopicIds,
     messagesEndRef,
@@ -67,8 +71,8 @@ const Index: React.FC = () => {
     refreshTopics
   } = useChat()
 
-  // 工作区/模型就绪检查已提升到应用级引导（CustomFrame/OnboardingGuide），
-  // 聊天页直接进入可用状态
+  // 模型就绪检查：应用即开即用，只有「助手」页依赖模型配置——未配置时在本页内引导
+  const hasModels = providers.length > 0
   const [workspacePath, setWorkspacePath] = useState<string>('')
   const [panelOpen, setPanelOpen] = useState(false)
   const [panelHasEditor, setPanelHasEditor] = useState(false)
@@ -306,54 +310,98 @@ const Index: React.FC = () => {
             onNewChat={handleNewChat}
           />
 
-          <>
-            <ChatMessageArea
-              messages={messages}
-              isDarkMode={isDarkMode}
-              colorText={colorText}
-              colorTextSecondary={colorTextSecondary}
-              colorTextTertiary={colorTextTertiary}
-              colorFillAlter={colorFillAlter}
-              colorBorderSecondary={colorBorderSecondary}
-              titleDisplayed={titleDisplayed}
-              titleDone={titleDone}
-              subtitleDisplayed={subtitleDisplayed}
-              subtitleDone={subtitleDone}
-              copiedId={copiedId}
-              hasMoreMessages={messagesHasMore}
-              isLoadingMoreMessages={messagesLoadingMore}
-              onCopy={handleCopy}
-              onDelete={handleDeleteMessagePair}
-              onLoadMoreMessages={handleLoadMoreMessages}
-              messagesEndRef={messagesEndRef}
-            />
-
-            <div className="px-16 pb-8">
-              <div className="max-w-4xl mx-auto">
-                <ChatInput
-                  inputValue={inputValue}
-                  onInputChange={setInputValue}
-                  textareaRef={textareaRef}
-                  attachments={attachments}
-                  onAttachmentsChange={setAttachments}
-                  isLoading={isLoading}
-                  selectedProviderId={selectedProviderId}
-                  onSelectProvider={(value) => setSelectedProviderId(value)}
-                  groupedProviderOptions={groupedProviderOptions}
-                  modelSupportsTools={modelSupportsTools}
-                  modelSupportsVision={modelSupportsVision}
-                  isDarkMode={isDarkMode}
-                  colorBgLayout={colorBgLayout}
-                  colorBorder={colorBorder}
-                  colorText={colorText}
-                  colorBorderSecondary={colorBorderSecondary}
-                  onSend={handleSend}
-                  onStop={handleStop}
-                  onKeyDown={handleKeyDown}
-                />
+          {!hasModels ? (
+            /* 模型未配置：仅「助手」页内引导，不影响其他功能使用 */
+            <div
+              className="flex-1 flex items-center justify-center"
+              style={{ minHeight: 0, padding: 24 }}
+            >
+              <div style={{ maxWidth: 420, textAlign: 'center' }}>
+                <div
+                  style={{
+                    width: 56,
+                    height: 56,
+                    margin: '0 auto 14px',
+                    borderRadius: 16,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    background: colorPrimaryBg,
+                    color: colorPrimary,
+                    fontSize: 26
+                  }}
+                >
+                  <RiChatAiLine size={26} />
+                </div>
+                <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: colorText }}>
+                  配置模型后开始对话
+                </h2>
+                <p style={{ margin: '8px 0 20px', fontSize: 13, color: colorTextSecondary }}>
+                  AI 对话需要模型供应商。添加并启用至少一个模型后即可使用，其他功能不受影响。
+                </p>
+                <Button
+                  type="primary"
+                  icon={<RiListSettingsLine size={15} />}
+                  onClick={() =>
+                    window.dispatchEvent(
+                      new CustomEvent('open-system-settings', { detail: { tab: 'model' } })
+                    )
+                  }
+                >
+                  去配置模型
+                </Button>
               </div>
             </div>
-          </>
+          ) : (
+            <>
+              <ChatMessageArea
+                messages={messages}
+                isDarkMode={isDarkMode}
+                colorText={colorText}
+                colorTextSecondary={colorTextSecondary}
+                colorTextTertiary={colorTextTertiary}
+                colorFillAlter={colorFillAlter}
+                colorBorderSecondary={colorBorderSecondary}
+                titleDisplayed={titleDisplayed}
+                titleDone={titleDone}
+                subtitleDisplayed={subtitleDisplayed}
+                subtitleDone={subtitleDone}
+                copiedId={copiedId}
+                hasMoreMessages={messagesHasMore}
+                isLoadingMoreMessages={messagesLoadingMore}
+                onCopy={handleCopy}
+                onDelete={handleDeleteMessagePair}
+                onLoadMoreMessages={handleLoadMoreMessages}
+                messagesEndRef={messagesEndRef}
+              />
+
+              <div className="px-16 pb-8">
+                <div className="max-w-4xl mx-auto">
+                  <ChatInput
+                    inputValue={inputValue}
+                    onInputChange={setInputValue}
+                    textareaRef={textareaRef}
+                    attachments={attachments}
+                    onAttachmentsChange={setAttachments}
+                    isLoading={isLoading}
+                    selectedProviderId={selectedProviderId}
+                    onSelectProvider={(value) => setSelectedProviderId(value)}
+                    groupedProviderOptions={groupedProviderOptions}
+                    modelSupportsTools={modelSupportsTools}
+                    modelSupportsVision={modelSupportsVision}
+                    isDarkMode={isDarkMode}
+                    colorBgLayout={colorBgLayout}
+                    colorBorder={colorBorder}
+                    colorText={colorText}
+                    colorBorderSecondary={colorBorderSecondary}
+                    onSend={handleSend}
+                    onStop={handleStop}
+                    onKeyDown={handleKeyDown}
+                  />
+                </div>
+              </div>
+            </>
+          )}
         </main>
 
         {/* Workspace panel resizer */}

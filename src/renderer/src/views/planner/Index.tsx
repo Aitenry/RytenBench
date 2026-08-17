@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react'
 import { theme, Spin } from 'antd'
 import Toolbar from './components/Toolbar'
 import TaskTree from './components/TaskTree'
+import TaskListView from './components/TaskListView'
 import GanttChart from './components/GanttChart'
 import AddTaskModal from './components/TaskModal'
 import type { PlannerTreeNode } from '@renderer/types/planner'
@@ -41,17 +42,6 @@ const Index: React.FC = () => {
       }
     })()
   }, [])
-
-  // 工作区切换：重新加载任务树，并清空旧工作区的选中/折叠状态
-  useEffect(() => {
-    const handleWorkspaceChanged = (): void => {
-      setSelectedId(null)
-      setCollapsedIds(new Set())
-      loadTree().catch(console.error)
-    }
-    window.addEventListener('workspace-changed', handleWorkspaceChanged)
-    return () => window.removeEventListener('workspace-changed', handleWorkspaceChanged)
-  }, [loadTree])
 
   const handleToggleCollapse = useCallback((id: number) => {
     setCollapsedIds((prev) => {
@@ -133,30 +123,42 @@ const Index: React.FC = () => {
         onAddTask={() => handleOpenAddModal(null)}
       />
 
-      {/* 主体区域：树 + 甘特图 */}
+      {/* 主体区域：列表视图 = 完整字段清单；甘特图视图 = 树 + 甘特图 */}
       <div className="flex-1 flex flex-row overflow-hidden">
-        {/* 左侧任务树 */}
-        <TaskTree
-          tree={tree}
-          selectedId={selectedId}
-          collapsedIds={collapsedIds}
-          onSelect={handleSelect}
-          onToggleCollapse={handleToggleCollapse}
-          scrollRef={treeScrollRef}
-          onAddTask={handleOpenAddModal}
-          onDeleteTask={handleDeleteTask}
-          onEditTask={(task) => handleOpenAddModal(task.parent_id, task)}
-        />
-
-        {/* 中间甘特图 */}
-        <GanttChart
-          tree={tree}
-          selectedId={selectedId}
-          collapsedIds={collapsedIds}
-          onSelect={handleSelect}
-          ganttRef={ganttRef}
-          treeScrollRef={treeScrollRef}
-        />
+        {viewMode === 'list' ? (
+          <TaskListView
+            tree={tree}
+            selectedId={selectedId}
+            collapsedIds={collapsedIds}
+            onSelect={handleSelect}
+            onToggleCollapse={handleToggleCollapse}
+            onAddTask={handleOpenAddModal}
+            onDeleteTask={handleDeleteTask}
+            onEditTask={(task) => handleOpenAddModal(task.parent_id, task)}
+          />
+        ) : (
+          <>
+            <TaskTree
+              tree={tree}
+              selectedId={selectedId}
+              collapsedIds={collapsedIds}
+              onSelect={handleSelect}
+              onToggleCollapse={handleToggleCollapse}
+              scrollRef={treeScrollRef}
+              onAddTask={handleOpenAddModal}
+              onDeleteTask={handleDeleteTask}
+              onEditTask={(task) => handleOpenAddModal(task.parent_id, task)}
+            />
+            <GanttChart
+              tree={tree}
+              selectedId={selectedId}
+              collapsedIds={collapsedIds}
+              onSelect={handleSelect}
+              ganttRef={ganttRef}
+              treeScrollRef={treeScrollRef}
+            />
+          </>
+        )}
       </div>
 
       {/* 添加任务弹窗 */}

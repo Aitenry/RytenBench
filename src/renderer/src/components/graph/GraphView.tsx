@@ -16,7 +16,7 @@ import EntityDetail from './EntityDetail'
 import GraphToolbar from './GraphToolbar'
 import DocumentPreviewModal from '@renderer/components/document/DocumentPreviewModal'
 
-const GraphView: React.FC<GraphViewProps> = ({ selectedWiki }) => {
+const GraphView: React.FC<GraphViewProps> = ({ selectedWiki, onOpenDocInEditor, initialDocFilter }) => {
   const {
     token: { colorBgContainer, borderRadiusLG }
   } = theme.useToken()
@@ -34,7 +34,7 @@ const GraphView: React.FC<GraphViewProps> = ({ selectedWiki }) => {
   const [addedDocIds, setAddedDocIds] = useState<Set<number>>(new Set())
   const [isAppending, setIsAppending] = useState(false)
   const [isGraphLoading, setIsGraphLoading] = useState(false)
-  const [docFilter, setDocFilter] = useState<number[]>([])
+  const [docFilter, setDocFilter] = useState<number[]>(initialDocFilter ?? [])
 
   const [previewDoc, setPreviewDoc] = useState<{
     id: number
@@ -230,6 +230,11 @@ const GraphView: React.FC<GraphViewProps> = ({ selectedWiki }) => {
   }
 
   const handleDocClick = async (docId: number): Promise<void> => {
+    // 宿主提供「打开文档编辑器」回调时，点击来源文档直接跳到编辑器（图谱↔文档双向联动）
+    if (onOpenDocInEditor) {
+      onOpenDocInEditor(docId)
+      return
+    }
     try {
       const doc = await (window as unknown as Window).api.docs.getById(docId)
       if (doc) {
@@ -262,6 +267,7 @@ const GraphView: React.FC<GraphViewProps> = ({ selectedWiki }) => {
             addedDocIds={addedDocIds}
             isAppending={isAppending}
             docFilter={docFilter}
+            isDocGraph={(initialDocFilter?.length ?? 0) > 0}
             onSearchChange={setSearchQuery}
             onTypeFilterChange={handleTypeFilterChange}
             onAppendDocs={handleAppendDocs}

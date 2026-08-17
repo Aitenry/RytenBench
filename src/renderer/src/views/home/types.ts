@@ -9,4 +9,8 @@ export interface DocSourceInfo {
 }
 
 export type Selection =
-  { kind: 'doc'; docId: number; source?: DocSourceInfo } | { kind: 'todo'; todoId: number } | null
+  | { kind: 'doc'; docId: number; source?: DocSourceInfo }
+  | { kind: 'todo'; todoId: number }
+  | { kind: 'wiki-graph'; wikiId: number }
+  | { kind: 'doc-graph'; wikiId: number; docId: number }
+  | null

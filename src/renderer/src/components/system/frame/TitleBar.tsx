@@ -1,12 +1,16 @@
-import React, { useCallback, useEffect, useState } from 'react'
-import { theme, Button, Popover, Input, Dropdown, App } from 'antd'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { theme, Button, Popover, Input, Dropdown, App, Modal } from 'antd'
+import type { InputRef } from 'antd'
 import {
   RiCollapseDiagonal2Line,
   RiExpandDiagonal2Line,
+  RiFolderLine,
   RiFolderOpenLine,
   RiMoreLine,
   RiShutDownLine,
-  RiSubtractLine
+  RiSubtractLine,
+  RiSearchLine,
+  RiCloseLine
 } from '@remixicon/react'
 import logo from '@renderer/assets/logo.png'
 import { useMessage } from '@renderer/hooks/useMessage'
@@ -37,10 +41,22 @@ const TitleBar: React.FC<TitleBarProps> = ({
   /* ── 工作区状态 ── */
   const [workspaces, setWorkspaces] = useState<WorkspaceRow[]>([])
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<number | null>(null)
-  const [creatingName, setCreatingName] = useState('')
-  const [creatingPath, setCreatingPath] = useState('')
   const [workspaceOpen, setWorkspaceOpen] = useState(false)
   const [hoveredWsId, setHoveredWsId] = useState<number | null>(null)
+
+  /* 重命名弹窗 */
+  const [renameOpen, setRenameOpen] = useState(false)
+  const [renameTarget, setRenameTarget] = useState<WorkspaceRow | null>(null)
+  const [renameName, setRenameName] = useState('')
+  const [renameSaving, setRenameSaving] = useState(false)
+
+  /* 搜索模式 */
+  const [searchMode, setSearchMode] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const searchInputRef = useRef<InputRef | null>(null)
+  useEffect(() => {
+    if (searchMode) searchInputRef.current?.focus()
+  }, [searchMode])
 
   const loadWorkspaces = useCallback(async (): Promise<void> => {
     try {
@@ -97,6 +113,11 @@ const TitleBar: React.FC<TitleBarProps> = ({
   }
 
   const handleDeleteWorkspace = (ws: WorkspaceRow): void => {
+    // 至少保留一个工作区（主进程 deleteWorkspace 同样有校验，这里提前拦截）
+    if (workspaces.length <= 1) {
+      viewMessage('ws-delete-last', 'warning', '至少需要保留一个工作区')
+      return
+    }
     modal.confirm({
       title: '删除工作区',
       content: `确定要删除「${ws.name}」吗？该工作区下的所有内容也将被删除。`,
@@ -108,7 +129,7 @@ const TitleBar: React.FC<TitleBarProps> = ({
           const win = window as unknown as Window
           await win.api.chat.deleteWorkspace(ws.id)
           if (activeWorkspaceId === ws.id) {
-            // 删除的是当前工作区：自动切到剩余第一个；一个不剩则置 0（主进程按 0 查询为空）
+            // 删除的是当前工作区：自动切到剩余第一个
             const remaining = await win.api.chat.getAllWorkspaces()
             if (remaining.length > 0) {
               const next = remaining[0]
@@ -122,17 +143,6 @@ const TitleBar: React.FC<TitleBarProps> = ({
               window.dispatchEvent(
                 new CustomEvent('workspace-changed', { detail: { workspaceId: next.id } })
               )
-            } else {
-              // 注意：systemSettings.update 会跳过 undefined，必须用 0 显式清空
-              await win.api.systemSettings.update({
-                chat: {
-                  activeWorkspaceId: 0
-                } as Parameters<typeof win.api.systemSettings.update>[0]['chat']
-              })
-              setActiveWorkspaceId(null)
-              window.dispatchEvent(
-                new CustomEvent('workspace-changed', { detail: { workspaceId: null } })
-              )
             }
           }
           await loadWorkspaces()
@@ -143,44 +153,26 @@ const TitleBar: React.FC<TitleBarProps> = ({
     })
   }
 
+  /* 选择文件夹后直接创建并激活工作区（名称取目录名，之后可重命名） */
   const handleBrowseFolder = async (): Promise<void> => {
     try {
-      const dir = await (window as unknown as Window).api.chat.selectWorkspace()
-      if (dir) {
-        setCreatingPath(dir)
-        // 取路径最后一级作为默认名称
-        const defaultName =
-          dir
-            .replace(/[/\\]$/, '')
-            .split(/[/\\]/)
-            .pop() || dir
-        setCreatingName(defaultName)
-        setWorkspaceOpen(true)
-      }
-    } catch (err) {
-      console.error('Failed to select folder:', err)
-    }
-  }
-
-  const handleCreateWorkspace = async (): Promise<void> => {
-    const name = creatingName.trim()
-    if (!name || !creatingPath) {
-      viewMessage('ws-create-validate', 'warning', '请输入工作区名称')
-      return
-    }
-    try {
       const win = window as unknown as Window
-      const id = await win.api.chat.createWorkspace(name, creatingPath)
+      const dir = await win.api.chat.selectWorkspace()
+      if (!dir) return
+      const name =
+        dir
+          .replace(/[/\\]$/, '')
+          .split(/[/\\]/)
+          .pop() || '工作区'
+      const id = await win.api.chat.createWorkspace(name, dir)
       await win.api.systemSettings.update({
         chat: {
-          workspacePath: creatingPath,
+          workspacePath: dir,
           activeWorkspaceId: id
         } as Parameters<typeof win.api.systemSettings.update>[0]['chat']
       })
       setActiveWorkspaceId(id)
-      setCreatingName('')
-      setCreatingPath('')
-      setWorkspaceOpen(false)
+      setWorkspaceOpen(true)
       window.dispatchEvent(new CustomEvent('workspace-changed', { detail: { workspaceId: id } }))
       await loadWorkspaces()
     } catch (err) {
@@ -188,93 +180,210 @@ const TitleBar: React.FC<TitleBarProps> = ({
     }
   }
 
+  /* 打开重命名弹窗 */
+  const openRename = (ws: WorkspaceRow): void => {
+    setRenameTarget(ws)
+    setRenameName(ws.name)
+    setRenameOpen(true)
+  }
+
+  /* 保存重命名 */
+  const handleRenameSave = async (): Promise<void> => {
+    const name = renameName.trim()
+    if (!name || !renameTarget) {
+      viewMessage('ws-rename-validate', 'warning', '请输入工作区名称')
+      return
+    }
+    try {
+      setRenameSaving(true)
+      const win = window as unknown as Window
+      await win.api.chat.updateWorkspace(renameTarget.id, { name })
+      setRenameOpen(false)
+      await loadWorkspaces()
+      viewMessage('ws-rename-done', 'success', '工作区已重命名', 2)
+    } catch (err) {
+      console.error('Failed to rename workspace:', err)
+      viewMessage('ws-rename-error', 'error', '重命名失败')
+    } finally {
+      setRenameSaving(false)
+    }
+  }
+
   const activeWs = workspaces.find((w) => w.id === activeWorkspaceId)
 
-  const workspaceContent = (
-    <div
-      style={{ width: 320, maxHeight: 360, overflowY: 'auto', background: token.colorBgElevated }}
+  /* 搜索过滤后的工作区列表 */
+  const filteredWorkspaces = searchQuery.trim()
+    ? workspaces.filter((w) => w.name.toLowerCase().includes(searchQuery.trim().toLowerCase()))
+    : workspaces
+
+  /* 头部小图标按钮 */
+  const iconBtn = (title: string, onClick: () => void, icon: React.ReactNode): React.ReactNode => (
+    <button
+      title={title}
+      onClick={onClick}
+      style={{
+        width: 26,
+        height: 26,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        border: 'none',
+        borderRadius: 6,
+        background: 'transparent',
+        color: token.colorTextSecondary,
+        cursor: 'pointer',
+        transition: 'background 0.15s, color 0.15s'
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background = token.colorFillTertiary
+        e.currentTarget.style.color = token.colorText
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = 'transparent'
+        e.currentTarget.style.color = token.colorTextSecondary
+      }}
     >
-      {/* 选择文件夹 */}
-      <div className="mb-2">
-        <Button
-          block
-          icon={<RiFolderOpenLine size={14} />}
-          onClick={handleBrowseFolder}
-          size="small"
+      {icon}
+    </button>
+  )
+
+  /* 工作区列表（搜索模式与普通模式共用，滚动高度不同） */
+  const listNode = (
+    <div style={{ maxHeight: searchMode ? 210 : 260, overflowY: 'auto' }}>
+      {filteredWorkspaces.length === 0 ? (
+        <div
+          style={{
+            padding: '18px 0',
+            textAlign: 'center',
+            fontSize: 12,
+            color: token.colorTextTertiary
+          }}
         >
-          选择文件夹
-        </Button>
-      </div>
-
-      {/* 新工作区名称 & 路径 & 创建按钮 */}
-      {creatingPath && (
-        <div className="mb-2 p-2 rounded" style={{ background: token.colorFillTertiary }}>
-          <div className="text-xs mb-1" style={{ wordBreak: 'break-all', opacity: 0.6 }}>
-            {creatingPath}
-          </div>
-          <div className="flex items-center gap-1">
-            <Input
-              size="small"
-              value={creatingName}
-              onChange={(e) => setCreatingName(e.target.value)}
-              placeholder="工作区名称"
-              onPressEnter={handleCreateWorkspace}
-              style={{ flex: 1 }}
-            />
-            <Button size="small" type="primary" onClick={handleCreateWorkspace}>
-              创建
-            </Button>
-          </div>
+          {searchQuery ? '无匹配的工作区' : '暂无工作区'}
         </div>
-      )}
-
-      {/* 工作区列表 */}
-      {workspaces.length > 0 && (
-        <div>
-          <div className="text-xs font-medium mb-1" style={{ opacity: 0.5 }}>
-            工作区列表
-          </div>
-          {workspaces.map((ws) => (
-            <div
-              key={ws.id}
-              className="flex items-center justify-between px-2 py-1.5 rounded cursor-pointer transition-colors text-sm"
-              style={{
-                background:
-                  ws.id === activeWorkspaceId
-                    ? token.colorFillSecondary
-                    : hoveredWsId === ws.id
-                      ? token.colorFillTertiary
-                      : 'transparent'
+      ) : (
+        filteredWorkspaces.map((ws) => (
+          <div
+            key={ws.id}
+            className="flex items-center justify-between px-2 py-1.5 rounded cursor-pointer transition-colors"
+            style={{
+              fontSize: 12,
+              margin: '0 4px',
+              background:
+                ws.id === activeWorkspaceId
+                  ? token.colorFillSecondary
+                  : hoveredWsId === ws.id
+                    ? token.colorFillTertiary
+                    : 'transparent'
+            }}
+            onMouseEnter={() => setHoveredWsId(ws.id)}
+            onMouseLeave={() => setHoveredWsId(null)}
+            onClick={() => handleSelectWorkspace(ws)}
+          >
+            <RiFolderLine size={14} style={{ color: token.colorTextTertiary, flexShrink: 0 }} />
+            <span className="truncate flex-1 ml-1.5">{ws.name}</span>
+            <Dropdown
+              menu={{
+                items: [
+                  {
+                    key: 'rename',
+                    label: '重命名',
+                    onClick: () => openRename(ws)
+                  },
+                  /* 仅剩一个工作区时不提供删除（保留重命名） */
+                  ...(workspaces.length > 1
+                    ? [
+                        {
+                          key: 'delete',
+                          label: '删除',
+                          danger: true as const,
+                          onClick: () => handleDeleteWorkspace(ws)
+                        }
+                      ]
+                    : [])
+                ]
               }}
-              onMouseEnter={() => setHoveredWsId(ws.id)}
-              onMouseLeave={() => setHoveredWsId(null)}
-              onClick={() => handleSelectWorkspace(ws)}
+              trigger={['click']}
+              placement="bottomRight"
             >
-              <span className="truncate flex-1">{ws.name}</span>
-              <Dropdown
-                menu={{
-                  items: [
-                    {
-                      key: 'delete',
-                      label: '删除',
-                      danger: true,
-                      onClick: () => handleDeleteWorkspace(ws)
-                    }
-                  ]
-                }}
-                trigger={['click']}
-                placement="bottomRight"
-              >
-                <Button
-                  type="text"
-                  size="small"
-                  icon={<RiMoreLine size={14} />}
-                  onClick={(e) => e.stopPropagation()}
-                />
-              </Dropdown>
-            </div>
-          ))}
+              <Button
+                type="text"
+                size="small"
+                icon={<RiMoreLine size={14} />}
+                onClick={(e) => e.stopPropagation()}
+              />
+            </Dropdown>
+          </div>
+        ))
+      )}
+    </div>
+  )
+
+  const workspaceContent = (
+    <div style={{ width: 200, background: token.colorBgElevated }}>
+      {searchMode ? (
+        /* 搜索模式：搜索框与结果合并为一个整体面板 */
+        <div
+          style={{
+            margin: 6,
+            border: `1px solid ${token.colorBorderSecondary}`,
+            borderRadius: 10,
+            overflow: 'hidden',
+            background: token.colorFillQuaternary
+          }}
+        >
+          <div
+            style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 6px 6px 10px' }}
+          >
+            <Input
+              ref={searchInputRef}
+              size="small"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onPressEnter={() => {
+                if (filteredWorkspaces.length > 0) handleSelectWorkspace(filteredWorkspaces[0])
+              }}
+              placeholder="搜索工作区"
+              allowClear
+              variant="borderless"
+              prefix={<RiSearchLine size={14} style={{ color: token.colorTextTertiary }} />}
+              style={{ flex: 1, background: 'transparent' }}
+            />
+            {iconBtn(
+              '退出搜索',
+              () => {
+                setSearchMode(false)
+                setSearchQuery('')
+              },
+              <RiCloseLine size={15} />
+            )}
+          </div>
+          <div style={{ borderTop: `1px solid ${token.colorBorderSecondary}` }}>{listNode}</div>
         </div>
+      ) : (
+        <>
+          {/* 头部：工作区标题 + 搜索 / 添加 */}
+          <div style={{ display: 'flex', alignItems: 'center', padding: '10px 10px 8px' }}>
+            <span
+              style={{
+                fontSize: 13,
+                fontWeight: 600,
+                color: token.colorText,
+                paddingLeft: 2,
+                userSelect: 'none'
+              }}
+            >
+              工作区
+            </span>
+            <span style={{ flex: 1 }} />
+            {iconBtn('搜索工作区', () => setSearchMode(true), <RiSearchLine size={15} />)}
+            <span style={{ width: 6, flexShrink: 0 }} />
+            {iconBtn('添加工作区', handleBrowseFolder, <RiFolderOpenLine size={15} />)}
+          </div>
+
+          {/* 工作区列表 */}
+          <div style={{ padding: '0 0 6px' }}>{listNode}</div>
+        </>
       )}
     </div>
   )
@@ -292,7 +401,7 @@ const TitleBar: React.FC<TitleBarProps> = ({
           style={{
             width: 1,
             height: 14,
-            margin: '0 10px',
+            margin: '0 6px',
             background: colorTextSecondary,
             opacity: 0.15,
             flexShrink: 0
@@ -307,7 +416,7 @@ const TitleBar: React.FC<TitleBarProps> = ({
           open={workspaceOpen}
           onOpenChange={setWorkspaceOpen}
           placement="bottomLeft"
-          overlayStyle={{ width: 340 }}
+          overlayStyle={{ width: 200 }}
         >
           <Button
             type="text"
@@ -320,6 +429,7 @@ const TitleBar: React.FC<TitleBarProps> = ({
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
                 fontSize: 12,
+                padding: '0 2px',
                 color: colorTextSecondary,
                 WebkitAppRegion: 'no-drag'
               } as React.CSSProperties
@@ -353,6 +463,29 @@ const TitleBar: React.FC<TitleBarProps> = ({
           <RiShutDownLine size={16} />
         </button>
       </div>
+
+      {/* 重命名工作区弹窗 */}
+      <Modal
+        title="重命名工作区"
+        open={renameOpen}
+        onCancel={() => {
+          setRenameOpen(false)
+          setRenameTarget(null)
+        }}
+        onOk={handleRenameSave}
+        okText="保存"
+        cancelText="取消"
+        confirmLoading={renameSaving}
+        width={380}
+      >
+        <Input
+          autoFocus
+          placeholder="工作区名称"
+          value={renameName}
+          onChange={(e) => setRenameName(e.target.value)}
+          onPressEnter={handleRenameSave}
+        />
+      </Modal>
     </div>
   )
 }
