@@ -363,10 +363,10 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
   const searchLower = search.trim().toLowerCase()
 
   /* ── 行样式 ── */
-  const rowStyle = (selected: boolean, indent = 0): React.CSSProperties => ({
+  const rowStyle = (selected: boolean, indent = 0, isDoc = false): React.CSSProperties => ({
     display: 'flex',
     alignItems: 'center',
-    gap: 6,
+    gap: isDoc ? 6.5 : 6,
     height: 28,
     padding: `0 7px 0 ${8 + indent * 16}px`,
     borderRadius: 6,
@@ -640,7 +640,7 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
             const isSel = selection?.kind === 'doc' && selection.docId === noteId
             const title = docTitle(noteId)
             children.push(
-              <div key={`doc-${noteId}`} style={rowStyle(isSel, 1 + depth)}>
+              <div key={`doc-${noteId}`} style={rowStyle(isSel, 1 + depth, true)}>
                 {accentBar(isSel)}
                 <span
                   style={{
