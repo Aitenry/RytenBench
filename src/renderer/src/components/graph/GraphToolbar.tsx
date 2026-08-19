@@ -122,7 +122,11 @@ const GraphToolbar: React.FC<GraphToolbarProps> = ({
                       }}
                     >
                       <span
-                        style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                        style={{
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap'
+                        }}
                       >
                         {label}
                       </span>

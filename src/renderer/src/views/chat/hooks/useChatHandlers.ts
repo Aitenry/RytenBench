@@ -892,6 +892,9 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
   const handleSend = useCallback(async (): Promise<void> => {
     if (!inputValue.trim()) return
 
+    // 新一轮问答开始：清空输入框上方的进行中任务卡片（等待模型重新规划）
+    window.dispatchEvent(new CustomEvent('chat-send-started'))
+
     const currentAttachments = [...attachments]
     setAttachments([])
 

@@ -16,7 +16,11 @@ import EntityDetail from './EntityDetail'
 import GraphToolbar from './GraphToolbar'
 import DocumentPreviewModal from '@renderer/components/document/DocumentPreviewModal'
 
-const GraphView: React.FC<GraphViewProps> = ({ selectedWiki, onOpenDocInEditor, initialDocFilter }) => {
+const GraphView: React.FC<GraphViewProps> = ({
+  selectedWiki,
+  onOpenDocInEditor,
+  initialDocFilter
+}) => {
   const {
     token: { colorBgContainer, borderRadiusLG }
   } = theme.useToken()

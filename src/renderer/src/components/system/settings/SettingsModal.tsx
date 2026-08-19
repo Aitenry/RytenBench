@@ -6,7 +6,6 @@ import {
   RiMindMap,
   RiComputerLine,
   RiBrainAi3Line,
-  RiChatSettingsLine,
   RiAiAgentLine,
   RiFileAi2Line,
   RiBrain4Line
@@ -16,13 +15,12 @@ import MusicSettings from './MusicSettings'
 import GraphSettings from './GraphSettings'
 import SystemInfo from './SystemInfo'
 import ModelSettings from './ModelSettings'
-import AssistantSettings from './AssistantSettings'
 import AgentSettings from '@renderer/views/chat/components/settings/AgentSettings'
 import SkillsSettings from '@renderer/views/chat/components/settings/SkillsSettings'
 import MemorySettings from '@renderer/views/chat/components/settings/MemorySettings'
 
 export type SettingsTab =
-  'general' | 'model' | 'music' | 'graph' | 'system' | 'chat' | 'agents' | 'skills' | 'memory'
+  'general' | 'model' | 'music' | 'graph' | 'system' | 'agents' | 'skills' | 'memory'
 
 interface TabItem {
   key: SettingsTab
@@ -30,7 +28,7 @@ interface TabItem {
   icon: React.ReactNode
 }
 
-/** 分组导航：常规 + 助手（聊天设置已并入系统设置） */
+/** 分组导航：常规 + 助手（对话参数已由工程自动管理，无独立设置页） */
 const NAV_GROUPS: { label: string; items: TabItem[] }[] = [
   {
     label: '常规',
@@ -45,7 +43,6 @@ const NAV_GROUPS: { label: string; items: TabItem[] }[] = [
   {
     label: '助手',
     items: [
-      { key: 'chat', label: '对话', icon: <RiChatSettingsLine size={16} /> },
       { key: 'agents', label: '智能体', icon: <RiAiAgentLine size={16} /> },
       { key: 'skills', label: '技能', icon: <RiFileAi2Line size={16} /> },
       { key: 'memory', label: '记忆', icon: <RiBrain4Line size={16} /> }
@@ -94,8 +91,6 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ open, onClose, initialTab
         return <GraphSettings />
       case 'system':
         return <SystemInfo />
-      case 'chat':
-        return <AssistantSettings />
       case 'agents':
         return <AgentSettings />
       case 'skills':

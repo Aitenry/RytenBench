@@ -517,7 +517,7 @@ const AgentSettings: React.FC = () => {
         icon={<TeamOutlined size={14} />}
         description={`共 ${total} 个，只有开启的智能体才会在对话中生效`}
         extra={
-          <>
+          <div className="flex items-center" style={{ gap: 8 }}>
             <Button
               icon={<ImportOutlined />}
               size="small"
@@ -534,7 +534,7 @@ const AgentSettings: React.FC = () => {
             >
               新建
             </Button>
-          </>
+          </div>
         }
       >
         {loading ? (

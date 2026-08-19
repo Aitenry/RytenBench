@@ -1,19 +1,15 @@
 import { BaseMessage } from '@langchain/core/messages'
-import { createDeepAgent } from 'deepagents'
 import logger from 'electron-log'
 import { ChatOptions, StructuredMessage } from '../types'
+import { Runtime } from '../runtime/runtime'
 import { buildHumanMessage } from './message-builder'
 import type { UploadedFileRef } from './message-builder'
-import {
-  produceMessages,
-  produceToolCalls,
-  produceSubAgents,
-  type StreamRun
-} from './stream-producers'
+import { produceMessages, produceToolCalls, produceSubAgents } from './stream-producers'
 
 /** 流式处理所需的 ChatService 依赖（避免循环引用） */
 export interface StreamDeps {
-  createAgent(): ReturnType<typeof createDeepAgent>
+  /** 创建运行时（LangChain/LangGraph） */
+  createRuntime(): Runtime
 
   loadContextMessages(topicId: number): Promise<BaseMessage[]>
 
@@ -25,7 +21,7 @@ export interface StreamDeps {
 
 /**
  * 发送消息并以流式方式返回内容
- * @param deps ChatService 的 agent 和历史加载方法
+ * @param deps ChatService 的运行时和历史加载方法
  * @param message 用户输入
  * @param options 可选配置（含 topicId 用于加载历史）
  * @returns 异步生成器，返回 StructuredMessage
@@ -39,28 +35,27 @@ export async function* runStream(
   const signal = options?.signal
 
   try {
-    const agent = deps.createAgent()
+    const runtime = deps.createRuntime()
 
     const uploadedRefs = await deps.copyUploadedFiles(options?.documents)
     const userMessage = buildHumanMessage(message, options?.images, uploadedRefs)
     const contextMessages = options?.topicId ? await deps.loadContextMessages(options.topicId) : []
     logger.info(
-      `[Chat] Passing ${contextMessages.length} context messages + 1 user message to deepagent (topicId=${options?.topicId})`
+      `[Chat] Passing ${contextMessages.length} context messages + 1 user message to runtime (topicId=${options?.topicId})`
     )
     if (contextMessages.length > 0) {
       logger.info(`[Chat] Context roles: ${contextMessages.map((m) => m._getType()).join(' → ')}`)
     }
-    const run = (await agent.streamEvents(
-      { messages: [...contextMessages, userMessage] },
-      { version: 'v3', signal }
-    )) as StreamRun
+    const run = runtime.stream([...contextMessages, userMessage], signal, options?.topicId)
 
     // 使用队列实现消息和工具调用的并发流式输出
     const queue: StructuredMessage[] = []
     let waiting: (() => void) | null = null
     let producersAlive = 3
+    let emittedCount = 0
 
     const enqueue = (item: StructuredMessage): void => {
+      emittedCount++
       queue.push(item)
       if (waiting) {
         waiting()
@@ -115,6 +110,17 @@ export async function* runStream(
 
     // 等待所有生产者完成（捕获潜在错误）
     await Promise.allSettled([msgProducer, toolProducer, subAgentProducer])
+
+    // 完全无输出：图执行失败被静默吞掉时向前端透传错误，避免"没有任何内容"
+    if (emittedCount === 0 && !signal?.aborted) {
+      if (run.error) {
+        logger.error('[Chat] 运行时执行失败，无任何输出:', run.error)
+        yield { content: `Failed to get response: ${run.error.message}` }
+      } else {
+        logger.warn('[Chat] 运行时未产生任何输出（无错误信息）')
+        yield { content: 'Failed to get response: 模型未返回任何内容，请查看日志或重试。' }
+      }
+    }
   } catch (error) {
     logger.error('Error in sendMessageStream:', error)
     yield {

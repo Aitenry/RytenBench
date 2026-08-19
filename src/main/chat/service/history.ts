@@ -1,4 +1,10 @@
-import { BaseMessage, HumanMessage, AIMessage, ToolMessage } from '@langchain/core/messages'
+import {
+  BaseMessage,
+  HumanMessage,
+  AIMessage,
+  ToolMessage,
+  SystemMessage
+} from '@langchain/core/messages'
 import logger from 'electron-log'
 import type { StructuredMessage, ToolCallDetail } from '../types'
 
@@ -80,27 +86,51 @@ export function extractStructuredMessages(messages: BaseMessage[]): StructuredMe
 }
 
 /**
- * 将数据库中的对话记录转换为 LangChain BaseMessage 数组，
- * 支持窗口限制（历史轮数）
+ * 历史上下文默认字符预算：超出后自动省略更早的对话（仅保留最近内容），
+ * 防止长对话累积导致上下文溢出。工程自动处理，不再暴露为设置项。
+ * （24,000 字符 ≈ 中文约 2-3 万 token，对主流上下文窗口均安全）
+ */
+export const HISTORY_MAX_CHARS = 24000
+
+/** 历史上下文转换结果 */
+export interface HistoryContext {
+  messages: BaseMessage[]
+  /** 是否发生了截断（更早的对话被省略） */
+  truncated: boolean
+}
+
+/**
+ * 将数据库中的对话记录转换为 LangChain BaseMessage 数组。
+ * 上下文压缩策略：从最近一条向前累计字符数，超过预算即停止（自动省略更早内容）；
+ * 发生截断时在消息头部插入 SystemMessage 说明，避免模型困惑于缺失的历史。
  */
 export function convertDialoguesToMessages(
   dialogues: HistoryDialogue[],
-  historyWindowSize: number
-): BaseMessage[] {
-  // historyWindowSize=0 表示不限制
-  const effectiveHistory = historyWindowSize > 0 ? historyWindowSize : Number.MAX_SAFE_INTEGER
-
-  // 从后往前取最多 effectiveHistory 轮对话
+  maxChars: number = HISTORY_MAX_CHARS
+): HistoryContext {
+  // 从后往前选取最近的对话，直到累计字符数超过预算（至少保留最后一条）
   const selected: HistoryDialogue[] = []
-  let pairCount = 0
-  for (let i = dialogues.length - 1; i >= 0 && pairCount < effectiveHistory; i--) {
-    selected.unshift(dialogues[i])
-    if (dialogues[i].role === 'user') {
-      pairCount++
+  let totalChars = 0
+  let truncated = false
+  for (let i = dialogues.length - 1; i >= 0; i--) {
+    const d = dialogues[i]
+    const chars = d.content.length + (d.blocks ? d.blocks.length : 0)
+    if (totalChars + chars > maxChars && selected.length > 0) {
+      truncated = true
+      break
     }
+    selected.unshift(d)
+    totalChars += chars
   }
 
   const messages: BaseMessage[] = []
+
+  // 截断说明：置于最前，告知模型早期历史被省略
+  if (truncated) {
+    messages.push(
+      new SystemMessage('（注：更早的对话因篇幅过长已自动省略，本次仅携带最近的内容。）')
+    )
+  }
 
   for (const d of selected) {
     if (d.role === 'user') {
@@ -165,5 +195,5 @@ export function convertDialoguesToMessages(
     }
   }
 
-  return messages
+  return { messages, truncated }
 }

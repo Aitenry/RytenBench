@@ -515,7 +515,11 @@ const HomeView: React.FC = () => {
       return (
         <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
           <GraphView
-            key={selection.kind === 'doc-graph' ? `doc-graph-${selection.docId}` : `wiki-graph-${selection.wikiId}`}
+            key={
+              selection.kind === 'doc-graph'
+                ? `doc-graph-${selection.docId}`
+                : `wiki-graph-${selection.wikiId}`
+            }
             selectedWiki={wiki}
             initialDocFilter={selection.kind === 'doc-graph' ? [selection.docId] : undefined}
             onOpenDocInEditor={(docId) =>
@@ -562,9 +566,7 @@ const HomeView: React.FC = () => {
         onEditWiki={setEditWiki}
         onDeleteWiki={handleDeleteWiki}
         onOpenGraph={(wiki) => setSelection({ kind: 'wiki-graph', wikiId: wiki.id })}
-        onOpenDocGraph={(wikiId, docId) =>
-          setSelection({ kind: 'doc-graph', wikiId, docId })
-        }
+        onOpenDocGraph={(wikiId, docId) => setSelection({ kind: 'doc-graph', wikiId, docId })}
         onDeleteDoc={handleDeleteDoc}
         onArchiveDoc={setArchiveDoc}
         onCreateDocInDirectory={handleCreateDocInDirectory}

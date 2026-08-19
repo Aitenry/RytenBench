@@ -8,6 +8,7 @@ import ChatSidebar from './components/ChatSidebar'
 import ChatHeader from './components/ChatHeader'
 import ChatMessageArea from './components/ChatMessageArea'
 import ChatInput from './components/ChatInput'
+import TaskProgressCard from './components/TaskProgressCard'
 import WorkspacePanel from './components/WorkspacePanel'
 
 const Index: React.FC = () => {
@@ -377,6 +378,7 @@ const Index: React.FC = () => {
 
               <div className="px-16 pb-8">
                 <div className="max-w-4xl mx-auto">
+                  <TaskProgressCard currentTopicId={currentTopicId} />
                   <ChatInput
                     inputValue={inputValue}
                     onInputChange={setInputValue}

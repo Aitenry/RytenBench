@@ -7,6 +7,7 @@ import { ChatTopicRow, ChatDialogueRow, WorkspaceRow } from '../main/database/ma
 import type { LlmProviderInput, LlmProviderConfig } from '../main/database/mapper/provider'
 import type { AgentConfigRow, AgentConfigInput } from '../main/database/mapper/agent'
 import type { PaginatedResult as AgentPaginatedResult } from '../main/database/mapper/agent'
+import type { TodoItem } from '../main/chat/runtime/todo'
 import type { SystemSettings } from '../main/types/settings'
 
 interface WeatherData {
@@ -193,24 +194,40 @@ const api = {
         streamErrorHandlers.delete(callback)
       }
     },
+    onChatTodosUpdated: (callback: (data: { topicId: number; todos: TodoItem[] }) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, data: { topicId: number; todos: TodoItem[] }): void => {
+        callback(data)
+      }
+      ipcRenderer.on('chat-todos-updated', listener)
+      return () => {
+        ipcRenderer.removeListener('chat-todos-updated', listener)
+      }
+    },
     cancelStream: () => {
       ipcRenderer.send('chat-cancel-stream')
     },
     selectSkillsDirectory: () => ipcRenderer.invoke('chat-select-skills-directory'),
     selectWorkspace: () => ipcRenderer.invoke('chat-select-workspace') as Promise<string | null>,
     listSkills: () => ipcRenderer.invoke('chat-list-skills'),
-    // 记忆管理
+    // 记忆管理（Mnemon 三层记忆）
     selectMemoryDirectory: () => ipcRenderer.invoke('chat-select-memory-directory'),
-    scanMemoryTree: (workspaceId: number) =>
-      ipcRenderer.invoke('chat-scan-memory-tree', workspaceId),
-    initMemoryDirs: (workspaceId: number) =>
-      ipcRenderer.invoke('chat-init-memory-dirs', workspaceId),
-    checkMemoryInitialized: () => ipcRenderer.invoke('chat-check-memory-initialized'),
-    initSubagentMemoryDirs: (workspaceId: number, agentName: string) =>
-      ipcRenderer.invoke('chat-init-subagent-memory-dirs', workspaceId, agentName),
-    removeSubagentMemoryDirs: (workspaceId: number, agentName: string) =>
-      ipcRenderer.invoke('chat-remove-subagent-memory-dirs', workspaceId, agentName),
-    readMemoryFile: (filePath: string) => ipcRenderer.invoke('chat-read-memory-file', filePath),
+    // Mnemon 记忆系统
+    mnemonSnapshot: () => ipcRenderer.invoke('mnemon-snapshot'),
+    mnemonRuntimeMutate: (request: {
+      action: string
+      target: string
+      content?: string
+      old_text?: string
+      importance?: string
+    }) => ipcRenderer.invoke('mnemon-runtime-mutate', request),
+    mnemonBodies: () => ipcRenderer.invoke('mnemon-bodies'),
+    mnemonBodyCreate: (name: string, description: string) =>
+      ipcRenderer.invoke('mnemon-body-create', { name, description }),
+    mnemonBodyUpdate: (id: string, request: { name?: string; description?: string; active?: boolean }) =>
+      ipcRenderer.invoke('mnemon-body-update', id, request),
+    mnemonBodyList: (memoryBodyIds?: string[]) =>
+      ipcRenderer.invoke('mnemon-body-list', memoryBodyIds),
+    mnemonDocumentSnapshot: () => ipcRenderer.invoke('mnemon-document-snapshot'),
     // 工作区管理
     getAllWorkspaces: () => ipcRenderer.invoke('workspace-get-all') as Promise<WorkspaceRow[]>,
     createWorkspace: (name: string, path: string) =>

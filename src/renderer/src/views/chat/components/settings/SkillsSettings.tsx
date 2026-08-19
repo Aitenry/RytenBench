@@ -79,10 +79,7 @@ const SkillsSettings: React.FC = () => {
       setSavingPath(true)
       const trimmed = skillsPath.trim()
       const nextChat: ChatSettings = {
-        ...(settings?.chat ?? {
-          maxIterations: 5,
-          historyWindowSize: 10
-        }),
+        ...(settings?.chat ?? {}),
         skillsPath: trimmed || undefined
       }
       await (window as unknown as Window).api.systemSettings.update({ chat: nextChat })

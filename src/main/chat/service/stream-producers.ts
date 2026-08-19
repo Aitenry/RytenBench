@@ -1,43 +1,24 @@
 import logger from 'electron-log'
 import { StructuredMessage, ToolCard } from '../types'
+import type { RuntimeStream, MessageRecord, ToolCallRecord, SubAgentRecord } from '../runtime/types'
 
-/** deepagents streamEvents 返回的 run 对象的结构化契约 */
-export interface StreamRun {
-  messages: AsyncIterable<StreamMessage>
-  toolCalls: AsyncIterable<StreamToolCall>
-  subagents?: AsyncIterable<StreamSubAgent>
-}
-
-interface StreamMessage {
-  reasoning?: AsyncIterable<unknown>
-
-  [Symbol.asyncIterator](): AsyncIterator<StreamEvent>
-}
-
-interface StreamEvent {
-  event: string
-  index: number
-  delta?: unknown
-  content?: { type?: string; name?: unknown; id?: unknown }
-}
-
-interface StreamToolCall {
-  name: string
-  input: unknown
-  callId: string
-  output: unknown
-}
-
-interface StreamSubAgent {
-  name: string
-  cause?: { type: string; tool_call_id: string }
-  messages?: AsyncIterable<StreamMessage>
-  toolCalls?: AsyncIterable<StreamToolCall>
-}
+/**
+ * 流式生产者 — 消费 LangChain 运行时的三路记录流，转换为前端协议 StructuredMessage。
+ *
+ * 与旧版 deepagents streamEvents(v3) 版本的行为保持一致：
+ * - 消息生产者：推理/文本增量去重（兼容 delta 与整段两种形态）+ 工具 preparing 节流；
+ * - 工具生产者：executing → completed + 定制卡片；task 工具转换为子代理 started/completed；
+ * - 子代理生产者：按 (name, causeId) 分组，逐记录转发 running 事件，结束时发 early completed。
+ */
 
 type EnqueueFn = (item: StructuredMessage) => void
 type MarkDoneFn = () => void
 type SafeGetOutputFn = (call: { output: unknown }) => Promise<unknown>
+
+/** 延迟 100ms 确保渲染进程有时间渲染 loading 状态 */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
 
 // ============================================================================
 // 定制化工具卡片生成
@@ -117,106 +98,72 @@ function buildToolCard(
   }
 }
 
-/**
- * 生产者1：流式输出文本和推理内容
- */
+// ============================================================================
+// 消息流生产者：推理增量 / 文本增量 / 工具块
+// ============================================================================
+
+/** 文本增量去重：兼容「累积全文」与「纯增量」两种 provider 形态 */
+function computeDelta(tokenText: string, lastSent: string): string | undefined {
+  if (!tokenText) return undefined
+  if (tokenText.startsWith(lastSent) && tokenText.length > lastSent.length) {
+    return tokenText.slice(lastSent.length)
+  }
+  if (tokenText !== lastSent) {
+    return tokenText
+  }
+  return undefined
+}
+
 export async function produceMessages(
-  run: StreamRun,
+  run: RuntimeStream,
   signal: AbortSignal | undefined,
   enqueue: EnqueueFn,
   markDone: MarkDoneFn
 ): Promise<void> {
-  // lastSent 提升到跨所有 msg 共享：某些 provider / deepAgents 会把整段文本拆成多个 msg 重复发送
+  // lastSent 跨所有记录共享：某些 provider 会把整段文本拆成多条重复发送
   let lastSentReasoning = ''
   let lastSentContent = ''
+  const toolBlocks = new Map<number, { id?: string; name: string }>()
+  let lastProgressAt = 0
   try {
-    for await (const msg of run.messages) {
+    for await (const rec of run.messages as AsyncIterable<MessageRecord>) {
       if (signal?.aborted) break
-      // 推理流和文本流必须并发消费：对部分只发 delta 事件的 provider，
-      // reasoning 流要到整条消息结束才关闭，顺序消费会把正文扣留到消息完成后才下发
-      const reasoning = msg.reasoning
-      const drains: Promise<void>[] = []
-      if (reasoning) {
-        drains.push(
-          (async () => {
-            for await (const token of reasoning) {
-              if (signal?.aborted) break
-              const tokenText = String(token ?? '')
-              if (!tokenText) continue
-              let delta = ''
-              if (
-                tokenText.startsWith(lastSentReasoning) &&
-                tokenText.length > lastSentReasoning.length
-              ) {
-                delta = tokenText.slice(lastSentReasoning.length)
-              } else if (tokenText !== lastSentReasoning) {
-                delta = tokenText
-              }
-              lastSentReasoning = tokenText
-              if (delta) {
-                enqueue({ reasoning_content: delta })
-              }
-            }
-          })()
-        )
-      }
-      // text + tool 统一迭代：单次遍历 msg 事件，按时间顺序产出 text 和 tool preparing
-      // 不再使用独立的 msg.text / msg[Symbol.asyncIterator] 两路消费
-      {
-        const toolBlocks = new Map<number, { id?: string; name: string }>()
-        let lastProgressAt = 0
-        for await (const event of msg) {
-          if (signal?.aborted) break
-          if (event.event === 'content-block-delta') {
-            const d = event.delta as unknown as Record<string, unknown>
-            // 文本增量：检测 text 属性（兼容 delta.type 为 text_delta / text 等）
-            if (typeof d.text === 'string' && d.text) {
-              const tokenText = d.text
-              if (
-                tokenText.startsWith(lastSentContent) &&
-                tokenText.length > lastSentContent.length
-              ) {
-                const delta = tokenText.slice(lastSentContent.length)
-                enqueue({ content: delta })
-              } else if (tokenText !== lastSentContent) {
-                enqueue({ content: tokenText })
-              }
-              lastSentContent = tokenText
-            }
-            // 工具参数增量
-            else if (
-              d.type === 'block-delta' &&
-              (d.fields as Record<string, unknown>)?.type === 'tool_call_chunk'
-            ) {
-              const now = Date.now()
-              if (now - lastProgressAt < 500) continue
-              lastProgressAt = now
-              const info = toolBlocks.get(event.index)
-              if (!info || info.name === 'task') continue
-              enqueue({
-                tool: {
-                  name: info.name,
-                  input: {},
-                  output: '',
-                  status: 'preparing',
-                  id: info.id
-                }
-              })
-            }
-          } else if (event.event === 'content-block-start') {
-            const block = event.content as { type?: string; name?: unknown; id?: unknown }
-            if (block.type === 'tool_call_chunk' || block.type === 'tool_call') {
-              const name = typeof block.name === 'string' ? block.name : ''
-              if (name === 'task') continue
-              const id = typeof block.id === 'string' && block.id ? block.id : undefined
-              toolBlocks.set(event.index, { id, name })
-              lastProgressAt = Date.now()
-              enqueue({ tool: { name, input: {}, output: '', status: 'preparing', id } })
-            }
-          }
+      if (rec.kind === 'reasoning') {
+        const delta = computeDelta(rec.text, lastSentReasoning)
+        if (delta) {
+          enqueue({ reasoning_content: delta })
         }
+        lastSentReasoning = rec.text
+      } else if (rec.kind === 'text') {
+        const delta = computeDelta(rec.text, lastSentContent)
+        if (delta) {
+          enqueue({ content: delta })
+        }
+        lastSentContent = rec.text
+      } else if (rec.kind === 'tool_block_start') {
+        if (rec.name === 'task') continue
+        toolBlocks.set(rec.index, { id: rec.id, name: rec.name })
+        lastProgressAt = Date.now()
+        enqueue({
+          tool: { name: rec.name, input: {}, output: '', status: 'preparing', id: rec.id }
+        })
+      } else if (rec.kind === 'tool_args') {
+        // 工具参数增量：节流 500ms，只刷状态不刷内容
+        const now = Date.now()
+        if (now - lastProgressAt < 500) continue
+        lastProgressAt = now
+        const info = toolBlocks.get(rec.index)
+        if (!info || info.name === 'task') continue
+        enqueue({
+          tool: {
+            name: info.name,
+            input: {},
+            output: '',
+            status: 'preparing',
+            id: info.id
+          }
+        })
       }
-      await Promise.all(drains)
     }
   } catch (err) {
     if ((err as Error)?.name !== 'AbortError') {
@@ -227,18 +174,19 @@ export async function produceMessages(
   }
 }
 
-/**
- * 生产者2：工具调用 — 同一源发 executing 和 completed，callId 天然一致
- */
+// ============================================================================
+// 工具调用流生产者：executing → completed
+// ============================================================================
+
 export async function produceToolCalls(
-  run: StreamRun,
+  run: RuntimeStream,
   signal: AbortSignal | undefined,
   enqueue: EnqueueFn,
   markDone: MarkDoneFn,
   safeGetOutput: SafeGetOutputFn
 ): Promise<void> {
   try {
-    for await (const call of run.toolCalls) {
+    for await (const call of run.toolCalls as AsyncIterable<ToolCallRecord>) {
       if (signal?.aborted) break
       const input = call.input as Record<string, unknown>
       // task 工具是智能体派遣器：转换为 subAgent 事件下发，前端只看到智能体块
@@ -251,7 +199,7 @@ export async function produceToolCalls(
         enqueue({
           subAgent: { name: saName, causeId, status: 'started', taskDescription: taskDesc }
         })
-        await new Promise<void>((resolve) => setTimeout(resolve, 100))
+        await sleep(100)
         if (signal?.aborted) break
         const raw = await safeGetOutput(call)
         const output = typeof raw === 'string' ? raw : JSON.stringify(raw)
@@ -278,7 +226,7 @@ export async function produceToolCalls(
         }
       })
       // 延迟 100ms 确保渲染进程有时间渲染 loading 状态
-      await new Promise<void>((resolve) => setTimeout(resolve, 100))
+      await sleep(100)
       if (signal?.aborted) break
       const raw = await safeGetOutput(call)
       const output = typeof raw === 'string' ? raw : JSON.stringify(raw)
@@ -303,215 +251,98 @@ export async function produceToolCalls(
   }
 }
 
-/**
- * 生产者3：智能体流式输出 — 消费 run.subagents，逐 token / tool call 下发
- * 注意：生命周期事件（started/completed）由 toolProducer 统一发送，此处只发内容事件。
- *
- * 关键同步策略：逐条消息处理，每条消息中统计工具调用数量，处理完后
- * 立即从 sa.toolCalls 中消费等量的 executing/completed 事件，再处理下一条消息。
- * 这保证 thinking → context → tool → context 的自然交替顺序不被打破。
- */
+// ============================================================================
+// 子代理流生产者：running 事件（reasoning / content / tool）
+// ============================================================================
+
+/** 子代理流式分组状态（按 name + causeId 区分同名子代理的多次调用） */
+interface SubAgentGroupState {
+  lastSentReasoning: string
+  lastSentContent: string
+}
+
 export async function produceSubAgents(
-  run: StreamRun,
+  run: RuntimeStream,
   signal: AbortSignal | undefined,
   enqueue: EnqueueFn,
   markDone: MarkDoneFn,
   safeGetOutput: SafeGetOutputFn
 ): Promise<void> {
+  const groups = new Map<string, SubAgentGroupState>()
   try {
-    if (run.subagents) {
-      for await (const sa of run.subagents) {
-        if (signal?.aborted) break
-        const causeId: string | undefined =
-          sa.cause?.type === 'toolCall' ? sa.cause.tool_call_id : undefined
-        try {
-          let lastSentReasoning = ''
-          let lastSentContent = ''
+    for await (const rec of run.subagents as AsyncIterable<SubAgentRecord>) {
+      if (signal?.aborted) break
+      const key = `${rec.name}:${rec.causeId ?? ''}`
+      let group = groups.get(key)
+      if (!group) {
+        group = { lastSentReasoning: '', lastSentContent: '' }
+        groups.set(key, group)
+      }
 
-          // 手动迭代器：逐条处理消息，工具调用按需消费
-          const toolIter = sa.toolCalls?.[Symbol.asyncIterator]()
-          if (sa.messages) {
-            for await (const msg of sa.messages) {
-              if (signal?.aborted) break
-              const drains: Promise<void>[] = []
-              let pendingToolCount = 0
-
-              // 推理 drain：独立运行，逐 token 实时下发
-              const reasoning = msg.reasoning
-              if (reasoning) {
-                drains.push(
-                  (async () => {
-                    for await (const token of reasoning) {
-                      if (signal?.aborted) return
-                      const tokenText = String(token ?? '')
-                      if (!tokenText) continue
-                      let delta = ''
-                      if (
-                        tokenText.startsWith(lastSentReasoning) &&
-                        tokenText.length > lastSentReasoning.length
-                      ) {
-                        delta = tokenText.slice(lastSentReasoning.length)
-                      } else if (tokenText !== lastSentReasoning) {
-                        delta = tokenText
-                      }
-                      lastSentReasoning = tokenText
-                      if (delta) {
-                        enqueue({
-                          subAgent: {
-                            name: sa.name,
-                            causeId,
-                            status: 'running',
-                            reasoning_content: delta
-                          }
-                        })
-                      }
-                    }
-                  })()
-                )
-              }
-
-              // 统一迭代 msg 内容块：按时间顺序产出 text 和 tool preparing
-              {
-                const toolBlocks = new Map<number, { id?: string; name: string }>()
-                let lastProgressAt = 0
-                for await (const event of msg) {
-                  if (signal?.aborted) break
-                  if (event.event === 'content-block-delta') {
-                    const d = event.delta as unknown as Record<string, unknown>
-                    if (typeof d.text === 'string' && d.text) {
-                      const tokenText = d.text
-                      if (
-                        tokenText.startsWith(lastSentContent) &&
-                        tokenText.length > lastSentContent.length
-                      ) {
-                        const delta = tokenText.slice(lastSentContent.length)
-                        enqueue({
-                          subAgent: {
-                            name: sa.name,
-                            causeId,
-                            status: 'running',
-                            content: delta
-                          }
-                        })
-                      } else if (tokenText !== lastSentContent) {
-                        enqueue({
-                          subAgent: {
-                            name: sa.name,
-                            causeId,
-                            status: 'running',
-                            content: tokenText
-                          }
-                        })
-                      }
-                      lastSentContent = tokenText
-                    } else if (
-                      d.type === 'block-delta' &&
-                      (d.fields as Record<string, unknown>)?.type === 'tool_call_chunk'
-                    ) {
-                      const now = Date.now()
-                      if (now - lastProgressAt < 500) continue
-                      lastProgressAt = now
-                      const info = toolBlocks.get(event.index)
-                      if (!info || info.name === 'task') continue
-                      enqueue({
-                        subAgent: {
-                          name: sa.name,
-                          causeId,
-                          status: 'running',
-                          tool: {
-                            name: info.name,
-                            input: {},
-                            output: '',
-                            status: 'preparing',
-                            id: info.id
-                          }
-                        }
-                      })
-                    }
-                  } else if (event.event === 'content-block-start') {
-                    const block = event.content as {
-                      type?: string
-                      name?: unknown
-                      id?: unknown
-                    }
-                    if (block.type === 'tool_call_chunk' || block.type === 'tool_call') {
-                      const name = typeof block.name === 'string' ? block.name : ''
-                      if (name === 'task') continue
-                      const id = typeof block.id === 'string' && block.id ? block.id : undefined
-                      toolBlocks.set(event.index, { id, name })
-                      lastProgressAt = Date.now()
-                      pendingToolCount++
-                      enqueue({
-                        subAgent: {
-                          name: sa.name,
-                          causeId,
-                          status: 'running',
-                          tool: { name, input: {}, output: '', status: 'preparing', id }
-                        }
-                      })
-                    }
-                  }
-                }
-              }
-
-              await Promise.all(drains)
-
-              // 本消息中的工具调用全部就绪后，立即从 toolCalls 消费相应数量的
-              // executing/completed 事件，再处理下一条消息
-              if (toolIter && pendingToolCount > 0) {
-                for (let i = 0; i < pendingToolCount; i++) {
-                  if (signal?.aborted) break
-                  const callResult = await toolIter.next()
-                  if (callResult.done) break
-                  const call = callResult.value
-                  const input = call.input as Record<string, unknown>
-                  enqueue({
-                    subAgent: {
-                      name: sa.name,
-                      causeId,
-                      status: 'running',
-                      tool: {
-                        name: call.name,
-                        input,
-                        output: '',
-                        status: 'executing',
-                        id: call.callId
-                      }
-                    }
-                  })
-                  await new Promise<void>((resolve) => setTimeout(resolve, 100))
-                  if (signal?.aborted) break
-                  const raw = await safeGetOutput(call)
-                  const output = typeof raw === 'string' ? raw : JSON.stringify(raw)
-                  enqueue({
-                    subAgent: {
-                      name: sa.name,
-                      causeId,
-                      status: 'running',
-                      tool: {
-                        name: call.name,
-                        input,
-                        output,
-                        status: 'completed',
-                        id: call.callId,
-                        card: buildToolCard(call.name, input, output)
-                      }
-                    }
-                  })
-                }
-              }
+      if (rec.kind === 'sub_start') {
+        // started 生命周期事件由 toolCalls 流的 task 记录发出，此处跳过
+        continue
+      } else if (rec.kind === 'sub_reasoning') {
+        const delta = computeDelta(rec.text, group.lastSentReasoning)
+        if (delta) {
+          enqueue({
+            subAgent: {
+              name: rec.name,
+              causeId: rec.causeId,
+              status: 'running',
+              reasoning_content: delta
+            }
+          })
+        }
+        group.lastSentReasoning = rec.text
+      } else if (rec.kind === 'sub_text') {
+        const delta = computeDelta(rec.text, group.lastSentContent)
+        if (delta) {
+          enqueue({
+            subAgent: { name: rec.name, causeId: rec.causeId, status: 'running', content: delta }
+          })
+        }
+        group.lastSentContent = rec.text
+      } else if (rec.kind === 'sub_tool_call') {
+        const call = rec.tool
+        const input = call.input as Record<string, unknown>
+        enqueue({
+          subAgent: {
+            name: rec.name,
+            causeId: rec.causeId,
+            status: 'running',
+            tool: {
+              name: call.name,
+              input,
+              output: '',
+              status: 'executing',
+              id: call.callId
             }
           }
-        } catch (err) {
-          if ((err as Error)?.name !== 'AbortError') {
-            logger.warn(`SubAgent ${sa.name} stream ended:`, err)
-          }
-        }
-
-        // 内容流已结束（messages + toolCalls 全处理完），立即发送 early completed
-        // 避免 toolProducer 的 call.output 延迟导致前端 spinner 一直转
+        })
+        await sleep(100)
+        if (signal?.aborted) break
+        const raw = await safeGetOutput(call)
+        const output = typeof raw === 'string' ? raw : JSON.stringify(raw)
         enqueue({
-          subAgent: { name: sa.name, causeId, status: 'completed' }
+          subAgent: {
+            name: rec.name,
+            causeId: rec.causeId,
+            status: 'running',
+            tool: {
+              name: call.name,
+              input,
+              output,
+              status: 'completed',
+              id: call.callId,
+              card: buildToolCard(call.name, input, output)
+            }
+          }
+        })
+      } else if (rec.kind === 'sub_end') {
+        // 内容流已结束，立即发送 early completed（完整输出由 toolCalls 流的 task 记录补充）
+        enqueue({
+          subAgent: { name: rec.name, causeId: rec.causeId, status: 'completed' }
         })
       }
     }

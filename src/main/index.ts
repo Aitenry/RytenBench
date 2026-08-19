@@ -96,6 +96,7 @@ import {
 } from './database/mapper/music'
 import { ChatService, buildTools, loadSubAgentDefinitions, availableTools } from './chat'
 import type { ToolCallDetail, SubAgentEvent } from './chat/types'
+import { todoStore } from './chat/runtime/todo'
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models'
 // BaseMessage 等 LangChain 类型已移入 ChatService 内部使用
 import { KnowledgeGraphService, BuildConfig } from './graph'
@@ -364,10 +365,7 @@ async function loadConfig(): Promise<void> {
   if (!chatConfig) {
     configPromises.push(
       Promise.resolve().then(() => {
-        settingsStore.set('chat', {
-          maxIterations: 5,
-          historyWindowSize: 10
-        } as ChatSettings)
+        settingsStore.set('chat', {} as ChatSettings)
       })
     )
   }
@@ -1783,9 +1781,7 @@ app.whenReady().then(async () => {
         model,
         tools,
         await getSubAgentDefs(chatSettings?.activeWorkspaceId ?? 0),
-        chatSettings?.maxIterations ?? 5,
         getDialoguesByTopicId,
-        chatSettings?.historyWindowSize ?? 10,
         chatSettings?.skillsPath || undefined,
         effectiveSkills,
         chatSettings?.workspacePath || undefined,
@@ -1881,10 +1877,7 @@ app.whenReady().then(async () => {
           logger.error('Failed to save user message:', err)
         }
 
-        // 2.5. 历史对话上下文由 ChatService 内部从数据库加载
-
-        // 3. 流式输出 + 累积完整内容
-        const historyWindowSize = chatSettings?.historyWindowSize ?? 10
+        // 2.5. 历史对话上下文由 ChatService 内部从数据库加载（超长自动压缩）
 
         // 技能优先级：chatSettings.enabledSkills > mainAgent.skills
         const effectiveSkills = chatSettings?.enabledSkills ?? mainAgentDefaults?.skills
@@ -1893,9 +1886,7 @@ app.whenReady().then(async () => {
           model,
           tools,
           await getSubAgentDefs(chatSettings?.activeWorkspaceId ?? 0),
-          chatSettings?.maxIterations ?? 5,
           getDialoguesByTopicId,
-          historyWindowSize,
           chatSettings?.skillsPath || undefined,
           effectiveSkills,
           chatSettings?.workspacePath || undefined,
@@ -2279,6 +2270,15 @@ app.whenReady().then(async () => {
     }
   })
 
+  // 对话计划清单（write_todos）变更 → 广播到渲染进程（输入框上方的进行中任务卡片）
+  todoStore.onChange = (topicId, todos) => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) {
+        win.webContents.send('chat-todos-updated', { topicId, todos })
+      }
+    }
+  }
+
   // 选择记忆（Memory）存储目录
   ipcMain.handle('chat-select-memory-directory', async () => {
     const result = await dialog.showOpenDialog({
@@ -2289,355 +2289,109 @@ app.whenReady().then(async () => {
     return result.filePaths[0]
   })
 
-  // 扫描记忆目录树（仅当前工作区 + 全局）
-  ipcMain.handle('chat-scan-memory-tree', async (_event, workspaceId: number) => {
+  // --- Mnemon 记忆管理 IPC（三层记忆：热记忆 / 长期空间 / 档案） ---
+
+  // 当前记忆目录（从设置读取）
+  const currentMemoryPath = (): string | undefined => {
+    const chatSettings = settingsStore.get('chat') as ChatSettings | undefined
+    return chatSettings?.memoryPath || undefined
+  }
+
+  // 记忆系统总览快照
+  ipcMain.handle('mnemon-snapshot', async () => {
+    const { getMnemonComponent } = await import('./chat/mnemon-singleton')
+    const component = getMnemonComponent(currentMemoryPath())
+    if (!component) {
+      return { configured: false, error: '未配置记忆存储目录' }
+    }
+    const [runtime, bodies, documents] = await Promise.all([
+      Promise.resolve(component.runtimeMemory.snapshot()),
+      component.service.bodies(),
+      Promise.resolve(component.documents.snapshot())
+    ])
+    return { configured: true, runtime, bodies, documents }
+  })
+
+  // 热记忆增删改（add / replace / remove）
+  ipcMain.handle(
+    'mnemon-runtime-mutate',
+    async (_event, request: { action: string; target: string; content?: string; old_text?: string; importance?: string }) => {
+      const { getMnemonComponent } = await import('./chat/mnemon-singleton')
+      const component = getMnemonComponent(currentMemoryPath())
+      if (!component) return { success: false, message: '未配置记忆存储目录' }
+      return await component.runtimeMemory.mutate({
+        action: request.action as 'add' | 'replace' | 'remove',
+        target: request.target as 'user' | 'memory',
+        content: request.content,
+        oldText: request.old_text,
+        importance: request.importance as 'critical' | 'normal' | 'low' | undefined
+      })
+    }
+  )
+
+  // 长期记忆空间目录
+  ipcMain.handle('mnemon-bodies', async () => {
+    const { getMnemonComponent } = await import('./chat/mnemon-singleton')
+    const component = getMnemonComponent(currentMemoryPath())
+    if (!component) return { items: [], total: 0, activeCount: 0, directory: '', generatedAt: '' }
+    return await component.service.bodies()
+  })
+
+  // 创建记忆空间
+  ipcMain.handle(
+    'mnemon-body-create',
+    async (_event, request: { name: string; description: string }) => {
+      const { getMnemonComponent } = await import('./chat/mnemon-singleton')
+      const component = getMnemonComponent(currentMemoryPath())
+      if (!component) return { success: false, message: '未配置记忆存储目录' }
+      try {
+        const body = await component.service.createBody(request)
+        return { success: true, body }
+      } catch (err) {
+        return { success: false, message: err instanceof Error ? err.message : String(err) }
+      }
+    }
+  )
+
+  // 更新记忆空间（名称/描述/激活）
+  ipcMain.handle(
+    'mnemon-body-update',
+    async (
+      _event,
+      id: string,
+      request: { name?: string; description?: string; active?: boolean }
+    ) => {
+      const { getMnemonComponent } = await import('./chat/mnemon-singleton')
+      const component = getMnemonComponent(currentMemoryPath())
+      if (!component) return { success: false, message: '未配置记忆存储目录' }
+      try {
+        const body = component.service.updateBody(id, request)
+        return { success: true, body }
+      } catch (err) {
+        return { success: false, message: err instanceof Error ? err.message : String(err) }
+      }
+    }
+  )
+
+  // 记忆空间内容浏览
+  ipcMain.handle('mnemon-body-list', async (_event, memoryBodyIds?: string[]) => {
+    const { getMnemonComponent } = await import('./chat/mnemon-singleton')
+    const component = getMnemonComponent(currentMemoryPath())
+    if (!component) return []
     try {
-      const path = await import('path')
-      const settings = settingsStore.store
-      const memoryPath = (settings.chat as ChatSettings)?.memoryPath
-      if (!memoryPath || !fs.existsSync(memoryPath)) return []
-
-      const SUB_DIRS = ['memories', 'peers', 'privacy', 'resources', 'sessions', 'skills']
-
-      interface MemoryTreeNode {
-        key: string
-        title: string
-        type: 'global' | 'workspace' | 'agent' | 'folder' | 'file'
-        isLeaf?: boolean
-        children?: MemoryTreeNode[]
-        filePath?: string
-      }
-
-      // 扫描目录下的文件
-      const scanFiles = (dirPath: string, prefix: string): MemoryTreeNode[] => {
-        const files: MemoryTreeNode[] = []
-        if (!fs.existsSync(dirPath)) return files
-        const entries = fs.readdirSync(dirPath, { withFileTypes: true })
-        for (const entry of entries) {
-          if (entry.isFile()) {
-            files.push({
-              key: `${prefix}/${entry.name}`,
-              title: entry.name,
-              type: 'file',
-              isLeaf: true,
-              filePath: path.join(dirPath, entry.name)
-            })
-          }
-        }
-        return files
-      }
-
-      const tree: MemoryTreeNode[] = []
-
-      // 全局记忆
-      const globalDir = path.join(memoryPath, '_global')
-      if (fs.existsSync(globalDir)) {
-        const globalChildren: MemoryTreeNode[] = []
-        for (const sub of SUB_DIRS) {
-          const subPath = path.join(globalDir, sub)
-          if (fs.existsSync(subPath)) {
-            const fileNodes = scanFiles(subPath, `global/${sub}`)
-            globalChildren.push({
-              key: `global/${sub}`,
-              title: sub,
-              type: 'folder',
-              isLeaf: fileNodes.length === 0,
-              children: fileNodes.length > 0 ? fileNodes : undefined
-            })
-          }
-        }
-        if (globalChildren.length > 0) {
-          tree.push({
-            key: 'global',
-            title: '全局记忆',
-            type: 'global',
-            children: globalChildren
-          })
-        }
-      }
-
-      // 当前工作区记忆
-      if (workspaceId) {
-        const wsName = `workspace-${workspaceId}`
-        const wsPath = path.join(memoryPath, wsName)
-        if (fs.existsSync(wsPath)) {
-          const wsChildren: MemoryTreeNode[] = []
-
-          // 主 Agent
-          const mainAgentDir = path.join(wsPath, 'main-agent')
-          if (fs.existsSync(mainAgentDir)) {
-            const mainChildren: MemoryTreeNode[] = []
-            for (const sub of SUB_DIRS) {
-              const subPath = path.join(mainAgentDir, sub)
-              if (fs.existsSync(subPath)) {
-                const fileNodes = scanFiles(subPath, `${wsName}/main-agent/${sub}`)
-                mainChildren.push({
-                  key: `${wsName}/main-agent/${sub}`,
-                  title: sub,
-                  type: 'folder',
-                  isLeaf: fileNodes.length === 0,
-                  children: fileNodes.length > 0 ? fileNodes : undefined
-                })
-              }
-            }
-            if (mainChildren.length > 0) {
-              wsChildren.push({
-                key: `${wsName}/main-agent`,
-                title: 'DeepAgent',
-                type: 'agent',
-                children: mainChildren
-              })
-            }
-          }
-
-          // 子 Agent
-          const subAgentsDir = path.join(wsPath, 'sub-agents')
-          if (fs.existsSync(subAgentsDir)) {
-            const saEntries = fs.readdirSync(subAgentsDir, { withFileTypes: true })
-            const saChildren: MemoryTreeNode[] = []
-            for (const sa of saEntries) {
-              if (!sa.isDirectory()) continue
-              const saPath = path.join(subAgentsDir, sa.name)
-              const saSubChildren: MemoryTreeNode[] = []
-              for (const sub of SUB_DIRS) {
-                const subPath = path.join(saPath, sub)
-                if (fs.existsSync(subPath)) {
-                  const fileNodes = scanFiles(subPath, `${wsName}/sub-agents/${sa.name}/${sub}`)
-                  saSubChildren.push({
-                    key: `${wsName}/sub-agents/${sa.name}/${sub}`,
-                    title: sub,
-                    type: 'folder',
-                    isLeaf: fileNodes.length === 0,
-                    children: fileNodes.length > 0 ? fileNodes : undefined
-                  })
-                }
-              }
-              if (saSubChildren.length > 0) {
-                saChildren.push({
-                  key: `${wsName}/sub-agents/${sa.name}`,
-                  title: sa.name,
-                  type: 'agent',
-                  children: saSubChildren
-                })
-              }
-            }
-            if (saChildren.length > 0) {
-              wsChildren.push({
-                key: `${wsName}/sub-agents`,
-                title: 'SubAgent',
-                type: 'agent',
-                children: saChildren
-              })
-            }
-          }
-
-          if (wsChildren.length > 0) {
-            // 尝试获取工作区名称
-            let wsTitle = `工作区 ${workspaceId}`
-            try {
-              const workspaces = await getAllWorkspaces()
-              const ws = workspaces.find((w) => w.id === workspaceId)
-              if (ws) wsTitle = ws.name
-            } catch {
-              // 保持默认名称
-            }
-            tree.push({
-              key: wsName,
-              title: wsTitle,
-              type: 'workspace',
-              children: wsChildren
-            })
-          }
-        }
-      }
-
-      return tree
-    } catch (error) {
-      logger.error('Error scanning memory tree:', error)
+      return await component.service.list(memoryBodyIds, 200)
+    } catch {
       return []
     }
   })
 
-  // 读取记忆文件内容
-  ipcMain.handle('chat-read-memory-file', async (_event, filePath: string) => {
-    try {
-      if (!fs.existsSync(filePath)) {
-        return { success: false, error: '文件不存在' }
-      }
-      const content = fs.readFileSync(filePath, 'utf-8')
-      return { success: true, content }
-    } catch (error) {
-      logger.error('Error reading memory file:', error)
-      return { success: false, error: String(error) }
-    }
+  // 档案快照
+  ipcMain.handle('mnemon-document-snapshot', async () => {
+    const { getMnemonComponent } = await import('./chat/mnemon-singleton')
+    const component = getMnemonComponent(currentMemoryPath())
+    if (!component) return null
+    return component.documents.snapshot()
   })
-
-  // 初始化记忆目录结构（仅当前工作区 + 全局）
-  ipcMain.handle('chat-init-memory-dirs', async (_event, workspaceId: number) => {
-    try {
-      const path = await import('path')
-      const settings = settingsStore.store
-      const memoryPath = (settings.chat as ChatSettings)?.memoryPath
-      if (!memoryPath) return { success: false, error: '未配置记忆存储目录' }
-
-      const SUB_DIRS = ['memories', 'peers', 'privacy', 'resources', 'sessions', 'skills']
-
-      // 确保根目录存在
-      if (!fs.existsSync(memoryPath)) {
-        fs.mkdirSync(memoryPath, { recursive: true })
-      }
-
-      // 模板文件路径（相对于项目源码目录）
-      const templatePath = path.resolve(
-        __dirname,
-        '..',
-        '..',
-        'src',
-        'main',
-        'memory',
-        'AGENTS.md.template'
-      )
-
-      // 创建全局记忆目录
-      const globalDir = path.join(memoryPath, '_global')
-      for (const sub of SUB_DIRS) {
-        const subPath = path.join(globalDir, sub)
-        if (!fs.existsSync(subPath)) {
-          fs.mkdirSync(subPath, { recursive: true })
-        }
-      }
-      // 全局记忆 AGENTS.md
-      const globalMemFile = path.join(globalDir, 'memories', 'AGENTS.md')
-      if (!fs.existsSync(globalMemFile)) {
-        fs.copyFileSync(templatePath, globalMemFile)
-      }
-
-      // 当前工作区记忆
-      if (workspaceId) {
-        const wsDir = path.join(memoryPath, `workspace-${workspaceId}`)
-
-        // DeepAgent目录
-        const mainAgentDir = path.join(wsDir, 'main-agent')
-        for (const sub of SUB_DIRS) {
-          const subPath = path.join(mainAgentDir, sub)
-          if (!fs.existsSync(subPath)) {
-            fs.mkdirSync(subPath, { recursive: true })
-          }
-        }
-        // DeepAgent 记忆文件
-        const mainMemFile = path.join(mainAgentDir, 'memories', 'AGENTS.md')
-        if (!fs.existsSync(mainMemFile)) {
-          fs.copyFileSync(templatePath, mainMemFile)
-        }
-
-        // 子Agent目录
-        const agents = await getAllAgents(workspaceId)
-        for (const agent of agents) {
-          const agentDir = path.join(wsDir, 'sub-agents', agent.name)
-          for (const sub of SUB_DIRS) {
-            const subPath = path.join(agentDir, sub)
-            if (!fs.existsSync(subPath)) {
-              fs.mkdirSync(subPath, { recursive: true })
-            }
-          }
-          // 子Agent 记忆文件
-          const subMemFile = path.join(agentDir, 'memories', 'AGENTS.md')
-          if (!fs.existsSync(subMemFile)) {
-            fs.copyFileSync(templatePath, subMemFile)
-          }
-        }
-      }
-
-      logger.info(`Memory directories initialized for workspace ${workspaceId}`)
-      return { success: true }
-    } catch (error) {
-      logger.error('Error initializing memory directories:', error)
-      return { success: false, error: String(error) }
-    }
-  })
-
-  // 检查记忆目录是否已初始化
-  ipcMain.handle('chat-check-memory-initialized', async () => {
-    try {
-      const path = await import('path')
-      const settings = settingsStore.store
-      const memoryPath = (settings.chat as ChatSettings)?.memoryPath
-      if (!memoryPath) return { configured: false, initialized: false }
-      const globalDir = path.join(memoryPath, '_global')
-      const globalMemFile = path.join(globalDir, 'memories', 'AGENTS.md')
-      return {
-        configured: true,
-        initialized: fs.existsSync(globalDir) && fs.existsSync(globalMemFile)
-      }
-    } catch (error) {
-      logger.error('Error checking memory initialized:', error)
-      return { configured: false, initialized: false }
-    }
-  })
-
-  // 为指定子Agent创建记忆目录
-  ipcMain.handle(
-    'chat-init-subagent-memory-dirs',
-    async (_event, workspaceId: number, agentName: string) => {
-      try {
-        const path = await import('path')
-        const settings = settingsStore.store
-        const memoryPath = (settings.chat as ChatSettings)?.memoryPath
-        if (!memoryPath) return { success: false, error: '未配置记忆存储目录' }
-
-        const SUB_DIRS = ['memories', 'peers', 'privacy', 'resources', 'sessions', 'skills']
-        const agentDir = path.join(memoryPath, `workspace-${workspaceId}`, 'sub-agents', agentName)
-        for (const sub of SUB_DIRS) {
-          const subPath = path.join(agentDir, sub)
-          if (!fs.existsSync(subPath)) {
-            fs.mkdirSync(subPath, { recursive: true })
-          }
-        }
-        // 创建记忆模板文件
-        const memFile = path.join(agentDir, 'memories', 'AGENTS.md')
-        if (!fs.existsSync(memFile)) {
-          const templatePath = path.resolve(
-            __dirname,
-            '..',
-            '..',
-            'src',
-            'main',
-            'memory',
-            'AGENTS.md.template'
-          )
-          fs.copyFileSync(templatePath, memFile)
-        }
-        logger.info(`Created memory directories for sub-agent: ${agentName}`)
-        return { success: true }
-      } catch (error) {
-        logger.error('Error creating sub-agent memory directories:', error)
-        return { success: false, error: String(error) }
-      }
-    }
-  )
-
-  // 删除指定子Agent的记忆目录
-  ipcMain.handle(
-    'chat-remove-subagent-memory-dirs',
-    async (_event, workspaceId: number, agentName: string) => {
-      try {
-        const path = await import('path')
-        const settings = settingsStore.store
-        const memoryPath = (settings.chat as ChatSettings)?.memoryPath
-        if (!memoryPath) return { success: false, error: '未配置记忆存储目录' }
-
-        const agentDir = path.join(memoryPath, `workspace-${workspaceId}`, 'sub-agents', agentName)
-        if (fs.existsSync(agentDir)) {
-          fs.rmSync(agentDir, { recursive: true, force: true })
-          logger.info(`Removed memory directories for sub-agent: ${agentName}`)
-        }
-        return { success: true }
-      } catch (error) {
-        logger.error('Error removing sub-agent memory directories:', error)
-        return { success: false, error: String(error) }
-      }
-    }
-  )
 
   // 选择技能（Skills）存储目录
   ipcMain.handle('chat-select-skills-directory', async () => {
@@ -2801,6 +2555,8 @@ app.whenReady().then(async () => {
   ipcMain.handle('chat-topic-delete', async (_event, id: number) => {
     try {
       clearTopicCache()
+      // 清理该话题的对话计划清单（进程级 todoStore）
+      todoStore.clear(id)
       return await deleteTopic(id)
     } catch (error) {
       logger.error('Error in chat-topic-delete:', error)
@@ -3208,44 +2964,6 @@ app.whenReady().then(async () => {
     try {
       const id = await createAgent(input)
       clearAgentCache()
-      // 自动创建子Agent记忆目录
-      const settings = settingsStore.store
-      const memoryPath = (settings.chat as ChatSettings)?.memoryPath
-      if (memoryPath) {
-        try {
-          const path = await import('path')
-          const SUB_DIRS = ['memories', 'peers', 'privacy', 'resources', 'sessions', 'skills']
-          const agentDir = path.join(
-            memoryPath,
-            `workspace-${input.workspace_id}`,
-            'sub-agents',
-            input.name
-          )
-          for (const sub of SUB_DIRS) {
-            const subPath = path.join(agentDir, sub)
-            if (!fs.existsSync(subPath)) {
-              fs.mkdirSync(subPath, { recursive: true })
-            }
-          }
-          // 创建子Agent记忆模板文件
-          const memFile = path.join(agentDir, 'memories', 'AGENTS.md')
-          if (!fs.existsSync(memFile)) {
-            const templatePath = path.resolve(
-              __dirname,
-              '..',
-              '..',
-              'src',
-              'main',
-              'memory',
-              'AGENTS.md.template'
-            )
-            fs.copyFileSync(templatePath, memFile)
-          }
-          logger.info(`Auto-created memory directories for sub-agent: ${input.name}`)
-        } catch (memErr) {
-          logger.warn('Failed to auto-create sub-agent memory directories:', memErr)
-        }
-      }
       return id
     } catch (error) {
       logger.error('Error in agent-create:', error)
@@ -3434,6 +3152,12 @@ app.on('before-quit', (event) => {
           await database.close()
         }
       } finally {
+        try {
+          const { closeAllMnemon } = await import('./chat/mnemon-singleton')
+          await closeAllMnemon()
+        } catch (err) {
+          logger.warn('[Mnemon] 退出清理失败:', err)
+        }
         app.quit()
       }
     }

@@ -444,14 +444,14 @@ const ModelSettings: React.FC = () => {
         title="大模型供应商"
         description="管理 AI 聊天和知识图谱使用的模型供应商配置"
         extra={
-          <>
+          <div className="flex items-center" style={{ gap: 8 }}>
             <Button icon={<DownloadOutlined />} onClick={() => setFetchModalOpen(true)}>
               拉取模型
             </Button>
             <Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>
               添加模型
             </Button>
-          </>
+          </div>
         }
       />
 

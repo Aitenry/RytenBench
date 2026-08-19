@@ -1,36 +1,19 @@
 import React, { useRef, useEffect, useCallback, useState } from 'react'
-import { Dropdown, Spin, Modal } from 'antd'
+import { Dropdown, Spin } from 'antd'
 import {
   RiListCheck2,
   RiDeleteBin6Line,
   RiMoreLine,
   RiLoader4Line,
   RiBrain4Line,
-  RiGpsLine,
-  RiHomeOfficeLine,
-  RiFolder6Line,
-  RiAiAgentLine,
-  RiShieldKeyholeLine,
-  RiBookOpenLine,
-  RiChatHistoryLine,
-  RiFileCodeLine,
-  RiUserSharedLine,
   RiArrowDownSLine,
   RiArrowRightSLine,
-  RiFileTextLine
+  RiDatabase2Line,
+  RiFileTextLine,
+  RiSettings4Line
 } from '@remixicon/react'
 import type { ChatTopicRow } from '../../../../../main/database/mapper/chat'
 import { Window } from '../../../../resource/types/window'
-import MarkdownView from '@renderer/components/markdown/MarkdownView'
-
-interface MemoryTreeNode {
-  key: string
-  title: string
-  type: 'global' | 'workspace' | 'agent' | 'folder' | 'file'
-  isLeaf?: boolean
-  children?: MemoryTreeNode[]
-  filePath?: string
-}
 
 interface ChatSidebarProps {
   topics: ChatTopicRow[]
@@ -51,13 +34,21 @@ interface ChatSidebarProps {
   onLoadMoreTopics: () => void
 }
 
-const FOLDER_ICON_MAP: Record<string, React.ReactNode> = {
-  memories: <RiBrain4Line size={12} />,
-  peers: <RiUserSharedLine size={12} />,
-  privacy: <RiShieldKeyholeLine size={12} />,
-  resources: <RiBookOpenLine size={12} />,
-  sessions: <RiChatHistoryLine size={12} />,
-  skills: <RiFileCodeLine size={12} />
+/** Mnemon 记忆概览快照 */
+interface MnemonSidebarSnapshot {
+  configured: boolean
+  runtime?: {
+    entries: { content: string; target: 'user' | 'memory'; importance: string }[]
+    targets: Record<'user' | 'memory', { used: number; limit: number; entryCount: number }>
+  }
+  bodies?: {
+    total: number
+    activeCount: number
+  }
+  documents?: {
+    total: number
+    activeCount: number
+  }
 }
 
 const ChatSidebar: React.FC<ChatSidebarProps> = ({
@@ -78,131 +69,68 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
   onLoadMoreTopics
 }) => {
   const scrollRef = useRef<HTMLDivElement>(null)
-  const memoryScrollRef = useRef<HTMLDivElement>(null)
 
-  // 记忆树状态
-  const [memoryTree, setMemoryTree] = useState<MemoryTreeNode[]>([])
-  const [memoryLoading, setMemoryLoading] = useState(false)
+  // Mnemon 记忆概览状态
   const [memoryExpanded, setMemoryExpanded] = useState(false)
-  const [expandedKeys, setExpandedKeys] = useState<string[]>([])
-  const [memoryConfigured, setMemoryConfigured] = useState(false)
-  const [autoInitLoading, setAutoInitLoading] = useState(false)
-  const [workspaceId, setWorkspaceId] = useState(0)
+  const [memoryLoading, setMemoryLoading] = useState(false)
+  const [memorySnap, setMemorySnap] = useState<MnemonSidebarSnapshot | null>(null)
 
-  // 文件预览状态
-  const [previewVisible, setPreviewVisible] = useState(false)
-  const [previewContent, setPreviewContent] = useState('')
-  const [previewTitle, setPreviewTitle] = useState('')
-  const [previewLoading, setPreviewLoading] = useState(false)
-
-  const loadMemoryTree = useCallback(async () => {
+  const loadMnemonSnapshot = useCallback(async () => {
     setMemoryLoading(true)
     try {
-      const tree = await (window as unknown as Window).api.chat.scanMemoryTree(workspaceId)
-      setMemoryTree(tree)
-      setExpandedKeys(tree.map((n) => n.key))
+      const snap = await (window as unknown as Window).api.chat.mnemonSnapshot()
+      if (!snap.configured) {
+        setMemorySnap({ configured: false })
+      } else {
+        setMemorySnap({
+          configured: true,
+          runtime: snap.runtime
+            ? {
+                entries: snap.runtime.entries,
+                targets: snap.runtime.targets
+              }
+            : undefined,
+          bodies: snap.bodies
+            ? { total: snap.bodies.total, activeCount: snap.bodies.activeCount }
+            : undefined,
+          documents: snap.documents
+            ? { total: snap.documents.total, activeCount: snap.documents.activeCount }
+            : undefined
+        })
+      }
     } catch {
-      setMemoryTree([])
+      setMemorySnap({ configured: false })
     } finally {
       setMemoryLoading(false)
     }
-  }, [workspaceId])
+  }, [])
 
-  const checkMemoryStatus = useCallback(async () => {
-    try {
-      const status = await (window as unknown as Window).api.chat.checkMemoryInitialized()
-      setMemoryConfigured(status.configured)
-      if (status.initialized) {
-        loadMemoryTree()
-      } else if (status.configured) {
-        // 已配置但未初始化，自动初始化
-        setAutoInitLoading(true)
-        try {
-          const result = await (window as unknown as Window).api.chat.initMemoryDirs(workspaceId)
-          if (result.success) {
-            loadMemoryTree()
-          }
-        } catch {
-          // ignore
-        } finally {
-          setAutoInitLoading(false)
-        }
-      }
-    } catch {
-      setMemoryConfigured(false)
-    }
-  }, [loadMemoryTree, workspaceId])
-
-  // 展开记忆面板时检查状态
+  // 展开记忆面板时加载概览
   const handleToggleMemory = useCallback(async () => {
     const next = !memoryExpanded
     setMemoryExpanded(next)
     if (next) {
-      await checkMemoryStatus()
+      await loadMnemonSnapshot()
     }
-  }, [memoryExpanded, checkMemoryStatus])
+  }, [memoryExpanded, loadMnemonSnapshot])
 
-  // 点击文件节点打开预览
-  const handleFileClick = useCallback(async (node: MemoryTreeNode) => {
-    if (!node.filePath) return
-    setPreviewTitle(node.title)
-    setPreviewLoading(true)
-    setPreviewVisible(true)
-    try {
-      const result = await (window as unknown as Window).api.chat.readMemoryFile(node.filePath)
-      if (result.success) {
-        setPreviewContent(result.content || '')
-      } else {
-        setPreviewContent(`无法读取文件: ${result.error}`)
-      }
-    } catch {
-      setPreviewContent('读取文件失败')
-    } finally {
-      setPreviewLoading(false)
-    }
+  // 打开系统设置记忆页
+  const handleOpenMemorySettings = useCallback(() => {
+    window.dispatchEvent(
+      new CustomEvent('open-system-settings', { detail: { tab: 'memory' } })
+    )
   }, [])
 
-  // 组件挂载时获取工作区ID并检查记忆状态
-  useEffect(() => {
-    const init = async (): Promise<void> => {
-      try {
-        const settings = await (window as unknown as Window).api.systemSettings.getAll()
-        const wsId = settings.chat?.activeWorkspaceId ?? 0
-        setWorkspaceId(wsId)
-      } catch {
-        // ignore
-      }
-    }
-    init()
-  }, [])
-
-  // workspaceId 变化后检查记忆状态
-  useEffect(() => {
-    if (workspaceId) {
-      checkMemoryStatus()
-    }
-  }, [workspaceId, checkMemoryStatus])
-
-  // 监听记忆树刷新事件
+  // 监听记忆变更事件（对话中模型写记忆后刷新概览）
   useEffect(() => {
     const handleRefresh = (): void => {
-      checkMemoryStatus()
+      if (memoryExpanded) {
+        loadMnemonSnapshot()
+      }
     }
     window.addEventListener('memory-tree-refresh', handleRefresh)
     return () => window.removeEventListener('memory-tree-refresh', handleRefresh)
-  }, [checkMemoryStatus])
-
-  // 监听工作区切换
-  useEffect(() => {
-    const handleWorkspaceChanged = (e: Event): void => {
-      const wsId = (e as CustomEvent<{ workspaceId: number | null }>).detail?.workspaceId
-      if (wsId != null) {
-        setWorkspaceId(wsId)
-      }
-    }
-    window.addEventListener('workspace-changed', handleWorkspaceChanged)
-    return () => window.removeEventListener('workspace-changed', handleWorkspaceChanged)
-  }, [])
+  }, [memoryExpanded, loadMnemonSnapshot])
 
   const handleScroll = useCallback(() => {
     const el = scrollRef.current
@@ -212,83 +140,15 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
     }
   }, [isLoadingMoreTopics, hasMoreTopics, onLoadMoreTopics])
 
-  useEffect(() => {
-    const el = scrollRef.current
-    if (!el) return
-    el.addEventListener('scroll', handleScroll, { passive: true })
-    return () => el.removeEventListener('scroll', handleScroll)
-  }, [handleScroll])
-
-  // 自定义记忆树节点图标
-  const getNodeIcon = (node: MemoryTreeNode): React.ReactNode => {
-    if (node.type === 'file') {
-      return <RiFileTextLine size={12} style={{ color: '#52c41a', flexShrink: 0 }} />
-    }
-    if (node.type === 'global') {
-      return <RiGpsLine size={14} style={{ color: '#1677ff', flexShrink: 0 }} />
-    }
-    if (node.type === 'workspace') {
-      return <RiHomeOfficeLine size={14} style={{ color: '#fa8c16', flexShrink: 0 }} />
-    }
-    if (node.type === 'agent') {
-      return <RiAiAgentLine size={14} style={{ color: '#722ed1', flexShrink: 0 }} />
-    }
-    return (
-      (FOLDER_ICON_MAP[node.title] as React.ReactElement) || (
-        <RiFolder6Line size={12} style={{ flexShrink: 0 }} />
-      )
-    )
+  const importanceColor: Record<string, string> = {
+    critical: '#d4380d',
+    normal: colorTextSecondary,
+    low: colorTextTertiary
   }
 
-  const toggleExpand = (key: string): void => {
-    setExpandedKeys((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]))
-  }
-
-  // 递归树节点
-  const renderTreeNode = (node: MemoryTreeNode, depth: number): React.ReactNode => {
-    const isExpanded = expandedKeys.includes(node.key)
-    const hasChildren = node.children && node.children.length > 0
-    const isLeaf = node.isLeaf || !hasChildren
-    const isFile = node.type === 'file'
-
-    return (
-      <div key={node.key}>
-        <div
-          className="flex items-center gap-1 py-1 cursor-pointer rounded transition-colors select-none"
-          style={{
-            paddingLeft: 8 + depth * 16,
-            color: colorTextSecondary
-          }}
-          onClick={() => {
-            if (isFile) {
-              handleFileClick(node)
-            } else if (!isLeaf) {
-              toggleExpand(node.key)
-            }
-          }}
-          onMouseEnter={(e) => (e.currentTarget.style.background = colorFillAlter)}
-          onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-        >
-          {/* 展开/折叠箭头 */}
-          {!isLeaf ? (
-            <span className="flex items-center justify-center" style={{ width: 14, flexShrink: 0 }}>
-              {isExpanded ? <RiArrowDownSLine size={12} /> : <RiArrowRightSLine size={12} />}
-            </span>
-          ) : (
-            <span style={{ width: 14, flexShrink: 0 }} />
-          )}
-          {/* 图标 */}
-          {getNodeIcon(node)}
-          {/* 标题 */}
-          <span className="text-xs truncate">{node.title}</span>
-        </div>
-        {/* 子节点 */}
-        {hasChildren && isExpanded && (
-          <>{node.children!.map((child) => renderTreeNode(child, depth + 1))}</>
-        )}
-      </div>
-    )
-  }
+  // 按目标分组的热记忆条目
+  const userEntries = memorySnap?.runtime?.entries.filter((e) => e.target === 'user') ?? []
+  const memoryEntries = memorySnap?.runtime?.entries.filter((e) => e.target === 'memory') ?? []
 
   return (
     <div
@@ -314,7 +174,7 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
           {topics.length}
         </span>
       </div>
-      <div ref={scrollRef} className="flex-1 overflow-y-auto py-2 history-scrollbar">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto py-2 history-scrollbar" onScroll={handleScroll}>
         {topics.length === 0 ? (
           <p className="text-xs text-center py-8" style={{ color: colorTextTertiary }}>
             暂无任务
@@ -409,7 +269,7 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
         )}
       </div>
 
-      {/* 记忆树 */}
+      {/* Mnemon 记忆概览 */}
       <div className="border-t flex-shrink-0" style={{ borderColor: colorFillAlter }}>
         <button
           onClick={handleToggleMemory}
@@ -422,59 +282,172 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
             <RiBrain4Line size={16} />
             记忆
           </span>
-          {memoryExpanded ? <RiArrowDownSLine size={16} /> : <RiArrowRightSLine size={16} />}
+          <span className="flex items-center gap-2">
+            {memorySnap?.configured && (
+              <span className="text-xs" style={{ color: colorTextTertiary }}>
+                {memorySnap.runtime?.entries.length ?? 0} 条热记忆
+              </span>
+            )}
+            {memoryExpanded ? <RiArrowDownSLine size={16} /> : <RiArrowRightSLine size={16} />}
+          </span>
         </button>
 
         {memoryExpanded && (
-          <div
-            ref={memoryScrollRef}
-            className="overflow-y-auto history-scrollbar"
-            style={{ maxHeight: 240 }}
-          >
+          <div className="overflow-y-auto history-scrollbar px-3 pb-3" style={{ maxHeight: 300 }}>
             {memoryLoading ? (
-              <div className="flex justify-center py-4">
+              <div className="flex justify-center py-5">
                 <Spin size="small" />
               </div>
-            ) : !memoryConfigured ? (
-              <p className="text-xs text-center py-4 px-4" style={{ color: colorTextTertiary }}>
-                请在设置中配置记忆目录
-              </p>
-            ) : autoInitLoading ? (
-              <div className="flex justify-center py-4">
-                <Spin size="small" />
+            ) : !memorySnap?.configured ? (
+              <div className="pt-2">
+                <p className="text-xs text-center py-3" style={{ color: colorTextTertiary }}>
+                  未配置记忆目录，模型将没有持久记忆。
+                </p>
+                <button
+                  onClick={handleOpenMemorySettings}
+                  className="flex items-center justify-center gap-1 w-full py-2 rounded text-xs transition-colors"
+                  style={{ color: '#1677ff', background: colorFillAlter }}
+                >
+                  <RiSettings4Line size={13} />
+                  前往设置配置记忆
+                </button>
               </div>
-            ) : memoryTree.length === 0 ? (
-              <p className="text-xs text-center py-4 px-4" style={{ color: colorTextTertiary }}>
-                暂无记忆数据
-              </p>
             ) : (
-              <div className="px-2 pb-2">{memoryTree.map((node) => renderTreeNode(node, 0))}</div>
+              <div className="pt-1">
+                {/* 用户画像（USER） */}
+                {memorySnap.runtime && userEntries.length > 0 && (
+                  <div className="mb-3">
+                    <div
+                      className="flex items-center gap-1.5 mb-1.5 text-xs font-medium"
+                      style={{ color: colorTextSecondary }}
+                    >
+                      <span
+                        className="rounded-sm"
+                        style={{ width: 3, height: 12, background: '#1677ff' }}
+                      />
+                      用户画像
+                      <span style={{ color: colorTextTertiary, fontWeight: 400 }}>
+                        {userEntries.length} 条
+                      </span>
+                    </div>
+                    <div className="space-y-1.5">
+                      {userEntries.slice(0, 4).map((entry, i) => (
+                        <MemoryItem key={i} entry={entry} colorFillAlter={colorFillAlter} colorTextSecondary={colorTextSecondary} importanceColor={importanceColor} />
+                      ))}
+                      {userEntries.length > 4 && (
+                        <p className="text-xs text-center pt-0.5" style={{ color: colorTextTertiary }}>
+                          还有 {userEntries.length - 4} 条…
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* 项目记忆（MEMORY） */}
+                {memorySnap.runtime && memoryEntries.length > 0 && (
+                  <div className="mb-3">
+                    <div
+                      className="flex items-center gap-1.5 mb-1.5 text-xs font-medium"
+                      style={{ color: colorTextSecondary }}
+                    >
+                      <span
+                        className="rounded-sm"
+                        style={{ width: 3, height: 12, background: '#52c41a' }}
+                      />
+                      项目记忆
+                      <span style={{ color: colorTextTertiary, fontWeight: 400 }}>
+                        {memoryEntries.length} 条
+                      </span>
+                    </div>
+                    <div className="space-y-1.5">
+                      {memoryEntries.slice(0, 4).map((entry, i) => (
+                        <MemoryItem key={i} entry={entry} colorFillAlter={colorFillAlter} colorTextSecondary={colorTextSecondary} importanceColor={importanceColor} />
+                      ))}
+                      {memoryEntries.length > 4 && (
+                        <p className="text-xs text-center pt-0.5" style={{ color: colorTextTertiary }}>
+                          还有 {memoryEntries.length - 4} 条…
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {!memorySnap.runtime ||
+                  (memorySnap.runtime.entries.length === 0 && (
+                    <p className="text-xs text-center py-3" style={{ color: colorTextTertiary }}>
+                      暂无热记忆，对话时可直接告诉模型要记住的内容
+                    </p>
+                  ))}
+
+                {/* 统计行（换行排列，不挤压） */}
+                <div
+                  className="flex flex-wrap gap-x-4 gap-y-1 mt-1 pt-2 text-xs"
+                  style={{
+                    color: colorTextTertiary,
+                    borderTop: `1px solid ${colorFillAlter}`
+                  }}
+                >
+                  <span className="flex items-center gap-1.5">
+                    <RiBrain4Line size={13} />
+                    {memorySnap.runtime
+                      ? `${memorySnap.runtime.entries.length} 条热记忆`
+                      : '热记忆 -'}
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <RiDatabase2Line size={13} />
+                    空间 {memorySnap.bodies?.activeCount ?? 0}/{memorySnap.bodies?.total ?? 0} 激活
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <RiFileTextLine size={13} />
+                    档案 {memorySnap.documents?.total ?? 0}
+                  </span>
+                </div>
+
+                {/* 管理入口 */}
+                <button
+                  onClick={handleOpenMemorySettings}
+                  className="flex items-center justify-center gap-1.5 w-full py-2 mt-2.5 rounded text-xs transition-colors"
+                  style={{ color: '#1677ff', background: colorFillAlter }}
+                >
+                  <RiSettings4Line size={13} />
+                  管理记忆
+                </button>
+              </div>
             )}
           </div>
         )}
       </div>
-
-      {/* 文件预览 Modal */}
-      <Modal
-        title={previewTitle}
-        open={previewVisible}
-        onCancel={() => setPreviewVisible(false)}
-        footer={null}
-        width={800}
-        style={{ top: 20 }}
-        styles={{ body: { padding: 0, height: '70vh' } }}
-        destroyOnHidden
-      >
-        {previewLoading ? (
-          <div className="flex justify-center items-center h-full">
-            <Spin size="default" />
-          </div>
-        ) : (
-          <MarkdownView content={previewContent} isDarkMode={isDarkMode} />
-        )}
-      </Modal>
     </div>
   )
 }
+
+/** 单条热记忆条目：优先级圆点 + 两行文字 */
+const MemoryItem: React.FC<{
+  entry: { content: string; importance: string }
+  colorFillAlter: string
+  colorTextSecondary: string
+  importanceColor: Record<string, string>
+}> = ({ entry, colorFillAlter, colorTextSecondary, importanceColor }) => (
+  <div
+    className="flex items-start gap-2 rounded-md px-2 py-1.5"
+    style={{ background: colorFillAlter }}
+  >
+    <span
+      className="mt-[5px] rounded-full shrink-0"
+      style={{
+        width: 7,
+        height: 7,
+        background: importanceColor[entry.importance] ?? colorTextSecondary
+      }}
+    />
+    <span
+      className="line-clamp-2 text-[13px]"
+      style={{ color: colorTextSecondary, lineHeight: '19px', wordBreak: 'break-all' }}
+      title={entry.content}
+    >
+      {entry.content}
+    </span>
+  </div>
+)
 
 export default ChatSidebar

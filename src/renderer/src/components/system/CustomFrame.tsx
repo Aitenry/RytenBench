@@ -136,7 +136,6 @@ const CustomFrame: React.FC<CustomFrameProps> = ({ currentKey, setCurrentKey }) 
               | 'graph'
               | 'model'
               | 'system'
-              | 'chat'
               | 'agents'
               | 'skills'
               | 'memory'

@@ -6,6 +6,7 @@ import { GraphEntity, GraphBuildJob, GraphData } from '../../../main/database/ma
 import { Lock } from '@renderer/types/settings'
 import { LlmProviderInput, LlmProviderConfig } from '../../../../main/database/mapper/provider'
 import { AgentConfigRow, AgentConfigInput } from '../../../../main/database/mapper/agent'
+import { TodoItem } from '../../../../main/chat/runtime/todo'
 import { SystemSettings } from '@renderer/types/settings'
 
 export interface PaginatedResult<T> {
@@ -173,6 +174,9 @@ export interface Window {
       onStreamChunk: (callback: (chunk: StructuredMessage) => void) => () => void
       onStreamDone: (callback: (result: { topicId: number }) => void) => () => void
       onStreamError: (callback: (error: { error: string; topicId?: number }) => void) => () => void
+      onChatTodosUpdated: (
+        callback: (data: { topicId: number; todos: TodoItem[] }) => void
+      ) => () => void
       cancelStream: () => void
       startMessageStream: (
         message: string,
@@ -188,45 +192,113 @@ export interface Window {
       selectWorkspace: () => Promise<string | null>
       listSkills: () => Promise<{ id: string; name: string; description: string }[]>
       selectMemoryDirectory: () => Promise<string | null>
-      scanMemoryTree: (workspaceId: number) => Promise<
-        {
-          key: string
-          title: string
-          type: 'global' | 'workspace' | 'agent' | 'folder'
-          isLeaf?: boolean
-          children?: {
-            key: string
-            title: string
-            type: 'global' | 'workspace' | 'agent' | 'folder'
-            isLeaf?: boolean
-            children?: {
-              key: string
-              title: string
-              type: 'global' | 'workspace' | 'agent' | 'folder'
-              isLeaf?: boolean
-              children?: {
-                key: string
-                title: string
-                type: 'global' | 'workspace' | 'agent' | 'folder'
-                isLeaf?: boolean
-              }[]
-            }[]
+      // Mnemon 三层记忆
+      mnemonSnapshot: () => Promise<{
+        configured: boolean
+        error?: string
+        runtime?: {
+          revision: string
+          entries: {
+            content: string
+            created_at: string
+            updated_at: string
+            target: 'user' | 'memory'
+            importance: 'critical' | 'normal' | 'low'
           }[]
+          targets: Record<
+            'user' | 'memory',
+            { target: 'user' | 'memory'; used: number; limit: number; entryCount: number; markdownPath: string }
+          >
+        }
+        bodies?: {
+          items: {
+            id: string
+            name: string
+            description: string
+            active: boolean
+            dbPath: string
+            healthy: boolean
+            error?: string
+            stats?: {
+              totalInsights: number
+              deletedInsights: number
+              edgeCount: number
+              byCategory: Record<string, number>
+              topEntities: { entity: string; count: number }[]
+            }
+          }[]
+          total: number
+          activeCount: number
+          directory: string
+        }
+        documents?: {
+          total: number
+          activeCount: number
+          archivedCount: number
+          activeBytes: number
+          limitBytes: number
+          documents: {
+            id: string
+            title: string
+            description: string
+            status: 'active' | 'archived'
+            updatedAt: string
+            lastAccessedAt: string
+            revision: number
+            sizeBytes: number
+            healthy: boolean
+            excerpt: string
+          }[]
+        }
+      }>
+      mnemonRuntimeMutate: (request: {
+        action: string
+        target: string
+        content?: string
+        old_text?: string
+        importance?: string
+      }) => Promise<{ success: boolean; message: string }>
+      mnemonBodies: () => Promise<{
+        items: {
+          id: string
+          name: string
+          description: string
+          active: boolean
+          healthy: boolean
+          error?: string
+          stats?: { totalInsights: number; edgeCount: number; deletedInsights: number }
         }[]
-      >
-      initMemoryDirs: (workspaceId: number) => Promise<{ success: boolean; error?: string }>
-      checkMemoryInitialized: () => Promise<{ configured: boolean; initialized: boolean }>
-      initSubagentMemoryDirs: (
-        workspaceId: number,
-        agentName: string
-      ) => Promise<{ success: boolean; error?: string }>
-      removeSubagentMemoryDirs: (
-        workspaceId: number,
-        agentName: string
-      ) => Promise<{ success: boolean; error?: string }>
-      readMemoryFile: (
-        filePath: string
-      ) => Promise<{ success: boolean; content?: string; error?: string }>
+        total: number
+        activeCount: number
+      }>
+      mnemonBodyCreate: (name: string, description: string) => Promise<{
+        success: boolean
+        body?: { id: string; name: string; description: string; active: boolean }
+        message?: string
+      }>
+      mnemonBodyUpdate: (
+        id: string,
+        request: { name?: string; description?: string; active?: boolean }
+      ) => Promise<{
+        success: boolean
+        body?: { id: string; name: string; description: string; active: boolean }
+        message?: string
+      }>
+      mnemonBodyList: (
+        memoryBodyIds?: string[]
+      ) => Promise<{ id: string; content: string; category?: string; importance?: number; createdAt?: string }[]>
+      mnemonDocumentSnapshot: () => Promise<{
+        total: number
+        activeCount: number
+        archivedCount: number
+        documents: {
+          id: string
+          title: string
+          status: 'active' | 'archived'
+          updatedAt: string
+          excerpt: string
+        }[]
+      } | null>
       getAllWorkspaces: () => Promise<WorkspaceRow[]>
       createWorkspace: (name: string, path: string) => Promise<number>
       updateWorkspace: (id: number, updates: { name: string }) => Promise<boolean>

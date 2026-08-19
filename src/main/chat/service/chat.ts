@@ -1,14 +1,12 @@
 import type { StructuredToolInterface } from '@langchain/core/tools'
 import { BaseChatModel } from '@langchain/core/language_models/chat_models'
 import { BaseMessage } from '@langchain/core/messages'
-import { createDeepAgent, CompositeBackend, StateBackend, FilesystemBackend } from 'deepagents'
-import type { SubAgent, AnyBackendProtocol } from 'deepagents'
 import logger from 'electron-log'
 import * as fs from 'fs'
 import * as path from 'path'
 import { ChatOptions, StructuredMessage, SubAgentConfig } from '../types'
-import { buildSubAgentTools } from '../tools/builders'
-import { SafeFilesystemBackend } from './safe-backend'
+import { Runtime } from '../runtime/runtime'
+import { getMnemonComponent } from '../mnemon-singleton'
 import type { HistoryDialogue, LoadHistoryFn } from './history'
 import { extractStructuredMessages, convertDialoguesToMessages } from './history'
 import { buildHumanMessage } from './message-builder'
@@ -19,9 +17,7 @@ class ChatService {
   private readonly model: BaseChatModel
   private readonly tools: StructuredToolInterface[]
   private readonly subAgents: SubAgentConfig[]
-  private readonly _maxIterations: number
   private readonly loadHistory?: LoadHistoryFn
-  private readonly historyWindowSize: number
   private readonly skillsPath?: string
   private readonly enabledSkills?: string[]
   private readonly workspacePath?: string
@@ -32,12 +28,10 @@ class ChatService {
    * @param model 已创建的 BaseChatModel 实例（由外部 ProviderService 提供）
    * @param tools 工具列表
    * @param subAgents 智能体定义列表
-   * @param maxIterations 工具调用最大轮次（保留兼容性，deepAgents 内部自动管理）
    * @param loadHistory 从数据库加载历史对话的回调（由主进程注入，避免循环依赖）
-   * @param historyWindowSize 历史对话轮次上限（0 = 不限制），默认 10
-   * @param skillsPath 技能存储目录（deepAgents skills），空表示不启用
+   * @param skillsPath 技能存储目录（含 SKILL.md 的子目录即技能），空表示不启用
    * @param enabledSkills 启用的技能 ID 列表，undefined 表示全部启用
-   * @param workspacePath AI 工作区目录，挂载为 FilesystemBackend 根目录（虚拟 /）
+   * @param workspacePath AI 工作区目录，挂载为虚拟 /
    * @param memoryPath 记忆存储根目录，空表示不启用
    * @param workspaceId 当前工作区 ID，用于定位记忆目录
    */
@@ -45,9 +39,7 @@ class ChatService {
     model: BaseChatModel,
     tools: StructuredToolInterface[] = [],
     subAgents: SubAgentConfig[] = [],
-    maxIterations = 5,
     loadHistory?: LoadHistoryFn,
-    historyWindowSize = 10,
     skillsPath?: string,
     enabledSkills?: string[],
     workspacePath?: string,
@@ -57,141 +49,33 @@ class ChatService {
     this.model = model
     this.tools = tools
     this.subAgents = subAgents
-    this._maxIterations = maxIterations
     this.loadHistory = loadHistory
-    this.historyWindowSize = historyWindowSize
     this.skillsPath = skillsPath
     this.enabledSkills = enabledSkills
     this.workspacePath = workspacePath
     this.memoryPath = memoryPath
     this.workspaceId = workspaceId
     logger.info(
-      `ChatService initialized with DeepAgents (maxIterations=${this._maxIterations}, historyWindow=${this.historyWindowSize}, skillsPath=${this.skillsPath ?? 'disabled'}, workspacePath=${this.workspacePath ?? 'disabled'}, memoryPath=${this.memoryPath ?? 'disabled'}, workspaceId=${this.workspaceId}, subAgents=${this.subAgents.length})`
+      `ChatService initialized with LangChain Runtime (skillsPath=${this.skillsPath ?? 'disabled'}, workspacePath=${this.workspacePath ?? 'disabled'}, memoryPath=${this.memoryPath ?? 'disabled'}, workspaceId=${this.workspaceId}, subAgents=${this.subAgents.length})`
     )
   }
 
   /**
-   * 创建 DeepAgent 实例；配置工作区目录时挂载 FilesystemBackend，配置技能目录时启用 skills 加载。
-   * 路径需转换为 POSIX 正斜杠（deepAgents 内部使用 path.resolve，Windows 反斜杠会被误解析）。
-   * 智能体将工具组合为专用智能体，主代理通过 task() 工具委托任务。
-   * 配置记忆目录时，为 DeepAgent 加载全局+工作区记忆，为每个 SubAgent 加载其专属记忆。
+   * 创建 LangChain/LangGraph 运行时（每次请求独立实例，隔离性好）。
+   * Mnemon 记忆组件为进程级单例（跨请求共享，见 mnemon-singleton.ts）。
    */
-  private createAgent(): ReturnType<typeof createDeepAgent> {
-    // 构建 deepAgents SubAgent 字典，为每个子Agent预加载其专属记忆到 systemPrompt
-    const deepSubAgents: SubAgent[] = this.subAgents.map((sa) => {
-      let systemPrompt = sa.systemPrompt
-      if (this.memoryPath && this.workspaceId) {
-        const agentMemoryFile = path.join(
-          this.memoryPath,
-          `workspace-${this.workspaceId}`,
-          'sub-agents',
-          sa.name,
-          'memories',
-          'AGENTS.md'
-        )
-        if (fs.existsSync(agentMemoryFile)) {
-          try {
-            const memoryContent = fs.readFileSync(agentMemoryFile, 'utf-8').trim()
-            if (memoryContent) {
-              systemPrompt = `${systemPrompt}\n\n## 长期记忆\n${memoryContent}`
-            }
-          } catch {
-            // 读取失败则忽略
-          }
-        }
-      }
-      return {
-        name: sa.name,
-        description: sa.description,
-        systemPrompt,
-        model: sa.model,
-        tools: buildSubAgentTools(sa) as SubAgent['tools']
-      }
-    })
-
-    const baseConfig = {
+  private createRuntime(): Runtime {
+    return new Runtime({
       model: this.model,
       tools: this.tools,
-      systemPrompt: this.buildSystemPrompt(),
-      subagents: deepSubAgents.length > 0 ? deepSubAgents : undefined
-    }
-
-    const config: Record<string, unknown> = { ...baseConfig }
-
-    // 确定 FilesystemBackend 的根目录：优先 workspacePath，回退到 skillsPath
-    const backendRoot = this.workspacePath || this.skillsPath
-
-    // 构建 Backend：有记忆路径时使用 CompositeBackend 组合工作区+记忆
-    if (this.memoryPath) {
-      const posixMemoryPath = this.memoryPath.replace(/\\/g, '/')
-      const pathBackends: Record<string, AnyBackendProtocol> = {
-        '/memories/': new FilesystemBackend({ rootDir: posixMemoryPath, virtualMode: true })
-      }
-      if (backendRoot) {
-        const posixPath = backendRoot.replace(/\\/g, '/')
-        pathBackends['/'] = new SafeFilesystemBackend({ rootDir: posixPath, virtualMode: true })
-      }
-      config.backend = new CompositeBackend(new StateBackend(), pathBackends)
-    } else if (backendRoot) {
-      const posixPath = backendRoot.replace(/\\/g, '/')
-      config.backend = new SafeFilesystemBackend({ rootDir: posixPath, virtualMode: true })
-    }
-
-    // DeepAgent 记忆文件路径（全局 + 当前工作区主Agent）
-    if (this.memoryPath && this.workspaceId) {
-      const memoryFiles: string[] = []
-      const globalFullPath = path.join(this.memoryPath, '_global', 'memories', 'AGENTS.md')
-      if (fs.existsSync(globalFullPath)) {
-        memoryFiles.push('/memories/_global/memories/AGENTS.md')
-      }
-      const agentFullPath = path.join(
-        this.memoryPath,
-        `workspace-${this.workspaceId}`,
-        'main-agent',
-        'memories',
-        'AGENTS.md'
-      )
-      if (fs.existsSync(agentFullPath)) {
-        memoryFiles.push(`/memories/workspace-${this.workspaceId}/main-agent/memories/AGENTS.md`)
-      }
-      if (memoryFiles.length > 0) {
-        config.memory = memoryFiles
-      }
-    }
-
-    if (this.skillsPath) {
-      const skillPaths = this.enabledSkills ? this.enabledSkills.map((s) => '/' + s) : ['/']
-      if (skillPaths.length > 0) {
-        config.skills = skillPaths
-      }
-    }
-
-    return createDeepAgent(config as Parameters<typeof createDeepAgent>[0])
-  }
-
-  /**
-   * 构建系统提示词，包含记忆文件路径指引
-   */
-  private buildSystemPrompt(): string {
-    let prompt = `Your name is Rita. You are a helpful assistant.
-
-You are in a continuous conversation with the user. All messages in the chat history are genuine prior exchanges between you and this same user — treat them as real conversation context.
-- When the user asks about "previous" or "last time", refer to the conversation history provided.
-- Do NOT claim you cannot see or remember earlier messages. You have full access to the chat history.
-- Keep your responses concise and natural in Chinese unless the user writes in another language.`
-
-    if (this.memoryPath && this.workspaceId) {
-      const globalPath = '/memories/_global/memories/AGENTS.md'
-      const agentPath = `/memories/workspace-${this.workspaceId}/main-agent/memories/AGENTS.md`
-      prompt += `\n\n## 持久记忆
-你的记忆文件位于文件系统中：
-- 全局记忆：\`${globalPath}\`
-- 工作区记忆：\`${agentPath}\`
-
-当你学到新信息时，必须使用 edit_file 工具立即更新这些记忆文件。这是你的最高优先级任务之一。`
-    }
-
-    return prompt
+      subAgents: this.subAgents,
+      skillsPath: this.skillsPath,
+      enabledSkills: this.enabledSkills,
+      workspacePath: this.workspacePath,
+      memoryPath: this.memoryPath,
+      workspaceId: this.workspaceId,
+      mnemon: getMnemonComponent(this.memoryPath)
+    })
   }
 
   /**
@@ -199,7 +83,7 @@ You are in a continuous conversation with the user. All messages in the chat his
    * 返回 agent 文件系统中的虚拟路径引用。
    *
    * 不直接将文件内容嵌入消息，而是让 agent 通过 read_file 工具按需读取，
-   * 利用 DeepAgents 内置的上下文管理（大文件自动 offload、摘要压缩等）。
+   * 大文件读取结果在工具层截断（20K 字符），避免上下文膨胀。
    */
   private async copyUploadedFiles(
     docs?: { fileName: string; filePath: string }[]
@@ -260,9 +144,9 @@ You are in a continuous conversation with the user. All messages in the chat his
         return []
       }
 
-      const messages = convertDialoguesToMessages(historyDialogues, this.historyWindowSize)
-      logger.info(`[Chat] Loaded ${messages.length} history messages for topic ${topicId}`)
-      return messages
+      const messages = convertDialoguesToMessages(historyDialogues)
+      logger.info(`[Chat] Loaded ${messages.messages.length} history messages for topic ${topicId}`)
+      return messages.messages
     } catch (err) {
       logger.error('Failed to load chat history:', err)
       return []
@@ -277,7 +161,7 @@ You are in a continuous conversation with the user. All messages in the chat his
    */
   async sendMessage(message: string, options?: ChatOptions): Promise<StructuredMessage[]> {
     try {
-      const agent = this.createAgent()
+      const runtime = this.createRuntime()
 
       // 将上传文件复制到 agent 可访问的工作区目录
       const uploadedRefs = await this.copyUploadedFiles(options?.documents)
@@ -286,11 +170,15 @@ You are in a continuous conversation with the user. All messages in the chat his
         ? await this.loadContextMessages(options.topicId)
         : []
       logger.info(
-        `[Chat] Passing ${contextMessages.length} context messages + 1 user message to deepagent (topicId=${options?.topicId})`
+        `[Chat] Passing ${contextMessages.length} context messages + 1 user message to runtime (topicId=${options?.topicId})`
       )
-      const result = await agent.invoke({ messages: [...contextMessages, userMessage] })
+      const resultMessages = await runtime.invoke(
+        [...contextMessages, userMessage],
+        options?.signal,
+        options?.topicId
+      )
 
-      return extractStructuredMessages(result.messages || [])
+      return extractStructuredMessages(resultMessages)
     } catch (error) {
       logger.error('Error in sendMessage:', error)
       return [
@@ -313,7 +201,7 @@ You are in a continuous conversation with the user. All messages in the chat his
   ): AsyncGenerator<StructuredMessage> {
     yield* runStream(
       {
-        createAgent: () => this.createAgent(),
+        createRuntime: () => this.createRuntime(),
         loadContextMessages: (topicId: number) => this.loadContextMessages(topicId),
         copyUploadedFiles: (docs) => this.copyUploadedFiles(docs)
       },
