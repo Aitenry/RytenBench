@@ -28,6 +28,7 @@ import type { AgentConfigRow, AgentConfigInput } from '../../../../../../main/da
 import type { ProviderOption } from '@renderer/types/components'
 import type { ToolInfo } from '../../../../../resource/types/window'
 import { toolIconMap } from '../ChatConstants'
+import { isEmbeddingProvider, getProviderDisplayName } from '@renderer/utils/providerMeta'
 import {
   SettingsPageHeader,
   SettingsSection,
@@ -107,7 +108,7 @@ const AgentSettings: React.FC = () => {
         (window as unknown as Window).api.mainAgent.get(),
         (window as unknown as Window).api.systemSettings.getAll()
       ])
-      setProviders((providerList as ProviderOption[]).filter((p) => !p.tags?.includes('embedding')))
+      setProviders((providerList as ProviderOption[]).filter((p) => !isEmbeddingProvider(p)))
       setAvailableTools(tools)
       setSkills(skillList)
       setMainAgent({
@@ -409,7 +410,7 @@ const AgentSettings: React.FC = () => {
 
   const providerOptions = providers.map((p) => ({
     value: `${p.provider}:${p.model}`,
-    label: `${p.name} (${p.provider}:${p.model})`
+    label: `${getProviderDisplayName(p)} (${p.provider}:${p.model})`
   }))
 
   return (

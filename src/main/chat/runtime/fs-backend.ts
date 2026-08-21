@@ -93,11 +93,12 @@ function formatOutput(output: unknown): string {
 
 /** 简易 glob → 正则（支持 *、**、?） */
 function globToRegExp(pattern: string): RegExp {
+  const GLOBSTAR = '__GLOBSTAR__'
   let re = pattern
-    .replace(/\*\*/g, '\u0000') // 临时占位
+    .replace(/\*\*/g, GLOBSTAR) // 临时占位
     .replace(/\*/g, '[^/]*')
     .replace(/\?/g, '[^/]')
-    .replace(/\u0000/g, '.*')
+    .replace(new RegExp(GLOBSTAR, 'g'), '.*')
   // 纯文件名模式也匹配路径末尾
   if (!re.includes('/')) {
     re = `(?:^|/)${re}$`

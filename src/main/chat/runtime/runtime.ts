@@ -11,6 +11,7 @@ import { createTaskTool } from './subagent'
 import { RecordQueue, startGraphStream, invokeGraph, type GraphRunOptions } from './graph'
 import type { MnemonComponent } from './mnemon'
 import type { RuntimeStream } from './types'
+import type { MemoryInjection } from '../types'
 
 /**
  * AgentRuntime — 声明式组件组装入口（对应论文 §5.2 声明式配置 + 协调）
@@ -152,6 +153,26 @@ export class Runtime {
     return {
       recursionLimit: this.recursionLimit,
       signal
+    }
+  }
+
+  /**
+   * 本轮注入系统提示词的热记忆内容（USER / MEMORY 条目）。
+   * Mnemon 未启用或热记忆为空时返回 null——前端据此决定是否显示「注入记忆」标识。
+   */
+  get memoryInjection(): MemoryInjection | null {
+    if (!this.mnemon) return null
+    const snapshot = this.mnemon.runtimeMemory.snapshot()
+    const user = snapshot.entries.filter((e) => e.target === 'user').map((e) => e.content)
+    const memory = snapshot.entries.filter((e) => e.target === 'memory').map((e) => e.content)
+    if (user.length === 0 && memory.length === 0) return null
+    return {
+      user,
+      memory,
+      usage: {
+        user: `${snapshot.targets.user.used}/${snapshot.targets.user.limit}`,
+        memory: `${snapshot.targets.memory.used}/${snapshot.targets.memory.limit}`
+      }
     }
   }
 

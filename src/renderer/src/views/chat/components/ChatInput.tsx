@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useCallback, useEffect, useRef } from 'react'
-import { Button, Tooltip, Select } from 'antd'
+import { App, Button, Tooltip, Select } from 'antd'
 import { RiArrowUpLine, RiAttachment2, RiCloseLine, RiStopFill } from '@remixicon/react'
 import {
   OpenAIFilled,
@@ -63,6 +63,16 @@ const providerColors: Record<string, string> = {
 // 如需微调高度改这里即可。
 const CARET_HEIGHT = 14
 
+// 读取粘贴 File 内容为 dataUrl（图片附件走此路径）
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result as string)
+    reader.onerror = () => reject(reader.error)
+    reader.readAsDataURL(file)
+  })
+}
+
 interface ChatInputProps {
   inputValue: string
   onInputChange: (value: string) => void
@@ -111,6 +121,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
   const [isDragOver, setIsDragOver] = useState(false)
   // 自定义光标元素（原生光标已隐藏，见 updateCaret）
   const caretRef = useRef<HTMLSpanElement | null>(null)
+  const { message } = App.useApp()
 
   const selectedProviderType = useMemo(() => {
     if (selectedProviderId == null) return ''
@@ -132,6 +143,45 @@ const ChatInput: React.FC<ChatInputProps> = ({
   onKeyDownRef.current = onKeyDown
 
   const editorRef = useRef<Editor | null>(null)
+
+  // ── 粘贴附件：剪贴板中的文件/图片转为附件（上传按钮同一套 Attachment 结构）──
+  // 图片：读内容为 dataUrl（与 select-image-file 的图片分支一致）
+  // 非图片：取真实磁盘路径（与 select-image-file 的非图片分支一致：dataUrl 即路径），
+  //         取不到路径（如其他应用复制的无磁盘来源文件）时提示改用拖拽/上传
+  const handlePasteFiles = useCallback(
+    async (files: File[]) => {
+      const added: Attachment[] = []
+      for (const file of files) {
+        const isImage =
+          file.type.startsWith('image/') || /\.(png|jpe?g|gif|bmp|webp|svg|ico)$/i.test(file.name)
+        if (isImage) {
+          // 与上传按钮一致：非视觉模型禁止粘贴图片附件
+          if (!modelSupportsVision) {
+            message.warning('当前模型不支持视觉识别，无法粘贴图片附件')
+            continue
+          }
+          try {
+            const dataUrl = await readFileAsDataUrl(file)
+            added.push({ dataUrl, fileName: file.name || 'paste-image.png', isImage: true })
+          } catch {
+            message.error(`读取图片附件失败：${file.name}`)
+          }
+        } else {
+          const realPath = (window as unknown as Window).api.file.getPathForFile(file)
+          if (realPath) {
+            added.push({ dataUrl: realPath, fileName: file.name, isImage: false })
+          } else {
+            message.warning(`无法获取「${file.name}」的本地路径，请通过拖拽或上传按钮添加`)
+          }
+        }
+      }
+      if (added.length > 0) onAttachmentsChange([...attachments, ...added])
+    },
+    [attachments, onAttachmentsChange, modelSupportsVision, message]
+  )
+  // 同上：editor 只创建一次，handlePaste 经 ref 取最新实现
+  const handlePasteFilesRef = useRef(handlePasteFiles)
+  handlePasteFilesRef.current = handlePasteFiles
 
   const editor = useEditor({
     extensions: [
@@ -190,9 +240,16 @@ const ChatInput: React.FC<ChatInputProps> = ({
       // 完全接管 drop：拖入的文件引用统一由容器 onDrop 插入 chip，
       // 避免 ProseMirror 默认把 text/plain 当文本插入造成双重插入
       handleDrop: () => true,
-      // 粘贴强制纯文本：按 \n 拆行插入（换行用 hardBreak，保持 DOM 扁平）
+      // 剪切板含文件/图片时优先转附件（Ctrl+V 粘贴上传），无文件才走纯文本粘贴
+      // 粘贴纯文本：按 \n 拆行插入（换行用 hardBreak，保持 DOM 扁平）
       // 注意：不能使用 insertContent(数组)（会丢弃 hardBreak），必须走原生 tr.insert
       handlePaste: (_view, event) => {
+        const pastedFiles = Array.from(event.clipboardData?.files ?? [])
+        if (pastedFiles.length > 0) {
+          event.preventDefault()
+          void handlePasteFilesRef.current(pastedFiles)
+          return true
+        }
         const text = event.clipboardData?.getData('text/plain')
         if (text === undefined) return false
         event.preventDefault()
@@ -574,7 +631,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
       )}
       <div className="flex items-center justify-between px-4 pb-4">
         <div className="flex items-center gap-2">
-          <Tooltip title={modelSupportsVision ? '上传附件（含图片）' : '上传附件（不含图片）'}>
+          <Tooltip title={'上传附件（也可 Ctrl+V 直接粘贴图片/文件）'}>
             <Button
               type="dashed"
               shape="circle"

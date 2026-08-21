@@ -4,7 +4,6 @@ import {
   RiListCheck2,
   RiDeleteBin6Line,
   RiMoreLine,
-  RiLoader4Line,
   RiBrain4Line,
   RiArrowDownSLine,
   RiArrowRightSLine,
@@ -12,6 +11,7 @@ import {
   RiFileTextLine,
   RiSettings4Line
 } from '@remixicon/react'
+import ChaseDots from './ChaseDots'
 import type { ChatTopicRow } from '../../../../../main/database/mapper/chat'
 import { Window } from '../../../../resource/types/window'
 
@@ -116,9 +116,7 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 
   // 打开系统设置记忆页
   const handleOpenMemorySettings = useCallback(() => {
-    window.dispatchEvent(
-      new CustomEvent('open-system-settings', { detail: { tab: 'memory' } })
-    )
+    window.dispatchEvent(new CustomEvent('open-system-settings', { detail: { tab: 'memory' } }))
   }, [])
 
   // 监听记忆变更事件（对话中模型写记忆后刷新概览）
@@ -132,6 +130,18 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
     return () => window.removeEventListener('memory-tree-refresh', handleRefresh)
   }, [memoryExpanded, loadMnemonSnapshot])
 
+  // 切换工作区后立即刷新记忆概览（记忆按工作区目录隔离，旧工作区快照必须立刻失效）
+  useEffect(() => {
+    const handleWorkspaceChanged = (): void => {
+      setMemorySnap(null)
+      if (memoryExpanded) {
+        loadMnemonSnapshot()
+      }
+    }
+    window.addEventListener('workspace-changed', handleWorkspaceChanged)
+    return () => window.removeEventListener('workspace-changed', handleWorkspaceChanged)
+  }, [memoryExpanded, loadMnemonSnapshot])
+
   const handleScroll = useCallback(() => {
     const el = scrollRef.current
     if (!el || isLoadingMoreTopics || !hasMoreTopics) return
@@ -140,13 +150,7 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
     }
   }, [isLoadingMoreTopics, hasMoreTopics, onLoadMoreTopics])
 
-  const importanceColor: Record<string, string> = {
-    critical: '#d4380d',
-    normal: colorTextSecondary,
-    low: colorTextTertiary
-  }
-
-  // 按目标分组的热记忆条目
+  // 按目标分组的热记忆数量
   const userEntries = memorySnap?.runtime?.entries.filter((e) => e.target === 'user') ?? []
   const memoryEntries = memorySnap?.runtime?.entries.filter((e) => e.target === 'memory') ?? []
 
@@ -174,7 +178,11 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
           {topics.length}
         </span>
       </div>
-      <div ref={scrollRef} className="flex-1 overflow-y-auto py-2 history-scrollbar" onScroll={handleScroll}>
+      <div
+        ref={scrollRef}
+        className="flex-1 overflow-y-auto py-2 history-scrollbar"
+        onScroll={handleScroll}
+      >
         {topics.length === 0 ? (
           <p className="text-xs text-center py-8" style={{ color: colorTextTertiary }}>
             暂无任务
@@ -207,11 +215,7 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
                   }}
                 >
                   {isTopicLoading ? (
-                    <RiLoader4Line
-                      size={16}
-                      className="shrink-0 animate-spin"
-                      style={{ color: colorTextTertiary }}
-                    />
+                    <ChaseDots size={16} className="shrink-0" color={colorTextTertiary} />
                   ) : (
                     <RiListCheck2
                       size={16}
@@ -314,60 +318,44 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
               </div>
             ) : (
               <div className="pt-1">
-                {/* 用户画像（USER） */}
+                {/* 用户画像（USER）——仅显示数量，不展示内容 */}
                 {memorySnap.runtime && userEntries.length > 0 && (
-                  <div className="mb-3">
+                  <div className="mb-2">
                     <div
-                      className="flex items-center gap-1.5 mb-1.5 text-xs font-medium"
+                      className="flex items-center justify-between gap-1.5 mb-1.5 text-xs font-medium"
                       style={{ color: colorTextSecondary }}
                     >
-                      <span
-                        className="rounded-sm"
-                        style={{ width: 3, height: 12, background: '#1677ff' }}
-                      />
-                      用户画像
+                      <span className="flex items-center gap-1.5">
+                        <span
+                          className="rounded-sm"
+                          style={{ width: 3, height: 12, background: '#1677ff' }}
+                        />
+                        用户画像
+                      </span>
                       <span style={{ color: colorTextTertiary, fontWeight: 400 }}>
                         {userEntries.length} 条
                       </span>
                     </div>
-                    <div className="space-y-1.5">
-                      {userEntries.slice(0, 4).map((entry, i) => (
-                        <MemoryItem key={i} entry={entry} colorFillAlter={colorFillAlter} colorTextSecondary={colorTextSecondary} importanceColor={importanceColor} />
-                      ))}
-                      {userEntries.length > 4 && (
-                        <p className="text-xs text-center pt-0.5" style={{ color: colorTextTertiary }}>
-                          还有 {userEntries.length - 4} 条…
-                        </p>
-                      )}
-                    </div>
                   </div>
                 )}
 
-                {/* 项目记忆（MEMORY） */}
+                {/* 项目记忆（MEMORY）——仅显示数量，不展示内容 */}
                 {memorySnap.runtime && memoryEntries.length > 0 && (
-                  <div className="mb-3">
+                  <div className="mb-2">
                     <div
-                      className="flex items-center gap-1.5 mb-1.5 text-xs font-medium"
+                      className="flex items-center justify-between gap-1.5 mb-1.5 text-xs font-medium"
                       style={{ color: colorTextSecondary }}
                     >
-                      <span
-                        className="rounded-sm"
-                        style={{ width: 3, height: 12, background: '#52c41a' }}
-                      />
-                      项目记忆
+                      <span className="flex items-center gap-1.5">
+                        <span
+                          className="rounded-sm"
+                          style={{ width: 3, height: 12, background: '#52c41a' }}
+                        />
+                        项目记忆
+                      </span>
                       <span style={{ color: colorTextTertiary, fontWeight: 400 }}>
                         {memoryEntries.length} 条
                       </span>
-                    </div>
-                    <div className="space-y-1.5">
-                      {memoryEntries.slice(0, 4).map((entry, i) => (
-                        <MemoryItem key={i} entry={entry} colorFillAlter={colorFillAlter} colorTextSecondary={colorTextSecondary} importanceColor={importanceColor} />
-                      ))}
-                      {memoryEntries.length > 4 && (
-                        <p className="text-xs text-center pt-0.5" style={{ color: colorTextTertiary }}>
-                          还有 {memoryEntries.length - 4} 条…
-                        </p>
-                      )}
                     </div>
                   </div>
                 )}
@@ -420,34 +408,5 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
     </div>
   )
 }
-
-/** 单条热记忆条目：优先级圆点 + 两行文字 */
-const MemoryItem: React.FC<{
-  entry: { content: string; importance: string }
-  colorFillAlter: string
-  colorTextSecondary: string
-  importanceColor: Record<string, string>
-}> = ({ entry, colorFillAlter, colorTextSecondary, importanceColor }) => (
-  <div
-    className="flex items-start gap-2 rounded-md px-2 py-1.5"
-    style={{ background: colorFillAlter }}
-  >
-    <span
-      className="mt-[5px] rounded-full shrink-0"
-      style={{
-        width: 7,
-        height: 7,
-        background: importanceColor[entry.importance] ?? colorTextSecondary
-      }}
-    />
-    <span
-      className="line-clamp-2 text-[13px]"
-      style={{ color: colorTextSecondary, lineHeight: '19px', wordBreak: 'break-all' }}
-      title={entry.content}
-    >
-      {entry.content}
-    </span>
-  </div>
-)
 
 export default ChatSidebar

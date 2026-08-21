@@ -198,3 +198,55 @@ mark.search-highlight-current {
   border-radius: 2px;
   padding: 0 1px;
 }
+
+/* ── 内容适配：Mermaid 图表 ── */
+
+.mermaid-block {
+  margin: 1em 0;
+  padding: 16px;
+  border: 1px solid var(--md-th-td-border);
+  border-radius: 8px;
+  background: var(--md-pre-bg);
+  display: flex;
+  justify-content: center;
+  overflow-x: auto;
+}
+
+/* !important 压过 mermaid 内联的 max-width（自然宽度），保证 SVG 永远不超出容器 */
+.mermaid-block svg {
+  max-width: 100% !important;
+  height: auto;
+  margin: 0 auto;
+}
+
+.mermaid-loading {
+  color: var(--md-code-color);
+  font-size: 13px;
+  justify-content: center;
+}
+
+.mermaid-error {
+  color: #dc2626;
+  font-size: 13px;
+  justify-content: center;
+  text-align: center;
+  word-break: break-all;
+}
+
+/* ── 内容适配：KaTeX 公式 ── */
+
+.markdown-body .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 2px 0;
+}
+
+.markdown-body .math.math-inline {
+  font-family: inherit;
+}
+
+/* ── 内容适配：MDX 源码块（预览中以代码块展示，语言标记为 mdx） ── */
+
+.markdown-body pre code.language-mdx {
+  color: var(--md-pre-code-color);
+}

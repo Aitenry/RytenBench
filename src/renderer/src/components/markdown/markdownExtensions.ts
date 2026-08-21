@@ -15,6 +15,9 @@ import type { Editor } from '@tiptap/react'
 import type { Extensions } from '@tiptap/core'
 import type MarkdownIt from 'markdown-it'
 import { taskCheckboxPlugin } from './taskCheckboxPlugin'
+import { MathInline, MathBlock, mathPlugin } from './markdownMath'
+import { MdxBlock, MdxInline, setupMdxParse } from './mdx'
+import { Mermaid } from './mermaid'
 
 /* ────────────────────────────────────────────────────────────
    下划线 / 高亮没有标准 Markdown 语法，序列化为 <u>/<mark> HTML，
@@ -167,9 +170,38 @@ const MarkdownTaskItemTyping = Extension.create({
   }
 })
 
+/**
+ * Markdown 解析期内容适配：KaTeX 数学（$..$ / $$..$$）与 MDX 源码保护。
+ * setup 钩子在每次 parse 前被 tiptap-markdown 调用。
+ */
+const MarkdownContentExtras = Extension.create({
+  name: 'markdownContentExtras',
+  addStorage() {
+    return {
+      markdown: {
+        parse: {
+          setup(md: MarkdownIt) {
+            setupMdxParse(md)
+            md.use(mathPlugin)
+          }
+        }
+      }
+    }
+  }
+})
+
 /** 构建所见即所得 Markdown 编辑器的扩展集 */
 export function buildMarkdownEditorExtensions(placeholder: string): Extensions {
   return [
+    /* 自定义块/行内节点须在 CodeBlockLowlight（pre code）之前注册，
+       parseDOM 按 schema 顺序匹配，保证 pre[data-mermaid] /
+       pre[data-mdx-src] 优先命中 */
+    Mermaid,
+    MdxBlock,
+    MdxInline,
+    MathInline,
+    MathBlock,
+    MarkdownContentExtras,
     StarterKit.configure({
       heading: { levels: [1, 2, 3, 4] },
       // 代码块改用 CodeBlockLowlight（带语法高亮）
@@ -202,7 +234,8 @@ export function buildMarkdownEditorExtensions(placeholder: string): Extensions {
       html: true,
       tightLists: true,
       bulletListMarker: '-',
-      linkify: false,
+      // GFM 自动链接：解析裸 URL 为链接（与 Link 扩展 autolink 一致）
+      linkify: true,
       breaks: false,
       transformPastedText: true,
       transformCopiedText: false

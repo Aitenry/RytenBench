@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import {
   theme,
+  App,
   Table,
   Button,
   Modal,
@@ -31,7 +32,20 @@ import {
 } from '@ant-design/icons'
 import { useMessage } from '@renderer/hooks/useMessage'
 import { Window } from '../../../../resource/types/window'
-import type { LlmProviderConfig, LlmProviderInput } from '@renderer/types/provider'
+import {
+  type LlmProviderConfig,
+  type LlmProviderInput,
+  type ModelMetadata,
+  type FetchedModel
+} from '@renderer/types/provider'
+import {
+  CAPABILITY_OPTIONS,
+  CAPABILITY_BADGES,
+  MODEL_TYPE_LABELS,
+  getCapabilities,
+  getProviderDisplayName,
+  isEmbeddingProvider
+} from '@renderer/utils/providerMeta'
 import { SettingsPageHeader, SettingsSection } from './settings-ui'
 
 const PROVIDER_TYPES = [
@@ -106,27 +120,36 @@ const ProviderLogo: React.FC<{ provider: string; size?: number }> = ({ provider,
   )
 }
 
-const MODEL_TAGS = [
-  { value: 'chat', label: '对话', color: 'blue' },
-  { value: 'embedding', label: '嵌入', color: 'purple' },
-  { value: 'vision', label: '视觉', color: 'cyan' },
-  { value: 'tools', label: '工具', color: 'green' },
-  { value: 'thinking', label: '思考', color: 'orange' },
-  { value: 'other', label: '非对话', color: 'default' }
-]
+/** 判断是否为向量/嵌入模型：由元数据（type/supports_embeddings）或名称/模型名兜底 */
+const isEmbeddingModel = (p: LlmProviderConfig): boolean => isEmbeddingProvider(p)
 
-/** 判断是否为向量/嵌入模型：标签含 embedding，或名称/模型名含 embedding */
-const isEmbeddingModel = (p: LlmProviderConfig): boolean => {
-  if (p.tags?.some((t) => t.toLowerCase() === 'embedding')) return true
-  const lowered = (p.name + p.model).toLowerCase()
-  return lowered.includes('embedding')
+/** 模型元数据简述（表格列 / 拉取列表复用，不展示模型名称） */
+const MetaSummary: React.FC<{ metadata: ModelMetadata | null }> = ({ metadata }) => {
+  const {
+    token: { colorTextTertiary }
+  } = theme.useToken()
+  if (!metadata) {
+    return <span style={{ color: colorTextTertiary, fontSize: 12 }}>未填写</span>
+  }
+  const caps = getCapabilities(metadata)
+  const typeLabel = metadata.type ? MODEL_TYPE_LABELS[metadata.type] ?? metadata.type : null
+  const badges = CAPABILITY_BADGES.filter((b) => caps[b.key] === true)
+  return (
+    <Space size={4} wrap>
+      {typeLabel ? <Tag style={{ margin: 0, fontSize: 11 }}>{typeLabel}</Tag> : null}
+      {badges.map((b) => (
+        <Tag key={b.key} style={{ margin: 0, fontSize: 11 }} color="blue">
+          {b.label}
+        </Tag>
+      ))}
+    </Space>
+  )
 }
 
 const ModelSettings: React.FC = () => {
-  const {
-    token: { colorTextSecondary }
-  } = theme.useToken()
+  const { token: { colorTextSecondary } } = theme.useToken()
 
+  const { modal } = App.useApp()
   const { viewMessage } = useMessage()
 
   const [providers, setProviders] = useState<LlmProviderConfig[]>([])
@@ -140,12 +163,16 @@ const ModelSettings: React.FC = () => {
   const [fetchProviderType, setFetchProviderType] = useState('ollama')
   const [fetchBaseUrl, setFetchBaseUrl] = useState('http://localhost:11434')
   const [fetchApiKey, setFetchApiKey] = useState('')
-  const [fetchModels, setFetchModels] = useState<{ id: string; tags: string[] }[]>([])
+  const [fetchModels, setFetchModels] = useState<FetchedModel[]>([])
   const [fetchLoading, setFetchLoading] = useState(false)
   const [checkedModels, setCheckedModels] = useState<string[]>([])
   const [addingModels, setAddingModels] = useState(false)
 
-  const watchedTags: string[] = (Form.useWatch('tags', form) as string[]) || []
+  const watchedCaps: string[] = (Form.useWatch('metadata_capabilities', form) as string[]) || []
+  const watchedType: string | undefined = Form.useWatch('metadata_type', form)
+  // 表单中是否将模型配置为嵌入模型（用于禁用“设为默认”）
+  const isEmbeddingInForm =
+    watchedType === 'embedding' || watchedCaps.includes('supports_embeddings')
 
   const loadProviders = useCallback(async () => {
     const msgKey = 'providers-load'
@@ -170,7 +197,12 @@ const ModelSettings: React.FC = () => {
     form.setFieldsValue({
       provider: 'deepseek',
       temperature: 0.7,
-      tags: [],
+      metadata_display_name: '',
+      metadata_vendor: '',
+      metadata_type: undefined,
+      metadata_capabilities: [],
+      metadata_context_window: null,
+      metadata_max_output_tokens: null,
       is_enabled: true,
       is_default: false,
       sort_order: 0
@@ -180,15 +212,24 @@ const ModelSettings: React.FC = () => {
 
   const openEditModal = (record: LlmProviderConfig): void => {
     setEditingProvider(record)
+    const meta = record.metadata ?? {}
+    const caps = getCapabilities(record.metadata)
     form.setFieldsValue({
-      name: record.name,
+      name: getProviderDisplayName(record),
       provider: record.provider,
       base_url: record.base_url,
       api_key: record.api_key || '',
       model: record.model,
       temperature: record.temperature,
       max_tokens: record.max_tokens,
-      tags: record.tags || [],
+      metadata_display_name: typeof meta.display_name === 'string' ? meta.display_name : '',
+      metadata_vendor: typeof meta.vendor === 'string' ? meta.vendor : '',
+      metadata_type: typeof meta.type === 'string' ? meta.type : undefined,
+      metadata_capabilities: CAPABILITY_OPTIONS.filter((o) => caps[o.key]).map((o) => o.key),
+      metadata_context_window:
+        typeof meta.context_window === 'number' ? meta.context_window : null,
+      metadata_max_output_tokens:
+        typeof meta.max_output_tokens === 'number' ? meta.max_output_tokens : null,
       is_enabled: record.is_enabled,
       is_default: record.is_default,
       sort_order: record.sort_order
@@ -203,6 +244,54 @@ const ModelSettings: React.FC = () => {
     }
   }
 
+  /** 由表单字段组装元数据对象：保留已有档案字段，覆盖用户编辑项；全空时返回 null */
+  const buildMetadata = (
+    values: Record<string, unknown>,
+    existing: ModelMetadata | null
+  ): ModelMetadata | null => {
+    const base = existing ? { ...existing } : {}
+    const currentCaps: Record<string, boolean> = {
+      ...(existing?.capabilities && typeof existing.capabilities === 'object'
+        ? (existing.capabilities as Record<string, boolean>)
+        : {})
+    }
+    const selectedCaps = ((values.metadata_capabilities as string[]) ?? []).filter(Boolean)
+    for (const opt of CAPABILITY_OPTIONS) {
+      const key = opt.key as string
+      currentCaps[key] = selectedCaps.includes(key)
+    }
+
+    const displayName = typeof values.metadata_display_name === 'string'
+      ? values.metadata_display_name.trim()
+      : ''
+    const vendor =
+      typeof values.metadata_vendor === 'string' ? values.metadata_vendor.trim() : ''
+    const type = typeof values.metadata_type === 'string' ? values.metadata_type.trim() : ''
+    const ctx = values.metadata_context_window as number | null | undefined
+    const maxOut = values.metadata_max_output_tokens as number | null | undefined
+
+    const metadata: ModelMetadata = { ...base, capabilities: currentCaps }
+    if (displayName) metadata.display_name = displayName
+    else delete metadata.display_name
+    if (vendor) metadata.vendor = vendor
+    else delete metadata.vendor
+    if (type) metadata.type = type
+    else delete metadata.type
+    if (ctx != null && ctx > 0) metadata.context_window = ctx
+    else delete metadata.context_window
+    if (maxOut != null && maxOut > 0) metadata.max_output_tokens = maxOut
+    else delete metadata.max_output_tokens
+
+    const meaningful =
+      displayName.length > 0 ||
+      vendor.length > 0 ||
+      type.length > 0 ||
+      (ctx != null && ctx > 0) ||
+      (maxOut != null && maxOut > 0) ||
+      CAPABILITY_OPTIONS.some((o) => currentCaps[o.key])
+    return meaningful ? metadata : null
+  }
+
   const handleSubmit = async (): Promise<void> => {
     const msgKey = 'provider-save'
     try {
@@ -215,7 +304,7 @@ const ModelSettings: React.FC = () => {
         model: values.model as string,
         temperature: values.temperature as number | undefined,
         max_tokens: values.max_tokens as number | null | undefined,
-        tags: (values.tags as string[]) ?? [],
+        metadata: buildMetadata(values, editingProvider?.metadata ?? null),
         is_enabled: values.is_enabled as boolean | undefined,
         is_default: values.is_default as boolean | undefined,
         sort_order: values.sort_order as number | undefined
@@ -280,17 +369,22 @@ const ModelSettings: React.FC = () => {
     setFetchModels([])
     setCheckedModels([])
     try {
-      const result = await (window as unknown as Window).api.providers.fetchModels(
+      const result = (await (window as unknown as Window).api.providers.fetchModels(
         fetchProviderType,
         fetchBaseUrl || undefined,
         fetchApiKey || undefined
-      )
+      )) as FetchedModel[]
       // 过滤掉已存在的模型
       const existingIds = new Set(providers.map((p) => p.model))
       const newModels = result.filter((m) => !existingIds.has(m.id))
       setFetchModels(newModels)
-      // 默认勾选对话/嵌入等可用模型，跳过非对话模型（图像生成、语音等）
-      setCheckedModels(newModels.filter((m) => !m.tags.includes('other')).map((m) => m.id))
+      // 默认勾选档案中为文本生成（或档案缺失）的模型，跳过图像生成等非对话模型；
+      // 无档案的模型也可添加，之后由用户在编辑表单中自行填写元数据
+      setCheckedModels(
+        newModels
+          .filter((m) => !m.metadata || m.metadata.type === 'text-generation')
+          .map((m) => m.id)
+      )
     } catch (error) {
       viewMessage('fetch-models', 'error', `拉取失败: ${error}`)
     } finally {
@@ -316,7 +410,7 @@ const ModelSettings: React.FC = () => {
       viewMessage(msgKey, 'warning', '请至少选择一个模型')
       return
     }
-    const tagMap = new Map(fetchModels.map((m) => [m.id, m.tags]))
+    const metaMap = new Map(fetchModels.map((m) => [m.id, m.metadata]))
     setAddingModels(true)
     try {
       let added = 0
@@ -328,7 +422,7 @@ const ModelSettings: React.FC = () => {
             base_url: fetchBaseUrl || undefined,
             api_key: fetchApiKey || undefined,
             model: modelId,
-            tags: tagMap.get(modelId) ?? [],
+            metadata: metaMap.get(modelId) ?? null,
             is_enabled: true,
             is_default: false
           })
@@ -352,10 +446,10 @@ const ModelSettings: React.FC = () => {
       title: '模型名称',
       dataIndex: 'name',
       key: 'name',
-      render: (text: string, record: LlmProviderConfig) => (
+      render: (_text: string, record: LlmProviderConfig) => (
         <Space>
           <ProviderLogo provider={record.provider} />
-          <span>{text}</span>
+          <span>{getProviderDisplayName(record)}</span>
           {record.is_default && (
             <Tag color="gold" style={{ margin: 0 }}>
               默认
@@ -372,22 +466,11 @@ const ModelSettings: React.FC = () => {
       render: (type: string) => getProviderConfig(type)?.label || type
     },
     {
-      title: '标签',
-      dataIndex: 'tags',
-      key: 'tags',
-      width: 150,
-      render: (tags: string[] | null) => (
-        <Space size={4} wrap>
-          {(tags ?? []).map((t) => {
-            const cfg = MODEL_TAGS.find((x) => x.value === t)
-            return cfg ? (
-              <Tag key={t} color={cfg.color} style={{ margin: 0, fontSize: 11 }}>
-                {cfg.label}
-              </Tag>
-            ) : null
-          })}
-        </Space>
-      )
+      title: '元数据',
+      dataIndex: 'metadata',
+      key: 'metadata',
+      width: 220,
+      render: (metadata: ModelMetadata | null) => <MetaSummary metadata={metadata} />
     },
     {
       title: '操作',
@@ -422,16 +505,24 @@ const ModelSettings: React.FC = () => {
             />
           </Tooltip>
           {!record.is_default && (
-            <Popconfirm
-              title="确定删除此供应商？"
-              onConfirm={() => handleDelete(record.id)}
-              okText="确定"
-              cancelText="取消"
-            >
-              <Tooltip title="删除">
-                <Button type="text" size="small" danger icon={<DeleteOutlined />} />
-              </Tooltip>
-            </Popconfirm>
+            <Tooltip title="删除">
+              <Button
+                type="text"
+                size="small"
+                danger
+                icon={<DeleteOutlined />}
+                onClick={() => {
+                  modal.confirm({
+                    title: '确定删除此供应商？',
+                    content: `删除后「${record.name}」将不再可用，此操作不可撤销。`,
+                    okText: '删除',
+                    cancelText: '取消',
+                    okButtonProps: { danger: true },
+                    onOk: () => handleDelete(record.id)
+                  })
+                }}
+              />
+            </Tooltip>
           )}
         </Space>
       )
@@ -490,7 +581,7 @@ const ModelSettings: React.FC = () => {
           initialValues={{
             provider: 'deepseek',
             temperature: 0.7,
-            tags: [],
+            metadata_capabilities: [],
             is_enabled: true,
             is_default: false,
             sort_order: 0
@@ -529,24 +620,48 @@ const ModelSettings: React.FC = () => {
           </Form.Item>
 
           <Form.Item
-            name="tags"
-            label="模型标签"
-            tooltip="嵌入模型只能选择嵌入标签，其他标签互不影响"
+            name="metadata_display_name"
+            label="显示名称"
+            tooltip="模型档案中的展示名称，未填写时使用模型名称"
+          >
+            <Input placeholder="例如：GPT-5.6 Sol" />
+          </Form.Item>
+
+          <Space size="middle" className="w-full">
+            <Form.Item name="metadata_vendor" label="厂商" style={{ width: 160 }}>
+              <Input placeholder="例如：OpenAI" />
+            </Form.Item>
+            <Form.Item name="metadata_type" label="模型类型" style={{ width: 150 }}>
+              <Select
+                allowClear
+                placeholder="选择类型"
+                options={Object.entries(MODEL_TYPE_LABELS).map(([value, label]) => ({
+                  value,
+                  label
+                }))}
+              />
+            </Form.Item>
+          </Space>
+
+          <Space size="middle" className="w-full">
+            <Form.Item name="metadata_context_window" label="上下文 (tokens)" style={{ width: 160 }}>
+              <InputNumber min={0} step={1000} style={{ width: '100%' }} placeholder="未知" />
+            </Form.Item>
+            <Form.Item name="metadata_max_output_tokens" label="最大输出 (tokens)" style={{ width: 160 }}>
+              <InputNumber min={1} style={{ width: '100%' }} placeholder="未知" />
+            </Form.Item>
+          </Space>
+
+          <Form.Item
+            name="metadata_capabilities"
+            label="能力"
+            tooltip="能力来自 models-profile.json 档案；未收录的模型可在此自行勾选。嵌入能力勾选后不能设为默认聊天模型"
           >
             <Select
               mode="multiple"
-              placeholder="选择模型能力标签"
-              options={MODEL_TAGS.map((t) => {
-                const hasEmbedding = watchedTags.includes('embedding')
-                const hasOther = watchedTags.some((tag) => tag !== 'embedding')
-                return {
-                  value: t.value,
-                  label: t.label,
-                  disabled:
-                    (t.value === 'embedding' && hasOther) ||
-                    (t.value !== 'embedding' && hasEmbedding)
-                }
-              })}
+              placeholder="选择模型能力"
+              options={CAPABILITY_OPTIONS.map((o) => ({ value: o.key, label: o.label }))}
+              optionFilterProp="label"
             />
           </Form.Item>
 
@@ -592,12 +707,12 @@ const ModelSettings: React.FC = () => {
               label="设为默认"
               valuePropName="checked"
               tooltip={
-                watchedTags.includes('embedding')
+                isEmbeddingInForm
                   ? '向量模型不能设为默认聊天模型'
                   : '只能有一个默认供应商'
               }
             >
-              <Switch disabled={watchedTags.includes('embedding')} />
+              <Switch disabled={isEmbeddingInForm} />
             </Form.Item>
           </Space>
         </Form>
@@ -703,17 +818,18 @@ const ModelSettings: React.FC = () => {
                           flexShrink: 0,
                           display: 'flex',
                           gap: 4,
-                          flexWrap: 'nowrap'
+                          flexWrap: 'wrap',
+                          justifyContent: 'flex-end',
+                          maxWidth: 260
                         }}
                       >
-                        {m.tags.map((t) => {
-                          const cfg = MODEL_TAGS.find((x) => x.value === t)
-                          return cfg ? (
-                            <Tag key={t} color={cfg.color} style={{ margin: 0, fontSize: 11 }}>
-                              {cfg.label}
-                            </Tag>
-                          ) : null
-                        })}
+                        {m.metadata ? (
+                          <MetaSummary metadata={m.metadata} />
+                        ) : (
+                          <span style={{ color: colorTextSecondary, fontSize: 12 }}>
+                            暂无元数据（添加后可编辑填写）
+                          </span>
+                        )}
                       </span>
                     </div>
                   ))}

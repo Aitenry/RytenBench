@@ -32,8 +32,8 @@ class ChatService {
    * @param skillsPath 技能存储目录（含 SKILL.md 的子目录即技能），空表示不启用
    * @param enabledSkills 启用的技能 ID 列表，undefined 表示全部启用
    * @param workspacePath AI 工作区目录，挂载为虚拟 /
-   * @param memoryPath 记忆存储根目录，空表示不启用
-   * @param workspaceId 当前工作区 ID，用于定位记忆目录
+   * @param memoryPath 记忆存储根目录，空表示不启用（其下按工作区 ID 分隔，每个工作区一套独立记忆）
+   * @param workspaceId 当前工作区 ID，用于按工作区隔离记忆目录
    */
   constructor(
     model: BaseChatModel,
@@ -72,10 +72,18 @@ class ChatService {
       skillsPath: this.skillsPath,
       enabledSkills: this.enabledSkills,
       workspacePath: this.workspacePath,
-      memoryPath: this.memoryPath,
+      // 记忆按工作区隔离：Runtime 的 /memories/ 挂载与 Mnemon 存储根
+      // 均位于 <memoryPath>/workspace-<workspaceId>/ 下（见 mnemon-singleton.ts）
+      memoryPath: this.workspaceMemoryPath,
       workspaceId: this.workspaceId,
-      mnemon: getMnemonComponent(this.memoryPath)
+      mnemon: getMnemonComponent(this.memoryPath, this.workspaceId)
     })
+  }
+
+  /** 工作区级记忆目录（记忆根 + 工作区 ID 定位） */
+  private get workspaceMemoryPath(): string | undefined {
+    if (!this.memoryPath) return undefined
+    return path.join(this.memoryPath, `workspace-${this.workspaceId}`)
   }
 
   /**
@@ -178,7 +186,10 @@ class ChatService {
         options?.topicId
       )
 
-      return extractStructuredMessages(resultMessages)
+      const structured = extractStructuredMessages(resultMessages)
+      // 非流式路径同样携带本轮热记忆注入信息（前端据此显示「注入记忆」）
+      const injection = runtime.memoryInjection
+      return injection ? [{ memoryInjected: injection }, ...structured] : structured
     } catch (error) {
       logger.error('Error in sendMessage:', error)
       return [

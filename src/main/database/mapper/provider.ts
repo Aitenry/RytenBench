@@ -15,7 +15,7 @@ export interface LlmProviderRow {
   temperature: number
   max_tokens: number | null
   extra_config: string | null
-  tags: string | null
+  metadata: string | null
   is_default: boolean
   is_enabled: boolean
   sort_order: number
@@ -34,7 +34,8 @@ export interface LlmProviderConfig {
   temperature: number
   max_tokens: number | null
   extra_config: Record<string, unknown> | null
-  tags: string[] | null
+  /** 模型元数据（models-profile.json 档案，JSON 对象）；未填写时为 null */
+  metadata: Record<string, unknown> | null
   is_default: boolean
   is_enabled: boolean
   sort_order: number
@@ -50,7 +51,7 @@ export interface LlmProviderInput {
   temperature?: number
   max_tokens?: number | null
   extra_config?: Record<string, unknown> | null
-  tags?: string[] | null
+  metadata?: Record<string, unknown> | null
   is_default?: boolean
   is_enabled?: boolean
   sort_order?: number
@@ -69,7 +70,7 @@ function rowToConfig(row: LlmProviderRow): LlmProviderConfig {
     temperature: row.temperature,
     max_tokens: row.max_tokens,
     extra_config: row.extra_config ? JSON.parse(row.extra_config) : null,
-    tags: row.tags ? JSON.parse(row.tags) : null,
+    metadata: row.metadata ? JSON.parse(row.metadata) : null,
     is_default: row.is_default,
     is_enabled: row.is_enabled,
     sort_order: row.sort_order
@@ -163,12 +164,12 @@ async function createProvider(input: LlmProviderInput): Promise<number> {
 
     const encryptedKey = input.api_key ? encryptApiKey(input.api_key) : null
     const extraConfig = input.extra_config ? JSON.stringify(input.extra_config) : null
-    const tags = input.tags && input.tags.length > 0 ? JSON.stringify(input.tags) : null
+    const metadata = input.metadata ? JSON.stringify(input.metadata) : null
 
     const sql = `
       INSERT INTO llm_providers
         (name, provider, base_url, api_key_encrypted, model, temperature,
-         max_tokens, extra_config, tags, is_default, is_enabled, sort_order)
+         max_tokens, extra_config, metadata, is_default, is_enabled, sort_order)
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
       RETURNING id
     `
@@ -181,7 +182,7 @@ async function createProvider(input: LlmProviderInput): Promise<number> {
       input.temperature ?? 0.7,
       input.max_tokens || null,
       extraConfig,
-      tags,
+      metadata,
       input.is_default ?? false,
       input.is_enabled ?? true,
       input.sort_order ?? 0
@@ -242,11 +243,13 @@ async function updateProvider(id: number, updates: Partial<LlmProviderInput>): P
       updateFields.push(`extra_config = $${paramIndex++}`)
       updateValues.push(extraConfig)
     }
-    if (updates.tags !== undefined) {
-      // null 或空数组都清空标签
-      const tags = updates.tags && updates.tags.length > 0 ? JSON.stringify(updates.tags) : null
-      updateFields.push(`tags = $${paramIndex++}`)
-      updateValues.push(tags)
+    if (updates.metadata !== undefined) {
+      // null 或空对象都清空元数据
+      const metadata = updates.metadata && Object.keys(updates.metadata).length > 0
+        ? JSON.stringify(updates.metadata)
+        : null
+      updateFields.push(`metadata = $${paramIndex++}`)
+      updateValues.push(metadata)
     }
     if (updates.is_default !== undefined) {
       if (updates.is_default) {

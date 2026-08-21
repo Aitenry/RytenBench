@@ -10,9 +10,17 @@ import React, {
 import ReactMarkdown from 'react-markdown'
 import type { Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import remarkMath from 'remark-math'
 import rehypeHighlight from 'rehype-highlight'
 import rehypeSanitize from 'rehype-sanitize'
 import rehypeRaw from 'rehype-raw'
+import rehypeKatex from 'rehype-katex'
+import { defaultSchema } from 'hast-util-sanitize'
+import type { Pluggable, PluggableList } from 'unified'
+import remarkMdxSource from './remarkMdxSource'
+import remarkMathBridge from './remarkMathBridge'
+import MermaidDiagram from './MermaidDiagram'
+import 'katex/dist/katex.min.css'
 import {
   RiCheckLine,
   RiFileCopyLine,
@@ -33,8 +41,25 @@ import type {
 } from '@renderer/types/components'
 
 // Stable references — prevent ReactMarkdown from re-rendering due to new array on each render
-const remarkPlugins = [remarkGfm]
-const rehypePlugins = [rehypeRaw, rehypeHighlight, rehypeSanitize]
+const remarkPlugins = [remarkGfm, remarkMath, remarkMathBridge, remarkMdxSource]
+
+// sanitize 先于 highlight/katex：KaTeX 输出与 hljs 类名不再被剥掉；
+// 白名单需放行 remarkMathBridge 生成的 .math 类名（rehype-katex 依赖它匹配）
+const sanitizeSchema = {
+  ...defaultSchema,
+  attributes: {
+    ...(defaultSchema.attributes ?? {}),
+    code: [...(defaultSchema.attributes?.code ?? []), ['className', /^math/]],
+    div: [...(defaultSchema.attributes?.div ?? []), ['className', /^math/]],
+    span: [...(defaultSchema.attributes?.span ?? []), ['className', /^math/]]
+  }
+}
+const rehypePlugins: PluggableList = [
+  rehypeRaw,
+  [rehypeSanitize, sanitizeSchema] as unknown as Pluggable,
+  rehypeHighlight,
+  rehypeKatex
+]
 
 // Context to tell code component whether it's inside a <pre> (code block) or standalone (inline)
 const IsPreContext = createContext(false)
@@ -494,6 +519,17 @@ const MarkdownView = React.memo(
         ...props
       }: React.ComponentPropsWithoutRef<'pre'>): React.ReactNode {
         const codeText = extractTextFromChildren(children)
+        // Mermaid 代码块 → 渲染为图表
+        const codeChild = React.Children.toArray(children).find(
+          (c): c is React.ReactElement => React.isValidElement(c)
+        )
+        const codeClass =
+          ((codeChild?.props as { className?: string } | undefined)?.className as
+            | string
+            | undefined) ?? ''
+        if (codeClass.includes('language-mermaid')) {
+          return <MermaidDiagram code={codeText} isDarkMode={isDarkMode} />
+        }
         return (
           <div className="relative">
             <IsPreContext.Provider value={true}>

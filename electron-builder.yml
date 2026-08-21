@@ -14,6 +14,8 @@ asarUnpack:
 extraResources:
   - from: src/main/database/sql
     to: database/sql
+  - from: resources/models-profile.json
+    to: models-profile.json
 win:
   executableName: RytenBench
   target: nsis

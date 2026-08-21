@@ -269,5 +269,5 @@ export interface ProviderOption {
   name: string
   model: string
   provider: string
-  tags: string[] | null
+  metadata: Record<string, unknown> | null
 }

@@ -3,8 +3,7 @@ import { theme } from 'antd'
 import {
   RiListCheck2,
   RiArrowDownSLine,
-  RiCheckboxCircleFill,
-  RiCircleLine
+  RiCheckboxCircleFill
 } from '@remixicon/react'
 import { Window } from '../../../../resource/types/window'
 import type { TodoItem } from '../../../../../main/chat/runtime/todo'
@@ -63,6 +62,12 @@ const TaskProgressCard: React.FC<{ currentTopicId: number | null }> = ({ current
         overflow: 'hidden'
       }}
     >
+      {/* 进行中状态：细圆环转圈动画（主色顶弧 + 平滑旋转） */}
+      <style>{`
+        @keyframes task-card-spin {
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
       {/* 标题栏：点击折叠/展开 */}
       <button
         type="button"
@@ -113,7 +118,18 @@ const TaskProgressCard: React.FC<{ currentTopicId: number | null }> = ({ current
                     style={{ color: colorPrimary, marginTop: 2, flexShrink: 0 }}
                   />
                 ) : t.status === 'in_progress' ? (
-                  <RiCircleLine size={16} style={{ color: colorTextSecondary, marginTop: 2, flexShrink: 0 }} />
+                  <span
+                    style={{
+                      width: 16,
+                      height: 16,
+                      marginTop: 2,
+                      flexShrink: 0,
+                      borderRadius: '50%',
+                      border: `1.5px solid ${colorBorderSecondary}`,
+                      borderTopColor: colorPrimary,
+                      animation: 'task-card-spin 0.8s linear infinite'
+                    }}
+                  />
                 ) : (
                   <span
                     style={{

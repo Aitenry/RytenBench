@@ -37,6 +37,12 @@ export async function* runStream(
   try {
     const runtime = deps.createRuntime()
 
+    // 首个 chunk 下发本轮注入的热记忆内容，前端在 AI 消息顶部显示「注入记忆」
+    const injection = runtime.memoryInjection
+    if (injection) {
+      yield { memoryInjected: injection }
+    }
+
     const uploadedRefs = await deps.copyUploadedFiles(options?.documents)
     const userMessage = buildHumanMessage(message, options?.images, uploadedRefs)
     const contextMessages = options?.topicId ? await deps.loadContextMessages(options.topicId) : []

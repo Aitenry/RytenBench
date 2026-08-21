@@ -32,15 +32,27 @@ export interface SubAgentEvent {
   taskDescription?: string
 }
 
+/** 记忆注入块数据（主进程 MemoryInjection 透传） */
+export interface MemoryInjectionBlock {
+  /** 用户画像条目（USER） */
+  user: string[]
+  /** 项目记忆条目（MEMORY） */
+  memory: string[]
+  /** 容量信息展示串 */
+  usage: { user: string; memory: string }
+}
+
 /** 消息块 */
 export interface MessageBlock {
-  type: 'text' | 'tool' | 'reasoning' | 'image' | 'document' | 'subAgent'
+  type: 'text' | 'tool' | 'reasoning' | 'image' | 'document' | 'subAgent' | 'memoryInjected'
   text?: string
   tool?: ToolCall
   reasoning?: string
   image_url?: string
   fileName?: string
   subAgent?: SubAgentEvent
+  /** 本轮注入的热记忆内容（memoryInjected 类型使用） */
+  memory?: MemoryInjectionBlock
   /** 智能体嵌套的子块（仅 subAgent 类型使用，用于流式构建智能体的 text/tool/reasoning） */
   children?: MessageBlock[]
 }

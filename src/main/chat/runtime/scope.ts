@@ -37,15 +37,10 @@ export class EffectScope {
       logger.warn('[EffectScope] 已回收，效果未注册')
       return await run()
     }
-    try {
-      const result = await run()
-      // 逆以 LIFO 组合：新的逆先执行
-      this.inverses.unshift(undo)
-      return result
-    } catch (err) {
-      // 效果本身失败：不回滚（尚未产生副作用），交给调用方处理
-      throw err
-    }
+    // 效果失败不回滚（尚未产生副作用），交给调用方处理；成功则以 LIFO 组合逆
+    const result = await run()
+    this.inverses.unshift(undo)
+    return result
   }
 
   /** 登记取消回调（AbortSignal 触发或 dispose 时调用） */

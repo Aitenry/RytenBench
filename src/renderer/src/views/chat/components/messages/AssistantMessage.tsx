@@ -15,7 +15,8 @@ import {
   RiPencilLine,
   RiFolderOpenLine,
   RiSearchLine,
-  RiTerminalBoxLine
+  RiTerminalBoxLine,
+  RiBrain4Line
 } from '@remixicon/react'
 import MarkdownLoad from '@renderer/components/markdown/MarkdownLoad'
 import LoadingMessage from './LoadingMessage'
@@ -70,11 +71,14 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
       }
     })
 
+    // 仅有「注入记忆」块时仍渲染（卡片可见），其余空消息走 LoadingMessage
+    const hasMemoryBlock = message.blocks.some((b) => b.type === 'memoryInjected')
     if (
       message.loading &&
       !message.content &&
       !message.reasoning_content &&
-      (!message.toolCalls || message.toolCalls.length === 0)
+      (!message.toolCalls || message.toolCalls.length === 0) &&
+      !hasMemoryBlock
     ) {
       return <LoadingMessage colorTextSecondary={colorTextSecondary} />
     }
@@ -297,6 +301,437 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
       }
     }
 
+    // ── Mnemon 记忆工具定制卡片 ──────────────────────────────────────────
+    // 读取类（召回/查看记忆）：mnemon_recall / mnemon_document_search / mnemon_related /
+    //   mnemon_memory_bodies / mnemon_status
+    // 写入类（沉淀/维护记忆）：mnemon_runtime_memory / mnemon_remember / mnemon_document_manage /
+    //   mnemon_forget / mnemon_link / mnemon_memory_body_*
+    const MEMORY_READ_TOOLS = [
+      'mnemon_recall',
+      'mnemon_document_search',
+      'mnemon_related',
+      'mnemon_memory_bodies',
+      'mnemon_status'
+    ]
+    const MEMORY_WRITE_TOOLS = [
+      'mnemon_runtime_memory',
+      'mnemon_remember',
+      'mnemon_document_manage',
+      'mnemon_forget',
+      'mnemon_link',
+      'mnemon_memory_body_create',
+      'mnemon_memory_body_update',
+      'mnemon_memory_body_merge'
+    ]
+    /** 工具中文标签（卡片标题） */
+    const MEMORY_TOOL_TITLES: Record<string, string> = {
+      mnemon_status: '记忆状态',
+      mnemon_memory_bodies: '记忆空间',
+      mnemon_recall: '记忆召回',
+      mnemon_document_search: '档案搜索',
+      mnemon_related: '关联记忆'
+    }
+
+    /** 截断长文本（记忆条目/摘要展示用） */
+    const clampText = (text: string, max = 300): string =>
+      text.length > max ? `${text.slice(0, max)}…` : text
+
+    /** 渲染 mnemon_* 记忆工具为定制卡片：每个工具一类独特内容，不展示存储路径 */
+    const renderMemoryToolCard = (
+      tool: ToolCall,
+      key: string | number,
+      isNested = false
+    ): React.ReactNode => {
+      const size = isNested ? 14 : 16
+      const fontSize = isNested ? '12px' : '13px'
+      const smallFont = isNested ? '11px' : '12px'
+      const query = (tool.input as Record<string, unknown>)?.query as string | undefined
+
+      // 安全解析工具输出 JSON
+      let parsed: Record<string, unknown> | null = null
+      if (tool.output) {
+        try {
+          parsed = JSON.parse(tool.output) as Record<string, unknown>
+        } catch {
+          parsed = null
+        }
+      }
+      const asList = (v: unknown): Record<string, unknown>[] =>
+        Array.isArray(v) ? (v as Record<string, unknown>[]) : []
+
+      /** 统一条目行：主文本 + 元信息行 + 可选徽标（发丝线分隔） */
+      const renderEntry = (
+        entryKey: number,
+        primary: string,
+        meta?: string,
+        badge?: { text: string; active?: boolean }
+      ): React.ReactNode => (
+        <div
+          key={entryKey}
+          className="flex items-start gap-2 py-1.5 first:pt-0"
+          style={{
+            borderTop: entryKey === 0 ? 'none' : `1px solid ${colorFillAlter}`
+          }}
+        >
+          <div className="flex-1 min-w-0">
+            <div style={{ color: colorText, fontSize }} className="whitespace-pre-wrap break-words">
+              {clampText(primary)}
+            </div>
+            {meta ? (
+              <div className="mt-0.5" style={{ color: colorTextTertiary, fontSize: smallFont }}>
+                {meta}
+              </div>
+            ) : null}
+          </div>
+          {badge ? (
+            <span
+              className="shrink-0 rounded px-1.5 py-0.5 mt-px"
+              style={{
+                background: badge.active ? 'rgba(82,196,26,0.12)' : colorFillAlter,
+                color: badge.active ? '#52c41a' : colorTextSecondary,
+                fontSize: isNested ? '10px' : '11px'
+              }}
+            >
+              {badge.text}
+            </span>
+          ) : null}
+        </div>
+      )
+
+      /** 卡片外壳：图标 + 标题 + 头部统计 + 查询词 + 内容 */
+      const shell = (
+        title: string,
+        headExtra: React.ReactNode,
+        body: React.ReactNode
+      ): React.ReactNode => (
+        <div
+          key={key}
+          style={{
+            background: collapseBg,
+            border: 'var(--ant-line-width) var(--ant-line-type) var(--ant-color-border)',
+            marginBottom: isNested ? '4px' : '6px',
+            borderRadius: '8px',
+            padding: '8px 12px'
+          }}
+          className="rounded-lg"
+        >
+          <div className="flex items-center gap-2 mb-1">
+            <RiBrain4Line size={size} style={{ color: colorTextSecondary, flexShrink: 0 }} />
+            <span style={{ color: colorTextSecondary, fontSize, fontWeight: 500, flexShrink: 0 }}>
+              {title}
+            </span>
+            {headExtra}
+            {query ? (
+              <span
+                style={{ color: colorTextTertiary, fontSize: smallFont, flex: 1 }}
+                className="truncate text-right"
+                title={query}
+              >
+                「{clampText(query, 60)}」
+              </span>
+            ) : null}
+          </div>
+          <div className="max-h-64 overflow-y-auto chat-scrollbar pl-0.5">{body}</div>
+        </div>
+      )
+
+      /** 空态行 */
+      const empty = (text: string): React.ReactNode => (
+        <div style={{ color: colorTextTertiary, fontSize: smallFont }} className="py-0.5">
+          {text}
+        </div>
+      )
+
+      // ── mnemon_status：记忆状态概览 ──
+      if (tool.name === 'mnemon_status') {
+        const activeSpaces = asList(parsed?.active_spaces)
+        const rows: [string, string][] = [
+          [
+            '记忆空间',
+            `${parsed?.memory_bodies_active ?? 0}/${parsed?.memory_bodies_total ?? 0} 激活`
+          ],
+          ['热记忆', parsed?.runtime_memory_configured ? '已配置' : '未配置'],
+          ['项目档案', parsed?.documents_configured ? '已配置' : '未配置']
+        ]
+        return shell(
+          MEMORY_TOOL_TITLES.mnemon_status,
+          null,
+          <div>
+            {parsed ? (
+              <>
+                {rows.map(([label, value], i) => (
+                  <div
+                    key={label}
+                    className="flex items-center justify-between py-1"
+                    style={{
+                      borderTop: i === 0 ? 'none' : `1px solid ${colorFillAlter}`
+                    }}
+                  >
+                    <span style={{ color: colorTextSecondary, fontSize: smallFont }}>{label}</span>
+                    <span style={{ color: colorTextTertiary, fontSize: smallFont }}>{value}</span>
+                  </div>
+                ))}
+                {activeSpaces.length > 0 ? (
+                  <div className="flex flex-wrap gap-1 pt-1.5">
+                    {activeSpaces.map((s, i) => (
+                      <span
+                        key={i}
+                        className="rounded px-1.5 py-0.5"
+                        style={{
+                          background: colorFillAlter,
+                          color: colorTextSecondary,
+                          fontSize: isNested ? '10px' : '11px'
+                        }}
+                      >
+                        {String(s.name ?? `空间 ${i + 1}`)} · {Number(s.totalInsights ?? 0)} 条
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+              </>
+            ) : (
+              empty('无法解析状态输出')
+            )}
+          </div>
+        )
+      }
+
+      // ── mnemon_memory_bodies：记忆空间目录 ──
+      if (tool.name === 'mnemon_memory_bodies') {
+        const bodies = asList(parsed?.bodies)
+        return shell(
+          MEMORY_TOOL_TITLES.mnemon_memory_bodies,
+          parsed ? (
+            <span style={{ color: colorTextTertiary, fontSize: smallFont, flexShrink: 0 }}>
+              共 {Number(parsed.total ?? 0)} 个 · {Number(parsed.activeCount ?? 0)} 激活
+            </span>
+          ) : null,
+          bodies.length === 0 ? (
+            empty('暂无记忆空间，可在对话中让模型创建')
+          ) : (
+            <div>
+              {bodies.map((b, i) => (
+                <div
+                  key={i}
+                  className="flex items-start gap-2 py-1.5 first:pt-0"
+                  style={{
+                    borderTop: i === 0 ? 'none' : `1px solid ${colorFillAlter}`
+                  }}
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <span
+                        style={{ color: colorText, fontSize, fontWeight: 500 }}
+                        className="truncate"
+                        title={String(b.name ?? '')}
+                      >
+                        {String(b.name ?? '未命名空间')}
+                      </span>
+                      <span
+                        className="shrink-0 rounded px-1.5 py-px"
+                        style={{
+                          background: b.active ? 'rgba(82,196,26,0.12)' : colorFillAlter,
+                          color: b.active ? '#52c41a' : colorTextTertiary,
+                          fontSize: isNested ? '10px' : '11px'
+                        }}
+                      >
+                        {b.active ? '已激活' : '未激活'}
+                      </span>
+                    </div>
+                    {b.description ? (
+                      <div
+                        className="mt-0.5 truncate"
+                        style={{ color: colorTextTertiary, fontSize: smallFont }}
+                        title={String(b.description)}
+                      >
+                        {String(b.description)}
+                      </div>
+                    ) : null}
+                  </div>
+                  <span
+                    style={{
+                      color: colorTextTertiary,
+                      fontSize: smallFont,
+                      flexShrink: 0
+                    }}
+                  >
+                    {Number(b.totalInsights ?? 0)} 条洞察
+                  </span>
+                </div>
+              ))}
+            </div>
+          )
+        )
+      }
+
+      // ── mnemon_recall：召回的记忆条目 ──
+      if (tool.name === 'mnemon_recall') {
+        const results = asList(parsed?.results)
+        return shell(
+          MEMORY_TOOL_TITLES.mnemon_recall,
+          results.length > 0 ? (
+            <span style={{ color: colorTextTertiary, fontSize: smallFont, flexShrink: 0 }}>
+              {results.length} 条
+            </span>
+          ) : null,
+          results.length === 0 ? (
+            empty(typeof parsed?.hint === 'string' ? String(parsed.hint) : '未召回相关记忆')
+          ) : (
+            <div>
+              {results.map((item, i) => {
+                const primary = String(item.content ?? '')
+                const meta = [
+                  typeof item.memory_body_name === 'string' ? `来源：${item.memory_body_name}` : '',
+                  typeof item.score === 'number' ? `相关度 ${item.score.toFixed(2)}` : ''
+                ]
+                  .filter(Boolean)
+                  .join(' · ')
+                return renderEntry(
+                  i,
+                  primary,
+                  meta || undefined,
+                  typeof item.category === 'string'
+                    ? { text: item.category, active: false }
+                    : undefined
+                )
+              })}
+            </div>
+          )
+        )
+      }
+
+      // ── mnemon_document_search：项目档案搜索 ──
+      if (tool.name === 'mnemon_document_search') {
+        const results = asList(parsed?.results)
+        return shell(
+          MEMORY_TOOL_TITLES.mnemon_document_search,
+          results.length > 0 ? (
+            <span style={{ color: colorTextTertiary, fontSize: smallFont, flexShrink: 0 }}>
+              {results.length} 份
+            </span>
+          ) : null,
+          results.length === 0 ? (
+            empty('未找到匹配的档案')
+          ) : (
+            <div>
+              {results.map((item, i) => {
+                const title = String(item.title ?? '')
+                const excerpt =
+                  (typeof item.excerpt === 'string' && item.excerpt) ||
+                  (typeof item.description === 'string' && item.description) ||
+                  ''
+                return (
+                  <div
+                    key={i}
+                    className="py-1.5 first:pt-0"
+                    style={{
+                      borderTop: i === 0 ? 'none' : `1px solid ${colorFillAlter}`
+                    }}
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <span
+                        style={{ color: colorText, fontSize, fontWeight: 500 }}
+                        className="truncate"
+                        title={title}
+                      >
+                        {clampText(title, 80)}
+                      </span>
+                      {item.status ? (
+                        <span
+                          className="shrink-0 rounded px-1.5 py-px"
+                          style={{
+                            background:
+                              item.status === 'active' ? 'rgba(82,196,26,0.12)' : colorFillAlter,
+                            color: item.status === 'active' ? '#52c41a' : colorTextTertiary,
+                            fontSize: isNested ? '10px' : '11px'
+                          }}
+                        >
+                          {item.status === 'active'
+                            ? '已激活'
+                            : item.status === 'archived'
+                              ? '已归档'
+                              : String(item.status)}
+                        </span>
+                      ) : null}
+                    </div>
+                    {excerpt ? (
+                      <div
+                        className="mt-0.5"
+                        style={{ color: colorTextTertiary, fontSize: smallFont }}
+                      >
+                        {clampText(excerpt, 120)}
+                      </div>
+                    ) : null}
+                  </div>
+                )
+              })}
+            </div>
+          )
+        )
+      }
+
+      // ── mnemon_related：关联记忆遍历 ──
+      if (tool.name === 'mnemon_related') {
+        const results = asList(parsed?.results)
+        return shell(
+          MEMORY_TOOL_TITLES.mnemon_related,
+          results.length > 0 ? (
+            <span style={{ color: colorTextTertiary, fontSize: smallFont, flexShrink: 0 }}>
+              {results.length} 条
+            </span>
+          ) : null,
+          results.length === 0 ? (
+            empty('未找到关联记忆')
+          ) : (
+            <div>
+              {results.map((item, i) => {
+                const primary = String(item.content ?? '')
+                const meta = [
+                  typeof item.edge_type === 'string' ? item.edge_type : '',
+                  typeof item.depth === 'number' ? `深度 ${item.depth}` : ''
+                ]
+                  .filter(Boolean)
+                  .join(' · ')
+                return renderEntry(i, primary, meta || undefined)
+              })}
+            </div>
+          )
+        )
+      }
+
+      // ── 写入类：沉淀/维护结果 ──
+      const writeBody = (): React.ReactNode => {
+        // mnemon_remember：JSON 输出，展示沉淀目标
+        if (tool.name === 'mnemon_remember' && parsed) {
+          const category = typeof parsed.category === 'string' ? `类别：${parsed.category}` : ''
+          const importance =
+            typeof parsed.importance === 'number' ? `重要度 ${parsed.importance}` : ''
+          return (
+            <div>
+              <div style={{ color: colorText, fontSize }}>
+                已沉淀到「{String(parsed.memory_body_name ?? '记忆空间')}」
+              </div>
+              {category || importance ? (
+                <div className="mt-0.5" style={{ color: colorTextTertiary, fontSize: smallFont }}>
+                  {[category, importance].filter(Boolean).join(' · ')}
+                </div>
+              ) : null}
+            </div>
+          )
+        }
+        return (
+          <div style={{ color: colorText, fontSize }} className="whitespace-pre-wrap break-words">
+            {clampText(tool.output, 500)}
+          </div>
+        )
+      }
+      return shell(
+        '记忆写入',
+        null,
+        parsed === null && tool.name === 'mnemon_remember' ? empty('无法解析工具输出') : writeBody()
+      )
+    }
+
     const renderBlocks = (): React.ReactNode => {
       if (message.blocks.length === 0) {
         if (message.content) {
@@ -323,6 +758,70 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
       }
 
       return mergedBlocks.map((block, blockIndex) => {
+        // 本轮注入的热记忆（置于消息顶部，默认折叠）
+        if (block.type === 'memoryInjected' && block.memory) {
+          const mem = block.memory
+          const total = mem.user.length + mem.memory.length
+          return (
+            <Collapse
+              key={blockIndex}
+              items={[
+                {
+                  key: blockIndex,
+                  label: (
+                    <span className="flex items-center gap-2">
+                      <RiBrain4Line size={14} style={{ color: colorTextSecondary }} />
+                      <span style={{ color: colorTextSecondary }}>
+                        注入记忆 · {total} 条
+                        <span style={{ color: colorTextTertiary }}>
+                          {mem.user.length > 0
+                            ? `（用户画像 ${mem.user.length} · 项目记忆 ${mem.memory.length}）`
+                            : `（项目记忆 ${mem.memory.length}）`}
+                        </span>
+                      </span>
+                    </span>
+                  ),
+                  children: (
+                    <div className="px-1.5 text-sm">
+                      {mem.user.length > 0 ? (
+                        <>
+                          <div style={{ color: colorTextSecondary }} className="font-medium mb-1">
+                            用户画像 USER（{mem.usage.user} 字节）
+                          </div>
+                          <ul className="list-disc pl-4 mb-2" style={{ color: colorText }}>
+                            {mem.user.map((entry, i) => (
+                              <li key={i} className="mb-0.5 break-words">
+                                {entry}
+                              </li>
+                            ))}
+                          </ul>
+                        </>
+                      ) : null}
+                      {mem.memory.length > 0 ? (
+                        <>
+                          <div style={{ color: colorTextSecondary }} className="font-medium mb-1">
+                            项目记忆 MEMORY（{mem.usage.memory} 字节）
+                          </div>
+                          <ul className="list-disc pl-4" style={{ color: colorText }}>
+                            {mem.memory.map((entry, i) => (
+                              <li key={i} className="mb-0.5 break-words">
+                                {entry}
+                              </li>
+                            ))}
+                          </ul>
+                        </>
+                      ) : null}
+                    </div>
+                  )
+                }
+              ]}
+              defaultActiveKey={[]}
+              size="small"
+              style={{ marginBottom: '6px', background: collapseBg }}
+              className="rounded-lg border-0"
+            />
+          )
+        }
         if (block.type === 'reasoning' && block.reasoning) {
           // 后续出现任意非推理块（正文/工具），或消息已结束（完成/中止/出错），都视为思考完成
           const hasContentAfter = mergedBlocks
@@ -392,6 +891,15 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
         if (block.type === 'tool' && block.tool) {
           if (block.tool.name === 'write_todos') {
             return renderWriteTodos(block.tool, blockIndex)
+          }
+          // Mnemon 记忆工具定制卡片（仅在完成后展示内容）
+          if (
+            block.tool.name.startsWith('mnemon_') &&
+            (MEMORY_READ_TOOLS.includes(block.tool.name) ||
+              MEMORY_WRITE_TOOLS.includes(block.tool.name)) &&
+            block.tool.status === 'completed'
+          ) {
+            return renderMemoryToolCard(block.tool, blockIndex)
           }
           // 定制化卡片：deepagent 内置工具（ls / read_file / write_file / edit_file / glob / grep / execute）
           if (block.tool.card && block.tool.status === 'completed') {
@@ -534,6 +1042,15 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
               if (child.type === 'tool' && child.tool) {
                 if (child.tool.name === 'write_todos') {
                   return renderWriteTodos(child.tool, ci, true)
+                }
+                // Mnemon 记忆工具定制卡片（嵌套）
+                if (
+                  child.tool.name.startsWith('mnemon_') &&
+                  (MEMORY_READ_TOOLS.includes(child.tool.name) ||
+                    MEMORY_WRITE_TOOLS.includes(child.tool.name)) &&
+                  child.tool.status === 'completed'
+                ) {
+                  return renderMemoryToolCard(child.tool, ci, true)
                 }
                 // 定制化卡片：deepagent 内置工具
                 if (child.tool.card && child.tool.status === 'completed') {
@@ -756,6 +1273,17 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
       <div className="flex mb-6">
         <div className="w-full">
           {renderBlocks()}
+          {/* 仅展示「注入记忆」卡片期间的生成中指示 */}
+          {message.loading &&
+          !message.content &&
+          !message.reasoning_content &&
+          (!message.toolCalls || message.toolCalls.length === 0) &&
+          hasMemoryBlock ? (
+            <div className="flex items-center gap-2 mt-1" style={{ color: colorTextSecondary }}>
+              <RiLoader4Line size={14} className="animate-spin" />
+              <span style={{ fontSize: 13 }}>正在生成…</span>
+            </div>
+          ) : null}
           <div className="flex items-center gap-2 mt-3">
             <Tooltip title={isCopied ? '已复制' : '复制'}>
               <button

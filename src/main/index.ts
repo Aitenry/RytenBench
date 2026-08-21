@@ -95,21 +95,13 @@ import {
   deleteTrackById
 } from './database/mapper/music'
 import { ChatService, buildTools, loadSubAgentDefinitions, availableTools } from './chat'
-import type { ToolCallDetail, SubAgentEvent } from './chat/types'
+import type { ToolCallDetail, SubAgentEvent, MemoryInjection } from './chat/types'
 import { todoStore } from './chat/runtime/todo'
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models'
 // BaseMessage 等 LangChain 类型已移入 ChatService 内部使用
 import { KnowledgeGraphService, BuildConfig } from './graph'
 import { getProviderService } from './provider/service'
-import {
-  deriveModelTags,
-  type FetchedModelInfo,
-  tagsFromOllamaCapabilities,
-  tagsFromOpenRouterArchitecture,
-  tagsFromMistralCapabilities,
-  tagsFromGeminiModel,
-  geminiModelId
-} from './provider/model-tags'
+import { type FetchedModelInfo, findModelProfile, geminiModelId } from './provider/model-tags'
 import {
   getAllProviders,
   getProviderById,
@@ -431,7 +423,7 @@ async function createLoadingWindow(): Promise<void> {
 function createMainWindow(): void {
   const mainWindow = new BrowserWindow({
     width: 1390,
-    height: 827,
+    height: 900,
     minWidth: 1390,
     minHeight: 827,
     show: false,
@@ -465,45 +457,228 @@ function createMainWindow(): void {
     mainWindow.webContents.send('main-window-ready')
   })
 
-  // 窗口控制 IPC
-  let isMaximized = false
-  let normalBounds: { x: number; y: number; width: number; height: number } | null = null
+  // 窗口控制 IPC（作用于发送方窗口：主窗口与 mermaid 预览窗口共用）
+  const windowMaxStates = new Map<number, { isMaximized: boolean; normalBounds: Electron.Rectangle | null }>()
 
-  ipcMain.on('window-minimize', () => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.minimize()
+  const winFromEvent = (
+    event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent
+  ): BrowserWindow | null => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (win && !win.isDestroyed()) {
+      win.once('closed', () => windowMaxStates.delete(win.id))
     }
+    return win
+  }
+
+  ipcMain.on('window-minimize', (event) => {
+    winFromEvent(event)?.minimize()
   })
-  ipcMain.on('window-maximize', () => {
-    if (!mainWindow || mainWindow.isDestroyed()) return
-    if (isMaximized) {
+  ipcMain.on('window-maximize', (event) => {
+    const win = winFromEvent(event)
+    if (!win || win.isDestroyed()) return
+    let st = windowMaxStates.get(win.id)
+    if (!st) {
+      st = { isMaximized: false, normalBounds: null }
+      windowMaxStates.set(win.id, st)
+    }
+    if (st.isMaximized) {
       // 还原到之前的尺寸和位置
-      if (normalBounds) {
-        mainWindow.setBounds(normalBounds)
-      }
-      isMaximized = false
-      mainWindow.webContents.send('window-maximized', false)
+      if (st.normalBounds) win.setBounds(st.normalBounds)
+      st.isMaximized = false
     } else {
       // 保存当前尺寸，然后最大化到可用工作区
-      normalBounds = mainWindow.getBounds()
+      st.normalBounds = win.getBounds()
       const { workArea } = screen.getPrimaryDisplay()
-      mainWindow.setBounds({
+      win.setBounds({
         x: workArea.x,
         y: workArea.y,
         width: workArea.width,
         height: workArea.height
       })
-      isMaximized = true
-      mainWindow.webContents.send('window-maximized', true)
+      st.isMaximized = true
     }
+    win.webContents.send('window-maximized', st.isMaximized)
   })
-  ipcMain.on('window-close', () => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.close()
+  ipcMain.on('window-close', (event) => {
+    winFromEvent(event)?.close()
+  })
+  ipcMain.handle('window-is-maximized', (event) => {
+    const win = winFromEvent(event)
+    return win ? (windowMaxStates.get(win.id)?.isMaximized ?? false) : false
+  })
+
+  /* ── Mermaid 预览窗口（可拖拽/缩放画布） ── */
+
+  const ICON_CENTER =
+    'M13 1L13.001 4.06201C16.6192 4.51365 19.4869 7.38163 19.9381 11L23 11V13L19.938 13.001C19.4864 16.6189 16.6189 19.4864 13.001 19.938L13 23H11L11 19.9381C7.38163 19.4869 4.51365 16.6192 4.06201 13.001L1 13V11L4.06189 11C4.51312 7.38129 7.38129 4.51312 11 4.06189L11 1H13ZM12 6C8.68629 6 6 8.68629 6 12C6 15.3137 8.68629 18 12 18C15.3137 18 18 15.3137 18 12C18 8.68629 15.3137 6 12 6ZM12 10C13.1046 10 14 10.8954 14 12C14 13.1046 13.1046 14 12 14C10.8954 14 10 13.1046 10 12C10 10.8954 10.8954 10 12 10Z'
+  // 标题栏图标（与应用 TitleBar 同款）：最小化 / 最大化 / 还原 / 关闭 / 图表
+  const ICON_MIN =
+    'M5 11V13H19V11H5Z'
+  const ICON_MAX =
+    'M6.41421 5H10V3H3V10H5V6.41421L9.29289 10.7071L10.7071 9.29289L6.41421 5ZM21 14H19V17.5858L14.7071 13.2929L13.2929 14.7071L17.5858 19H14V21H21V14Z'
+  const ICON_RESTORE =
+    'M9.00008 4.00008H11.0001V11.0001H4.00008V9.00008H7.58586L3.29297 4.70718L4.70718 3.29297L9.00008 7.58586V4.00008ZM20 15H16.4142L20.7071 19.2929L19.2929 20.7071L15 16.4142V20H13V13H20V15Z'
+  const ICON_POWER =
+    'M6.26489 3.80698L7.41191 5.44558C5.34875 6.89247 4 9.28873 4 12C4 16.4183 7.58172 20 12 20C16.4183 20 20 16.4183 20 12C20 9.28873 18.6512 6.89247 16.5881 5.44558L17.7351 3.80698C20.3141 5.61559 22 8.61091 22 12C22 17.5228 17.5228 22 12 22C6.47715 22 2 17.5228 2 12C2 8.61091 3.68594 5.61559 6.26489 3.80698ZM11 12V2H13V12H11Z'
+  const ICON_FLOW =
+    'M6 21.5C4.067 21.5 2.5 19.933 2.5 18C2.5 16.067 4.067 14.5 6 14.5C7.5852 14.5 8.92427 15.5539 9.35481 16.9992L15 16.9994V15L17 14.9994V9.24339L14.757 6.99938H9V9.00003H3V3.00003H9V4.99939H14.757L18 1.75739L22.2426 6.00003L19 9.24139V14.9994L21 15V21H15V18.9994L9.35499 19.0003C8.92464 20.4459 7.58543 21.5 6 21.5ZM6 16.5C5.17157 16.5 4.5 17.1716 4.5 18C4.5 18.8285 5.17157 19.5 6 19.5C6.82843 19.5 7.5 18.8285 7.5 18C7.5 17.1716 6.82843 16.5 6 16.5ZM19 17H17V19H19V17ZM18 4.58581L16.5858 6.00003L18 7.41424L19.4142 6.00003L18 4.58581ZM7 5.00003H5V7.00003H7V5.00003Z'
+
+  function buildMermaidPreviewHtml(svg: string): string {
+    const safeSvg = svg.replace(/\$\{/g, '\\${')
+    const icon = (d: string, size = 14): string =>
+      `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="currentColor" aria-hidden="true"><path d="${d}"/></svg>`
+    return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; font-family: system-ui, sans-serif; }
+  /* 与应用主窗口同款：圆角无边框自定义窗口 */
+  #app { height: 100vh; box-sizing: border-box; border-radius: 12px; background: #141414; border: 1px solid rgba(255,255,255,0.08); overflow: hidden; display: flex; flex-direction: column; }
+  #titlebar { height: 36px; flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; padding: 0 6px 0 12px; -webkit-app-region: drag; user-select: none; background: #171717; border-bottom: 1px solid rgba(255,255,255,0.08); }
+  #titlebar .title { display: flex; align-items: center; gap: 8px; font-size: 12px; color: rgba(255,255,255,0.6); }
+  #titlebar .title svg { color: rgba(255,255,255,0.45); }
+  #titlebar .controls { display: flex; align-items: center; gap: 2px; -webkit-app-region: no-drag; }
+  #titlebar .ctrl-btn { display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 26px; border: none; background: transparent; color: rgba(255,255,255,0.65); border-radius: 6px; cursor: pointer; transition: background 0.15s, color 0.15s; }
+  #titlebar .ctrl-btn:hover { background: rgba(255,255,255,0.12); color: #fff; }
+  #titlebar .ctrl-btn.close:hover { background: #e81123; color: #fff; }
+  #stage { flex: 1; position: relative; cursor: grab; touch-action: none; user-select: none; }
+  #stage.dragging { cursor: grabbing; }
+  #viewport { position: absolute; left: 0; right: 0; top: 0; padding: 24px; box-sizing: border-box; transform-origin: 0 0; will-change: transform; text-align: center; }
+  #viewport svg { display: block; max-width: none !important; height: auto; margin: 0; }
+  #toolbar { position: absolute; top: 14px; right: 14px; display: flex; gap: 8px; z-index: 10; }
+  #toolbar button { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border: 1px solid rgba(255,255,255,0.18); border-radius: 10px; background: rgba(20,20,20,0.72); color: #d8d8d8; cursor: pointer; transition: background 0.15s, color 0.15s; }
+  #toolbar button:hover { background: rgba(255,255,255,0.14); color: #fff; }
+  #hint { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%); color: rgba(255,255,255,0.35); font-size: 12px; z-index: 10; pointer-events: none; }
+</style>
+</head>
+<body>
+  <div id="app">
+    <div id="titlebar">
+      <div class="title">${icon(ICON_FLOW, 14)}<span>Mermaid 预览</span></div>
+      <div class="controls">
+        <button id="win-min" class="ctrl-btn" title="最小化">${icon(ICON_MIN)}</button>
+        <button id="win-max" class="ctrl-btn" title="最大化">${icon(ICON_MAX)}</button>
+        <button id="win-close" class="ctrl-btn close" title="关闭">${icon(ICON_POWER)}</button>
+      </div>
+    </div>
+    <div id="stage">
+      <div id="viewport">${safeSvg}</div>
+      <div id="toolbar"><button id="fit" title="居中画布">${icon(ICON_CENTER, 18)}</button></div>
+      <div id="hint">拖拽平移 · 滚轮缩放 · 双击居中 · Esc 关闭</div>
+    </div>
+  </div>
+<script>
+  var stage = document.getElementById('stage')
+  var viewport = document.getElementById('viewport')
+  var tx = 0, ty = 0, scale = 1
+  var MIN = 0.2, MAX = 5
+  function apply() { viewport.style.transform = 'translate(' + tx + 'px, ' + ty + 'px) scale(' + scale + ')' }
+  // 适配：把 SVG 等比缩小到窗口可见区域并居中（先量未缩放尺寸）
+  function fit() {
+    var svg = viewport.querySelector('svg')
+    if (!svg) { tx = 0; ty = 0; scale = 1; apply(); return }
+    // 按自然尺寸（viewBox）布局，覆盖 mermaid 输出的 width="100%"，避免拉伸
+    if (svg.viewBox && svg.viewBox.baseVal && svg.viewBox.baseVal.width > 0) {
+      svg.style.width = svg.viewBox.baseVal.width + 'px'
+      svg.style.height = svg.viewBox.baseVal.height + 'px'
     }
+    viewport.style.transform = ''
+    var w = svg.getBoundingClientRect().width
+    var h = svg.getBoundingClientRect().height
+    var r = stage.getBoundingClientRect()
+    var s = Math.min(1, (r.width - 48) / Math.max(1, w), (r.height - 48) / Math.max(1, h))
+    scale = s
+    // svg 从 viewport padding 内左上起排，且 padding 偏移会随 scale 放大，
+    // 居中偏移需减 24*s 才能精确居中
+    tx = (r.width - w * s) / 2 - 24 * s
+    ty = (r.height - h * s) / 2 - 24 * s
+    apply()
+  }
+  stage.addEventListener('wheel', function (e) {
+    e.preventDefault()
+    var r = stage.getBoundingClientRect()
+    var mx = e.clientX - r.left, my = e.clientY - r.top
+    var next = Math.min(MAX, Math.max(MIN, scale * Math.exp(-e.deltaY * 0.0015)))
+    var k = next / scale
+    tx = mx - (mx - tx) * k
+    ty = my - (my - ty) * k
+    scale = next
+    apply()
+  }, { passive: false })
+  var drag = null
+  stage.addEventListener('mousedown', function (e) {
+    if (e.button !== 0) return
+    e.preventDefault()
+    drag = { sx: e.clientX, sy: e.clientY, tx: tx, ty: ty }
+    stage.classList.add('dragging')
   })
-  ipcMain.handle('window-is-maximized', () => {
-    return isMaximized
+  window.addEventListener('mousemove', function (e) {
+    if (!drag) return
+    tx = drag.tx + e.clientX - drag.sx
+    ty = drag.ty + e.clientY - drag.sy
+    apply()
+  })
+  window.addEventListener('mouseup', function () { drag = null; stage.classList.remove('dragging') })
+  stage.addEventListener('dblclick', function (e) { e.preventDefault(); fit() })
+  document.getElementById('fit').onclick = fit
+  window.addEventListener('keydown', function (e) { if (e.key === 'Escape') window.api.window.close() })
+  // 窗口尺寸变化（拉伸/最大化）后重新适配居中
+  var resizeTimer = null
+  window.addEventListener('resize', function () {
+    if (resizeTimer) clearTimeout(resizeTimer)
+    resizeTimer = setTimeout(fit, 120)
+  })
+  // 标题栏窗口控制（复用主窗口 IPC，按发送方窗口生效）
+  document.getElementById('win-min').onclick = function () { window.api.window.minimize() }
+  document.getElementById('win-close').onclick = function () { window.api.window.close() }
+  var maxBtn = document.getElementById('win-max')
+  function setMaxIcon(m) {
+    maxBtn.innerHTML = m ? '${icon(ICON_RESTORE)}' : '${icon(ICON_MAX)}'
+    maxBtn.title = m ? '还原' : '最大化'
+  }
+  maxBtn.onclick = function () { window.api.window.maximize() }
+  window.api.window.onMaximized(function (m) { setMaxIcon(m) })
+  window.api.window.isMaximized().then(setMaxIcon)
+  fit()
+</script>
+</body>
+</html>`
+  }
+
+  let mermaidPreviewWin: BrowserWindow | null = null
+  ipcMain.handle('mermaid-preview', (_event, svg: string) => {
+    const dataUrl = 'data:text/html;charset=utf-8,' + encodeURIComponent(buildMermaidPreviewHtml(svg))
+    if (mermaidPreviewWin && !mermaidPreviewWin.isDestroyed()) {
+      void mermaidPreviewWin.loadURL(dataUrl)
+      mermaidPreviewWin.focus()
+      return
+    }
+    // 独立预览窗口：与应用同款自定义无边框标题栏，可拉伸、可最大化，不占满全屏
+    const { workAreaSize } = screen.getPrimaryDisplay()
+    mermaidPreviewWin = new BrowserWindow({
+      width: Math.round(Math.min(1200, workAreaSize.width * 0.7)),
+      height: Math.round(Math.min(800, workAreaSize.height * 0.75)),
+      minWidth: 480,
+      minHeight: 360,
+      show: false,
+      frame: false,
+      transparent: true,
+      backgroundColor: '#00000000',
+      title: 'Mermaid 预览',
+      autoHideMenuBar: true,
+      webPreferences: {
+        preload: join(__dirname, '../preload/index.js'),
+        sandbox: false
+      }
+    })
+    mermaidPreviewWin.on('closed', () => {
+      mermaidPreviewWin = null
+    })
+    mermaidPreviewWin.on('ready-to-show', () => {
+      mermaidPreviewWin?.show()
+    })
+    void mermaidPreviewWin.loadURL(dataUrl)
   })
 
   // --- Weather ---
@@ -1904,6 +2079,8 @@ app.whenReady().then(async () => {
           tool?: ToolCallDetail
           reasoning?: string
           subAgent?: SubAgentEvent
+          /** 本轮注入的热记忆（memoryInjected 类型；随 blocks 持久化，历史对话可恢复显示） */
+          memory?: MemoryInjection
           children?: {
             type: string
             text?: string
@@ -1919,6 +2096,16 @@ app.whenReady().then(async () => {
             if (abortController.signal.aborted) {
               logger.info('[Chat] Stream cancelled by user')
               break
+            }
+            // 本轮热记忆注入：置于消息块最顶部（首个 chunk 到达，仅累积一次，随 blocks 持久化）
+            if (chunk.memoryInjected) {
+              const exists = accumulatedBlocks.some((b) => b.type === 'memoryInjected')
+              if (!exists) {
+                accumulatedBlocks.unshift({
+                  type: 'memoryInjected',
+                  memory: chunk.memoryInjected
+                })
+              }
             }
             if (chunk.reasoning_content) {
               const rc = String(chunk.reasoning_content)
@@ -2297,10 +2484,15 @@ app.whenReady().then(async () => {
     return chatSettings?.memoryPath || undefined
   }
 
+  // 当前工作区 Mnemon 组件（记忆按工作区目录隔离：<memoryPath>/workspace-<id>/mnemon）
+  const currentMnemonComponent = async () => {
+    const { getMnemonComponent } = await import('./chat/mnemon-singleton')
+    return getMnemonComponent(currentMemoryPath(), getActiveWorkspaceId())
+  }
+
   // 记忆系统总览快照
   ipcMain.handle('mnemon-snapshot', async () => {
-    const { getMnemonComponent } = await import('./chat/mnemon-singleton')
-    const component = getMnemonComponent(currentMemoryPath())
+    const component = await currentMnemonComponent()
     if (!component) {
       return { configured: false, error: '未配置记忆存储目录' }
     }
@@ -2316,8 +2508,7 @@ app.whenReady().then(async () => {
   ipcMain.handle(
     'mnemon-runtime-mutate',
     async (_event, request: { action: string; target: string; content?: string; old_text?: string; importance?: string }) => {
-      const { getMnemonComponent } = await import('./chat/mnemon-singleton')
-      const component = getMnemonComponent(currentMemoryPath())
+      const component = await currentMnemonComponent()
       if (!component) return { success: false, message: '未配置记忆存储目录' }
       return await component.runtimeMemory.mutate({
         action: request.action as 'add' | 'replace' | 'remove',
@@ -2331,8 +2522,7 @@ app.whenReady().then(async () => {
 
   // 长期记忆空间目录
   ipcMain.handle('mnemon-bodies', async () => {
-    const { getMnemonComponent } = await import('./chat/mnemon-singleton')
-    const component = getMnemonComponent(currentMemoryPath())
+    const component = await currentMnemonComponent()
     if (!component) return { items: [], total: 0, activeCount: 0, directory: '', generatedAt: '' }
     return await component.service.bodies()
   })
@@ -2341,8 +2531,7 @@ app.whenReady().then(async () => {
   ipcMain.handle(
     'mnemon-body-create',
     async (_event, request: { name: string; description: string }) => {
-      const { getMnemonComponent } = await import('./chat/mnemon-singleton')
-      const component = getMnemonComponent(currentMemoryPath())
+      const component = await currentMnemonComponent()
       if (!component) return { success: false, message: '未配置记忆存储目录' }
       try {
         const body = await component.service.createBody(request)
@@ -2361,8 +2550,7 @@ app.whenReady().then(async () => {
       id: string,
       request: { name?: string; description?: string; active?: boolean }
     ) => {
-      const { getMnemonComponent } = await import('./chat/mnemon-singleton')
-      const component = getMnemonComponent(currentMemoryPath())
+      const component = await currentMnemonComponent()
       if (!component) return { success: false, message: '未配置记忆存储目录' }
       try {
         const body = component.service.updateBody(id, request)
@@ -2375,8 +2563,7 @@ app.whenReady().then(async () => {
 
   // 记忆空间内容浏览
   ipcMain.handle('mnemon-body-list', async (_event, memoryBodyIds?: string[]) => {
-    const { getMnemonComponent } = await import('./chat/mnemon-singleton')
-    const component = getMnemonComponent(currentMemoryPath())
+    const component = await currentMnemonComponent()
     if (!component) return []
     try {
       return await component.service.list(memoryBodyIds, 200)
@@ -2387,8 +2574,7 @@ app.whenReady().then(async () => {
 
   // 档案快照
   ipcMain.handle('mnemon-document-snapshot', async () => {
-    const { getMnemonComponent } = await import('./chat/mnemon-singleton')
-    const component = getMnemonComponent(currentMemoryPath())
+    const component = await currentMnemonComponent()
     if (!component) return null
     return component.documents.snapshot()
   })
@@ -3030,7 +3216,8 @@ app.whenReady().then(async () => {
     return true
   })
 
-  // 拉取供应商的模型列表（标签优先取接口元数据，缺失时回退名称推导）
+  // 拉取供应商的模型列表（元数据直接来自 models-profile.json 档案，不做名称/接口能力推导；
+  // 档案中不存在的模型返回 metadata = null，由用户在设置界面自行填写）
   ipcMain.handle(
     'provider-fetch-models',
     async (_event, providerType: string, baseUrl?: string, apiKey?: string) => {
@@ -3051,10 +3238,7 @@ app.whenReady().then(async () => {
           for (const m of data.models || []) {
             const id = typeof m.name === 'string' ? m.name : ''
             if (!id) continue
-            models.push({
-              id,
-              tags: tagsFromOllamaCapabilities(m) ?? deriveModelTags(id)
-            })
+            models.push({ id, metadata: findModelProfile(id) })
           }
         } else if (providerType === 'google-genai') {
           // Gemini 原生接口: GET /v1beta/models?key=...
@@ -3072,11 +3256,10 @@ app.whenReady().then(async () => {
           for (const m of data.models || []) {
             const id = geminiModelId(m)
             if (!id) continue
-            models.push({ id, tags: tagsFromGeminiModel(m, id) ?? deriveModelTags(id) })
+            models.push({ id, metadata: findModelProfile(id) })
           }
         } else {
           // OpenAI 兼容协议: GET /v1/models
-          // OpenRouter / Mistral 在同样的响应里附带能力元数据，能解析则优先取接口数据
           const base = (baseUrl || 'https://api.openai.com/v1').replace(/\/+$/, '')
           const url = base.endsWith('/v1') ? `${base}/models` : `${base}/v1/models`
           logger.info(`[FetchModels] OpenAI-compatible: ${url}`)
@@ -3093,13 +3276,7 @@ app.whenReady().then(async () => {
           for (const m of data.data || []) {
             const id = typeof m.id === 'string' ? m.id : ''
             if (!id) continue
-            models.push({
-              id,
-              tags:
-                tagsFromMistralCapabilities(m) ??
-                tagsFromOpenRouterArchitecture(m) ??
-                deriveModelTags(id)
-            })
+            models.push({ id, metadata: findModelProfile(id) })
           }
         }
 

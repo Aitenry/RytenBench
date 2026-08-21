@@ -1,153 +1,107 @@
 /**
- * 拉取模型的能力标签推导（provider-fetch-models 使用）。
- * 标签值与渲染层 ModelSettings 的 MODEL_TAGS 保持一致。
+ * 模型元数据档案（models-profile.json）加载与查询。
+ * provider-fetch-models 不再做任何名称/接口能力推导，直接使用档案内容；
+ * 档案中不存在的模型返回 metadata = null，由用户在设置界面自行填写。
  */
-export type ModelTag = 'chat' | 'embedding' | 'vision' | 'thinking' | 'tools' | 'other'
+import * as fs from 'fs'
+import * as path from 'path'
+import { app } from 'electron'
+import logger from 'electron-log'
 
+/** 模型能力字段（models-profile.json 的 capabilities 结构） */
+export interface ModelCapabilities {
+  supports_text_input?: boolean
+  supports_text_output?: boolean
+  supports_image_input?: boolean
+  supports_image_output?: boolean
+  supports_audio_input?: boolean
+  supports_audio_output?: boolean
+  supports_video_input?: boolean
+  supports_thinking?: boolean
+  supports_function_calling?: boolean
+  supports_streaming?: boolean
+  supports_json_mode?: boolean
+  supports_structured_output?: boolean
+  supports_batch?: boolean
+  supports_fine_tuning?: boolean
+  supports_embeddings?: boolean
+  reasoning_effort_levels?: string[]
+}
+
+/** 单个模型档案条目（models-profile.json models 数组的一项） */
+export interface ModelProfileEntry {
+  id: string
+  vendor?: string
+  display_name?: string
+  type?: string
+  status?: string
+  release_date?: string | null
+  knowledge_cutoff?: string | null
+  capabilities?: ModelCapabilities
+  context_window?: number | null
+  max_output_tokens?: number | null
+  image_options?: Record<string, unknown> | null
+  [key: string]: unknown
+}
+
+/** 拉取远程模型列表后的返回项 */
 export interface FetchedModelInfo {
   id: string
-  tags: ModelTag[]
+  /** 档案中的元数据；档案中不存在时为 null，由用户自行填写 */
+  metadata: ModelProfileEntry | null
 }
 
-/**
- * 根据模型 ID 推导能力标签：
- * - embedding：向量模型（与其它标签互斥）
- * - other：图像生成/语音/重排等非对话模型（拉取列表中默认不勾选）
- * - vision：视觉多模态
- * - thinking：推理/思考模型
- * - tools：支持工具调用（保守名单）
- * - chat：其余默认视为对话模型
- */
-export function deriveModelTags(id: string): ModelTag[] {
-  const raw = id.toLowerCase().trim()
-  // Ollama 名称带标签后缀（如 qwen2.5:7b、llama3.2:latest），规则用基础名匹配
-  const base = raw.replace(/:[^:]*$/, '')
-
-  // 向量/嵌入模型
-  if (/(embedding|embed-|bge[-_/]|^e5-|nomic-embed|gte-|jina-embed|mxbai)/.test(raw)) {
-    return ['embedding']
-  }
-
-  // 非对话模型（图像生成/语音/审核/重排等）
-  if (
-    /(dall-e|gpt-image|tts|whisper|audio|speech|rerank|moderation|stable-diffusion|sdxl|\bflux\b|imagen|image-?generation|veo\b|sora)/.test(
-      raw
-    )
-  ) {
-    return ['other']
-  }
-
-  const tags: ModelTag[] = ['chat']
-
-  // 视觉多模态
-  if (
-    /(vision|\bvl\b|llava|pixtral|internvl|minicpm-v|moondream|qwen\d*(\.\d+)?-vl|glm-4v|gpt-4o|gpt-4\.1|deepseek-vl|claude-3|claude-4|gemini|gemma3|(^|-)o1($|-)|(^|-)o3($|-)|(^|-)o4($|-))/.test(
-      base
-    )
-  ) {
-    tags.push('vision')
-  }
-
-  // 推理/思考模型
-  if (
-    /((^|-)o1($|-)|(^|-)o3($|-)|(^|-)o4($|-)|deepseek-reasoner|\br1\b|qwq|thinking|reasoning|k2-thinking)/.test(
-      base
-    )
-  ) {
-    tags.push('thinking')
-  }
-
-  // 工具调用能力（保守名单）
-  if (
-    /(^gpt-4|^gpt-3\.5-turbo|^o1|^o3|^o4|deepseek-chat|deepseek-v|qwen2\.5|qwen3|glm-4(?!v)|claude-3|claude-4|gemini|mistral-large|mistral-small|mistral-medium|kimi|^grok)/.test(
-      base
-    )
-  ) {
-    tags.push('tools')
-  }
-
-  return tags
+interface ModelProfileFile {
+  version?: string
+  updated_at?: string
+  schema_version?: string
+  api_endpoints?: Record<string, string>
+  models?: ModelProfileEntry[]
 }
 
-// ============================================================================
-// 接口元数据解析（优先）：各供应商 API 返回的能力字段 → 标签；信息不足时返回 null，
-// 由调用方回退到 deriveModelTags 名称推导。
-// ============================================================================
+let profileCache: Map<string, ModelProfileEntry> | null = null
 
-type RawModel = Record<string, unknown>
-
-/** Ollama /api/tags：capabilities: ["completion","vision","tools","embedding"] */
-export function tagsFromOllamaCapabilities(model: RawModel): ModelTag[] | null {
-  const caps = model.capabilities
-  if (!Array.isArray(caps)) return null
-  const set = new Set(caps.map((c) => String(c).toLowerCase()))
-  if (set.has('embedding')) return ['embedding']
-  const tags: ModelTag[] = ['chat']
-  if (set.has('vision')) tags.push('vision')
-  if (set.has('tools')) tags.push('tools')
-  return tags
+function profilePath(): string {
+  // dev：项目 resources 目录；打包后：由 electron-builder extraResources 拷贝到 resourcesPath
+  return app.isPackaged
+    ? path.join(process.resourcesPath, 'models-profile.json')
+    : path.join(app.getAppPath(), 'resources', 'models-profile.json')
 }
 
-/** OpenRouter /models：architecture.modality / input_modalities / reasoning */
-export function tagsFromOpenRouterArchitecture(model: RawModel): ModelTag[] | null {
-  const arch = model.architecture
-  if (!arch || typeof arch !== 'object') return null
-  const a = arch as Record<string, unknown>
-  const modalities: string[] = []
-  if (typeof a.modality === 'string') modalities.push(a.modality.toLowerCase())
-  for (const key of ['input_modalities', 'output_modalities']) {
-    if (Array.isArray(a[key])) {
-      for (const v of a[key] as unknown[]) modalities.push(String(v).toLowerCase())
+/** 加载 models-profile.json，按模型 id 建立索引并缓存 */
+export function loadModelProfiles(): Map<string, ModelProfileEntry> {
+  if (profileCache) return profileCache
+
+  const map = new Map<string, ModelProfileEntry>()
+  try {
+    const raw = fs.readFileSync(profilePath(), 'utf8')
+    const data = JSON.parse(raw) as ModelProfileFile
+    for (const entry of data.models ?? []) {
+      if (entry && entry.id) {
+        map.set(entry.id, entry)
+      }
     }
+    logger.info(`[ModelProfile] 已加载 ${map.size} 条模型元数据档案: ${profilePath()}`)
+  } catch (error) {
+    logger.warn(`[ModelProfile] 模型元数据档案加载失败（${profilePath()}）:`, error)
   }
-  if (modalities.length === 0) return null
-  const tags: ModelTag[] = ['chat']
-  if (modalities.some((m) => m.includes('image'))) tags.push('vision')
-  if (modalities.some((m) => m.includes('audio'))) tags.push('vision')
-  if (a.reasoning === true || (typeof a.reasoning === 'string' && a.reasoning.length > 0)) {
-    tags.push('thinking')
-  }
-  return tags
-}
-
-/** Mistral /models：capabilities.vision / capabilities.function_calling */
-export function tagsFromMistralCapabilities(model: RawModel): ModelTag[] | null {
-  const caps = model.capabilities
-  if (!caps || typeof caps !== 'object') return null
-  const c = caps as Record<string, unknown>
-  if (typeof c.vision !== 'boolean' && typeof c.function_calling !== 'boolean') return null
-  const tags: ModelTag[] = ['chat']
-  if (c.vision === true) tags.push('vision')
-  if (c.function_calling === true) tags.push('tools')
-  return tags
+  profileCache = map
+  return profileCache
 }
 
 /**
- * Google Gemini /v1beta/models：supportedGenerationMethods 判定模型能力。
- * 返回模型的 id（去 models/ 前缀）。
+ * 精确按模型 ID 查询档案，不进行任何名称推导；未收录返回 null。
+ * 匹配不到的模型由用户在设置界面手动填写元数据。
  */
-export function geminiModelId(model: RawModel): string {
+export function findModelProfile(id: string): ModelProfileEntry | null {
+  return loadModelProfiles().get(id) ?? null
+}
+
+/**
+ * Google Gemini /v1beta/models：返回模型的 id（去 models/ 前缀）。
+ * 这只是从接口响应中提取模型 id，不做任何能力推导。
+ */
+export function geminiModelId(model: Record<string, unknown>): string {
   const name = typeof model.name === 'string' ? model.name : ''
   return name.replace(/^models\//, '')
-}
-
-export function tagsFromGeminiModel(model: RawModel, id: string): ModelTag[] | null {
-  const methods = model.supportedGenerationMethods
-  if (!Array.isArray(methods)) return null
-  const set = new Set(methods.map((m) => String(m).toLowerCase()))
-  if (set.has('embedcontent')) return ['embedding']
-  // 图像生成 / 语音等非对话模型
-  if (set.has('generateimage') || set.has('generatespeech') || set.has('recognizespeech')) {
-    return ['other']
-  }
-  const tags: ModelTag[] = ['chat']
-  const desc =
-    (typeof model.description === 'string' ? model.description.toLowerCase() : '') +
-    ' ' +
-    id.toLowerCase()
-  if (desc.includes('thinking') || desc.includes('reasoning')) tags.push('thinking')
-  if (desc.includes('multimodal') || desc.includes('vision')) tags.push('vision')
-  // Gemini 系列均支持函数调用
-  tags.push('tools')
-  return tags
 }

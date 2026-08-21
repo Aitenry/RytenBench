@@ -6,6 +6,7 @@ import type { Message, Attachment, ToolCall, MessageBlock } from '@renderer/type
 import type { StreamChunk } from '../../../../../main/chat/types'
 import { useTypewriter, useCyclingTypewriter } from './useTypewriter'
 import { isSameToolCall, computeTextDelta, pushBlock } from '../utils/chatHelpers'
+import { getProviderDisplayName, isEmbeddingProvider, supportsCapability } from '@renderer/utils/providerMeta'
 
 const TOPICS_PAGE_SIZE = 20
 const MESSAGES_PAGE_SIZE = 20 // 10对消息
@@ -150,8 +151,8 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
     () => providers.find((p) => p.id === selectedProviderId) ?? null,
     [providers, selectedProviderId]
   )
-  const modelSupportsTools = selectedProvider?.tags?.includes('tools') ?? false
-  const modelSupportsVision = selectedProvider?.tags?.includes('vision') ?? false
+  const modelSupportsTools = supportsCapability(selectedProvider?.metadata, 'supports_function_calling')
+  const modelSupportsVision = supportsCapability(selectedProvider?.metadata, 'supports_image_input')
 
   const scrollToBottom = useCallback((): void => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -169,17 +170,12 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
     const loadProviders = async (): Promise<void> => {
       try {
         const list = await (window as unknown as Window).api.providers.getEnabled()
-        const isEmbeddingModel = (p: LlmProviderConfig): boolean => {
-          if (p.tags?.some((t) => t.toLowerCase() === 'embedding')) return true
-          const lowered = (p.name + p.model).toLowerCase()
-          return lowered.includes('embedding')
-        }
-        const chatModels = list.filter((p) => !isEmbeddingModel(p))
+        const chatModels = list.filter((p) => !isEmbeddingProvider(p))
         setProviders(chatModels)
 
         // 模型：优先使用默认 provider
         const defaultProvider = await (window as unknown as Window).api.providers.getDefault()
-        if (defaultProvider && !isEmbeddingModel(defaultProvider)) {
+        if (defaultProvider && !isEmbeddingProvider(defaultProvider)) {
           setSelectedProviderId(defaultProvider.id)
         } else if (chatModels.length > 0) {
           setSelectedProviderId(chatModels[0].id)
@@ -323,6 +319,21 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
           }
         }
         const updatedBlocks = [...msg.blocks]
+
+        // 本轮热记忆注入：置于消息块最顶部（首个 chunk 到达，仅插入一次）
+        if (chunk.memoryInjected) {
+          const exists = updatedBlocks.some((b) => b.type === 'memoryInjected')
+          if (!exists) {
+            updatedBlocks.unshift({
+              type: 'memoryInjected',
+              memory: {
+                user: chunk.memoryInjected.user,
+                memory: chunk.memoryInjected.memory,
+                usage: chunk.memoryInjected.usage
+              }
+            })
+          }
+        }
 
         if (chunk.reasoning_content) {
           const reasoningDelta = computeTextDelta(
@@ -1088,18 +1099,20 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
   }, [syncLoadingTopics])
 
   const groupedProviderOptions = useMemo(() => {
-    const grouped = new Map<string, { value: number; name: string; model: string }[]>()
+    const grouped = new Map<string, { value: number; displayName: string; model: string }[]>()
     for (const p of providers) {
       if (!grouped.has(p.provider)) {
         grouped.set(p.provider, [])
       }
-      grouped.get(p.provider)!.push({ value: p.id, name: p.name, model: p.model })
+      grouped
+        .get(p.provider)!
+        .push({ value: p.id, displayName: getProviderDisplayName(p), model: p.model })
     }
     return Array.from(grouped.entries()).map(([provider, opts]) => ({
       label: provider.charAt(0).toUpperCase() + provider.slice(1),
       options: opts.map((o) => ({
         value: o.value,
-        label: o.name,
+        label: o.displayName,
         providerType: provider
       }))
     }))

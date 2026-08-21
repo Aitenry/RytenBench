@@ -4,6 +4,7 @@ import { useMessage } from '@renderer/hooks/useMessage'
 import { Window } from '../../../../resource/types/window'
 import type { SystemSettings, GraphSettings as GraphSettingsType } from '@renderer/types/settings'
 import type { ProviderOption } from '@renderer/types/components'
+import { isEmbeddingProvider, getProviderDisplayName } from '@renderer/utils/providerMeta'
 import { SettingsPageHeader, SettingsSection, SettingRow } from './settings-ui'
 
 const GraphSettings: React.FC = () => {
@@ -22,8 +23,8 @@ const GraphSettings: React.FC = () => {
       ])
       setSettings(result)
       const allProviders = providerList as ProviderOption[]
-      setProviders(allProviders.filter((p) => !p.tags?.includes('embedding')))
-      setEmbeddingProviders(allProviders.filter((p) => p.tags?.includes('embedding')))
+      setProviders(allProviders.filter((p) => !isEmbeddingProvider(p)))
+      setEmbeddingProviders(allProviders.filter((p) => isEmbeddingProvider(p)))
     } catch (error) {
       viewMessage(msgKey, 'error', `加载失败: ${error}`)
     }
@@ -130,7 +131,7 @@ const GraphSettings: React.FC = () => {
               allowClear
               options={providers.map((p) => ({
                 value: p.id,
-                label: `${p.provider.toUpperCase()}: ${p.model}`
+                label: `${p.provider.toUpperCase()}: ${getProviderDisplayName(p)}`
               }))}
               style={{ width: 260 }}
             />

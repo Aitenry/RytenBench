@@ -20,6 +20,7 @@ import { useTheme } from '@renderer/contexts/useTheme'
 import { Window } from '../../../resource/types/window'
 import type { SystemSettings, GraphSettings, ThemeMode } from '@renderer/types/settings'
 import type { ProviderOption } from '@renderer/types/components'
+import { isEmbeddingProvider, getProviderDisplayName } from '@renderer/utils/providerMeta'
 
 const SettingsPanel: React.FC = () => {
   const {
@@ -48,9 +49,9 @@ const SettingsPanel: React.FC = () => {
       setSettings(result)
       const allProviders = providerList as ProviderOption[]
       // 图谱构建和对话不需要 Embedding 模型
-      setProviders(allProviders.filter((p) => !p.tags?.includes('embedding')))
+      setProviders(allProviders.filter((p) => !isEmbeddingProvider(p)))
       // Embedding 模型独立列表
-      setEmbeddingProviders(allProviders.filter((p) => p.tags?.includes('embedding')))
+      setEmbeddingProviders(allProviders.filter((p) => isEmbeddingProvider(p)))
     } catch (error) {
       viewMessage(msgKey, 'error', `加载失败: ${error}`)
     }
@@ -357,7 +358,7 @@ const SettingsPanel: React.FC = () => {
                   onChange={handleDefaultModelChange}
                   options={providers.map((p) => ({
                     value: p.id,
-                    label: `${p.provider.toUpperCase()}: ${p.model}`
+                    label: `${p.provider.toUpperCase()}: ${getProviderDisplayName(p)}`
                   }))}
                   style={{ width: '100%' }}
                 />

@@ -34,12 +34,24 @@ export interface ToolCallDetail {
   card?: ToolCard
 }
 
+/** 每轮注入系统提示词的热记忆内容（用于前端展示「注入记忆」） */
+export interface MemoryInjection {
+  /** 用户画像条目（target=user） */
+  user: string[]
+  /** 项目记忆条目（target=memory） */
+  memory: string[]
+  /** 容量信息（user/memory 的 used/limit 展示串，如 "512/4096"） */
+  usage: { user: string; memory: string }
+}
+
 export interface StructuredMessage {
   tool?: ToolCallDetail
   content?: string
   reasoning_content?: string
   /** 智能体活动事件 */
   subAgent?: SubAgentEvent
+  /** 本轮注入的热记忆内容（Mnemon 启用且热记忆非空时，由流开头下发） */
+  memoryInjected?: MemoryInjection
 }
 
 /** IPC 发送的流式 chunk（StructuredMessage + 主进程注入的 topicId） */

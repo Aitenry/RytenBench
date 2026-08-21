@@ -660,3 +660,249 @@
   font-size: 10.5px;
   color: var(--slash-text-tertiary);
 }
+
+/* ═══ 内容适配：KaTeX 数学公式 ═══ */
+
+.tiptap-math {
+  display: inline-block;
+  padding: 0 3px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s;
+  vertical-align: middle;
+}
+
+.tiptap-math:hover {
+  background: var(--ed-accent-soft);
+}
+
+.tiptap-math.tiptap-math-block {
+  display: block;
+  margin: 8px 0;
+  padding: 10px 14px;
+  text-align: center;
+  border: 1px dashed var(--ed-border);
+  border-radius: 8px;
+  background: var(--ed-quote-bg);
+}
+
+.tiptap-math .katex-display {
+  margin: 0;
+}
+
+.tiptap-math .katex {
+  font-size: 1.06em;
+}
+
+.tiptap-math-empty {
+  opacity: 0.45;
+  font-style: italic;
+}
+
+.tiptap-math-error {
+  color: #e5484d;
+}
+
+.tiptap-math.ProseMirror-selectednode {
+  outline: 2px solid var(--ed-accent);
+  border-radius: 6px;
+}
+
+.tiptap-math-editing {
+  outline: 1px dashed var(--ed-accent);
+}
+
+.tiptap-math-textarea {
+  width: 100%;
+  min-width: 180px;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  border: 1px solid var(--ed-accent);
+  border-radius: 6px;
+  background: var(--ed-input-bg);
+  color: var(--ed-text);
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 12.5px;
+  line-height: 1.5;
+  resize: vertical;
+  outline: none;
+}
+
+/* ═══ 内容适配：Mermaid 图表 ═══ */
+
+.tiptap-mermaid {
+  margin: 10px 0;
+  border: 1px solid var(--ed-border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--ed-toolbar-bg);
+}
+
+.tiptap-mermaid.ProseMirror-selectednode {
+  outline: 2px solid var(--ed-accent);
+}
+
+.tiptap-mermaid-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--ed-border);
+  background: var(--ed-quote-bg);
+  user-select: none;
+}
+
+.tiptap-mermaid-label {
+  flex: 1;
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ed-text-tertiary);
+}
+
+.tiptap-mermaid-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--ed-border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ed-text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.tiptap-mermaid-btn svg {
+  display: block;
+}
+
+.tiptap-mermaid-btn:hover {
+  background: var(--ed-hover-bg);
+  color: var(--ed-text);
+}
+
+.tiptap-mermaid-canvas {
+  position: relative;
+  overflow: hidden;
+  min-height: 60px;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.tiptap-mermaid-canvas.tiptap-mermaid-dragging {
+  cursor: grabbing;
+}
+
+/* 变换层：translate/scale 由 JS 控制（拖拽平移 + 滚轮缩放）。
+   注意：不能 flex 居中——svg 从左上角起排，居中完全由 transform 计算，
+   否则 flex 偏移与 translate 叠加会把内容推到右侧 */
+.tiptap-mermaid-viewport {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  padding: 14px;
+  box-sizing: border-box;
+  transform-origin: 0 0;
+  will-change: transform;
+  text-align: center; /* 空态/错误文本居中（块级 svg 不受影响） */
+}
+
+/* SVG 以自然尺寸（viewBox）布局，由 JS 设 style.width/height；
+   max-width:none 压过 mermaid 内联的 max-width（自然宽度），避免拉伸/变形 */
+.tiptap-mermaid-viewport svg {
+  display: block;
+  max-width: none !important;
+  height: auto;
+  margin: 0;
+}
+
+.tiptap-mermaid-loading {
+  color: var(--ed-text-tertiary);
+  font-size: 12.5px;
+}
+
+.tiptap-mermaid-error {
+  color: #e5484d;
+  font-size: 12.5px;
+  word-break: break-all;
+  text-align: center;
+}
+
+.tiptap-mermaid-textarea {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: none;
+  border-top: 1px solid var(--ed-border);
+  background: var(--ed-code-bg);
+  color: var(--ed-code-text);
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 12.5px;
+  line-height: 1.6;
+  resize: vertical;
+  outline: none;
+}
+
+/* ═══ 内容适配：MDX 源码块与内联 JSX ═══ */
+
+.tiptap-editor [data-mdx-src] {
+  position: relative;
+  margin: 10px 0;
+  padding: 12px;
+  background: var(--ed-code-bg);
+  border: 1px solid var(--ed-code-border);
+  border-radius: 8px;
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 12.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  color: var(--ed-code-text);
+}
+
+.tiptap-editor [data-mdx-src]::before {
+  content: 'MDX';
+  position: absolute;
+  top: -9px;
+  left: 10px;
+  padding: 0 6px;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  line-height: 16px;
+  border: 1px solid var(--ed-code-border);
+  border-radius: 4px;
+  background: var(--ed-toolbar-bg);
+  color: var(--ed-accent);
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+}
+
+.tiptap-editor [data-mdx-src] code {
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+}
+
+.tiptap-editor [data-mdx-inline] {
+  display: inline-block;
+  padding: 0 5px;
+  border: 1px solid var(--ed-border);
+  border-radius: 4px;
+  background: var(--ed-accent-soft);
+  color: var(--ed-accent);
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 0.9em;
+  line-height: 1.5;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.tiptap-editor [data-mdx-inline].ProseMirror-selectednode {
+  outline: 1px solid var(--ed-accent);
+}

@@ -1,5 +1,5 @@
 import React from 'react'
-import { Tag } from 'antd'
+import { Image, Tag } from 'antd'
 import { RiAttachment2 } from '@remixicon/react'
 import type { Message } from '@renderer/types/chat'
 
@@ -32,17 +32,20 @@ const UserMessage: React.FC<UserMessageProps> = ({
           <p className="whitespace-pre-wrap">{message.content}</p>
         </div>
         {imageBlocks.length > 0 && (
-          <div className="flex gap-2 mt-2 justify-end flex-wrap">
-            {imageBlocks.map((b, idx) => (
-              <img
-                key={idx}
-                src={b.image_url}
-                alt={`user-img-${idx}`}
-                className="max-w-[200px] max-h-[200px] object-cover rounded-lg"
-                style={{ border: `1px solid ${colorBorderSecondary}` }}
-              />
-            ))}
-          </div>
+          <Image.PreviewGroup items={imageBlocks.map((b) => b.image_url!)}>
+            <div className="flex gap-2 mt-2 justify-end flex-wrap">
+              {imageBlocks.map((b, idx) => (
+                <Image
+                  key={idx}
+                  src={b.image_url}
+                  alt={`user-img-${idx}`}
+                  className="max-w-[200px] max-h-[200px] object-cover rounded-lg"
+                  style={{ border: `1px solid ${colorBorderSecondary}` }}
+                  classNames={{ cover: 'rounded-lg' }}
+                />
+              ))}
+            </div>
+          </Image.PreviewGroup>
         )}
         {documentBlocks.length > 0 && (
           <div className="flex gap-2 mt-2 justify-end flex-wrap">

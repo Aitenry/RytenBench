@@ -126,6 +126,8 @@ interface Api {
       allowImages?: boolean
     ) => Promise<{ dataUrl: string; fileName: string; isImage: boolean } | null>
     selectTextFile: () => Promise<{ fileName: string; filePath: string } | null>
+    /** 取剪贴板/拖拽 File 的真实磁盘路径；无磁盘文件来源（如网页复制的图片）返回空串 */
+    getPathForFile: (file: File) => string
   }
   setting: {
     getLockScreenCode: () => Promise<string>
@@ -323,6 +325,10 @@ interface Api {
     listDir: (dirPath: string) => Promise<{ name: string; isDirectory: boolean; path: string }[]>
     readFile: (filePath: string) => Promise<string>
     saveFile: (filePath: string, content: string) => Promise<boolean>
+  }
+  mermaid: {
+    /** 全屏窗口预览 SVG（可拖拽/缩放画布） */
+    preview: (svg: string) => Promise<void>
   }
 }
 

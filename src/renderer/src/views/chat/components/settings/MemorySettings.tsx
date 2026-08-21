@@ -363,6 +363,17 @@ const MemorySettings: React.FC = () => {
     }
   }, [settings?.chat?.memoryPath, loadSnapshot])
 
+  // 切换工作区后重载记忆快照（记忆按工作区目录隔离，旧工作区数据必须失效）
+  useEffect(() => {
+    const handleWorkspaceChanged = (): void => {
+      if (settings?.chat?.memoryPath) {
+        loadSnapshot().then()
+      }
+    }
+    window.addEventListener('workspace-changed', handleWorkspaceChanged)
+    return () => window.removeEventListener('workspace-changed', handleWorkspaceChanged)
+  }, [settings?.chat?.memoryPath, loadSnapshot])
+
   const handleBrowsePath = async (): Promise<void> => {
     try {
       const path = await (window as unknown as Window).api.chat.selectMemoryDirectory()
@@ -851,7 +862,7 @@ const MemorySettings: React.FC = () => {
     <div>
       <SettingsPageHeader
         title="记忆（Mnemon）"
-        description="三层记忆：热记忆（每轮注入）· 长期记忆空间（按需召回）· 项目档案（完整文档）。统一存储于记忆目录下。"
+        description="三层记忆：热记忆（每轮注入）· 长期记忆空间（按需召回）· 项目档案（完整文档）。存储于记忆根目录下，并按工作区目录隔离（每个工作区一套独立记忆，互不串扰）。"
       />
 
       {/* 目录选择 */}

@@ -3,6 +3,7 @@ import { theme, Dropdown, Tooltip } from 'antd'
 import type { GlobalToken } from 'antd'
 import { useEditor, EditorContent, useEditorState, type Editor } from '@tiptap/react'
 import { BubbleMenu } from '@tiptap/react/menus'
+import { NodeSelection } from '@tiptap/pm/state'
 import {
   RiArrowGoBackLine,
   RiArrowGoForwardLine,
@@ -26,6 +27,7 @@ import {
 import { buildMarkdownEditorExtensions, getMarkdownSafe } from './markdownExtensions'
 import { buildSlashMenuExtension } from './slash-menu'
 import type { SlashMenuTheme } from './slash-menu'
+import 'katex/dist/katex.min.css'
 import './tiptap-content.css'
 
 export interface TipTapMarkdownEditorProps {
@@ -363,7 +365,12 @@ const TipTapMarkdownEditor: React.FC<TipTapMarkdownEditorProps> = ({
           editor={editor}
           className="tiptap-bubble-menu"
           options={{ placement: 'top', offset: 8 }}
-          shouldShow={({ state }) => Boolean(state.selection && !state.selection.empty)}
+          shouldShow={({ state }) => {
+            const { selection } = state
+            // 点击 Mermaid/KaTeX 等原子节点（NodeSelection）时不显示文本格式工具栏
+            if (selection instanceof NodeSelection) return false
+            return Boolean(selection && !selection.empty)
+          }}
         >
           <BubbleButtons editor={editor} onLinkClick={openLinkPop} />
         </BubbleMenu>

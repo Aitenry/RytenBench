@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import { TodoItemRow } from '../main/database/mapper/todo'
 import { DocRow } from '../main/database/mapper/document'
@@ -153,7 +153,15 @@ const api = {
       ipcRenderer.invoke('select-text-file') as Promise<{
         fileName: string
         filePath: string
-      } | null>
+      } | null>,
+    // 取剪贴板/拖拽 File 的真实磁盘路径；无对应磁盘文件（如从网页复制的图片）返回空串
+    getPathForFile: (file: File) => {
+      try {
+        return webUtils.getPathForFile(file)
+      } catch {
+        return ''
+      }
+    }
   },
   setting: {
     getLockScreenCode: () => ipcRenderer.invoke('lock-screen-code'),
@@ -366,7 +374,7 @@ const api = {
       providerType: string,
       baseUrl?: string,
       apiKey?: string
-    ): Promise<{ id: string; tags: string[] }[]> =>
+    ): Promise<{ id: string; metadata: Record<string, unknown> | null }[]> =>
       ipcRenderer.invoke('provider-fetch-models', providerType, baseUrl, apiKey),
     onChanged: (callback: () => void) => {
       const handler = (): void => callback()
@@ -569,6 +577,10 @@ const api = {
       ipcRenderer.invoke('workspace-read-file', filePath) as Promise<string>,
     saveFile: (filePath: string, content: string) =>
       ipcRenderer.invoke('workspace-save-file', filePath, content) as Promise<boolean>
+  },
+  mermaid: {
+    preview: (svg: string) =>
+      ipcRenderer.invoke('mermaid-preview', svg) as Promise<void>
   },
   weather: {
     getCurrent: (force?: boolean) =>

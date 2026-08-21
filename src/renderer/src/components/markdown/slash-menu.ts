@@ -11,7 +11,10 @@ import {
   RiDoubleQuotesL,
   RiCodeBoxLine,
   RiSeparator,
-  RiTable2
+  RiTable2,
+  RiFunctionLine,
+  RiFunctionAddLine,
+  RiFlowChart
 } from '@remixicon/react'
 import SlashMenuList from './SlashMenuList'
 import type { SlashMenuListHandle, SlashMenuListProps } from './SlashMenuList'
@@ -114,6 +117,38 @@ export const SLASH_ITEMS: SlashMenuItemDef[] = [
     keywords: ['代码', 'code', 'block', '代码块'],
     Icon: RiCodeBoxLine,
     run: (editor) => editor.chain().focus().toggleCodeBlock().run()
+  },
+  {
+    key: 'inlineMath',
+    title: '公式',
+    description: '$…$ 行内 LaTeX 公式',
+    keywords: ['公式', '数学', '行内', 'math', 'latex', 'katex'],
+    Icon: RiFunctionLine,
+    run: (editor) => editor.chain().focus().insertContent({ type: 'mathInline' }).run()
+  },
+  {
+    key: 'blockMath',
+    title: '块级公式',
+    description: '$$…$$ 独立 LaTeX 公式块',
+    keywords: ['公式', '数学', '块级', 'math', 'latex', 'katex'],
+    Icon: RiFunctionAddLine,
+    run: (editor) => editor.chain().focus().insertContent({ type: 'mathBlock' }).run()
+  },
+  {
+    key: 'mermaid',
+    title: '图表',
+    description: 'Mermaid 流程图 / 时序图 / 甘特图',
+    keywords: ['图表', '图', '流程图', 'mermaid', 'diagram', 'flow'],
+    Icon: RiFlowChart,
+    run: (editor) =>
+      editor
+        .chain()
+        .focus()
+        .insertContent({
+          type: 'mermaid',
+          attrs: { code: 'graph TD\n  A[开始] --> B[结束]' }
+        })
+        .run()
   },
   {
     key: 'table',

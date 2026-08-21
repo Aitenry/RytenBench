@@ -19,7 +19,7 @@ export interface ChatSettings {
   workspacePath?: string
   /** 当前活跃的工作区 ID，用于按工作区筛选话题 */
   activeWorkspaceId?: number
-  /** 记忆（Memory）存储目录，空/未设置表示不启用 */
+  /** 记忆（Memory）存储根目录，空/未设置表示不启用；其下按工作区 ID 目录隔离（workspace-<id>/），每个工作区一套独立记忆 */
   memoryPath?: string
 }
 
