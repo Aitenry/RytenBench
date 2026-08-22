@@ -401,6 +401,8 @@ const Index: React.FC = () => {
               <ChatMessageArea
                 messages={messages}
                 isDarkMode={isDarkMode}
+                streaming={isLoading}
+                currentTopicId={currentTopicId}
                 colorText={colorText}
                 colorTextSecondary={colorTextSecondary}
                 colorTextTertiary={colorTextTertiary}

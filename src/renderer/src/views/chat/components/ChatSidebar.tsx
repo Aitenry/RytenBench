@@ -195,7 +195,7 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
                 <div
                   key={topic.id}
                   onClick={() => onSelectTopic(topic)}
-                  className="group flex items-center gap-2 px-4 py-2.5 mb-1 mx-2 rounded-lg cursor-pointer transition-colors"
+                  className="group flex items-center gap-2 px-3 py-1.5 mb-1 mx-2 rounded-lg cursor-pointer transition-colors"
                   style={{
                     color: colorText,
                     background:

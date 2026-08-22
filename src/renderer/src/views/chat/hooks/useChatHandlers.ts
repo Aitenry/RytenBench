@@ -183,14 +183,6 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
   )
   const modelSupportsVision = supportsCapability(selectedProvider?.metadata, 'supports_image_input')
 
-  const scrollToBottom = useCallback((): void => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [])
-
-  useEffect(() => {
-    scrollToBottom()
-  }, [messages, scrollToBottom])
-
   useEffect(() => {
     ;(window as unknown as Window).api.chat.getTools().then(setAvailableTools).catch(console.error)
   }, [])
