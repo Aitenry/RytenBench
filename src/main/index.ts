@@ -422,10 +422,10 @@ async function createLoadingWindow(): Promise<void> {
 
 function createMainWindow(): void {
   const mainWindow = new BrowserWindow({
-    width: 1390,
-    height: 900,
-    minWidth: 1390,
-    minHeight: 827,
+    width: 1200,
+    height: 800, // 打开应用时即为最小尺寸（与 min 一致），可后续手动拉大
+    minWidth: 1200,
+    minHeight: 800,
     show: false,
     frame: false,
     transparent: true,

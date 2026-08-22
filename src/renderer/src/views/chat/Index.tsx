@@ -124,6 +124,66 @@ const Index: React.FC = () => {
   const [sidebarWidth, setSidebarWidth] = useState(230)
   const draggingRef = useRef(false)
 
+  // 聊天区实际可用宽度（窗口宽度减去左右导航栏），所有分栏宽度上限都以它为准，
+  // 避免在最小窗口（1200px）下拖拽分栏导致整体出现横向滚动条
+  const layoutRef = useRef<HTMLDivElement>(null)
+  const [layoutWidth, setLayoutWidth] = useState(0)
+
+  useEffect(() => {
+    const el = layoutRef.current
+    if (!el) return
+    const update = (): void => setLayoutWidth(el.clientWidth)
+    update()
+    const ro = new ResizeObserver(update)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
+  // Workspace panel resizer
+  const [panelWidth, setPanelWidth] = useState(() =>
+    Math.max(500, Math.floor(window.innerWidth * 0.4))
+  )
+
+  const MAIN_MIN_WIDTH = 410
+  const RESIZER_WIDTH = 6
+  const panelMinWidth = panelHasEditor ? 450 : 220
+  // 动态限制 panel 最大宽度：不超过可用宽度 45%，且确保对话区至少有 MAIN_MIN_WIDTH
+  const panelMaxWidth = panelHasEditor
+    ? Math.max(
+        panelMinWidth,
+        Math.min(
+          Math.floor(layoutWidth * 0.45),
+          layoutWidth -
+            (sidebarOpen ? sidebarWidth + RESIZER_WIDTH : 0) -
+            RESIZER_WIDTH -
+            MAIN_MIN_WIDTH
+        )
+      )
+    : 220
+
+  // 面板宽度策略：编辑器打开/关闭时自动展开/收窄；其余变化（窗口缩放、侧边栏拖拽）
+  // 只把宽度收敛回合法区间，保留用户拖拽结果，避免溢出出现横向滚动条
+  const prevHasEditorRef = useRef(panelHasEditor)
+  useEffect(() => {
+    if (panelHasEditor === prevHasEditorRef.current) {
+      setPanelWidth((prev) => Math.min(Math.max(prev, panelMinWidth), panelMaxWidth))
+      return
+    }
+    prevHasEditorRef.current = panelHasEditor
+    setPanelWidth(
+      panelHasEditor ? Math.min(Math.floor(layoutWidth * 0.35), panelMaxWidth) : 220
+    )
+  }, [panelHasEditor, layoutWidth, panelMinWidth, panelMaxWidth])
+
+  // 侧边栏拖拽上限：为对话区与工作区面板留足空间，避免整体出现横向滚动条
+  const sidebarMaxWidth = Math.max(
+    200,
+    Math.min(
+      260,
+      layoutWidth - RESIZER_WIDTH - MAIN_MIN_WIDTH - (panelOpen ? panelWidth + RESIZER_WIDTH : 0)
+    )
+  )
+
   const handleResizerMouseDown = useCallback(
     (e: React.MouseEvent) => {
       e.preventDefault()
@@ -133,7 +193,7 @@ const Index: React.FC = () => {
 
       const handleMouseMove = (ev: MouseEvent): void => {
         if (!draggingRef.current) return
-        const newWidth = Math.min(260, Math.max(200, startWidth + ev.clientX - startX))
+        const newWidth = Math.min(sidebarMaxWidth, Math.max(200, startWidth + ev.clientX - startX))
         setSidebarWidth(newWidth)
       }
 
@@ -150,28 +210,8 @@ const Index: React.FC = () => {
       document.addEventListener('mousemove', handleMouseMove)
       document.addEventListener('mouseup', handleMouseUp)
     },
-    [sidebarWidth]
+    [sidebarWidth, sidebarMaxWidth]
   )
-
-  // Workspace panel resizer
-  const [panelWidth, setPanelWidth] = useState(() =>
-    Math.max(500, Math.floor(window.innerWidth * 0.4))
-  )
-
-  const MAIN_MIN_WIDTH = 300
-  const panelMinWidth = panelHasEditor ? 450 : 220
-  // 动态限制 panel 最大宽度：不超过窗口 45%，且确保主内容区至少有 MAIN_MIN_WIDTH
-  const panelMaxWidth = panelHasEditor
-    ? Math.min(
-        Math.floor(window.innerWidth * 0.45),
-        window.innerWidth - (sidebarOpen ? sidebarWidth + 6 : 0) - MAIN_MIN_WIDTH - 6
-      )
-    : 220
-
-  // 自动调整面板宽度：无文件时收窄到 220px，有文件时按窗口 35% 展开
-  useEffect(() => {
-    setPanelWidth(panelHasEditor ? Math.floor(window.innerWidth * 0.35) : 220)
-  }, [panelHasEditor])
 
   const panelDraggingRef = useRef(false)
 
@@ -266,7 +306,11 @@ const Index: React.FC = () => {
         }
       `}</style>
 
-      <div className="chat-layout" style={{ height: '100%', display: 'flex' }}>
+      <div
+        ref={layoutRef}
+        className="chat-layout"
+        style={{ height: '100%', display: 'flex', overflow: 'hidden' }}
+      >
         {sidebarOpen && (
           <>
             <div style={{ width: sidebarWidth, minWidth: 200, maxWidth: 239, flexShrink: 0 }}>
@@ -297,7 +341,7 @@ const Index: React.FC = () => {
           className="h-full flex flex-col overflow-hidden"
           style={{
             flex: 1,
-            minWidth: '20%',
+            minWidth: 410,
             background: colorBgContainer,
             borderRadius: borderRadiusLG
           }}

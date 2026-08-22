@@ -630,8 +630,8 @@ const ChatInput: React.FC<ChatInputProps> = ({
         </div>
       )}
       <div className="flex items-center justify-between px-4 pb-4">
-        <div className="flex items-center gap-2">
-          <Tooltip title={'上传附件（也可 Ctrl+V 直接粘贴图片/文件）'}>
+        <div className="flex min-w-0 items-center gap-2">
+          <Tooltip title={'上传附件'}>
             <Button
               type="dashed"
               shape="circle"
@@ -657,7 +657,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
             size="small"
             value={selectedProviderId}
             onChange={(value) => onSelectProvider(value)}
-            style={{ minWidth: 140, padding: '5px', borderRadius: '10px' }}
+            style={{ minWidth: 140, maxWidth: '100%', padding: '5px', borderRadius: '10px' }}
             placeholder="选择模型"
             showSearch={{
               filterOption: (input, option) =>
@@ -666,7 +666,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
             popupMatchSelectWidth={false}
             popupStyle={{ minWidth: 260 }}
             labelRender={(props) => (
-              <span className="flex items-center gap-1.5">
+              <span className="flex min-w-0 items-center gap-1.5 overflow-hidden">
                 {SelectedIcon ? (
                   <SelectedIcon style={{ fontSize: 14, color: selectedColor }} />
                 ) : selectedProviderType ? (
@@ -688,7 +688,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
                     {selectedProviderType.charAt(0).toUpperCase()}
                   </span>
                 ) : null}
-                {props.label}
+                <span className="truncate">{props.label}</span>
               </span>
             )}
             optionRender={(option) => {
