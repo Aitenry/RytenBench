@@ -1,16 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import {
-  Button,
-  Input,
-  Tabs,
-  Tag,
-  Switch,
-  Empty,
-  Popconfirm,
-  Modal,
-  Tooltip,
-  theme
-} from 'antd'
+import { Button, Input, Tabs, Tag, Switch, Empty, Popconfirm, Modal, Tooltip, theme } from 'antd'
 import {
   FolderOutlined,
   PlusOutlined,
@@ -123,7 +112,13 @@ const ImportancePill: React.FC<{
       }}
     >
       <span
-        style={{ width: 6, height: 6, borderRadius: '50%', background: color, display: 'inline-block' }}
+        style={{
+          width: 6,
+          height: 6,
+          borderRadius: '50%',
+          background: color,
+          display: 'inline-block'
+        }}
       />
       {label}
     </button>
@@ -455,10 +450,7 @@ const MemorySettings: React.FC = () => {
   }
 
   /** 空间激活开关 */
-  const handleToggleBody = async (
-    id: string,
-    active: boolean
-  ): Promise<void> => {
+  const handleToggleBody = async (id: string, active: boolean): Promise<void> => {
     const msgKey = 'mnemon-body-toggle'
     try {
       const result = await (window as unknown as Window).api.chat.mnemonBodyUpdate(id, { active })
@@ -482,7 +474,12 @@ const MemorySettings: React.FC = () => {
         createName.trim(),
         createDescription.trim()
       )
-      viewMessage(msgKey, result.success ? 'success' : 'warning', result.success ? `已创建「${result.body?.name}」` : (result.message ?? ''), 3)
+      viewMessage(
+        msgKey,
+        result.success ? 'success' : 'warning',
+        result.success ? `已创建「${result.body?.name}」` : (result.message ?? ''),
+        3
+      )
       if (result.success) {
         setCreateName('')
         setCreateDescription('')
@@ -703,7 +700,9 @@ const MemorySettings: React.FC = () => {
                   background: body.active ? t.iconBg : t.trackBg
                 }}
               >
-                <DatabaseOutlined style={{ fontSize: 17, color: body.active ? t.primary : t.textTertiary }} />
+                <DatabaseOutlined
+                  style={{ fontSize: 17, color: body.active ? t.primary : t.textTertiary }}
+                />
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div className="flex items-center gap-2 flex-wrap">
@@ -715,7 +714,11 @@ const MemorySettings: React.FC = () => {
                   ) : (
                     <Tag style={{ marginRight: 0, fontSize: 11, lineHeight: '18px' }}>未激活</Tag>
                   )}
-                  {!body.healthy && <Tag color="red" style={{ marginRight: 0, fontSize: 11 }}>异常</Tag>}
+                  {!body.healthy && (
+                    <Tag color="red" style={{ marginRight: 0, fontSize: 11 }}>
+                      异常
+                    </Tag>
+                  )}
                 </div>
                 {body.description && (
                   <div
@@ -734,10 +737,7 @@ const MemorySettings: React.FC = () => {
                   {body.stats?.deletedInsights ?? 0}
                 </div>
               </div>
-              <div
-                className="flex items-center gap-1 shrink-0"
-                style={{ marginTop: 2 }}
-              >
+              <div className="flex items-center gap-1 shrink-0" style={{ marginTop: 2 }}>
                 <Button
                   type="text"
                   size="small"
@@ -779,7 +779,14 @@ const MemorySettings: React.FC = () => {
                 className="px-3 py-2.5"
                 style={{ borderBottom: `1px solid ${t.hairline}` }}
               >
-                <div style={{ fontSize: 13, lineHeight: '20px', wordBreak: 'break-all', color: t.text }}>
+                <div
+                  style={{
+                    fontSize: 13,
+                    lineHeight: '20px',
+                    wordBreak: 'break-all',
+                    color: t.text
+                  }}
+                >
                   {item.content}
                 </div>
                 <div style={{ fontSize: 11, color: t.textTertiary, marginTop: 2 }}>
@@ -934,9 +941,21 @@ const MemorySettings: React.FC = () => {
             <Tabs
               size="small"
               items={[
-                { key: 'runtime', label: `热记忆（${userEntries.length + memoryEntries.length}）`, children: renderRuntimeTab() },
-                { key: 'bodies', label: `长期空间（${bodies.length}）`, children: renderBodiesTab() },
-                { key: 'documents', label: `档案（${documents?.total ?? 0}）`, children: renderDocumentsTab() }
+                {
+                  key: 'runtime',
+                  label: `热记忆（${userEntries.length + memoryEntries.length}）`,
+                  children: renderRuntimeTab()
+                },
+                {
+                  key: 'bodies',
+                  label: `长期空间（${bodies.length}）`,
+                  children: renderBodiesTab()
+                },
+                {
+                  key: 'documents',
+                  label: `档案（${documents?.total ?? 0}）`,
+                  children: renderDocumentsTab()
+                }
               ]}
             />
           )}

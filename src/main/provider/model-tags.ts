@@ -41,6 +41,7 @@ export interface ModelProfileEntry {
   context_window?: number | null
   max_output_tokens?: number | null
   image_options?: Record<string, unknown> | null
+
   [key: string]: unknown
 }
 

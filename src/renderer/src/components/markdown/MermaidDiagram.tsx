@@ -58,9 +58,7 @@ const MermaidDiagram: React.FC<MermaidDiagramProps> = ({ code, isDarkMode = fals
     return <div className="mermaid-block mermaid-loading">图表渲染中…</div>
   }
 
-  return (
-    <div ref={blockRef} className="mermaid-block" dangerouslySetInnerHTML={{ __html: svg }} />
-  )
+  return <div ref={blockRef} className="mermaid-block" dangerouslySetInnerHTML={{ __html: svg }} />
 }
 
 export default MermaidDiagram

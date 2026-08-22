@@ -132,6 +132,23 @@ function isRecursionError(err: unknown): boolean {
 }
 
 /**
+ * 判断 chunk 是否来自子代理子图（嵌套在主图 tools 节点内执行）。
+ *
+ * LangGraph 的 streamMode ['messages'] 通过 CallbackManager 收集模型事件，
+ * 子代理子图在主图 tools 节点内运行时，其模型调用事件会经 AsyncLocalStorage
+ * 传播的 callbacks 冒泡到主图 stream（metadata 的 langgraph_checkpoint_ns
+ * 形如 "tools:xxx"）。若不过滤，子智能体的 token 流会被当作主智能体文本
+ * 推入主消息流，导致前端「主智能体内容 = 子智能体内容」的重复显示。
+ */
+function isSubgraphChunk(meta: unknown): boolean {
+  if (typeof meta !== 'object' || meta === null) return false
+  const ns = (meta as Record<string, unknown>).langgraph_checkpoint_ns
+  if (typeof ns !== 'string' || !ns) return false
+  // 主图 model 节点的 ns 形如 "model:xxx"；tools 节点内嵌套子图的 ns 形如 "tools:xxx"
+  return !ns.startsWith('model:')
+}
+
+/**
  * 启动图流式执行并返回三路流适配器。
  * 图执行在后台进行（错误会关闭队列并由迭代器抛出）；AbortSignal 可随时取消。
  * queue 由调用方创建并注入（Runtime 需在建图前把队列注入 QueueRef，工具节点才能推送记录）。
@@ -162,6 +179,8 @@ export function startGraphStream(
         const [mode, payload] = item as readonly [string, [StreamMessageLike, unknown]]
         if (mode !== 'messages') continue
         if (options.signal?.aborted) break
+        // 过滤子代理子图冒泡的 chunk（其内容已由子代理子图独立流式转发为 sub_* 记录）
+        if (isSubgraphChunk(payload[1])) continue
         pushMessageRecords(payload[0], queue, seenIndexes)
       }
       queue.close()

@@ -42,10 +42,12 @@ export interface AgentConfigInput {
 function rowToSubAgentConfig(row: AgentConfigRow): SubAgentConfig {
   return {
     name: row.name,
+    ...(row.rename ? { rename: row.rename } : {}),
     description: row.description ?? '',
     systemPrompt: row.prompt ?? '',
     tools: row.tools ? JSON.parse(row.tools) : [],
-    ...(row.model ? { model: row.model } : {})
+    ...(row.model ? { model: row.model } : {}),
+    ...(row.skills ? { skills: JSON.parse(row.skills) as string[] } : {})
   }
 }
 

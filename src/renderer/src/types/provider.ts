@@ -16,6 +16,7 @@ export interface ModelCapabilities {
   supports_fine_tuning?: boolean
   supports_embeddings?: boolean
   reasoning_effort_levels?: string[]
+
   [key: string]: boolean | string[] | undefined
 }
 
@@ -32,6 +33,7 @@ export interface ModelMetadata {
   context_window?: number | null
   max_output_tokens?: number | null
   image_options?: Record<string, unknown> | null
+
   [key: string]: unknown
 }
 

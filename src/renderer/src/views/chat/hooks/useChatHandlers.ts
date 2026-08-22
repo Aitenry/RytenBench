@@ -6,10 +6,32 @@ import type { Message, Attachment, ToolCall, MessageBlock } from '@renderer/type
 import type { StreamChunk } from '../../../../../main/chat/types'
 import { useTypewriter, useCyclingTypewriter } from './useTypewriter'
 import { isSameToolCall, computeTextDelta, pushBlock } from '../utils/chatHelpers'
-import { getProviderDisplayName, isEmbeddingProvider, supportsCapability } from '@renderer/utils/providerMeta'
+import {
+  getProviderDisplayName,
+  isEmbeddingProvider,
+  supportsCapability
+} from '@renderer/utils/providerMeta'
 
 const TOPICS_PAGE_SIZE = 20
 const MESSAGES_PAGE_SIZE = 20 // 10对消息
+
+const INPUT_HISTORY_STORAGE_KEY = 'rytenbench.chat.inputHistory'
+const INPUT_HISTORY_MAX = 100
+/** 全局输入历史缓存（localStorage 持久化，模块级单例，避免每次渲染解析存储） */
+let inputHistoryCache: string[] | null = null
+const loadInputHistory = (): string[] => {
+  if (inputHistoryCache) return inputHistoryCache
+  try {
+    const raw = localStorage.getItem(INPUT_HISTORY_STORAGE_KEY)
+    const parsed: unknown = raw ? JSON.parse(raw) : []
+    inputHistoryCache = Array.isArray(parsed)
+      ? parsed.filter((x): x is string => typeof x === 'string').slice(-INPUT_HISTORY_MAX)
+      : []
+  } catch {
+    inputHistoryCache = []
+  }
+  return inputHistoryCache
+}
 
 /** 每个话题的会话缓存状态 */
 interface SessionState {
@@ -37,6 +59,8 @@ export interface UseChatHandlersReturn {
   isLoading: boolean
   messagesEndRef: React.RefObject<HTMLDivElement | null>
   textareaRef: React.RefObject<HTMLDivElement | null>
+  /** 全局输入历史（↑/↓ 键切换浏览，handleSend 记录，localStorage 持久化，上限 100 条） */
+  inputHistoryRef: { current: string[] }
   currentSessionIdRef: React.RefObject<string | null>
   currentTopicIdRef: React.RefObject<number | null>
   loadingTopicIds: Set<number>
@@ -77,6 +101,8 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLDivElement>(null)
+  /** 全局输入历史（↑/↓ 键切换浏览，handleSend 记录，localStorage 持久化，上限 100 条） */
+  const inputHistoryRef = useRef<string[]>(loadInputHistory())
   const currentSessionIdRef = useRef<string | null>(null)
 
   /** 当前活跃的工作区 ID */
@@ -151,7 +177,10 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
     () => providers.find((p) => p.id === selectedProviderId) ?? null,
     [providers, selectedProviderId]
   )
-  const modelSupportsTools = supportsCapability(selectedProvider?.metadata, 'supports_function_calling')
+  const modelSupportsTools = supportsCapability(
+    selectedProvider?.metadata,
+    'supports_function_calling'
+  )
   const modelSupportsVision = supportsCapability(selectedProvider?.metadata, 'supports_image_input')
 
   const scrollToBottom = useCallback((): void => {
@@ -955,6 +984,21 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
         refreshTopics().then()
       }
 
+      // 记录本轮输入到全局输入历史（输入框 ↑/↓ 键切换用，localStorage 持久化，上限 100 条）
+      const sentText = inputValue.trim()
+      const inputHistory = inputHistoryRef.current
+      if (inputHistory[inputHistory.length - 1] !== sentText) {
+        inputHistory.push(sentText)
+        if (inputHistory.length > INPUT_HISTORY_MAX) {
+          inputHistory.splice(0, inputHistory.length - INPUT_HISTORY_MAX)
+        }
+        try {
+          localStorage.setItem(INPUT_HISTORY_STORAGE_KEY, JSON.stringify(inputHistory))
+        } catch {
+          // 存储失败不影响发送流程
+        }
+      }
+
       currentSessionIdRef.current = aiMessageId
 
       // 标记加载状态
@@ -1139,6 +1183,7 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
     // refs
     messagesEndRef,
     textareaRef,
+    inputHistoryRef,
     currentSessionIdRef,
     currentTopicIdRef,
     // computed

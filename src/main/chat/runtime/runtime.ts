@@ -7,6 +7,7 @@ import { buildAgentGraph, buildGraphInput, MAX_TOOL_CALLS, type QueueRef } from 
 import { buildFsTools } from './fs-backend'
 import { buildTodoTools, todoStore } from './todo'
 import { buildSkillsPromptSection, loadSkills } from './skills'
+import { buildSubAgentTools as buildSubAgentToolsFromRegistry } from '../tools/builders'
 import { createTaskTool } from './subagent'
 import { RecordQueue, startGraphStream, invokeGraph, type GraphRunOptions } from './graph'
 import type { MnemonComponent } from './mnemon'
@@ -83,7 +84,11 @@ export class Runtime {
         workspaceId: opts.workspaceId,
         buildTools: (sa) => this.buildSubAgentTools(sa),
         queue: this.queueRef,
-        recursionLimit: this.recursionLimit
+        recursionLimit: this.recursionLimit,
+        // 子代理专属记忆根（<memoryPath>/workspace-<wsId>/ 下 sub-agents/<name>/memories/AGENTS.md）
+        memoryPath: opts.memoryPath,
+        // 技能目录：子代理按声明的 skills 过滤注入
+        skillsPath: opts.skillsPath
       })
     }
 
@@ -103,16 +108,22 @@ export class Runtime {
     ]
   }
 
-  /** 子代理工具（按声明的工具名从业务工具中选取） */
+  /** 子代理工具（按声明的工具名从系统工具注册表独立构建，与主智能体工具配置无关） */
   private buildSubAgentTools(subAgent: SubAgentConfig): StructuredToolInterface[] {
-    const names = subAgent.tools || []
-    return this.opts.tools.filter((t) => names.includes(t.name))
+    return buildSubAgentToolsFromRegistry(subAgent)
   }
 
   /** 解析 'provider:model' → 模型实例；失败返回 undefined（回退主模型） */
   private async resolveSubAgentModel(spec: string | undefined): Promise<BaseChatModel | undefined> {
     if (!spec) return undefined
-    const [type, modelName] = spec.split(':').map((s) => s.trim().toLowerCase())
+    // 仅按第一个冒号分割（模型名可能本身含冒号，如 ollama 的 "qwen2.5:7b"）
+    const sep = spec.indexOf(':')
+    if (sep <= 0) return undefined
+    const type = spec.slice(0, sep).trim().toLowerCase()
+    const modelName = spec
+      .slice(sep + 1)
+      .trim()
+      .toLowerCase()
     if (!type || !modelName) return undefined
     try {
       const { getEnabledProviders } = await import('../../database/mapper/provider')
@@ -130,10 +141,23 @@ export class Runtime {
   }
 
   /**
-   * 构建系统提示词：Rita 人设 + 技能段 + Mnemon sections（热记忆由 Mnemon 统一注入）。
+   * 构建系统提示词：Rita 人设 + 子智能体引导 + 技能段 + Mnemon sections（热记忆由 Mnemon 统一注入）。
    */
   private buildSystemPrompt(): string {
     let prompt = RITA_BASE_PROMPT
+    if (this.opts.subAgents.length > 0) {
+      const list = this.opts.subAgents
+        .map((sa) => {
+          const display =
+            sa.rename && sa.rename !== sa.name ? `${sa.rename}（${sa.name}）` : sa.name
+          return `- ${display}: ${sa.description || '（无描述）'}`
+        })
+        .join('\n')
+      prompt += `\n\n## 子智能体
+你可以使用 task 工具将合适的任务委托给专门的子智能体执行（子智能体拥有独立的系统提示词、工具与模型）。当任务超出你当前处理范围、或属于某个子智能体的专长领域时，优先考虑委托。可用子智能体：
+${list}
+委托完成后，子智能体的完整输出会直接展示给用户，你的最终回答只需简短总结或直接收尾，不要复述子智能体已输出的详细内容。`
+    }
     const skillsSection = buildSkillsPromptSection(
       loadSkills({ skillsPath: this.opts.skillsPath, enabledSkills: this.opts.enabledSkills })
     )

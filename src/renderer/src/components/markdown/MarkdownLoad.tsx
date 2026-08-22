@@ -158,13 +158,12 @@ const MarkdownLoad = React.memo(
       }: React.ComponentPropsWithoutRef<'pre'>): React.ReactNode {
         const codeText = extractTextFromChildren(children)
         // Mermaid 代码块 → 渲染为图表
-        const codeChild = React.Children.toArray(children).find(
-          (c): c is React.ReactElement => React.isValidElement(c)
+        const codeChild = React.Children.toArray(children).find((c): c is React.ReactElement =>
+          React.isValidElement(c)
         )
         const codeClass =
           ((codeChild?.props as { className?: string } | undefined)?.className as
-            | string
-            | undefined) ?? ''
+            string | undefined) ?? ''
         if (codeClass.includes('language-mermaid')) {
           return <MermaidDiagram code={codeText} isDarkMode={isDarkMode} />
         }

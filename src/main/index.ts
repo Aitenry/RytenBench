@@ -458,7 +458,10 @@ function createMainWindow(): void {
   })
 
   // 窗口控制 IPC（作用于发送方窗口：主窗口与 mermaid 预览窗口共用）
-  const windowMaxStates = new Map<number, { isMaximized: boolean; normalBounds: Electron.Rectangle | null }>()
+  const windowMaxStates = new Map<
+    number,
+    { isMaximized: boolean; normalBounds: Electron.Rectangle | null }
+  >()
 
   const winFromEvent = (
     event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent
@@ -512,8 +515,7 @@ function createMainWindow(): void {
   const ICON_CENTER =
     'M13 1L13.001 4.06201C16.6192 4.51365 19.4869 7.38163 19.9381 11L23 11V13L19.938 13.001C19.4864 16.6189 16.6189 19.4864 13.001 19.938L13 23H11L11 19.9381C7.38163 19.4869 4.51365 16.6192 4.06201 13.001L1 13V11L4.06189 11C4.51312 7.38129 7.38129 4.51312 11 4.06189L11 1H13ZM12 6C8.68629 6 6 8.68629 6 12C6 15.3137 8.68629 18 12 18C15.3137 18 18 15.3137 18 12C18 8.68629 15.3137 6 12 6ZM12 10C13.1046 10 14 10.8954 14 12C14 13.1046 13.1046 14 12 14C10.8954 14 10 13.1046 10 12C10 10.8954 10.8954 10 12 10Z'
   // 标题栏图标（与应用 TitleBar 同款）：最小化 / 最大化 / 还原 / 关闭 / 图表
-  const ICON_MIN =
-    'M5 11V13H19V11H5Z'
+  const ICON_MIN = 'M5 11V13H19V11H5Z'
   const ICON_MAX =
     'M6.41421 5H10V3H3V10H5V6.41421L9.29289 10.7071L10.7071 9.29289L6.41421 5ZM21 14H19V17.5858L14.7071 13.2929L13.2929 14.7071L17.5858 19H14V21H21V14Z'
   const ICON_RESTORE =
@@ -648,7 +650,8 @@ function createMainWindow(): void {
 
   let mermaidPreviewWin: BrowserWindow | null = null
   ipcMain.handle('mermaid-preview', (_event, svg: string) => {
-    const dataUrl = 'data:text/html;charset=utf-8,' + encodeURIComponent(buildMermaidPreviewHtml(svg))
+    const dataUrl =
+      'data:text/html;charset=utf-8,' + encodeURIComponent(buildMermaidPreviewHtml(svg))
     if (mermaidPreviewWin && !mermaidPreviewWin.isDestroyed()) {
       void mermaidPreviewWin.loadURL(dataUrl)
       mermaidPreviewWin.focus()
@@ -2246,11 +2249,12 @@ app.whenReady().then(async () => {
             if (chunk.subAgent) {
               const sa = chunk.subAgent
 
-              // 累积智能体最终输出到完整内容，避免历史记录重载时丢失智能体详情
-              // 只取 output 作为持久化文本，避免与 blocks 中的流式 text 重复拼接
-              if (sa.status === 'completed' && sa.output && !fullContent.includes(sa.output)) {
-                fullContent += sa.output
-              }
+              // 注意：不把子智能体输出拼入 fullContent（主消息 content）。
+              // 子智能体详情已持久化在 blocks 的 subAgent 块（含 children），
+              // 历史重载按 blocks 渲染即可；若再拼入 content，会导致：
+              // ① 复制消息/上下文注入时子智能体全文重复出现在主智能体发言中；
+              // ② 主模型下一轮看到重复文本，进一步放大复述行为。
+              // 子智能体块匹配逻辑见下：
 
               // 匹配智能体累积块：优先 causeId，回退 name
               const matchesSa = (b: (typeof accumulatedBlocks)[number]): boolean => {
@@ -2507,7 +2511,16 @@ app.whenReady().then(async () => {
   // 热记忆增删改（add / replace / remove）
   ipcMain.handle(
     'mnemon-runtime-mutate',
-    async (_event, request: { action: string; target: string; content?: string; old_text?: string; importance?: string }) => {
+    async (
+      _event,
+      request: {
+        action: string
+        target: string
+        content?: string
+        old_text?: string
+        importance?: string
+      }
+    ) => {
       const component = await currentMnemonComponent()
       if (!component) return { success: false, message: '未配置记忆存储目录' }
       return await component.runtimeMemory.mutate({

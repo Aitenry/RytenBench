@@ -245,9 +245,10 @@ async function updateProvider(id: number, updates: Partial<LlmProviderInput>): P
     }
     if (updates.metadata !== undefined) {
       // null 或空对象都清空元数据
-      const metadata = updates.metadata && Object.keys(updates.metadata).length > 0
-        ? JSON.stringify(updates.metadata)
-        : null
+      const metadata =
+        updates.metadata && Object.keys(updates.metadata).length > 0
+          ? JSON.stringify(updates.metadata)
+          : null
       updateFields.push(`metadata = $${paramIndex++}`)
       updateValues.push(metadata)
     }

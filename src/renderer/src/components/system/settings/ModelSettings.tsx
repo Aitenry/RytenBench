@@ -132,7 +132,7 @@ const MetaSummary: React.FC<{ metadata: ModelMetadata | null }> = ({ metadata })
     return <span style={{ color: colorTextTertiary, fontSize: 12 }}>未填写</span>
   }
   const caps = getCapabilities(metadata)
-  const typeLabel = metadata.type ? MODEL_TYPE_LABELS[metadata.type] ?? metadata.type : null
+  const typeLabel = metadata.type ? (MODEL_TYPE_LABELS[metadata.type] ?? metadata.type) : null
   const badges = CAPABILITY_BADGES.filter((b) => caps[b.key] === true)
   return (
     <Space size={4} wrap>
@@ -147,7 +147,9 @@ const MetaSummary: React.FC<{ metadata: ModelMetadata | null }> = ({ metadata })
 }
 
 const ModelSettings: React.FC = () => {
-  const { token: { colorTextSecondary } } = theme.useToken()
+  const {
+    token: { colorTextSecondary }
+  } = theme.useToken()
 
   const { modal } = App.useApp()
   const { viewMessage } = useMessage()
@@ -226,8 +228,7 @@ const ModelSettings: React.FC = () => {
       metadata_vendor: typeof meta.vendor === 'string' ? meta.vendor : '',
       metadata_type: typeof meta.type === 'string' ? meta.type : undefined,
       metadata_capabilities: CAPABILITY_OPTIONS.filter((o) => caps[o.key]).map((o) => o.key),
-      metadata_context_window:
-        typeof meta.context_window === 'number' ? meta.context_window : null,
+      metadata_context_window: typeof meta.context_window === 'number' ? meta.context_window : null,
       metadata_max_output_tokens:
         typeof meta.max_output_tokens === 'number' ? meta.max_output_tokens : null,
       is_enabled: record.is_enabled,
@@ -261,11 +262,9 @@ const ModelSettings: React.FC = () => {
       currentCaps[key] = selectedCaps.includes(key)
     }
 
-    const displayName = typeof values.metadata_display_name === 'string'
-      ? values.metadata_display_name.trim()
-      : ''
-    const vendor =
-      typeof values.metadata_vendor === 'string' ? values.metadata_vendor.trim() : ''
+    const displayName =
+      typeof values.metadata_display_name === 'string' ? values.metadata_display_name.trim() : ''
+    const vendor = typeof values.metadata_vendor === 'string' ? values.metadata_vendor.trim() : ''
     const type = typeof values.metadata_type === 'string' ? values.metadata_type.trim() : ''
     const ctx = values.metadata_context_window as number | null | undefined
     const maxOut = values.metadata_max_output_tokens as number | null | undefined
@@ -644,10 +643,18 @@ const ModelSettings: React.FC = () => {
           </Space>
 
           <Space size="middle" className="w-full">
-            <Form.Item name="metadata_context_window" label="上下文 (tokens)" style={{ width: 160 }}>
+            <Form.Item
+              name="metadata_context_window"
+              label="上下文 (tokens)"
+              style={{ width: 160 }}
+            >
               <InputNumber min={0} step={1000} style={{ width: '100%' }} placeholder="未知" />
             </Form.Item>
-            <Form.Item name="metadata_max_output_tokens" label="最大输出 (tokens)" style={{ width: 160 }}>
+            <Form.Item
+              name="metadata_max_output_tokens"
+              label="最大输出 (tokens)"
+              style={{ width: 160 }}
+            >
               <InputNumber min={1} style={{ width: '100%' }} placeholder="未知" />
             </Form.Item>
           </Space>
@@ -706,11 +713,7 @@ const ModelSettings: React.FC = () => {
               name="is_default"
               label="设为默认"
               valuePropName="checked"
-              tooltip={
-                isEmbeddingInForm
-                  ? '向量模型不能设为默认聊天模型'
-                  : '只能有一个默认供应商'
-              }
+              tooltip={isEmbeddingInForm ? '向量模型不能设为默认聊天模型' : '只能有一个默认供应商'}
             >
               <Switch disabled={isEmbeddingInForm} />
             </Form.Item>

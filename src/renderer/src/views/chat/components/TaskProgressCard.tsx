@@ -1,10 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { theme } from 'antd'
-import {
-  RiListCheck2,
-  RiArrowDownSLine,
-  RiCheckboxCircleFill
-} from '@remixicon/react'
+import { RiListCheck2, RiArrowDownSLine, RiCheckboxCircleFill } from '@remixicon/react'
 import { Window } from '../../../../resource/types/window'
 import type { TodoItem } from '../../../../../main/chat/runtime/todo'
 
@@ -19,7 +15,15 @@ import type { TodoItem } from '../../../../../main/chat/runtime/todo'
  */
 const TaskProgressCard: React.FC<{ currentTopicId: number | null }> = ({ currentTopicId }) => {
   const {
-    token: { colorBgLayout, colorBorder, colorBorderSecondary, colorText, colorTextSecondary, colorTextTertiary, colorPrimary }
+    token: {
+      colorBgLayout,
+      colorBorder,
+      colorBorderSecondary,
+      colorText,
+      colorTextSecondary,
+      colorTextTertiary,
+      colorPrimary
+    }
   } = theme.useToken()
 
   const [todos, setTodos] = useState<TodoItem[]>([])

@@ -209,7 +209,13 @@ export interface Window {
           }[]
           targets: Record<
             'user' | 'memory',
-            { target: 'user' | 'memory'; used: number; limit: number; entryCount: number; markdownPath: string }
+            {
+              target: 'user' | 'memory'
+              used: number
+              limit: number
+              entryCount: number
+              markdownPath: string
+            }
           >
         }
         bodies?: {
@@ -273,7 +279,10 @@ export interface Window {
         total: number
         activeCount: number
       }>
-      mnemonBodyCreate: (name: string, description: string) => Promise<{
+      mnemonBodyCreate: (
+        name: string,
+        description: string
+      ) => Promise<{
         success: boolean
         body?: { id: string; name: string; description: string; active: boolean }
         message?: string
@@ -286,9 +295,15 @@ export interface Window {
         body?: { id: string; name: string; description: string; active: boolean }
         message?: string
       }>
-      mnemonBodyList: (
-        memoryBodyIds?: string[]
-      ) => Promise<{ id: string; content: string; category?: string; importance?: number; createdAt?: string }[]>
+      mnemonBodyList: (memoryBodyIds?: string[]) => Promise<
+        {
+          id: string
+          content: string
+          category?: string
+          importance?: number
+          createdAt?: string
+        }[]
+      >
       mnemonDocumentSnapshot: () => Promise<{
         total: number
         activeCount: number

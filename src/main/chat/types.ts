@@ -63,6 +63,8 @@ export interface StreamChunk extends StructuredMessage {
 export interface SubAgentConfig {
   /** 唯一标识符，主代理通过 task() 工具调用时使用 */
   name: string
+  /** 中文显示名（可选） */
+  rename?: string
   /** 描述智能体的功能，主代理用于决定何时委托 */
   description: string
   /** 智能体的系统提示词 */
@@ -71,6 +73,8 @@ export interface SubAgentConfig {
   tools?: string[]
   /** 可选：覆盖主代理的模型，格式 'provider:model' */
   model?: string
+  /** 可选：可用的技能 ID 列表（从技能目录中选取），留空则无技能 */
+  skills?: string[]
 }
 
 /** 智能体活动事件 */

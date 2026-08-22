@@ -16,7 +16,12 @@ import katex from 'katex'
 /* ──────────── markdown-it 插件 ──────────── */
 
 /** 块级规则：$$...$$（单行或多行，闭合行必须整行是 $$） */
-function mathBlockRule(state: StateBlock, startLine: number, endLine: number, silent: boolean): boolean {
+function mathBlockRule(
+  state: StateBlock,
+  startLine: number,
+  endLine: number,
+  silent: boolean
+): boolean {
   const start = state.bMarks[startLine] + state.tShift[startLine]
   const max = state.eMarks[startLine]
   if (state.src.charCodeAt(start) !== 0x24 /* $ */) return false
@@ -63,7 +68,11 @@ function mathInlineRule(state: StateInline, silent: boolean): boolean {
   const len = state.posMax
   if (src.charCodeAt(start) !== 0x24) return false
   if (src.charCodeAt(start + 1) === 0x24) return false // $$ 交给块级
-  if (start > 0 && src.charCodeAt(start - 1) === 0x5c /* \ */ && src.charCodeAt(start - 2) !== 0x5c) {
+  if (
+    start > 0 &&
+    src.charCodeAt(start - 1) === 0x5c /* \ */ &&
+    src.charCodeAt(start - 2) !== 0x5c
+  ) {
     return false // \$ 转义
   }
   if (start + 1 >= len || /\s/.test(src[start + 1])) return false // 开 $ 后不能是空白
@@ -260,7 +269,7 @@ export const MathInline = Node.create({
     return {
       markdown: {
         serialize(state, node) {
-          state.write(`$${(node.attrs.tex as string)}$`)
+          state.write(`$${node.attrs.tex as string}$`)
         }
       }
     }

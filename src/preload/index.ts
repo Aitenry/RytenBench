@@ -203,7 +203,10 @@ const api = {
       }
     },
     onChatTodosUpdated: (callback: (data: { topicId: number; todos: TodoItem[] }) => void) => {
-      const listener = (_event: Electron.IpcRendererEvent, data: { topicId: number; todos: TodoItem[] }): void => {
+      const listener = (
+        _event: Electron.IpcRendererEvent,
+        data: { topicId: number; todos: TodoItem[] }
+      ): void => {
         callback(data)
       }
       ipcRenderer.on('chat-todos-updated', listener)
@@ -231,8 +234,10 @@ const api = {
     mnemonBodies: () => ipcRenderer.invoke('mnemon-bodies'),
     mnemonBodyCreate: (name: string, description: string) =>
       ipcRenderer.invoke('mnemon-body-create', { name, description }),
-    mnemonBodyUpdate: (id: string, request: { name?: string; description?: string; active?: boolean }) =>
-      ipcRenderer.invoke('mnemon-body-update', id, request),
+    mnemonBodyUpdate: (
+      id: string,
+      request: { name?: string; description?: string; active?: boolean }
+    ) => ipcRenderer.invoke('mnemon-body-update', id, request),
     mnemonBodyList: (memoryBodyIds?: string[]) =>
       ipcRenderer.invoke('mnemon-body-list', memoryBodyIds),
     mnemonDocumentSnapshot: () => ipcRenderer.invoke('mnemon-document-snapshot'),
@@ -579,8 +584,7 @@ const api = {
       ipcRenderer.invoke('workspace-save-file', filePath, content) as Promise<boolean>
   },
   mermaid: {
-    preview: (svg: string) =>
-      ipcRenderer.invoke('mermaid-preview', svg) as Promise<void>
+    preview: (svg: string) => ipcRenderer.invoke('mermaid-preview', svg) as Promise<void>
   },
   weather: {
     getCurrent: (force?: boolean) =>

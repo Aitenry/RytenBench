@@ -44,6 +44,7 @@ function getMermaidModule(): Promise<typeof import('mermaid')> {
   if (!mermaidModule) mermaidModule = import('mermaid')
   return mermaidModule
 }
+
 /** 渲染 Mermaid 源码为 SVG 字符串（mermaid 包懒加载，主题跟随明暗） */
 export async function renderMermaidDiagram(code: string, isDark: boolean): Promise<string> {
   const { default: mermaid } = await getMermaidModule()
@@ -425,7 +426,11 @@ export const Mermaid = Node.create({
   },
 
   renderHTML({ node, HTMLAttributes }) {
-    return ['pre', mergeAttributes(HTMLAttributes, { 'data-mermaid': '' }), ['code', node.attrs.code]]
+    return [
+      'pre',
+      mergeAttributes(HTMLAttributes, { 'data-mermaid': '' }),
+      ['code', node.attrs.code]
+    ]
   },
 
   addStorage() {

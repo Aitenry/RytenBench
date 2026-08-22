@@ -20,6 +20,7 @@ import Placeholder from '@tiptap/extension-placeholder'
 import { baseKeymap } from '@tiptap/pm/commands'
 import { keymap } from '@tiptap/pm/keymap'
 import { TextSelection } from '@tiptap/pm/state'
+import type { EditorView } from '@tiptap/pm/view'
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
 import FileRef from './FileRefNode'
 import type { Attachment } from '@renderer/types/chat'
@@ -77,6 +78,8 @@ interface ChatInputProps {
   inputValue: string
   onInputChange: (value: string) => void
   textareaRef: React.RefObject<HTMLDivElement | null>
+  /** 全局输入历史（↑/↓ 键切换浏览，handleSend 记录，localStorage 持久化） */
+  inputHistoryRef: { current: string[] }
   attachments: Attachment[]
   onAttachmentsChange: (attachments: Attachment[]) => void
   isLoading: boolean
@@ -102,6 +105,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
   inputValue,
   onInputChange,
   textareaRef,
+  inputHistoryRef,
   attachments,
   onAttachmentsChange,
   isLoading,
@@ -143,6 +147,98 @@ const ChatInput: React.FC<ChatInputProps> = ({
   onKeyDownRef.current = onKeyDown
 
   const editorRef = useRef<Editor | null>(null)
+
+  // ── 输入历史（↑/↓ 切换）：全局共享、localStorage 持久化，由 handleSend 记录到 inputHistoryRef ──
+  // historyIndexRef：-1 = 未浏览，0..n-1 = 指向历史条目；
+  // 触发条件：仅当输入内容为空（ed.isEmpty）时才接管 ↑/↓，用户输入内容后保留默认光标移动
+  const historyIndexRef = useRef(-1)
+  // 浏览切换后刷新自定义光标（updateCaret 定义在下方，经 ref 调用避免声明顺序问题）
+  const updateCaretRef = useRef<() => void>(() => {})
+
+  /** 与 onUpdate 一致的文本序列化：hardBreak→换行、fileRef→路径 */
+  const getEditorText = useCallback((ed: Editor): string => {
+    return ed
+      .getText({
+        blockSeparator: '\n',
+        textSerializers: {
+          hardBreak: () => '\n',
+          fileRef: ({ node }) => node.attrs.path ?? ''
+        }
+      })
+      .replace(/\n+$/, '')
+  }, [])
+
+  /** textarea 风格逐行移动光标。
+   * 输入框全部换行都是 hardBreak，整篇只是一个 textblock，ProseMirror 默认 ↑/↓
+   * 是 block 级移动（直接跳段落开头/结尾），这里按屏幕坐标逐行定位光标。 */
+  const moveCursorByLine = useCallback((view: EditorView, dir: -1 | 1): boolean => {
+    const { state } = view
+    if (!state.selection.empty) return false
+    const lineHeight = parseFloat(getComputedStyle(view.dom).lineHeight) || 19
+    const coords = view.coordsAtPos(state.selection.$head.pos)
+    const hit = view.posAtCoords({ left: coords.left, top: coords.top + dir * lineHeight })
+    if (!hit) return true // 首行 ↑ / 末行 ↓ 越界：接管但不动，避免跳到段落开头/结尾
+    // 目标与当前行高度差小于半行 → 仍是同一行（坐标被 clamp）→ 不移动
+    const hitCoords = view.coordsAtPos(hit.pos)
+    if (Math.abs(hitCoords.top - coords.top) < lineHeight * 0.5) return true
+    const bias = dir > 0 ? 1 : -1 // ↓ 到行首、↑ 到行尾（textarea 惯例）
+    view.dispatch(
+      state.tr.setSelection(TextSelection.near(state.doc.resolve(hit.pos), bias)).scrollIntoView()
+    )
+    return true
+  }, [])
+
+  /** ↑/↓ 切换输入历史（调用方已确保输入内容为空）；返回是否已接管按键 */
+  const navigateHistory = useCallback(
+    (dir: -1 | 1): boolean => {
+      const ed = editorRef.current
+      if (!ed) return false
+      const history = inputHistoryRef.current
+      if (history.length === 0) return false
+
+      let next = historyIndexRef.current
+      if (dir === -1) {
+        // ↑：空输入时逐条回退（最近一条 → 更早）；
+        // 最旧一条再按 ↑ 循环回空草稿（与 ↓ 越过最新一条回到空草稿对称）
+        if (next === -1) {
+          next = history.length - 1
+        } else {
+          next -= 1
+          if (next < 0) next = -1
+        }
+        if (next === historyIndexRef.current) return false
+      } else {
+        // ↓：回到更新的历史；越过最新一条后回到空草稿
+        if (next === -1) return false
+        next += 1
+        if (next >= history.length) next = -1
+      }
+
+      historyIndexRef.current = next
+      const text = next === -1 ? '' : history[next]
+      // 恢复为纯文本：按行重建（硬换行用 hardBreak），fileRef 以路径文本还原
+      const lines = text.replace(/\r\n?/g, '\n').split('\n')
+      const nodes: ProseMirrorNode[] = []
+      lines.forEach((line, i) => {
+        if (i > 0) nodes.push(ed.schema.nodes.hardBreak.create())
+        if (line) nodes.push(ed.schema.text(line))
+      })
+      // emitUpdate:false：避免 onUpdate 把它当成用户编辑而重置浏览态
+      ed.commands.setContent(
+        {
+          type: 'doc',
+          content: [{ type: 'paragraph', content: nodes.map((n) => n.toJSON()) }]
+        },
+        { emitUpdate: false }
+      )
+      ed.commands.focus('end')
+      // setContent 不触发 onUpdate，手动同步父组件 inputValue
+      onInputChangeRef.current(getEditorText(ed))
+      requestAnimationFrame(() => updateCaretRef.current())
+      return true
+    },
+    [inputHistoryRef, getEditorText]
+  )
 
   // ── 粘贴附件：剪贴板中的文件/图片转为附件（上传按钮同一套 Attachment 结构）──
   // 图片：读内容为 dataUrl（与 select-image-file 的图片分支一致）
@@ -203,6 +299,30 @@ const ChatInput: React.FC<ChatInputProps> = ({
           event.preventDefault()
           onKeyDownRef.current(event as unknown as React.KeyboardEvent<HTMLDivElement>)
           return true
+        }
+        // ↑/↓ 切换历史输入：空输入可进入浏览（加载最近一条），
+        // 浏览态（内容非空但非用户输入）可继续 ↑/↓ 逐条切换；
+        // 用户手动编辑后退出浏览态；内容非空且不在浏览态时，
+        // 改走 textarea 风格逐行移动光标（避免 PM 单 textblock 直接跳段落开头/结尾）
+        if (
+          !event.shiftKey &&
+          !event.altKey &&
+          (event.key === 'ArrowUp' || event.key === 'ArrowDown')
+        ) {
+          const ed = editorRef.current
+          if (!ed) return false
+          const dir = event.key === 'ArrowUp' ? -1 : 1
+          const browsing = historyIndexRef.current !== -1
+          const takeHistory = (dir === -1 && (ed.isEmpty || browsing)) || (dir === 1 && browsing)
+          if (takeHistory && navigateHistory(dir)) {
+            event.preventDefault()
+            return true
+          }
+          // 非浏览态（用户输入内容后）：逐行移动光标，不再触发任何历史切换
+          if (moveCursorByLine(ed.view, dir)) {
+            event.preventDefault()
+            return true
+          }
         }
         // 光标紧贴文件引用 chip 时，退格/删除一次删掉（ProseMirror 默认是先选中再删）
         if ((event.key === 'Backspace' || event.key === 'Delete') && view.state.selection.empty) {
@@ -271,15 +391,12 @@ const ChatInput: React.FC<ChatInputProps> = ({
     onUpdate: ({ editor }) => {
       // textSerializers：hardBreak 输出换行、fileRef 输出路径，保证发送文本与所见一致
       // 注意：v3 的 serializer 参数是 { node } 对象，不是节点本身
-      const text = editor
-        .getText({
-          blockSeparator: '\n',
-          textSerializers: {
-            hardBreak: () => '\n',
-            fileRef: ({ node }) => node.attrs.path ?? ''
-          }
-        })
-        .replace(/\n+$/, '')
+      const text = getEditorText(editor)
+      // 浏览历史时手动编辑：退出浏览态（编辑后内容非空且不在浏览态，↑/↓ 不再触发）。
+      // 程序化切换走 setContent(emitUpdate:false)，不会进入这里
+      if (historyIndexRef.current !== -1) {
+        historyIndexRef.current = -1
+      }
       onInputChangeRef.current(text)
     }
   })
@@ -378,6 +495,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
     caret.style.top = `${Math.round(top)}px`
     caret.style.left = `${Math.round(left)}px`
   }, [])
+  updateCaretRef.current = updateCaret
 
   // 父组件清空 inputValue 时（发送后），同步清空编辑器
   useEffect(() => {
@@ -386,6 +504,8 @@ const ChatInput: React.FC<ChatInputProps> = ({
     if (inputValue === '' && !ed.isEmpty) {
       ed.commands.clearContent()
       ed.commands.focus()
+      // 外部清空输入（发送/新对话/切话题）时重置历史浏览位置
+      historyIndexRef.current = -1
     }
     updateCaret()
   }, [inputValue, updateCaret])

@@ -48,6 +48,7 @@ const Index: React.FC = () => {
     loadingTopicIds,
     messagesEndRef,
     textareaRef,
+    inputHistoryRef,
     modelSupportsTools,
     modelSupportsVision,
     groupedProviderOptions,
@@ -170,9 +171,7 @@ const Index: React.FC = () => {
       return
     }
     prevHasEditorRef.current = panelHasEditor
-    setPanelWidth(
-      panelHasEditor ? Math.min(Math.floor(layoutWidth * 0.35), panelMaxWidth) : 220
-    )
+    setPanelWidth(panelHasEditor ? Math.min(Math.floor(layoutWidth * 0.35), panelMaxWidth) : 220)
   }, [panelHasEditor, layoutWidth, panelMinWidth, panelMaxWidth])
 
   // 侧边栏拖拽上限：为对话区与工作区面板留足空间，避免整体出现横向滚动条
@@ -427,6 +426,7 @@ const Index: React.FC = () => {
                     inputValue={inputValue}
                     onInputChange={setInputValue}
                     textareaRef={textareaRef}
+                    inputHistoryRef={inputHistoryRef}
                     attachments={attachments}
                     onAttachmentsChange={setAttachments}
                     isLoading={isLoading}
