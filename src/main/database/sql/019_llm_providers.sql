@@ -25,11 +25,3 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_llm_providers_default ON llm_providers (is
 CREATE INDEX IF NOT EXISTS idx_llm_providers_enabled ON llm_providers (is_enabled);
 CREATE INDEX IF NOT EXISTS idx_llm_providers_sort ON llm_providers (sort_order);
 
--- 迁移：字段由 tags 改为 metadata
--- tags 列已废弃（能力信息由 models-profile.json 元数据取代）
-ALTER TABLE llm_providers DROP COLUMN IF EXISTS tags;
--- 为已有表添加 metadata 列（JSON 文本，模型档案元数据）
-ALTER TABLE llm_providers ADD COLUMN IF NOT EXISTS metadata TEXT;
-
--- 迁移：移除 provider 白名单 CHECK 约束（允许用户自由输入接口协议；老库约束名由 PG 自动生成为 llm_providers_provider_check）
-ALTER TABLE llm_providers DROP CONSTRAINT IF EXISTS llm_providers_provider_check;
