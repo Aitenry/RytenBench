@@ -24,6 +24,8 @@ import type { EditorView } from '@tiptap/pm/view'
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
 import FileRef from './FileRefNode'
 import type { Attachment } from '@renderer/types/chat'
+import { getProviderColor } from '@renderer/utils/providerMeta'
+import ProviderMark from '@renderer/components/provider/provider-mark'
 import { Window } from '../../../../resource/types/window'
 
 // TipTap 默认不加载标准键位绑定（退格/删除/回车等），必须显式加载 prosemirror-commands 的 baseKeymap
@@ -44,19 +46,6 @@ const providerIconMap: Record<string, React.ComponentType<{ style?: React.CSSPro
     'google-genai': GeminiFilled,
     'google-vertexai': GeminiFilled
   }
-
-const providerColors: Record<string, string> = {
-  openai: '#10a37f',
-  deepseek: '#4d6bfe',
-  ollama: '#000000',
-  openrouter: '#6366f1',
-  mistral: '#f90',
-  xai: '#1d9bf0',
-  anthropic: '#d97757',
-  'google-genai': '#4285f4',
-  'google-vertexai': '#4285f4',
-  groq: '#f55036'
-}
 
 // 自定义光标高度（px）：ProseMirror 的原生光标高度跟随行高（19px），
 // 与普通输入框（≈字号高度）不一致，故隐藏原生光标、绘制固定高度光标。
@@ -138,7 +127,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
   }, [selectedProviderId, groupedProviderOptions])
 
   const SelectedIcon = providerIconMap[selectedProviderType]
-  const selectedColor = providerColors[selectedProviderType] || undefined
+  const selectedColor = getProviderColor(selectedProviderType, isDarkMode)
 
   // 外部回调走 ref：editor 只创建一次，避免 props 变化导致重建
   const onInputChangeRef = useRef(onInputChange)
@@ -826,23 +815,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
                 {SelectedIcon ? (
                   <SelectedIcon style={{ fontSize: 14, color: selectedColor }} />
                 ) : selectedProviderType ? (
-                  <span
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      width: 14,
-                      height: 14,
-                      borderRadius: 3,
-                      background: `${providerColors[selectedProviderType] || '#888'}20`,
-                      color: providerColors[selectedProviderType] || '#888',
-                      fontSize: 9,
-                      fontWeight: 600,
-                      flexShrink: 0
-                    }}
-                  >
-                    {selectedProviderType.charAt(0).toUpperCase()}
-                  </span>
+                  <ProviderMark providerType={selectedProviderType} size={14} color={selectedColor} />
                 ) : null}
                 <span className="truncate">{props.label}</span>
               </span>
@@ -850,29 +823,13 @@ const ChatInput: React.FC<ChatInputProps> = ({
             optionRender={(option) => {
               const providerType = (option.data as { providerType?: string })?.providerType ?? ''
               const Icon = providerIconMap[providerType]
-              const color = providerColors[providerType] || '#888'
+              const color = getProviderColor(providerType, isDarkMode) ?? '#888888'
               return (
                 <div className="flex items-center gap-2">
                   {Icon ? (
                     <Icon style={{ fontSize: 18, color }} />
                   ) : (
-                    <span
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        width: 18,
-                        height: 18,
-                        borderRadius: 4,
-                        background: `${color}18`,
-                        color,
-                        fontSize: 10,
-                        fontWeight: 600,
-                        flexShrink: 0
-                      }}
-                    >
-                      {providerType.charAt(0).toUpperCase()}
-                    </span>
+                    <ProviderMark providerType={providerType} size={18} color={color} />
                   )}
                   <span>{option.label as string}</span>
                 </div>

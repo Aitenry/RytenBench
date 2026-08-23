@@ -1,4 +1,4 @@
-﻿import { getDatabaseInstance } from '../instance'
+import { getDatabaseInstance } from '../instance'
 import { encryptApiKey, decryptApiKey } from '../../crypto/provider-key'
 import logger from 'electron-log'
 
@@ -23,7 +23,7 @@ export interface LlmProviderRow {
   updated_at: string
 }
 
-/** 解密后的供应商配置（API调用方使用） */
+/** 供应商配置（api_key 仅运行时路径解密；列表视图恒为 null，密钥不发送到渲染进程） */
 export interface LlmProviderConfig {
   id: number
   name: string
@@ -59,13 +59,18 @@ export interface LlmProviderInput {
 
 // --- 内部工具 ---
 
-function rowToConfig(row: LlmProviderRow): LlmProviderConfig {
+/**
+ * 按行组装配置。includeKey=false 时 api_key 恒为 null（列表/前端只读场景，
+ * 解密后的密钥绝不离开主进程）；运行时取数路径（getProviderById、
+ * getEnabledProviders、getDefaultProvider）必须传 true 供拉取调用使用。
+ */
+function rowToConfig(row: LlmProviderRow, includeKey = true): LlmProviderConfig {
   return {
     id: row.id,
     name: row.name,
     provider: row.provider,
     base_url: row.base_url,
-    api_key: row.api_key_encrypted ? decryptApiKey(row.api_key_encrypted) : null,
+    api_key: includeKey && row.api_key_encrypted ? decryptApiKey(row.api_key_encrypted) : null,
     model: row.model,
     temperature: row.temperature,
     max_tokens: row.max_tokens,
@@ -80,15 +85,17 @@ function rowToConfig(row: LlmProviderRow): LlmProviderConfig {
 // --- CRUD ---
 
 /**
- * 获取所有供应商（按 sort_order, id 排序），返回解密后的配置
+ * 获取所有供应商的「列表视图」（设置页树等只读场景）。
+ * 不解密 api_key —— 密钥永不发送到渲染进程；
+ * 需要完整配置（含密钥）的路径请使用 getProviderById / getEnabledProviders / getDefaultProvider。
  */
-async function getAllProviders(): Promise<LlmProviderConfig[]> {
+async function getAllProviderList(): Promise<LlmProviderConfig[]> {
   try {
     const db = (await getDatabaseInstance()).getDatabase()
     const sql = 'SELECT * FROM llm_providers ORDER BY sort_order ASC, id ASC'
     const result = await db.query<LlmProviderRow>(sql)
     logger.info(`Query for all providers returned ${result.rows.length} rows.`)
-    return result.rows.map(rowToConfig)
+    return result.rows.map((row) => rowToConfig(row, false))
   } catch (error) {
     logger.error('Failed to get all providers:', error)
     throw error
@@ -143,7 +150,7 @@ async function getEnabledProviders(): Promise<LlmProviderConfig[]> {
     const sql =
       'SELECT * FROM llm_providers WHERE is_enabled = TRUE ORDER BY sort_order ASC, id ASC'
     const result = await db.query<LlmProviderRow>(sql)
-    return result.rows.map(rowToConfig)
+    return result.rows.map((row) => rowToConfig(row))
   } catch (error) {
     logger.error('Failed to get enabled providers:', error)
     throw error
@@ -193,6 +200,86 @@ async function createProvider(input: LlmProviderInput): Promise<number> {
     return newId
   } catch (error) {
     logger.error('Failed to create provider:', error)
+    throw error
+  }
+}
+
+/**
+ * 批量创建供应商（“一键添加”拉取到的模型列表）。
+ * 相比逐个调用 createProvider：
+ * - 全部插入在同一个事务中完成（PGlite 单次事务开销）；
+ * - 自动跳过非法输入与已存在的 (provider, model) 组合，防止重复添加；
+ * - 调用方只需清一次缓存、广播一次变更，避免渲染进程风暴性全量刷新。
+ */
+async function createProviders(
+  inputs: LlmProviderInput[]
+): Promise<{ created: number; skipped: number }> {
+  try {
+    const db = (await getDatabaseInstance()).getDatabase()
+
+    const list = Array.isArray(inputs) ? inputs : []
+    const valid = list.filter(
+      (i) =>
+        i &&
+        typeof i.name === 'string' &&
+        i.name.trim() !== '' &&
+        typeof i.model === 'string' &&
+        i.model.trim() !== '' &&
+        typeof i.provider === 'string' &&
+        i.provider.trim() !== ''
+    )
+    const skippedByValidation = list.length - valid.length
+
+    let created = 0
+    await db.transaction(async (tx) => {
+      // 批量添加默认不设默认模型；若个别输入要求默认，先统一取消现有默认
+      if (valid.some((i) => i.is_default)) {
+        await tx.query('UPDATE llm_providers SET is_default = FALSE WHERE is_default = TRUE')
+      }
+
+      for (const input of valid) {
+        // 跳过与现有供应商重复的 (provider, model)
+        const dup = await tx.query<{ exists: boolean }>(
+          'SELECT EXISTS (SELECT 1 FROM llm_providers WHERE provider = $1 AND model = $2) AS exists',
+          [input.provider, input.model]
+        )
+        if (dup.rows[0]?.exists) continue
+
+        const encryptedKey = input.api_key ? encryptApiKey(input.api_key) : null
+        const extraConfig = input.extra_config ? JSON.stringify(input.extra_config) : null
+        const metadata = input.metadata ? JSON.stringify(input.metadata) : null
+
+        await tx.query(
+          `INSERT INTO llm_providers
+            (name, provider, base_url, api_key_encrypted, model, temperature,
+             max_tokens, extra_config, metadata, is_default, is_enabled, sort_order)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+          [
+            input.name,
+            input.provider,
+            input.base_url || null,
+            encryptedKey,
+            input.model,
+            input.temperature ?? 0.7,
+            input.max_tokens || null,
+            extraConfig,
+            metadata,
+            input.is_default ?? false,
+            input.is_enabled ?? true,
+            input.sort_order ?? 0
+          ]
+        )
+        created++
+      }
+    })
+
+    const skipped = skippedByValidation + (valid.length - created)
+    logger.info(
+      `Batch created ${created} provider(s), skipped ${skipped} (${list.length} input(s)).`
+    )
+    return { created, skipped }
+  } catch (error) {
+    logger.error('Failed to batch create providers:', error)
     throw error
   }
 }
@@ -305,6 +392,32 @@ async function deleteProvider(id: number): Promise<boolean> {
 }
 
 /**
+ * 批量删除供应商（按 ID 集合）。
+ * 与批量创建对称：全部删除在同一个事务中完成，调用方只需清一次缓存、广播一次变更，
+ * 避免逐个 deleteProvider 触发渲染进程反复全量刷新而卡死。
+ */
+async function deleteProviders(ids: number[]): Promise<number> {
+  try {
+    const db = (await getDatabaseInstance()).getDatabase()
+    const unique = [
+      ...new Set((Array.isArray(ids) ? ids : []).filter((id) => Number.isInteger(id) && id > 0))
+    ]
+    if (unique.length === 0) return 0
+
+    await db.transaction(async (tx) => {
+      for (const id of unique) {
+        await tx.query('DELETE FROM llm_providers WHERE id = $1', [id])
+      }
+    })
+    logger.info(`Batch deleted ${unique.length} provider(s).`)
+    return unique.length
+  } catch (error) {
+    logger.error('Failed to batch delete providers:', error)
+    throw error
+  }
+}
+
+/**
  * 设置默认供应商
  */
 async function setDefaultProvider(id: number): Promise<boolean> {
@@ -325,12 +438,14 @@ async function setDefaultProvider(id: number): Promise<boolean> {
 }
 
 export {
-  getAllProviders,
+  getAllProviderList,
   getProviderById,
   getDefaultProvider,
   getEnabledProviders,
   createProvider,
+  createProviders,
   updateProvider,
   deleteProvider,
+  deleteProviders,
   setDefaultProvider
 }

@@ -176,8 +176,13 @@ interface Api {
     getDefault: () => Promise<LlmProviderConfig | null>
     getEnabled: () => Promise<LlmProviderConfig[]>
     create: (input: LlmProviderInput) => Promise<number>
+    createBatch: (inputs: LlmProviderInput[]) => Promise<{
+      created: number
+      skipped: number
+    }>
     update: (id: number, updates: Partial<LlmProviderInput>) => Promise<boolean>
     delete: (id: number) => Promise<boolean>
+    deleteBatch: (ids: number[]) => Promise<number>
     setDefault: (id: number) => Promise<boolean>
   }
   systemSettings: {

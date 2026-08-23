@@ -3,11 +3,8 @@ CREATE TABLE IF NOT EXISTS llm_providers
 (
   id          SERIAL PRIMARY KEY,
   name        TEXT   NOT NULL,
-  provider    TEXT   NOT NULL CHECK (provider IN (
-    'openai', 'deepseek', 'ollama', 'openrouter', 'mistral', 'xai',
-    'anthropic', 'google-genai', 'google-vertexai', 'aws-bedrock',
-    'cloudflare', 'custom'
-  )),
+  -- provider 为接口协议标识（如 openai / anthropic / zhipu），允许用户自由输入，不做白名单约束
+  provider    TEXT   NOT NULL,
   base_url    TEXT,
   api_key_encrypted TEXT,
   model       TEXT   NOT NULL,
@@ -33,3 +30,6 @@ CREATE INDEX IF NOT EXISTS idx_llm_providers_sort ON llm_providers (sort_order);
 ALTER TABLE llm_providers DROP COLUMN IF EXISTS tags;
 -- 为已有表添加 metadata 列（JSON 文本，模型档案元数据）
 ALTER TABLE llm_providers ADD COLUMN IF NOT EXISTS metadata TEXT;
+
+-- 迁移：移除 provider 白名单 CHECK 约束（允许用户自由输入接口协议；老库约束名由 PG 自动生成为 llm_providers_provider_check）
+ALTER TABLE llm_providers DROP CONSTRAINT IF EXISTS llm_providers_provider_check;

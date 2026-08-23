@@ -15,14 +15,17 @@ import {
   setCachedDefaultProvider
 } from '../chat/preload-cache'
 import {
-  getAllProviders,
+  getAllProviderList,
   getProviderById,
   getDefaultProvider,
   getEnabledProviders,
   createProvider,
+  createProviders,
   updateProvider,
   deleteProvider,
+  deleteProviders,
   setDefaultProvider,
+  LlmProviderConfig,
   LlmProviderInput
 } from '../database/mapper/provider'
 import {
@@ -40,11 +43,26 @@ function broadcastProvidersChanged(): void {
   BrowserWindow.getAllWindows().forEach((w) => w.webContents.send('providers-changed'))
 }
 
+/**
+ * 渲染进程展示用配置：剥离解密后的 api_key。
+ * 密钥只在主进程运行时（ProviderService / 拉取调用）解密使用，绝不发送到渲染进程；
+ * 前端需要修改密钥时由用户在编辑表单重新输入，空值表示保持原密钥。
+ */
+function stripApiKey(config: LlmProviderConfig | null): LlmProviderConfig | null {
+  if (!config) return null
+  return { ...config, api_key: null }
+}
+
+function stripApiKeys(list: LlmProviderConfig[]): LlmProviderConfig[] {
+  return list.map((c) => ({ ...c, api_key: null }))
+}
+
 /** 模型供应商 + 智能体 + 主智能体配置 IPC */
 export function registerProviderIpc(): void {
   ipcMain.handle('provider-get-all', async () => {
     try {
-      return await getAllProviders()
+      // 列表视图：mapper 层已保证不解密 api_key
+      return await getAllProviderList()
     } catch (error) {
       logger.error('Error in provider-get-all:', error)
       throw error
@@ -53,7 +71,7 @@ export function registerProviderIpc(): void {
 
   ipcMain.handle('provider-get-by-id', async (_event, id: number) => {
     try {
-      return await getProviderById(id)
+      return stripApiKey(await getProviderById(id))
     } catch (error) {
       logger.error('Error in provider-get-by-id:', error)
       throw error
@@ -62,10 +80,10 @@ export function registerProviderIpc(): void {
 
   ipcMain.handle('provider-get-default', async () => {
     try {
-      if (getCachedDefaultProvider()) return getCachedDefaultProvider()
+      if (getCachedDefaultProvider()) return stripApiKey(getCachedDefaultProvider())
       const provider = await getDefaultProvider()
       setCachedDefaultProvider(provider)
-      return provider
+      return stripApiKey(provider)
     } catch (error) {
       logger.error('Error in provider-get-default:', error)
       throw error
@@ -74,10 +92,11 @@ export function registerProviderIpc(): void {
 
   ipcMain.handle('provider-get-enabled', async () => {
     try {
-      if (getCachedEnabledProviders()) return getCachedEnabledProviders()
+      const cached = getCachedEnabledProviders()
+      if (cached) return stripApiKeys(cached)
       const providers = await getEnabledProviders()
       setCachedEnabledProviders(providers)
-      return providers
+      return stripApiKeys(providers)
     } catch (error) {
       logger.error('Error in provider-get-enabled:', error)
       throw error
@@ -93,6 +112,23 @@ export function registerProviderIpc(): void {
       return id
     } catch (error) {
       logger.error('Error in provider-create:', error)
+      throw error
+    }
+  })
+
+  /**
+   * 批量创建供应商（一键添加拉取到的多个模型）。
+   * 单事务插入 + 只广播一次变更，避免 29 次逐个创建导致渲染进程反复全量刷新而卡死。
+   */
+  ipcMain.handle('provider-create-batch', async (_event, inputs: LlmProviderInput[]) => {
+    try {
+      const result = await createProviders(inputs)
+      clearProviderCache()
+      getProviderService().clearCache()
+      broadcastProvidersChanged()
+      return result
+    } catch (error) {
+      logger.error('Error in provider-create-batch:', error)
       throw error
     }
   })
@@ -122,6 +158,23 @@ export function registerProviderIpc(): void {
       return result
     } catch (error) {
       logger.error('Error in provider-delete:', error)
+      throw error
+    }
+  })
+
+  /**
+   * 批量删除供应商（勾选多个模型后删除）。
+   * 单事务删除 + 只广播一次变更，与 provider-create-batch 同理避免刷新风暴。
+   */
+  ipcMain.handle('provider-delete-batch', async (_event, ids: number[]) => {
+    try {
+      const count = await deleteProviders(ids)
+      clearProviderCache()
+      getProviderService().clearCache()
+      broadcastProvidersChanged()
+      return count
+    } catch (error) {
+      logger.error('Error in provider-delete-batch:', error)
       throw error
     }
   })

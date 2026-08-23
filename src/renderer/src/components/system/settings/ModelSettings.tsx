@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import {
   theme,
   App,
-  Table,
+  Tree,
+  Spin,
   Button,
   Modal,
   Form,
@@ -14,7 +15,8 @@ import {
   Popconfirm,
   Space,
   Tooltip,
-  Checkbox
+  Checkbox,
+  type TreeDataNode
 } from 'antd'
 import {
   PlusOutlined,
@@ -47,39 +49,53 @@ import {
   isEmbeddingProvider
 } from '@renderer/utils/providerMeta'
 import { SettingsPageHeader, SettingsSection } from './settings-ui'
+import ProviderMark from '@renderer/components/provider/provider-mark'
 
+// 预置供应商（value/label/baseURL）；品牌色统一在 providerMeta.PROVIDER_BRAND_COLORS，避免两处漂移
 const PROVIDER_TYPES = [
-  { value: 'openai', label: 'OpenAI', baseURL: 'https://api.openai.com/v1', color: '#10a37f' },
-  {
-    value: 'deepseek',
-    label: 'DeepSeek',
-    baseURL: 'https://api.deepseek.com/v1',
-    color: '#4d6bfe'
-  },
-  { value: 'ollama', label: 'Ollama', baseURL: 'http://localhost:11434', color: '#000000' },
-  {
-    value: 'openrouter',
-    label: 'OpenRouter',
-    baseURL: 'https://openrouter.ai/api/v1',
-    color: '#6366f1'
-  },
-  { value: 'mistral', label: 'Mistral AI', baseURL: 'https://api.mistral.ai/v1', color: '#f90' },
-  { value: 'xai', label: 'xAI (Grok)', baseURL: 'https://api.x.ai/v1', color: '#1d9bf0' },
-  {
-    value: 'anthropic',
-    label: 'Anthropic',
-    baseURL: 'https://api.anthropic.com',
-    color: '#d97757'
-  },
+  { value: 'openai', label: 'OpenAI', baseURL: 'https://api.openai.com/v1' },
+  { value: 'deepseek', label: 'DeepSeek', baseURL: 'https://api.deepseek.com/v1' },
+  { value: 'ollama', label: 'Ollama', baseURL: 'http://localhost:11434' },
+  { value: 'openrouter', label: 'OpenRouter', baseURL: 'https://openrouter.ai/api/v1' },
+  { value: 'mistral', label: 'Mistral AI', baseURL: 'https://api.mistral.ai/v1' },
+  { value: 'xai', label: 'xAI (Grok)', baseURL: 'https://api.x.ai/v1' },
+  { value: 'anthropic', label: 'Anthropic', baseURL: 'https://api.anthropic.com' },
   {
     value: 'google-genai',
     label: 'Google Gemini',
-    baseURL: 'https://generativelanguage.googleapis.com',
-    color: '#4285f4'
+    baseURL: 'https://generativelanguage.googleapis.com'
   },
   { value: 'google-vertexai', label: 'Google Vertex AI', baseURL: '' },
   { value: 'aws-bedrock', label: 'AWS Bedrock', baseURL: '' },
   { value: 'cloudflare', label: 'Cloudflare Workers AI', baseURL: '' },
+  { value: 'minimax', label: 'MiniMax', baseURL: 'https://api.minimax.io/v1' },
+  { value: 'moonshot', label: 'Moonshot Kimi', baseURL: 'https://api.moonshot.cn/v1' },
+  {
+    value: 'zhipu',
+    label: '智谱 GLM',
+    baseURL: 'https://open.bigmodel.cn/api/paas/v4'
+  },
+  {
+    value: 'aliyun',
+    label: '阿里云百炼',
+    baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1'
+  },
+  { value: 'qianfan', label: '百度千帆', baseURL: 'https://qianfan.baidubce.com/v2' },
+  {
+    value: 'volcengine',
+    label: '火山方舟',
+    baseURL: 'https://ark.cn-beijing.volces.com/api/v3'
+  },
+  {
+    value: 'tencent',
+    label: '腾讯混元',
+    baseURL: 'https://api.hunyuan.cloud.tencent.com/v1'
+  },
+  { value: 'siliconflow', label: '硅基流动', baseURL: 'https://api.siliconflow.cn/v1' },
+  { value: 'groq', label: 'Groq', baseURL: 'https://api.groq.com/openai/v1' },
+  { value: 'perplexity', label: 'Perplexity', baseURL: 'https://api.perplexity.ai' },
+  { value: 'together', label: 'Together AI', baseURL: 'https://api.together.xyz/v1' },
+  { value: 'lmstudio', label: 'LM Studio', baseURL: 'http://localhost:1234/v1' },
   { value: 'custom', label: '自定义', baseURL: '' }
 ]
 
@@ -102,29 +118,18 @@ const ProviderLogo: React.FC<{ provider: string; size?: number }> = ({ provider,
   if (Icon) {
     return <Icon style={{ fontSize: size }} />
   }
-  // 没有 logo 的降级为文字首字母
-  const cfg = getProviderConfig(provider)
-  return (
-    <span
-      className="inline-flex items-center justify-center flex-shrink-0 rounded-full font-semibold"
-      style={{
-        width: size,
-        height: size,
-        backgroundColor: cfg?.color || '#999',
-        color: '#fff',
-        fontSize: size * 0.55
-      }}
-    >
-      {(cfg?.label || provider).charAt(0)}
-    </span>
-  )
+  // 没有 logo 的降级为「印字号」徽章：等宽 monogram + 发丝边框（品牌色由 providerMeta 统一供给）
+  return <ProviderMark providerType={provider} size={size} />
 }
 
 /** 判断是否为向量/嵌入模型：由元数据（type/supports_embeddings）或名称/模型名兜底 */
 const isEmbeddingModel = (p: LlmProviderConfig): boolean => isEmbeddingProvider(p)
 
-/** 模型元数据简述（表格列 / 拉取列表复用，不展示模型名称） */
-const MetaSummary: React.FC<{ metadata: ModelMetadata | null }> = ({ metadata }) => {
+/** 模型元数据简述（树行/拉取列表复用，不展示模型名称）；maxBadges 限制能力徽章数量防止挤行 */
+const MetaSummary: React.FC<{ metadata: ModelMetadata | null; maxBadges?: number }> = ({
+  metadata,
+  maxBadges
+}) => {
   const {
     token: { colorTextTertiary }
   } = theme.useToken()
@@ -134,21 +139,28 @@ const MetaSummary: React.FC<{ metadata: ModelMetadata | null }> = ({ metadata })
   const caps = getCapabilities(metadata)
   const typeLabel = metadata.type ? (MODEL_TYPE_LABELS[metadata.type] ?? metadata.type) : null
   const badges = CAPABILITY_BADGES.filter((b) => caps[b.key] === true)
+  const shown = maxBadges != null && badges.length > maxBadges ? badges.slice(0, maxBadges) : badges
+  const hidden = badges.length - shown.length
   return (
     <Space size={4} wrap>
       {typeLabel ? <Tag style={{ margin: 0, fontSize: 11 }}>{typeLabel}</Tag> : null}
-      {badges.map((b) => (
+      {shown.map((b) => (
         <Tag key={b.key} style={{ margin: 0, fontSize: 11 }} color="blue">
           {b.label}
         </Tag>
       ))}
+      {hidden > 0 ? (
+        <Tag style={{ margin: 0, fontSize: 11 }} color="blue">
+          +{hidden}
+        </Tag>
+      ) : null}
     </Space>
   )
 }
 
 const ModelSettings: React.FC = () => {
   const {
-    token: { colorTextSecondary }
+    token: { colorTextSecondary, colorTextTertiary, colorSplit }
   } = theme.useToken()
 
   const { modal } = App.useApp()
@@ -169,12 +181,36 @@ const ModelSettings: React.FC = () => {
   const [fetchLoading, setFetchLoading] = useState(false)
   const [checkedModels, setCheckedModels] = useState<string[]>([])
   const [addingModels, setAddingModels] = useState(false)
+  // 自定义拉取：供应商 ID（全英文小写，仅可包含数字与 -）
+  const [fetchCustomProviderId, setFetchCustomProviderId] = useState('')
+
+  // 树形目录：分组展开与勾选状态（勾选用于批量删除）
+  const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([])
+  const [checkedKeys, setCheckedKeys] = useState<React.Key[]>([])
+  const [deletingBatch, setDeletingBatch] = useState(false)
 
   const watchedCaps: string[] = (Form.useWatch('metadata_capabilities', form) as string[]) || []
   const watchedType: string | undefined = Form.useWatch('metadata_type', form)
+  const watchedProviderType: string | undefined = Form.useWatch('provider', form)
   // 表单中是否将模型配置为嵌入模型（用于禁用“设为默认”）
   const isEmbeddingInForm =
     watchedType === 'embedding' || watchedCaps.includes('supports_embeddings')
+
+  // 接口协议：单选 Select + 输入任意协议标识。
+  // 输入内容不匹配任何预置平台时，实时注入「自定义协议」选项供提交（未知协议按 OpenAI 兼容调用）。
+  const [protocolSearch, setProtocolSearch] = useState('')
+  const protocolOptions = useMemo(() => {
+    const raw = protocolSearch.trim()
+    const search = raw.toLowerCase()
+    const presets = PROVIDER_TYPES.map((t) => ({
+      value: t.value,
+      label: `${t.label} (${t.value})`
+    }))
+    const matchesPreset = presets.some((o) => o.label.toLowerCase().includes(search))
+    return raw && !matchesPreset
+      ? [{ value: raw, label: `${raw}（自定义协议）` }, ...presets]
+      : presets
+  }, [protocolSearch])
 
   const loadProviders = useCallback(async () => {
     const msgKey = 'providers-load'
@@ -195,10 +231,12 @@ const ModelSettings: React.FC = () => {
 
   const openCreateModal = (): void => {
     setEditingProvider(null)
+    setProtocolSearch('')
     form.resetFields()
     form.setFieldsValue({
       provider: 'deepseek',
       temperature: 0.7,
+      api_format: 'openai',
       metadata_display_name: '',
       metadata_vendor: '',
       metadata_type: undefined,
@@ -214,16 +252,22 @@ const ModelSettings: React.FC = () => {
 
   const openEditModal = (record: LlmProviderConfig): void => {
     setEditingProvider(record)
+    setProtocolSearch('')
     const meta = record.metadata ?? {}
     const caps = getCapabilities(record.metadata)
     form.setFieldsValue({
       name: getProviderDisplayName(record),
       provider: record.provider,
       base_url: record.base_url,
-      api_key: record.api_key || '',
+      // 密钥永不发送到渲染进程：编辑时恒为空，留空保持原密钥，重新输入才替换
+      api_key: '',
       model: record.model,
       temperature: record.temperature,
       max_tokens: record.max_tokens,
+      api_format:
+        record.extra_config && typeof record.extra_config.api_format === 'string'
+          ? record.extra_config.api_format
+          : 'openai',
       metadata_display_name: typeof meta.display_name === 'string' ? meta.display_name : '',
       metadata_vendor: typeof meta.vendor === 'string' ? meta.vendor : '',
       metadata_type: typeof meta.type === 'string' ? meta.type : undefined,
@@ -239,10 +283,12 @@ const ModelSettings: React.FC = () => {
   }
 
   const handleProviderTypeChange = (providerType: string): void => {
-    const config = PROVIDER_TYPES.find((t) => t.value === providerType)
-    if (config && config.baseURL && !form.getFieldValue('base_url')) {
-      form.setFieldsValue({ base_url: config.baseURL })
+    const config = getProviderConfig(providerType)
+    if (config) {
+      // 预置协议自动跟随其默认端点；自定义类型清空由用户填写（API 地址仅在自定义时展示）
+      form.setFieldsValue({ base_url: config.value === 'custom' ? '' : config.baseURL || '' })
     }
+    setProtocolSearch('')
   }
 
   /** 由表单字段组装元数据对象：保留已有档案字段，覆盖用户编辑项；全空时返回 null */
@@ -296,13 +342,33 @@ const ModelSettings: React.FC = () => {
     try {
       const values = await form.validateFields()
 
+      // API 地址：仅「自定义」类型可输入；非自定义使用所选服务商的默认地址
+      const cfg = getProviderConfig(values.provider as string)
+      const rawBaseUrl =
+        typeof values.base_url === 'string'
+          ? values.base_url.trim()
+          : typeof form.getFieldValue('base_url') === 'string'
+            ? String(form.getFieldValue('base_url')).trim()
+            : ''
+      const defaultBaseUrl = cfg?.baseURL || undefined
+
       const input: LlmProviderInput = {
         name: values.name as string,
         provider: values.provider as string,
-        base_url: (values.base_url as string) || undefined,
+        base_url: rawBaseUrl || defaultBaseUrl,
         model: values.model as string,
         temperature: values.temperature as number | undefined,
         max_tokens: values.max_tokens as number | null | undefined,
+        // 兼容协议仅对「自定义」类型生效，存入 extra_config.api_format；其余类型保留原 extra_config
+        extra_config:
+          (values.provider as string) === 'custom'
+            ? {
+                ...(editingProvider?.extra_config ?? {}),
+                api_format: (values.api_format as string) || 'openai'
+              }
+            : editingProvider
+              ? editingProvider.extra_config
+              : undefined,
         metadata: buildMetadata(values, editingProvider?.metadata ?? null),
         is_enabled: values.is_enabled as boolean | undefined,
         is_default: values.is_default as boolean | undefined,
@@ -313,19 +379,20 @@ const ModelSettings: React.FC = () => {
         if (values.api_key) {
           input.api_key = values.api_key as string
         }
-        viewMessage(msgKey, 'loading', '正在更新供应商...')
+        viewMessage(msgKey, 'loading', '正在更新模型...')
         await (window as unknown as Window).api.providers.update(editingProvider.id, input)
-        viewMessage(msgKey, 'success', '供应商已更新', 2)
+        viewMessage(msgKey, 'success', '模型已更新', 2)
       } else {
         input.api_key = (values.api_key as string) || null
-        viewMessage(msgKey, 'loading', '正在创建供应商...')
+        viewMessage(msgKey, 'loading', '正在创建模型...')
         await (window as unknown as Window).api.providers.create(input)
-        viewMessage(msgKey, 'success', '供应商已创建', 2)
+        viewMessage(msgKey, 'success', '模型已创建', 2)
       }
 
       setModalOpen(false)
       form.resetFields()
       setEditingProvider(null)
+      setProtocolSearch('')
       await loadProviders()
     } catch (error) {
       if (error && typeof error === 'object' && 'errorFields' in error) return
@@ -353,9 +420,9 @@ const ModelSettings: React.FC = () => {
         viewMessage(msgKey, 'error', '向量（Embedding）模型不能设为默认聊天模型')
         return
       }
-      viewMessage(msgKey, 'loading', '正在设置默认供应商...')
+      viewMessage(msgKey, 'loading', '正在设置默认模型...')
       await (window as unknown as Window).api.providers.setDefault(id)
-      viewMessage(msgKey, 'success', '默认供应商已更新', 2)
+      viewMessage(msgKey, 'success', '默认模型已更新', 2)
       await loadProviders()
     } catch (error) {
       viewMessage(msgKey, 'error', `设置失败: ${error}`)
@@ -402,35 +469,47 @@ const ModelSettings: React.FC = () => {
     }
   }
 
-  // 一键添加选中的模型（携带拉取时推导出的能力标签）
+  // 一键添加选中的模型（携带拉取时推导出的能力标签）。
+  // 走 provider-create-batch：主进程单事务插入 + 只广播一次变更，
+  // 避免逐个 create 触发渲染进程 29 次全量刷新导致程序卡死。
   const handleBatchAdd = async (): Promise<void> => {
     const msgKey = 'batch-add'
     if (checkedModels.length === 0) {
       viewMessage(msgKey, 'warning', '请至少选择一个模型')
       return
     }
+    // 自定义类型必须填写供应商 ID（全英文小写，仅可包含数字与 -）
+    if (fetchProviderType === 'custom') {
+      const pid = fetchCustomProviderId.trim()
+      if (!/^[a-z0-9-]+$/.test(pid)) {
+        viewMessage(msgKey, 'warning', '请填写有效的供应商 ID：全英文小写，仅可包含数字与 -')
+        return
+      }
+    }
+    const addProvider =
+      fetchProviderType === 'custom' ? fetchCustomProviderId.trim() : fetchProviderType
     const metaMap = new Map(fetchModels.map((m) => [m.id, m.metadata]))
     setAddingModels(true)
     try {
-      let added = 0
-      for (const modelId of checkedModels) {
-        try {
-          await (window as unknown as Window).api.providers.create({
-            name: modelId,
-            provider: fetchProviderType,
-            base_url: fetchBaseUrl || undefined,
-            api_key: fetchApiKey || undefined,
-            model: modelId,
-            metadata: metaMap.get(modelId) ?? null,
-            is_enabled: true,
-            is_default: false
-          })
-          added++
-        } catch (err) {
-          console.error(`Failed to add model ${modelId}:`, err)
-        }
-      }
-      viewMessage(msgKey, 'success', `成功添加 ${added} 个模型`, 3)
+      const inputs: LlmProviderInput[] = checkedModels.map((modelId) => ({
+        name: modelId,
+        provider: addProvider,
+        base_url: fetchBaseUrl || undefined,
+        api_key: fetchApiKey || undefined,
+        model: modelId,
+        metadata: metaMap.get(modelId) ?? null,
+        is_enabled: true,
+        is_default: false
+      }))
+      const result = await (window as unknown as Window).api.providers.createBatch(inputs)
+      viewMessage(
+        msgKey,
+        'success',
+        result.skipped > 0
+          ? `成功添加 ${result.created} 个模型（跳过 ${result.skipped} 个已存在或无效）`
+          : `成功添加 ${result.created} 个模型`,
+        3
+      )
       setFetchModalOpen(false)
       await loadProviders()
     } catch (error) {
@@ -440,60 +519,124 @@ const ModelSettings: React.FC = () => {
     }
   }
 
-  const columns = [
-    {
-      title: '模型名称',
-      dataIndex: 'name',
-      key: 'name',
-      render: (_text: string, record: LlmProviderConfig) => (
-        <Space>
-          <ProviderLogo provider={record.provider} />
-          <span>{getProviderDisplayName(record)}</span>
-          {record.is_default && (
-            <Tag color="gold" style={{ margin: 0 }}>
-              默认
-            </Tag>
-          )}
-        </Space>
+  // --- 树形目录（按模型供应商 / 接口协议分组） ---
+
+  /** 分组归属：按模型供应商（接口协议）分组，如 OpenAI / DeepSeek / 智谱 GLM / 自定义 */
+  const groupOf = (p: LlmProviderConfig): { key: string; label: string } => {
+    const cfg = getProviderConfig(p.provider)
+    return { key: `provider:${p.provider}`, label: cfg?.label ?? p.provider }
+  }
+
+  interface ProviderTreeNode extends TreeDataNode {
+    record?: LlmProviderConfig
+    children?: ProviderTreeNode[]
+  }
+
+  const treeData = useMemo<ProviderTreeNode[]>(() => {
+    const groups = new Map<string, { label: string; items: LlmProviderConfig[] }>()
+    for (const p of providers) {
+      const g = groupOf(p)
+      let entry = groups.get(g.key)
+      if (!entry) {
+        entry = { label: g.label, items: [] }
+        groups.set(g.key, entry)
+      }
+      entry.items.push(p)
+    }
+    return [...groups.entries()].map(([key, entry]) => ({
+      key,
+      title: entry.label,
+      children: entry.items.map((p) => ({
+        key: String(p.id),
+        record: p,
+        // 默认模型不可勾选（与单行删除一致：默认模型不能删）
+        disableCheckbox: p.is_default
+      }))
+    }))
+  }, [providers])
+
+  /** 当前勾选中的模型 id（模型节点 key 为纯数字 id；分组节点 key 含冒号前缀） */
+  const selectedIds = useMemo(
+    () => checkedKeys.filter((k) => !String(k).includes(':')).map((k) => Number(k)),
+    [checkedKeys]
+  )
+
+  // 数据加载 / 刷新后默认展开所有分组（保留用户手动折叠过的分组）
+  useEffect(() => {
+    setExpandedKeys((prev) => {
+      const merged = new Set<React.Key>(prev)
+      for (const node of treeData) merged.add(node.key)
+      return [...merged]
+    })
+  }, [treeData])
+
+  /** 树节点渲染：分组行 / 模型行（模型行自带操作按钮） */
+  const renderTreeNodeTitle = (node: ProviderTreeNode): React.ReactNode => {
+    const record = node.record
+    if (!record) {
+      // 分组节点
+      const count = node.children?.length ?? 0
+      return (
+        <span className="inline-flex items-center" style={{ gap: 6 }}>
+          <span style={{ fontWeight: 600 }}>{String(node.title)}</span>
+          <span style={{ color: colorTextTertiary, fontSize: 12, fontFamily: 'monospace' }}>
+            {count} 个模型
+          </span>
+        </span>
       )
-    },
-    {
-      title: '服务商',
-      dataIndex: 'provider',
-      key: 'provider',
-      width: 120,
-      render: (type: string) => getProviderConfig(type)?.label || type
-    },
-    {
-      title: '元数据',
-      dataIndex: 'metadata',
-      key: 'metadata',
-      width: 220,
-      render: (metadata: ModelMetadata | null) => <MetaSummary metadata={metadata} />
-    },
-    {
-      title: '操作',
-      key: 'actions',
-      width: 120,
-      align: 'center' as const,
-      render: (_: unknown, record: LlmProviderConfig) => (
-        <Space size={4}>
+    }
+    // 模型节点
+    return (
+      <span
+        className="inline-flex items-center w-full"
+        style={{ gap: 6, minWidth: 0, paddingRight: 8 }}
+      >
+        <ProviderLogo provider={record.provider} size={16} />
+        <span style={{ whiteSpace: 'nowrap' }}>{getProviderDisplayName(record)}</span>
+        {record.is_default && (
+          <Tag color="gold" style={{ margin: 0, fontSize: 11 }}>
+            默认
+          </Tag>
+        )}
+        {record.provider === 'custom' && (
+          <span
+            style={{
+              color: colorTextTertiary,
+              fontSize: 12,
+              fontFamily: 'monospace',
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              maxWidth: 260,
+              minWidth: 0
+            }}
+          >
+            {record.base_url || '（未填地址）'} (
+            {record.extra_config && record.extra_config.api_format === 'anthropic'
+              ? 'Anthropic'
+              : 'OpenAI'}
+            )
+          </span>
+        )}
+        <MetaSummary metadata={record.metadata} maxBadges={2} />
+        <span className="flex-1" />
+        <Space size={2} onClick={(e) => e.stopPropagation()}>
           {record.is_default ? (
             <Tooltip title="当前已是默认">
-              <Button type="text" size="small" icon={<StarFilled style={{ color: '#faad14' }} />} />
+              <StarFilled style={{ color: '#faad14', fontSize: 14, padding: '0 6px' }} />
             </Tooltip>
           ) : isEmbeddingModel(record) ? null : (
-            <Popconfirm
-              title="设为默认模型？"
-              description="对话框将默认选中该模型进行问答"
-              onConfirm={() => handleSetDefault(record.id)}
-              okText="确定"
-              cancelText="取消"
-            >
-              <Tooltip title="设为默认">
+            <Tooltip title="设为默认">
+              <Popconfirm
+                title="设为默认模型？"
+                description="对话框将默认选中该模型进行问答"
+                onConfirm={() => handleSetDefault(record.id)}
+                okText="确定"
+                cancelText="取消"
+              >
                 <Button type="text" size="small" icon={<StarOutlined />} />
-              </Tooltip>
-            </Popconfirm>
+              </Popconfirm>
+            </Tooltip>
           )}
           <Tooltip title="编辑">
             <Button
@@ -512,7 +655,7 @@ const ModelSettings: React.FC = () => {
                 icon={<DeleteOutlined />}
                 onClick={() => {
                   modal.confirm({
-                    title: '确定删除此供应商？',
+                    title: '确定删除此模型？',
                     content: `删除后「${record.name}」将不再可用，此操作不可撤销。`,
                     okText: '删除',
                     cancelText: '取消',
@@ -524,9 +667,40 @@ const ModelSettings: React.FC = () => {
             </Tooltip>
           )}
         </Space>
-      )
-    }
-  ]
+      </span>
+    )
+  }
+
+  /** 批量删除勾选的模型（单事务 + 单广播，避免逐个删除触发刷新风暴） */
+  const handleBatchDelete = async (): Promise<void> => {
+    const msgKey = 'provider-delete-batch'
+    if (selectedIds.length === 0) return
+    const targets = providers.filter((p) => selectedIds.includes(p.id))
+    const names = targets.map((p) => getProviderDisplayName(p))
+    modal.confirm({
+      title: `确定删除选中的 ${targets.length} 个模型？`,
+      content:
+        targets.length > 3
+          ? `将删除：${names.slice(0, 3).join('、')} 等 ${targets.length} 个，此操作不可撤销。`
+          : `将删除：${names.join('、')}，此操作不可撤销。`,
+      okText: '批量删除',
+      cancelText: '取消',
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        setDeletingBatch(true)
+        try {
+          const count = await (window as unknown as Window).api.providers.deleteBatch(selectedIds)
+          viewMessage(msgKey, 'success', `已删除 ${count} 个模型`, 2)
+          setCheckedKeys([])
+          await loadProviders()
+        } catch (error) {
+          viewMessage(msgKey, 'error', `批量删除失败: ${error}`)
+        } finally {
+          setDeletingBatch(false)
+        }
+      }
+    })
+  }
 
   return (
     <div>
@@ -546,25 +720,66 @@ const ModelSettings: React.FC = () => {
       />
 
       <SettingsSection bodyPadding={0}>
-        <Table
-          dataSource={providers}
-          columns={columns}
-          rowKey="id"
-          loading={loading}
-          pagination={false}
-          size="middle"
-          locale={{ emptyText: '暂无供应商，点击右上角按钮添加' }}
-          style={{ borderRadius: 12 }}
-        />
+        {/* 目录头：统计 + 批量删除操作条 */}
+        <div
+          className="flex items-center justify-between px-4 py-2"
+          style={{ borderBottom: `1px solid ${colorSplit}` }}
+        >
+          <span style={{ color: colorTextSecondary, fontSize: 12, fontFamily: 'monospace' }}>
+            共 {providers.length} 个模型
+          </span>
+          {selectedIds.length > 0 && (
+            <Space size={8}>
+              <span style={{ color: colorTextSecondary, fontSize: 12, fontFamily: 'monospace' }}>
+                已选 {selectedIds.length} 个
+              </span>
+              <Button
+                danger
+                size="small"
+                icon={<DeleteOutlined />}
+                loading={deletingBatch}
+                onClick={handleBatchDelete}
+              >
+                批量删除
+              </Button>
+              <Button type="text" size="small" onClick={() => setCheckedKeys([])}>
+                取消选择
+              </Button>
+            </Space>
+          )}
+        </div>
+        <Spin spinning={loading}>
+          {providers.length === 0 ? (
+            <div className="py-12 text-center" style={{ color: colorTextSecondary }}>
+              暂无模型，点击右上角按钮添加
+            </div>
+          ) : (
+            <Tree
+              checkable
+              selectable={false}
+              blockNode
+              showLine={{ showLeafIcon: false }}
+              treeData={treeData}
+              checkedKeys={checkedKeys}
+              onCheck={(keys) => setCheckedKeys(Array.isArray(keys) ? keys : keys.checked)}
+              expandedKeys={expandedKeys}
+              onExpand={(keys) => setExpandedKeys(keys)}
+              titleRender={(node) => renderTreeNodeTitle(node as ProviderTreeNode)}
+              className="provider-directory-tree"
+              style={{ padding: '8px 8px 12px 4px' }}
+            />
+          )}
+        </Spin>
       </SettingsSection>
 
       <Modal
-        title={editingProvider ? `编辑供应商 — ${editingProvider.name}` : '添加供应商'}
+        title={editingProvider ? `编辑模型 — ${editingProvider.name}` : '添加模型'}
         open={modalOpen}
         onCancel={() => {
           setModalOpen(false)
           form.resetFields()
           setEditingProvider(null)
+          setProtocolSearch('')
         }}
         onOk={handleSubmit}
         okText="保存"
@@ -580,6 +795,7 @@ const ModelSettings: React.FC = () => {
           initialValues={{
             provider: 'deepseek',
             temperature: 0.7,
+            api_format: 'openai',
             metadata_capabilities: [],
             is_enabled: true,
             is_default: false,
@@ -597,16 +813,17 @@ const ModelSettings: React.FC = () => {
           <Form.Item
             name="provider"
             label="接口协议"
-            rules={[{ required: true, message: '请选择类型' }]}
+            rules={[{ required: true, message: '请输入接口协议' }]}
+            tooltip="可下拉选择常用平台，也可输入任意协议标识（如 openai、zhipu、xproxy）后从「自定义协议」项提交；未知协议按 OpenAI 兼容方式调用"
           >
             <Select
-              options={PROVIDER_TYPES}
+              showSearch
+              allowClear
+              placeholder="选择或输入接口协议"
+              optionFilterProp="label"
+              options={protocolOptions}
               onChange={handleProviderTypeChange}
-              placeholder="选择供应商类型"
-              showSearch={{
-                filterOption: (input, option) =>
-                  (option?.label as string)?.toLowerCase().includes(input.toLowerCase())
-              }}
+              onSearch={setProtocolSearch}
             />
           </Form.Item>
 
@@ -616,6 +833,18 @@ const ModelSettings: React.FC = () => {
             rules={[{ required: true, message: '请输入模型ID' }]}
           >
             <Input placeholder="例如：gpt-4o、deepseek-v4-flash、llama3.1" />
+          </Form.Item>
+
+          <Form.Item
+            name="api_key"
+            label="API Key"
+            rules={editingProvider ? undefined : [{ required: true, message: '请输入 API Key' }]}
+            tooltip={editingProvider ? '留空则保持原有密钥不变' : '密钥将使用本机唯一私钥加密存储'}
+          >
+            <Input.Password
+              placeholder={editingProvider ? '留空保持原密钥' : 'sk-xxxxxxxx'}
+              allowClear
+            />
           </Form.Item>
 
           <Form.Item
@@ -672,24 +901,30 @@ const ModelSettings: React.FC = () => {
             />
           </Form.Item>
 
-          <Form.Item
-            name="base_url"
-            label="API 地址"
-            tooltip="OpenAI 兼容的 API 端点，选类型后自动填充"
-          >
-            <Input placeholder="https://api.deepseek.com/v1" />
-          </Form.Item>
+          {watchedProviderType === 'custom' && (
+            <Form.Item
+              name="base_url"
+              label="API 地址"
+              tooltip="自定义服务商必须填写 OpenAI 兼容或 Anthropic 兼容的 API 端点"
+            >
+              <Input placeholder="https://api.example.com/v1" />
+            </Form.Item>
+          )}
 
-          <Form.Item
-            name="api_key"
-            label="API Key"
-            tooltip={editingProvider ? '留空则保持原有密钥不变' : '密钥将使用本机唯一私钥加密存储'}
-          >
-            <Input.Password
-              placeholder={editingProvider ? '留空保持原密钥' : 'sk-xxxxxxxx'}
-              allowClear
-            />
-          </Form.Item>
+          {watchedProviderType === 'custom' && (
+            <Form.Item
+              name="api_format"
+              label="兼容协议"
+              tooltip="自定义端点的调用协议：OpenAI 兼容或 Anthropic 兼容"
+            >
+              <Select
+                options={[
+                  { value: 'openai', label: 'OpenAI 兼容' },
+                  { value: 'anthropic', label: 'Anthropic 兼容' }
+                ]}
+              />
+            </Form.Item>
+          )}
 
           <Space size="middle" className="w-full">
             <Form.Item name="temperature" label="温度" style={{ width: 140 }}>
@@ -713,7 +948,7 @@ const ModelSettings: React.FC = () => {
               name="is_default"
               label="设为默认"
               valuePropName="checked"
-              tooltip={isEmbeddingInForm ? '向量模型不能设为默认聊天模型' : '只能有一个默认供应商'}
+              tooltip={isEmbeddingInForm ? '向量模型不能设为默认聊天模型' : '只能有一个默认模型'}
             >
               <Switch disabled={isEmbeddingInForm} />
             </Form.Item>
@@ -746,30 +981,50 @@ const ModelSettings: React.FC = () => {
         classNames={{ body: 'custom-scrollbar' }}
       >
         <Space orientation="vertical" style={{ width: '100%' }} size="middle">
-          <Space>
+          <div className="flex w-full" style={{ gap: 8 }}>
             <Select
               value={fetchProviderType}
               options={PROVIDER_TYPES}
               onChange={handleProviderTypeChangeForFetch}
-              style={{ width: 180 }}
+              style={{ flex: '1 1 0%', minWidth: 80 }}
               placeholder="选择供应商类型"
             />
-            <Input
-              placeholder="API 地址"
-              value={fetchBaseUrl}
-              onChange={(e) => setFetchBaseUrl(e.target.value)}
-              style={{ width: 200 }}
-              allowClear
-            />
-          </Space>
-
+            {fetchProviderType === 'custom' && (
+              <Input
+                placeholder="自定义 API 地址（必填）"
+                value={fetchBaseUrl}
+                onChange={(e) => setFetchBaseUrl(e.target.value)}
+                allowClear
+                style={{ flex: '5 1 0%', minWidth: 100 }}
+              />
+            )}
+          </div>
           {fetchProviderType !== 'ollama' && (
             <Input.Password
-              placeholder="API Key（可选）"
+              placeholder="API Key"
               value={fetchApiKey}
               onChange={(e) => setFetchApiKey(e.target.value)}
               allowClear
             />
+          )}
+          {fetchProviderType === 'custom' && (
+            <>
+              <Input
+                placeholder="供应商 ID（必填，如 opencode）"
+                value={fetchCustomProviderId}
+                onChange={(e) => setFetchCustomProviderId(e.target.value.toLowerCase())}
+                status={
+                  fetchCustomProviderId && !/^[a-z0-9-]+$/.test(fetchCustomProviderId)
+                    ? 'error'
+                    : undefined
+                }
+                allowClear
+              />
+              <div style={{ color: colorTextSecondary, fontSize: 12 }}>
+                供应商 ID 全英文小写，仅可包含数字与 - ｜ 列表拉取仅支持 OpenAI 兼容端点（GET
+                /v1/models）
+              </div>
+            </>
           )}
 
           <Button

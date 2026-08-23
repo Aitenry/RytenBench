@@ -266,6 +266,46 @@
   background: transparent;
 }
 
+/* ======== antd 弹层虚拟列表滚动条（Select 下拉等 portal 到 body） ======== */
+/* 原生细条：统一为 6px 圆角细滚动条，与 .custom-scrollbar 同一套视觉；
+   遵循 Chromium 121+ 陷阱：只走 ::-webkit-scrollbar 路径，禁用 scrollbar-width/color */
+.rc-virtual-list-holder::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.rc-virtual-list-holder::-webkit-scrollbar-track,
+.rc-virtual-list-holder::-webkit-scrollbar-track-piece {
+  background: transparent;
+  border-radius: 100px;
+}
+
+.rc-virtual-list-holder::-webkit-scrollbar-thumb {
+  background: rgba(128, 128, 128, 0.32);
+  border-radius: 100px;
+}
+
+.rc-virtual-list-holder::-webkit-scrollbar-thumb:hover {
+  background: rgba(128, 128, 128, 0.55);
+}
+
+.rc-virtual-list-holder::-webkit-scrollbar-button {
+  display: none;
+}
+
+.rc-virtual-list-holder::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* rc-virtual-list 自绘的可拖拽滚动条（滚动/悬停时出现）：颜色跟随同一套滚动条色 */
+.rc-virtual-list {
+  --rc-virtual-list-scrollbar-bg: rgba(128, 128, 128, 0.45);
+}
+
+.dark .rc-virtual-list {
+  --rc-virtual-list-scrollbar-bg: rgba(255, 255, 255, 0.28);
+}
+
 /* ======== 首页三栏（思源风格）列拖拽 ======== */
 /* 视觉缝宽 6px；拖拽条 10px 宽并向外各溢出 2px，扩大命中热区又不挤压可见间距 */
 .home-col-resizer {

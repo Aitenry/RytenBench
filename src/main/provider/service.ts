@@ -152,6 +152,14 @@ class ProviderService {
       case 'cloudflare':
         return this.buildCloudflareWorkersAI(config, extra)
 
+      case 'custom':
+        // 自定义服务商：按 extra_config.api_format 选兼容协议调用
+        // （缺省 OpenAI 兼容；Anthropic 兼容走 ChatAnthropic + 自定义端点）
+        if (String(extra.api_format ?? 'openai').toLowerCase() === 'anthropic') {
+          return this.buildAnthropic(config, extra)
+        }
+        return this.buildOpenAI(config, extra)
+
       default:
         // 未知供应商回退为 OpenAI 兼容模式
         logger.warn(`Unknown provider "${provider}", falling back to ChatOpenAI`)

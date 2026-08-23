@@ -15,10 +15,19 @@ const KEY_LENGTH = 32 // 256 bits
 const SALT = 'ryten-bench-provider-salt-v1' // 固定盐值，与机器属性混合
 
 /**
+ * 机器密钥缓存：单次会话内 hostname / username / userData 不会变化，
+ * 60 万次迭代的 PBKDF2 只派生一次（约 200~500ms，同步阻塞主进程）。
+ * 此前每加解密一个 API Key 都重新派生，批量场景（如 29 个模型逐行解密）
+ * 会累计阻塞数秒，导致模型设置树加载卡死。
+ */
+let cachedMachineKey: Buffer | null = null
+
+/**
  * 从当前机器属性派生加密密钥
  * 基于 hostname + username + userData 路径组合，每台电脑唯一
  */
 function deriveMachineKey(): Buffer {
+  if (cachedMachineKey) return cachedMachineKey
   const hostname = os.hostname()
   const username = os.userInfo().username
   const userDataPath = app.getPath('userData')
@@ -26,7 +35,14 @@ function deriveMachineKey(): Buffer {
   // 组合机器唯一标识
   const machineFingerprint = `${hostname}:${username}:${userDataPath}`
 
-  return crypto.pbkdf2Sync(machineFingerprint, SALT, PBKDF2_ITERATIONS, KEY_LENGTH, 'sha512')
+  cachedMachineKey = crypto.pbkdf2Sync(
+    machineFingerprint,
+    SALT,
+    PBKDF2_ITERATIONS,
+    KEY_LENGTH,
+    'sha512'
+  )
+  return cachedMachineKey
 }
 
 /**

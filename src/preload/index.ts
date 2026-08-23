@@ -371,9 +371,16 @@ const api = {
     getEnabled: () => ipcRenderer.invoke('provider-get-enabled') as Promise<LlmProviderConfig[]>,
     create: (input: LlmProviderInput) =>
       ipcRenderer.invoke('provider-create', input) as Promise<number>,
+    createBatch: (inputs: LlmProviderInput[]) =>
+      ipcRenderer.invoke('provider-create-batch', inputs) as Promise<{
+        created: number
+        skipped: number
+      }>,
     update: (id: number, updates: Partial<LlmProviderInput>) =>
       ipcRenderer.invoke('provider-update', id, updates) as Promise<boolean>,
     delete: (id: number) => ipcRenderer.invoke('provider-delete', id) as Promise<boolean>,
+    deleteBatch: (ids: number[]) =>
+      ipcRenderer.invoke('provider-delete-batch', ids) as Promise<number>,
     setDefault: (id: number) => ipcRenderer.invoke('provider-set-default', id) as Promise<boolean>,
     fetchModels: (
       providerType: string,
