@@ -140,7 +140,7 @@ const TodoPane: React.FC<TodoPaneProps> = ({ todoId, onChanged }) => {
 
   if (loading) {
     return (
-      <PaneShell token={token}>
+      <PaneShell>
         <div
           style={{
             display: 'flex',
@@ -157,7 +157,7 @@ const TodoPane: React.FC<TodoPaneProps> = ({ todoId, onChanged }) => {
 
   if (notFound || !todo) {
     return (
-      <PaneShell token={token}>
+      <PaneShell>
         <Empty description="待办不存在或已被删除" style={{ marginTop: 120 }} />
       </PaneShell>
     )
@@ -169,7 +169,7 @@ const TodoPane: React.FC<TodoPaneProps> = ({ todoId, onChanged }) => {
     todo.status !== 2 && todo.due_date && dayjs(todo.due_date).isBefore(dayjs(), 'day')
 
   return (
-    <PaneShell token={token}>
+    <PaneShell>
       <div
         className="custom-scrollbar"
         style={{
@@ -380,18 +380,15 @@ const TodoPane: React.FC<TodoPaneProps> = ({ todoId, onChanged }) => {
 /* ──────────── 通用 ──────────── */
 
 const PaneShell: React.FC<{
-  token: ReturnType<typeof theme.useToken>['token']
   children: React.ReactNode
-}> = ({ token, children }) => (
+}> = ({ children }) => (
   <div
     style={{
       flex: 1,
       minWidth: 0,
       minHeight: 0,
       display: 'flex',
-      background: token.colorBgContainer,
-      border: `1px solid ${token.colorBorderSecondary}`,
-      borderRadius: 12,
+      /* 卡片外壳已由中间主区容器提供，这里只承担布局 */
       overflow: 'hidden'
     }}
   >

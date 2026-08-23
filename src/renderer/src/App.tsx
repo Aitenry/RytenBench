@@ -7,6 +7,7 @@ import { NotificationProvider } from '@renderer/contexts/NotificationContext'
 import { ChatProvider } from '@renderer/contexts/ChatContext'
 import { composeProviders } from '@renderer/utils/composeProviders'
 import AppContent from '@renderer/components/system/AppContent'
+import AppErrorBoundary from '@renderer/components/system/AppErrorBoundary'
 
 const AppProviders = composeProviders(
   [
@@ -26,9 +27,12 @@ const AppProviders = composeProviders(
 const App: React.FC = () => {
   return (
     <HashRouter>
-      <AppProviders>
-        <AppContent />
-      </AppProviders>
+      {/* 全局错误边界：渲染错误不再让整个应用白屏死掉，而是给出可恢复的提示卡 */}
+      <AppErrorBoundary>
+        <AppProviders>
+          <AppContent />
+        </AppProviders>
+      </AppErrorBoundary>
     </HashRouter>
   )
 }

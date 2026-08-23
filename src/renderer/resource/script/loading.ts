@@ -8,7 +8,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // 监听初始化进度更新 - 使用暴露的 API
   ;(window as unknown as Window).loading.onInitProgress((_event, data) => {
-    // 更新进度条
+    // 更新进度条（逐步推进，细粒度百分比）
     if (progressFill) {
       progressFill.style.width = `${data.progress}%`
     }
@@ -34,10 +34,10 @@ document.addEventListener('DOMContentLoaded', () => {
       taskProgress.textContent = '准备就绪！'
     }
 
-    // 延迟一小段时间让用户看到完成状态
+    // 稍作停留让用户看到完成状态（主窗口此时可能仍在预热，交接由主进程在渲染就绪后触发）
     setTimeout(() => {
       ;(window as unknown as Window).loading.notifyInitComplete() // 使用暴露的 API
-    }, 500)
+    }, 200)
   })
 
   // 监听初始化错误信号

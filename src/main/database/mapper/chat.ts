@@ -1,4 +1,4 @@
-import { getDatabaseInstance } from '../../index'
+﻿import { getDatabaseInstance } from '../instance'
 import logger from 'electron-log'
 
 // --- 类型定义 ---

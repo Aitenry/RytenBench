@@ -863,8 +863,8 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
         flexDirection: 'column',
         minHeight: 0,
         background: token.colorBgContainer,
-        border: `1px solid ${token.colorBorderSecondary}`,
-        borderRadius: 12,
+        /* 贴边面板：左上/左下直角，右缘保留圆角与中间主区呼应（参考 Chat 侧边栏） */
+        borderRadius: '12px 0 0 12px',
         overflow: 'hidden'
       }}
     >

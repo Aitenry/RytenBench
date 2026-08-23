@@ -279,128 +279,157 @@ const ChatInput: React.FC<ChatInputProps> = ({
   const handlePasteFilesRef = useRef(handlePasteFiles)
   handlePasteFilesRef.current = handlePasteFiles
 
-  const editor = useEditor({
-    extensions: [
-      Document,
-      Paragraph,
-      Text,
-      HardBreak,
-      History,
-      Placeholder.configure({ placeholder: '给 Rita 发送消息' }),
-      BaseKeymap,
-      FileRef
-    ],
-    content: '',
-    editorProps: {
-      // Enter 发送（Shift+Enter 由 HardBreak 处理换行）；输入法组合期间不拦截
-      handleKeyDown: (view, event) => {
-        if (event.isComposing || event.keyCode === 229) return false
-        if (event.key === 'Enter' && !event.shiftKey) {
-          event.preventDefault()
-          onKeyDownRef.current(event as unknown as React.KeyboardEvent<HTMLDivElement>)
-          return true
-        }
-        // ↑/↓ 切换历史输入：空输入可进入浏览（加载最近一条），
-        // 浏览态（内容非空但非用户输入）可继续 ↑/↓ 逐条切换；
-        // 用户手动编辑后退出浏览态；内容非空且不在浏览态时，
-        // 改走 textarea 风格逐行移动光标（避免 PM 单 textblock 直接跳段落开头/结尾）
-        if (
-          !event.shiftKey &&
-          !event.altKey &&
-          (event.key === 'ArrowUp' || event.key === 'ArrowDown')
-        ) {
-          const ed = editorRef.current
-          if (!ed) return false
-          const dir = event.key === 'ArrowUp' ? -1 : 1
-          const browsing = historyIndexRef.current !== -1
-          const takeHistory = (dir === -1 && (ed.isEmpty || browsing)) || (dir === 1 && browsing)
-          if (takeHistory && navigateHistory(dir)) {
+  const editor = useEditor(
+    {
+      extensions: [
+        Document,
+        Paragraph,
+        Text,
+        HardBreak,
+        History,
+        Placeholder.configure({ placeholder: '给 Rita 发送消息' }),
+        BaseKeymap,
+        FileRef
+      ],
+      content: '',
+      editorProps: {
+        // Enter 发送（Shift+Enter 由 HardBreak 处理换行）；输入法组合期间不拦截
+        handleKeyDown: (view, event) => {
+          if (event.isComposing || event.keyCode === 229) return false
+          if (event.key === 'Enter' && !event.shiftKey) {
             event.preventDefault()
+            onKeyDownRef.current(event as unknown as React.KeyboardEvent<HTMLDivElement>)
             return true
           }
-          // 非浏览态（用户输入内容后）：逐行移动光标，不再触发任何历史切换
-          if (moveCursorByLine(ed.view, dir)) {
-            event.preventDefault()
-            return true
+          // ↑/↓ 切换历史输入：空输入可进入浏览（加载最近一条），
+          // 浏览态（内容非空但非用户输入）可继续 ↑/↓ 逐条切换；
+          // 用户手动编辑后退出浏览态；内容非空且不在浏览态时，
+          // 改走 textarea 风格逐行移动光标（避免 PM 单 textblock 直接跳段落开头/结尾）
+          if (
+            !event.shiftKey &&
+            !event.altKey &&
+            (event.key === 'ArrowUp' || event.key === 'ArrowDown')
+          ) {
+            const ed = editorRef.current
+            if (!ed) return false
+            const dir = event.key === 'ArrowUp' ? -1 : 1
+            const browsing = historyIndexRef.current !== -1
+            const takeHistory = (dir === -1 && (ed.isEmpty || browsing)) || (dir === 1 && browsing)
+            if (takeHistory && navigateHistory(dir)) {
+              event.preventDefault()
+              return true
+            }
+            // 非浏览态（用户输入内容后）：逐行移动光标，不再触发任何历史切换
+            // 视图不可用（编辑器销毁竞态）时放弃接管，退回默认行为
+            if (ed.isDestroyed) return false
+            try {
+              if (moveCursorByLine(ed.view, dir)) {
+                event.preventDefault()
+                return true
+              }
+            } catch {
+              return false
+            }
           }
-        }
-        // 光标紧贴文件引用 chip 时，退格/删除一次删掉（ProseMirror 默认是先选中再删）
-        if ((event.key === 'Backspace' || event.key === 'Delete') && view.state.selection.empty) {
-          const { $from } = view.state.selection
-          const node = event.key === 'Backspace' ? $from.nodeBefore : $from.nodeAfter
-          if (node && node.isAtom && node.type.name === 'fileRef') {
-            event.preventDefault()
-            const from = event.key === 'Backspace' ? $from.pos - node.nodeSize : $from.pos
-            view.dispatch(view.state.tr.deleteRange(from, from + node.nodeSize))
-            return true
+          // 光标紧贴文件引用 chip 时，退格/删除一次删掉（ProseMirror 默认是先选中再删）
+          if ((event.key === 'Backspace' || event.key === 'Delete') && view.state.selection.empty) {
+            const { $from } = view.state.selection
+            const node = event.key === 'Backspace' ? $from.nodeBefore : $from.nodeAfter
+            if (node && node.isAtom && node.type.name === 'fileRef') {
+              event.preventDefault()
+              const from = event.key === 'Backspace' ? $from.pos - node.nodeSize : $from.pos
+              view.dispatch(view.state.tr.deleteRange(from, from + node.nodeSize))
+              return true
+            }
           }
-        }
-        // 左右方向键直接跨过 chip（ProseMirror 对 selectable atom 默认是先选中再跳，
-        // 需要按两下；这里在光标紧贴 chip 时一次跨过；Shift+方向键保留默认的选区扩展）
-        if (
-          !event.shiftKey &&
-          (event.key === 'ArrowRight' || event.key === 'ArrowLeft') &&
-          view.state.selection.empty
-        ) {
-          const { $from } = view.state.selection
-          const node = event.key === 'ArrowRight' ? $from.nodeAfter : $from.nodeBefore
-          if (node && node.isAtom && node.type.name === 'fileRef') {
-            event.preventDefault()
-            const delta = event.key === 'ArrowRight' ? node.nodeSize : -node.nodeSize
-            view.dispatch(
-              view.state.tr.setSelection(
-                TextSelection.near(view.state.doc.resolve($from.pos + delta))
+          // 左右方向键直接跨过 chip（ProseMirror 对 selectable atom 默认是先选中再跳，
+          // 需要按两下；这里在光标紧贴 chip 时一次跨过；Shift+方向键保留默认的选区扩展）
+          if (
+            !event.shiftKey &&
+            (event.key === 'ArrowRight' || event.key === 'ArrowLeft') &&
+            view.state.selection.empty
+          ) {
+            const { $from } = view.state.selection
+            const node = event.key === 'ArrowRight' ? $from.nodeAfter : $from.nodeBefore
+            if (node && node.isAtom && node.type.name === 'fileRef') {
+              event.preventDefault()
+              const delta = event.key === 'ArrowRight' ? node.nodeSize : -node.nodeSize
+              view.dispatch(
+                view.state.tr.setSelection(
+                  TextSelection.near(view.state.doc.resolve($from.pos + delta))
+                )
               )
-            )
+              return true
+            }
+          }
+          return false
+        },
+        // 完全接管 drop：拖入的文件引用统一由容器 onDrop 插入 chip，
+        // 避免 ProseMirror 默认把 text/plain 当文本插入造成双重插入
+        handleDrop: () => true,
+        // 剪切板含文件/图片时优先转附件（Ctrl+V 粘贴上传），无文件才走纯文本粘贴
+        // 粘贴纯文本：按 \n 拆行插入（换行用 hardBreak，保持 DOM 扁平）
+        // 注意：不能使用 insertContent(数组)（会丢弃 hardBreak），必须走原生 tr.insert
+        handlePaste: (_view, event) => {
+          const pastedFiles = Array.from(event.clipboardData?.files ?? [])
+          if (pastedFiles.length > 0) {
+            event.preventDefault()
+            void handlePasteFilesRef.current(pastedFiles)
             return true
           }
-        }
-        return false
-      },
-      // 完全接管 drop：拖入的文件引用统一由容器 onDrop 插入 chip，
-      // 避免 ProseMirror 默认把 text/plain 当文本插入造成双重插入
-      handleDrop: () => true,
-      // 剪切板含文件/图片时优先转附件（Ctrl+V 粘贴上传），无文件才走纯文本粘贴
-      // 粘贴纯文本：按 \n 拆行插入（换行用 hardBreak，保持 DOM 扁平）
-      // 注意：不能使用 insertContent(数组)（会丢弃 hardBreak），必须走原生 tr.insert
-      handlePaste: (_view, event) => {
-        const pastedFiles = Array.from(event.clipboardData?.files ?? [])
-        if (pastedFiles.length > 0) {
+          const text = event.clipboardData?.getData('text/plain')
+          if (text === undefined) return false
           event.preventDefault()
-          void handlePasteFilesRef.current(pastedFiles)
+          const ed = editorRef.current
+          if (!ed || !text) return true
+          const lines = text.replace(/\r\n?/g, '\n').split('\n')
+          const content: ProseMirrorNode[] = []
+          lines.forEach((line, i) => {
+            if (i > 0) content.push(ed.schema.nodes.hardBreak.create())
+            if (line) content.push(ed.schema.text(line))
+          })
+          let tr = ed.state.tr
+          if (!ed.state.selection.empty) tr = tr.deleteSelection()
+          tr = tr.insert(tr.selection.from, content)
+          // 用事件自带的 view（真实视图）分发，避免绕经可能在销毁竞态中的 editor.view 代理
+          _view.dispatch(tr)
           return true
         }
-        const text = event.clipboardData?.getData('text/plain')
-        if (text === undefined) return false
-        event.preventDefault()
-        const ed = editorRef.current
-        if (!ed || !text) return true
-        const lines = text.replace(/\r\n?/g, '\n').split('\n')
-        const content: ProseMirrorNode[] = []
-        lines.forEach((line, i) => {
-          if (i > 0) content.push(ed.schema.nodes.hardBreak.create())
-          if (line) content.push(ed.schema.text(line))
-        })
-        let tr = ed.state.tr
-        if (!ed.state.selection.empty) tr = tr.deleteSelection()
-        tr = tr.insert(tr.selection.from, content)
-        ed.view.dispatch(tr)
-        return true
+      },
+      onUpdate: ({ editor }) => {
+        // textSerializers：hardBreak 输出换行、fileRef 输出路径，保证发送文本与所见一致
+        // 注意：v3 的 serializer 参数是 { node } 对象，不是节点本身
+        const text = getEditorText(editor)
+        // 浏览历史时手动编辑：退出浏览态（编辑后内容非空且不在浏览态，↑/↓ 不再触发）。
+        // 程序化切换走 setContent(emitUpdate:false)，不会进入这里
+        if (historyIndexRef.current !== -1) {
+          historyIndexRef.current = -1
+        }
+        onInputChangeRef.current(text)
       }
+      // deps=[]：编辑器只创建一次。@tiptap/react v3 的 useEditor 每次渲染都会重新挂起
+      // 一个 1ms 延迟销毁定时器（scheduleDestroy），若两次渲染间隔超过 1ms（如切页时
+      // monaco chunk 求值等重活占用主线程），定时器会先于下一次渲染触发把编辑器销毁，
+      // 之后任何 view 访问都会抛「The editor view is not available」→ React 整树卸载崩溃。
+      // 显式传空依赖数组让该定时器只在真正卸载时挂起，从源头消除竞态。
     },
-    onUpdate: ({ editor }) => {
-      // textSerializers：hardBreak 输出换行、fileRef 输出路径，保证发送文本与所见一致
-      // 注意：v3 的 serializer 参数是 { node } 对象，不是节点本身
-      const text = getEditorText(editor)
-      // 浏览历史时手动编辑：退出浏览态（编辑后内容非空且不在浏览态，↑/↓ 不再触发）。
-      // 程序化切换走 setContent(emitUpdate:false)，不会进入这里
-      if (historyIndexRef.current !== -1) {
-        historyIndexRef.current = -1
-      }
-      onInputChangeRef.current(text)
-    }
-  })
+    []
+  )
   editorRef.current = editor ?? null
+
+  /**
+   * 安全读取编辑器视图 DOM。
+   * TipTap v3.30 的 view 在视图未挂载/编辑器已销毁时返回一个仅含少量桩字段的 Proxy，
+   * 访问 dom 等属性会直接抛错（而非返回 null）；这里统一收敛成「拿不到就返回 null」。
+   */
+  const getViewDom = useCallback((ed: Editor): HTMLElement | null => {
+    if (ed.isDestroyed) return null
+    try {
+      return ed.view.dom as HTMLElement
+    } catch {
+      return null
+    }
+  }, [])
 
   // ── 自定义光标：跟随 collapsed selection 的位置，固定 CARET_HEIGHT 高度 ──
   // 原生 contentEditable 光标高度 = 行高（19px），普通输入框光标 ≈ 字号（14px），
@@ -409,7 +438,8 @@ const ChatInput: React.FC<ChatInputProps> = ({
     const ed = editorRef.current
     const caret = caretRef.current
     if (!ed || !caret) return
-    const el = ed.view.dom as HTMLDivElement
+    const el = getViewDom(ed)
+    if (!el) return
 
     const sel = window.getSelection()
     const show =
@@ -494,13 +524,13 @@ const ChatInput: React.FC<ChatInputProps> = ({
     caret.style.display = 'block'
     caret.style.top = `${Math.round(top)}px`
     caret.style.left = `${Math.round(left)}px`
-  }, [])
+  }, [getViewDom])
   updateCaretRef.current = updateCaret
 
   // 父组件清空 inputValue 时（发送后），同步清空编辑器
   useEffect(() => {
     const ed = editorRef.current
-    if (!ed) return
+    if (!ed || ed.isDestroyed) return
     if (inputValue === '' && !ed.isEmpty) {
       ed.commands.clearContent()
       ed.commands.focus()
@@ -527,10 +557,11 @@ const ChatInput: React.FC<ChatInputProps> = ({
   useEffect(() => {
     const ed = editor
     if (!ed) return
-    const dom = ed.view.dom
+    const dom = getViewDom(ed)
+    if (!dom) return
     dom.addEventListener('scroll', updateCaret)
     return () => dom.removeEventListener('scroll', updateCaret)
-  }, [editor, updateCaret])
+  }, [editor, updateCaret, getViewDom])
 
   // ── 在光标位置插入文件引用 chip ──
   const insertFileRef = useCallback(
@@ -579,12 +610,17 @@ const ChatInput: React.FC<ChatInputProps> = ({
   )
 
   // ── 点击输入区空白处聚焦并移光标到末尾（与普通输入框一致）──
-  const handleContainerClick = useCallback((e: React.MouseEvent) => {
-    const ed = editorRef.current
-    if (!ed) return
-    if (ed.view.dom.contains(e.target as Node)) return
-    ed.commands.focus('end')
-  }, [])
+  const handleContainerClick = useCallback(
+    (e: React.MouseEvent) => {
+      const ed = editorRef.current
+      if (!ed) return
+      const dom = getViewDom(ed)
+      if (!dom) return
+      if (dom.contains(e.target as Node)) return
+      ed.commands.focus('end')
+    },
+    [getViewDom]
+  )
 
   const hasContent = inputValue.trim().length > 0
 

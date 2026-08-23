@@ -125,7 +125,7 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
   /** messages React 状态实际属于哪个话题——用于检测 handleSelectTopic 异步间隙中的跨话题污染 */
   const messagesBelongToTopicRef = useRef<number | null>(null)
   const [topics, setTopics] = useState<ChatTopicRow[]>([])
-  const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [sidebarOpen, setSidebarOpen] = useState(true)
   const [providers, setProviders] = useState<LlmProviderConfig[]>([])
   const [selectedProviderId, setSelectedProviderId] = useState<number | null>(null)
   const [attachments, setAttachments] = useState<Attachment[]>([])

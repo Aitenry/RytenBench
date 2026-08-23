@@ -1,4 +1,4 @@
-import { getDatabaseInstance } from '../../index'
+﻿import { getDatabaseInstance } from '../instance'
 import type { SubAgentConfig } from '../../chat/types'
 import logger from 'electron-log'
 

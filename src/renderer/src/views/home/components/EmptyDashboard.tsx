@@ -111,10 +111,7 @@ const EmptyDashboard: React.FC<EmptyDashboardProps> = ({
         flex: 1,
         minWidth: 0,
         minHeight: 0,
-        overflowY: 'auto',
-        background: token.colorBgContainer,
-        border: `1px solid ${token.colorBorderSecondary}`,
-        borderRadius: 12
+        overflowY: 'auto'
       }}
     >
       <div style={{ maxWidth: 860, margin: '0 auto', padding: '36px 40px 56px' }}>

@@ -113,8 +113,8 @@ const OutlinePanel: React.FC<OutlinePanelProps> = ({ editor, scrollRef, meta, wi
         flexDirection: 'column',
         minHeight: 0,
         background: token.colorBgContainer,
-        border: `1px solid ${token.colorBorderSecondary}`,
-        borderRadius: 12,
+        /* 贴边面板：右上/右下直角，左缘保留圆角与中间主区呼应（与左侧栏对称） */
+        borderRadius: '0 12px 12px 0',
         overflow: 'hidden'
       }}
     >

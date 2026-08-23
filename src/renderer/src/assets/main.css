@@ -267,9 +267,10 @@
 }
 
 /* ======== 首页三栏（思源风格）列拖拽 ======== */
+/* 视觉缝宽 6px；拖拽条 10px 宽并向外各溢出 2px，扩大命中热区又不挤压可见间距 */
 .home-col-resizer {
-  width: 12px;
-  margin: 0 -6px;
+  width: 10px;
+  margin: 0 -2px;
   flex-shrink: 0;
   cursor: col-resize;
   position: relative;
@@ -279,8 +280,8 @@
 .home-col-resizer::after {
   content: '';
   position: absolute;
-  left: 5px;
-  right: 5px;
+  left: 4px;
+  right: 4px;
   top: 0;
   bottom: 0;
   border-radius: 2px;

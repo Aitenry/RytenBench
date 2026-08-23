@@ -5,6 +5,7 @@ import { RiCalendar2Line, RiChatAiLine, RiDashboardLine, RiMusicLine } from '@re
 import { useTheme } from '@renderer/contexts/useTheme'
 import { Window } from '../../../resource/types/window'
 import MainRoutes from '@renderer/route/MainRoutes'
+import { isLazyViewKey, preloadView, scheduleViewPreload } from '@renderer/route/viewPreload'
 import SettingsModal from './settings/SettingsModal'
 import TitleBar from './frame/TitleBar'
 import Sidebar from './frame/Sidebar'
@@ -41,6 +42,17 @@ const CustomFrame: React.FC<CustomFrameProps> = ({ currentKey, setCurrentKey }) 
   useEffect(() => {
     api.window.isMaximized().then(setIsMaximized)
     return api.window.onMaximized(setIsMaximized)
+  }, [])
+
+  // 启动后的空闲时段提前加载懒加载页面 chunk（chat → planner → music），
+  // 首次切换菜单时模块已就绪，实现直接切换不卡顿
+  useEffect(() => {
+    scheduleViewPreload()
+  }, [])
+
+  // 菜单悬停/聚焦时预加载对应 chunk：空闲预加载未完成时的兜底
+  const onMenuHover = useCallback((key: string): void => {
+    if (isLazyViewKey(key)) preloadView(key)
   }, [])
 
   // 监听自定义事件以从其他页面打开系统设置
@@ -104,6 +116,7 @@ const CustomFrame: React.FC<CustomFrameProps> = ({ currentKey, setCurrentKey }) 
             currentKey={currentKey}
             menuItems={menuItems}
             onMenuClick={onMenuClick}
+            onMenuHover={onMenuHover}
             colorTextSecondary={colorTextSecondary}
           />
 

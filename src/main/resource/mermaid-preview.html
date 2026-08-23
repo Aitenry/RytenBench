@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <style>
+    html, body {
+      margin: 0;
+      height: 100%;
+      overflow: hidden;
+      background: transparent;
+      font-family: system-ui, sans-serif;
+    }
+
+    /* 与应用主窗口同款：圆角无边框自定义窗口 */
+    #app {
+      height: 100vh;
+      box-sizing: border-box;
+      border-radius: 12px;
+      background: #141414;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    #titlebar {
+      height: 36px;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 6px 0 12px;
+      -webkit-app-region: drag;
+      user-select: none;
+      background: #171717;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    #titlebar .title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      color: rgba(255, 255, 255, 0.6);
+    }
+
+    #titlebar .title svg {
+      color: rgba(255, 255, 255, 0.45);
+    }
+
+    #titlebar .controls {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      -webkit-app-region: no-drag;
+    }
+
+    #titlebar .ctrl-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 38px;
+      height: 26px;
+      border: none;
+      background: transparent;
+      color: rgba(255, 255, 255, 0.65);
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+    }
+
+    #titlebar .ctrl-btn:hover {
+      background: rgba(255, 255, 255, 0.12);
+      color: #fff;
+    }
+
+    #titlebar .ctrl-btn.close:hover {
+      background: #e81123;
+      color: #fff;
+    }
+
+    #stage {
+      flex: 1;
+      position: relative;
+      cursor: grab;
+      touch-action: none;
+      user-select: none;
+    }
+
+    #stage.dragging {
+      cursor: grabbing;
+    }
+
+    #viewport {
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 0;
+      padding: 24px;
+      box-sizing: border-box;
+      transform-origin: 0 0;
+      will-change: transform;
+      text-align: center;
+    }
+
+    #viewport svg {
+      display: block;
+      max-width: none !important;
+      height: auto;
+      margin: 0;
+    }
+
+    #toolbar {
+      position: absolute;
+      top: 14px;
+      right: 14px;
+      display: flex;
+      gap: 8px;
+      z-index: 10;
+    }
+
+    #toolbar button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 36px;
+      height: 36px;
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      border-radius: 10px;
+      background: rgba(20, 20, 20, 0.72);
+      color: #d8d8d8;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+    }
+
+    #toolbar button:hover {
+      background: rgba(255, 255, 255, 0.14);
+      color: #fff;
+    }
+
+    #hint {
+      position: absolute;
+      bottom: 14px;
+      left: 50%;
+      transform: translateX(-50%);
+      color: rgba(255, 255, 255, 0.35);
+      font-size: 12px;
+      z-index: 10;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+<div id="app">
+  <div id="titlebar">
+    <div class="title"><span id="title-icon"></span><span>Mermaid 预览</span></div>
+    <div class="controls">
+      <button id="win-min" class="ctrl-btn" title="最小化"></button>
+      <button id="win-max" class="ctrl-btn" title="最大化"></button>
+      <button id="win-close" class="ctrl-btn close" title="关闭"></button>
+    </div>
+  </div>
+  <div id="stage">
+    <div id="viewport"><!-- __MERMAID_SVG__ --></div>
+    <div id="toolbar">
+      <button id="fit" title="居中画布"></button>
+    </div>
+    <div id="hint">拖拽平移 · 滚轮缩放 · 双击居中 · Esc 关闭</div>
+  </div>
+</div>
+<script>
+  // 标题栏图标（与应用 TitleBar 同款）：最小化 / 最大化 / 还原 / 关闭 / 图表 / 居中
+  var ICON_CENTER = 'M13 1L13.001 4.06201C16.6192 4.51365 19.4869 7.38163 19.9381 11L23 11V13L19.938 13.001C19.4864 16.6189 16.6189 19.4864 13.001 19.938L13 23H11L11 19.9381C7.38163 19.4869 4.51365 16.6192 4.06201 13.001L1 13V11L4.06189 11C4.51312 7.38129 7.38129 4.51312 11 4.06189L11 1H13ZM12 6C8.68629 6 6 8.68629 6 12C6 15.3137 8.68629 18 12 18C15.3137 18 18 15.3137 18 12C18 8.68629 15.3137 6 12 6ZM12 10C13.1046 10 14 10.8954 14 12C14 13.1046 13.1046 14 12 14C10.8954 14 10 13.1046 10 12C10 10.8954 10.8954 10 12 10Z'
+  var ICON_MIN = 'M5 11V13H19V11H5Z'
+  var ICON_MAX = 'M6.41421 5H10V3H3V10H5V6.41421L9.29289 10.7071L10.7071 9.29289L6.41421 5ZM21 14H19V17.5858L14.7071 13.2929L13.2929 14.7071L17.5858 19H14V21H21V14Z'
+  var ICON_RESTORE = 'M9.00008 4.00008H11.0001V11.0001H4.00008V9.00008H7.58586L3.29297 4.70718L4.70718 3.29297L9.00008 7.58586V4.00008ZM20 15H16.4142L20.7071 19.2929L19.2929 20.7071L15 16.4142V20H13V13H20V15Z'
+  var ICON_POWER = 'M6.26489 3.80698L7.41191 5.44558C5.34875 6.89247 4 9.28873 4 12C4 16.4183 7.58172 20 12 20C16.4183 20 20 16.4183 20 12C20 9.28873 18.6512 6.89247 16.5881 5.44558L17.7351 3.80698C20.3141 5.61559 22 8.61091 22 12C22 17.5228 17.5228 22 12 22C6.47715 22 2 17.5228 2 12C2 8.61091 3.68594 5.61559 6.26489 3.80698ZM11 12V2H13V12H11Z'
+  var ICON_FLOW = 'M6 21.5C4.067 21.5 2.5 19.933 2.5 18C2.5 16.067 4.067 14.5 6 14.5C7.5852 14.5 8.92427 15.5539 9.35481 16.9992L15 16.9994V15L17 14.9994V9.24339L14.757 6.99938H9V9.00003H3V3.00003H9V4.99939H14.757L18 1.75739L22.2426 6.00003L19 9.24139V14.9994L21 15V21H15V18.9994L9.35499 19.0003C8.92464 20.4459 7.58543 21.5 6 21.5ZM6 16.5C5.17157 16.5 4.5 17.1716 4.5 18C4.5 18.8285 5.17157 19.5 6 19.5C6.82843 19.5 7.5 18.8285 7.5 18C7.5 17.1716 6.82843 16.5 6 16.5ZM19 17H17V19H19V17ZM18 4.58581L16.5858 6.00003L18 7.41424L19.4142 6.00003L18 4.58581ZM7 5.00003H5V7.00003H7V5.00003Z'
+
+  function icon(d, size) {
+    size = size || 14
+    return '<svg viewBox="0 0 24 24" width="' + size + '" height="' + size + '" fill="currentColor" aria-hidden="true"><path d="' + d + '"/></svg>'
+  }
+
+  // 注入图标
+  document.getElementById('title-icon').innerHTML = icon(ICON_FLOW, 14)
+  document.getElementById('win-min').innerHTML = icon(ICON_MIN)
+  document.getElementById('win-max').innerHTML = icon(ICON_MAX)
+  document.getElementById('win-close').innerHTML = icon(ICON_POWER)
+  document.getElementById('fit').innerHTML = icon(ICON_CENTER, 18)
+
+  var stage = document.getElementById('stage')
+  var viewport = document.getElementById('viewport')
+  var tx = 0, ty = 0, scale = 1
+  var MIN = 0.2, MAX = 5
+
+  function apply() {
+    viewport.style.transform = 'translate(' + tx + 'px, ' + ty + 'px) scale(' + scale + ')'
+  }
+
+  // 适配：把 SVG 等比缩小到窗口可见区域并居中（先量未缩放尺寸）
+  function fit() {
+    var svg = viewport.querySelector('svg')
+    if (!svg) {
+      tx = 0
+      ty = 0
+      scale = 1
+      apply()
+      return
+    }
+    // 按自然尺寸（viewBox）布局，覆盖 mermaid 输出的 width="100%"，避免拉伸
+    if (svg.viewBox && svg.viewBox.baseVal && svg.viewBox.baseVal.width > 0) {
+      svg.style.width = svg.viewBox.baseVal.width + 'px'
+      svg.style.height = svg.viewBox.baseVal.height + 'px'
+    }
+    viewport.style.transform = ''
+    var w = svg.getBoundingClientRect().width
+    var h = svg.getBoundingClientRect().height
+    var r = stage.getBoundingClientRect()
+    var s = Math.min(1, (r.width - 48) / Math.max(1, w), (r.height - 48) / Math.max(1, h))
+    scale = s
+    // svg 从 viewport padding 内左上起排，且 padding 偏移会随 scale 放大，
+    // 居中偏移需减 24*s 才能精确居中
+    tx = (r.width - w * s) / 2 - 24 * s
+    ty = (r.height - h * s) / 2 - 24 * s
+    apply()
+  }
+
+  stage.addEventListener('wheel', function(e) {
+    e.preventDefault()
+    var r = stage.getBoundingClientRect()
+    var mx = e.clientX - r.left, my = e.clientY - r.top
+    var next = Math.min(MAX, Math.max(MIN, scale * Math.exp(-e.deltaY * 0.0015)))
+    var k = next / scale
+    tx = mx - (mx - tx) * k
+    ty = my - (my - ty) * k
+    scale = next
+    apply()
+  }, { passive: false })
+  var drag = null
+  stage.addEventListener('mousedown', function(e) {
+    if (e.button !== 0) return
+    e.preventDefault()
+    drag = { sx: e.clientX, sy: e.clientY, tx: tx, ty: ty }
+    stage.classList.add('dragging')
+  })
+  window.addEventListener('mousemove', function(e) {
+    if (!drag) return
+    tx = drag.tx + e.clientX - drag.sx
+    ty = drag.ty + e.clientY - drag.sy
+    apply()
+  })
+  window.addEventListener('mouseup', function() {
+    drag = null
+    stage.classList.remove('dragging')
+  })
+  stage.addEventListener('dblclick', function(e) {
+    e.preventDefault()
+    fit()
+  })
+  document.getElementById('fit').onclick = fit
+  window.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') window.api.window.close()
+  })
+  // 窗口尺寸变化（拉伸/最大化）后重新适配居中
+  var resizeTimer = null
+  window.addEventListener('resize', function() {
+    if (resizeTimer) clearTimeout(resizeTimer)
+    resizeTimer = setTimeout(fit, 120)
+  })
+  // 标题栏窗口控制（复用主窗口 IPC，按发送方窗口生效）
+  document.getElementById('win-min').onclick = function() {
+    window.api.window.minimize()
+  }
+  document.getElementById('win-close').onclick = function() {
+    window.api.window.close()
+  }
+  var maxBtn = document.getElementById('win-max')
+
+  function setMaxIcon(m) {
+    maxBtn.innerHTML = m ? icon(ICON_RESTORE) : icon(ICON_MAX)
+    maxBtn.title = m ? '还原' : '最大化'
+  }
+
+  maxBtn.onclick = function() {
+    window.api.window.maximize()
+  }
+  window.api.window.onMaximized(function(m) {
+    setMaxIcon(m)
+  })
+  window.api.window.isMaximized().then(setMaxIcon)
+  fit()
+</script>
+</body>
+</html>

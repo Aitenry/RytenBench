@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { theme, Spin, App } from 'antd'
 import type { Editor } from '@tiptap/react'
 import { Window } from '../../../../resource/types/window'
@@ -13,7 +13,8 @@ import TodoPane from './TodoPane'
 import EmptyDashboard from './EmptyDashboard'
 import OutlinePanel from './OutlinePanel'
 import ArchiveDocModal from './ArchiveDocModal'
-import GraphView from '@renderer/components/graph/GraphView'
+// 知识图谱按需加载（echarts 体积较大，避免拖慢首屏）
+const GraphView = lazy(() => import('@renderer/components/graph/GraphView'))
 import type { Selection } from '../types'
 
 const HomeView: React.FC = () => {
@@ -452,10 +453,7 @@ const HomeView: React.FC = () => {
             flex: 1,
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'center',
-            background: token.colorBgContainer,
-            border: `1px solid ${token.colorBorderSecondary}`,
-            borderRadius: 12
+            justifyContent: 'center'
           }}
         >
           <Spin size="large" />
@@ -499,10 +497,7 @@ const HomeView: React.FC = () => {
               minHeight: 0,
               display: 'flex',
               alignItems: 'center',
-              justifyContent: 'center',
-              background: token.colorBgContainer,
-              border: `1px solid ${token.colorBorderSecondary}`,
-              borderRadius: 12
+              justifyContent: 'center'
             }}
           >
             <span style={{ color: token.colorTextTertiary, fontSize: 13 }}>
@@ -514,22 +509,38 @@ const HomeView: React.FC = () => {
       /* 文档级子图：带 initialDocFilter，key 用 docId 保证切换文档时重建筛选 */
       return (
         <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
-          <GraphView
-            key={
-              selection.kind === 'doc-graph'
-                ? `doc-graph-${selection.docId}`
-                : `wiki-graph-${selection.wikiId}`
+          <Suspense
+            fallback={
+              <div
+                style={{
+                  flex: 1,
+                  minHeight: 0,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+              >
+                <Spin size="small" />
+              </div>
             }
-            selectedWiki={wiki}
-            initialDocFilter={selection.kind === 'doc-graph' ? [selection.docId] : undefined}
-            onOpenDocInEditor={(docId) =>
-              setSelection({
-                kind: 'doc',
-                docId,
-                source: { wikiId: wiki.id, wikiTitle: wiki.title }
-              })
-            }
-          />
+          >
+            <GraphView
+              key={
+                selection.kind === 'doc-graph'
+                  ? `doc-graph-${selection.docId}`
+                  : `wiki-graph-${selection.wikiId}`
+              }
+              selectedWiki={wiki}
+              initialDocFilter={selection.kind === 'doc-graph' ? [selection.docId] : undefined}
+              onOpenDocInEditor={(docId) =>
+                setSelection({
+                  kind: 'doc',
+                  docId,
+                  source: { wikiId: wiki.id, wikiTitle: wiki.title }
+                })
+              }
+            />
+          </Suspense>
         </div>
       )
     }
@@ -538,14 +549,15 @@ const HomeView: React.FC = () => {
     )
   }
 
+  /* ── 无卡片外壳的视图：首页仪表盘与知识图谱，与左右侧栏融为一体（无边框、无圆角） ── */
+  const frameless = !selection || selection.kind === 'wiki-graph' || selection.kind === 'doc-graph'
+
   return (
     <div
       style={{
         width: '100%',
         height: '100%',
         display: 'flex',
-        gap: 12,
-        padding: 12,
         background: token.colorBgLayout,
         boxSizing: 'border-box',
         minHeight: 0
@@ -576,7 +588,9 @@ const HomeView: React.FC = () => {
       />
       <div className="home-col-resizer" onMouseDown={handleDragStart('tree')} />
 
-      {/* 中间主区 */}
+      {/* 中间主区：整体一张卡片（面包屑 + 内容），参考 Chat 主区结构。
+          首页仪表盘与知识图谱视图无卡片外壳（无边框、无圆角），与左右侧栏融为一体；
+          文档/待办等具体内容才是独立卡片（有边框、有圆角） */}
       <div
         style={{
           flex: 1,
@@ -584,7 +598,10 @@ const HomeView: React.FC = () => {
           minHeight: 0,
           display: 'flex',
           flexDirection: 'column',
-          gap: 12
+          background: token.colorBgContainer,
+          border: frameless ? 'none' : `1px solid ${token.colorBorderSecondary}`,
+          borderRadius: frameless ? 0 : 12,
+          overflow: 'hidden'
         }}
       >
         <BreadcrumbBar items={breadcrumbItems} />

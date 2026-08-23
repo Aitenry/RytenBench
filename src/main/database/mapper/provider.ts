@@ -1,4 +1,4 @@
-import { getDatabaseInstance } from '../../index'
+﻿import { getDatabaseInstance } from '../instance'
 import { encryptApiKey, decryptApiKey } from '../../crypto/provider-key'
 import logger from 'electron-log'
 

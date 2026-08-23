@@ -910,7 +910,7 @@ const MemorySettings: React.FC = () => {
       {!configured ? (
         <SettingsSection title="启用记忆" icon={<DatabaseOutlined size={14} />} bodyPadding={24}>
           <Empty
-            imageStyle={{ height: 56 }}
+            styles={{ image: { height: 56 } }}
             description={
               <span style={{ fontSize: 13 }}>
                 未配置记忆目录，模型将没有持久记忆。
