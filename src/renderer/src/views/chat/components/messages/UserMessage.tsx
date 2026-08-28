@@ -1,12 +1,13 @@
 import React from 'react'
 import { Image, Tag } from 'antd'
-import { RiAttachment2 } from '@remixicon/react'
+import { RiAttachment2, RiFlag2Line } from '@remixicon/react'
 import type { Message } from '@renderer/types/chat'
 
 interface UserMessageProps {
   message: Message
   isDarkMode: boolean
   colorText: string
+  colorTextSecondary: string
   colorBorderSecondary: string
 }
 
@@ -14,10 +15,46 @@ const UserMessage: React.FC<UserMessageProps> = ({
   message,
   isDarkMode,
   colorText,
+  colorTextSecondary,
   colorBorderSecondary
 }) => {
   const imageBlocks = message.blocks.filter((b) => b.type === 'image' && b.image_url)
   const documentBlocks = message.blocks.filter((b) => b.type === 'document' && b.fileName)
+  // 目标自动续跑轮：渲染为居中的自动运行横幅（非普通用户气泡）
+  const goalRoundBlock = message.blocks.find((b) => b.type === 'goalRound')
+
+  if (goalRoundBlock) {
+    return (
+      <div className="flex justify-center mb-6">
+        <div
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '4px 12px',
+            borderRadius: 12,
+            border: `1px dashed ${colorBorderSecondary}`,
+            color: colorTextSecondary,
+            fontSize: 12
+          }}
+        >
+          <RiFlag2Line size={13} />
+          <span>目标自动续跑 · 第 {goalRoundBlock.round ?? '?'} 轮</span>
+          <span style={{ opacity: 0.75 }}>—</span>
+          <span
+            style={{
+              maxWidth: 360,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap'
+            }}
+          >
+            {(message.content.split('\n')[1] ?? '').replace(/^目标：/, '')}
+          </span>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="flex justify-end mb-6">

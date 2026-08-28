@@ -3,6 +3,7 @@ import { join } from 'path'
 import { is } from '@electron-toolkit/utils'
 import icon from '../../../resources/icon.png?asset'
 import logger from 'electron-log'
+import { safeSend } from '../safe-send'
 import { getMainWindow, markMainWindowReady, setMainWindow } from './window-manager'
 import { setupWeather } from '../weather'
 
@@ -35,6 +36,16 @@ export function createMainWindow(): void {
     if (getMainWindow() === win) setMainWindow(null)
   })
 
+  // 渲染进程退出诊断：记录原因（崩溃/OOM/被杀/正常退出），便于排查「运行运行突然白屏」
+  // 等异常；主进程本身不会因渲染进程退出而崩溃。
+  win.webContents.on('render-process-gone', (_event, details) => {
+    const abnormal =
+      details.reason !== 'clean-exit' && details.reason !== 'killed'
+    const msg = `[Window] 渲染进程退出 reason=${details.reason} exitCode=${details.exitCode}`
+    if (abnormal) logger.error(msg)
+    else logger.info(msg)
+  })
+
   win.webContents.setWindowOpenHandler((details) => {
     shell.openExternal(details.url).then()
     return { action: 'deny' }
@@ -49,7 +60,7 @@ export function createMainWindow(): void {
 
   win.webContents.once('dom-ready', () => {
     logger.info('[Window] Main window dom-ready')
-    win.webContents.send('main-window-ready')
+    safeSend(win.webContents, 'main-window-ready')
   })
 
   // 窗口控制 IPC（作用于发送方窗口：主窗口与 mermaid 预览窗口共用）
@@ -95,7 +106,7 @@ export function createMainWindow(): void {
       })
       st.isMaximized = true
     }
-    win.webContents.send('window-maximized', st.isMaximized)
+    safeSend(win.webContents, 'window-maximized', st.isMaximized)
   })
   ipcMain.on('window-close', (event) => {
     winFromEvent(event)?.close()

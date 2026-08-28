@@ -13,6 +13,7 @@ import type { StructuredToolInterface } from '@langchain/core/tools'
 import logger from 'electron-log'
 import type { RuntimeRecord, ToolCallRecord } from './types'
 import { formatOutput } from './fs-backend'
+import type { SpillStore } from './spill'
 
 /**
  * LangGraph Agent 图 — 替代 deepagents createDeepAgent
@@ -56,6 +57,8 @@ export interface BuildGraphOptions {
   queue?: QueueRef
   /** 子代理上下文（子代理图专用；主代理图不设置） */
   subagentCtx?: SubAgentToolContext
+  /** 工具结果溢出存储（超长输出保存为文件 + 返回预览/定位符；未配置则保持截断行为） */
+  spill?: SpillStore
 }
 
 /** 安全绑定工具：不支持工具调用的模型退化为纯对话（组件降级而非报错） */
@@ -187,11 +190,19 @@ function toolCallKey(name: string, args: unknown): string {
   return `${name}:${argsText}`
 }
 
+/**
+ * 溢出策略豁免工具集：文件读取/搜索工具自带输出边界（read_file 20K + offset/limit、
+ * grep 100 条匹配上限等），不再二次溢出——否则「读溢出文件 → 再次溢出」会无限套娃
+ * （参考 dsh-spill-policy 对 read 类工具的豁免）。
+ */
+const SPILL_EXEMPT_TOOLS = new Set(['read_file', 'grep', 'ls', 'glob'])
+
 /** 创建工具执行器：执行工具调用并推送生命周期记录 */
 function createToolRunner(
   tools: StructuredToolInterface[],
   queue?: QueueRef,
-  subagentCtx?: SubAgentToolContext
+  subagentCtx?: SubAgentToolContext,
+  spill?: SpillStore
 ) {
   const toolsByName = new Map(tools.map((t) => [t.name, t]))
 
@@ -309,7 +320,10 @@ function createToolRunner(
             ...config,
             configurable: { ...(config.configurable ?? {}), toolCallId: callId }
           })
-          return formatOutput(result)
+          // 溢出策略：超长输出保存为溢出文件，模型拿到「预览 + 定位符」而非硬截断。
+          // 文件读取/搜索工具自带边界，豁免溢出（防 read 循环）；spill 未配置时保持原有截断行为
+          const formatted = formatOutput(result)
+          return spill && !SPILL_EXEMPT_TOOLS.has(name) ? spill.trySpill(formatted) : formatted
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err)
           logger.warn(`[Agent] 工具 ${name} 执行失败:`, err)
@@ -347,9 +361,10 @@ export function buildAgentGraph(
   const { model, tools, systemPrompt } = options
   const queue = options.queue
   const subagentCtx = options.subagentCtx
+  const spill = options.spill
 
   const modelWithTools = bindToolsSafely(model, tools)
-  const runTools = createToolRunner(tools, queue, subagentCtx)
+  const runTools = createToolRunner(tools, queue, subagentCtx, spill)
 
   async function callModel(
     state: { messages: BaseMessage[] },

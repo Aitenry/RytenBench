@@ -7,6 +7,9 @@ import { Lock } from '@renderer/types/settings'
 import { LlmProviderInput, LlmProviderConfig } from '../../../../main/database/mapper/provider'
 import { AgentConfigRow, AgentConfigInput } from '../../../../main/database/mapper/agent'
 import { TodoItem } from '../../../../main/chat/runtime/todo'
+import { GoalView } from '../../../../main/chat/runtime/goal'
+import { JobSnapshot } from '../../../../main/chat/runtime/jobs'
+import { PendingQuestionView } from '../../../../main/chat/runtime/ask'
 import { SystemSettings } from '@renderer/types/settings'
 
 export interface PaginatedResult<T> {
@@ -179,6 +182,22 @@ export interface Window {
       onChatTodosUpdated: (
         callback: (data: { topicId: number; todos: TodoItem[] }) => void
       ) => () => void
+      // 目标系统（goal）
+      getGoal: (topicId: number) => Promise<GoalView | null>
+      onGoalUpdated: (
+        callback: (data: { topicId: number; goal: GoalView | null }) => void
+      ) => () => void
+      // 后台任务系统（jobs）
+      onJobsUpdated: (
+        callback: (data: { topicId: number; jobs: JobSnapshot[] }) => void
+      ) => () => void
+      // 向用户提问（ask_user_question）
+      onQuestionAsked: (callback: (pending: PendingQuestionView) => void) => () => void
+      answerQuestion: (
+        requestId: string,
+        answers: { id: string; selected: string[]; custom?: string }[]
+      ) => Promise<boolean>
+      getQuestion: (topicId: number) => Promise<PendingQuestionView | null>
       cancelStream: () => void
       startMessageStream: (
         message: string,

@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useCallback } from 'react'
+import React, { useRef, useEffect, useCallback, useState } from 'react'
 import { Tooltip, Collapse, App } from 'antd'
 import {
   RiFileCopyLine,
@@ -34,6 +34,46 @@ interface AssistantMessageProps {
   colorBorderSecondary: string
   onCopy: (text: string, id: string) => void
   onDelete: (index: number) => void
+}
+
+/** 工具卡片文本：单行显示 + 溢出省略，悬停展示完整内容（无箭头 Tooltip，仅在溢出时出现） */
+const TruncatedTooltipText: React.FC<{
+  text: string
+  style?: React.CSSProperties
+}> = ({ text, style }) => {
+  const spanRef = useRef<HTMLSpanElement>(null)
+  const [overflow, setOverflow] = useState(false)
+
+  useEffect(() => {
+    const el = spanRef.current
+    if (!el) return
+    const check = (): void => {
+      setOverflow(el.scrollWidth > el.clientWidth)
+    }
+    check()
+    const observer = new ResizeObserver(check)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [text])
+
+  return (
+    // Tooltip 与 span 始终渲染，保证 ResizeObserver 观察的 DOM 节点稳定；
+    // 空 title 时 antd 不会显示提示（仅溢出时 title 才有内容）
+    <Tooltip title={overflow ? text : ''} arrow={false} styles={{ root: { maxWidth: 560 } }}>
+      <span
+        ref={spanRef}
+        style={{
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          minWidth: 0,
+          ...style
+        }}
+      >
+        {text}
+      </span>
+    </Tooltip>
+  )
 }
 
 const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
@@ -240,16 +280,10 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
           }}
         >
           {icon}
-          <span
-            style={{
-              color: colorText,
-              fontSize,
-              wordBreak: 'break-all',
-              flex: 1
-            }}
-          >
-            {label}
-          </span>
+          <TruncatedTooltipText
+            text={label}
+            style={{ color: colorText, fontSize, flex: 1 }}
+          />
           {extra}
         </div>
       )

@@ -124,7 +124,7 @@ export const InlineCodeCopy = ({
   return (
     <span
       onClick={handleCopy}
-      className={`inline-flex items-center gap-1 cursor-pointer transition-all`}
+      className={`inline-flex items-center gap-1 cursor-pointer transition-all max-w-full min-w-0`}
       title={copied ? '已复制' : '点击复制'}
     >
       {children}

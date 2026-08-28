@@ -2,6 +2,7 @@ import { BrowserWindow } from 'electron'
 import { tool } from '@langchain/core/tools'
 import type { StructuredToolInterface } from '@langchain/core/tools'
 import * as z from 'zod/v4'
+import { safeSend } from '../../safe-send'
 
 // ============================================================================
 // Music Handlers — 渐进式：playlists → tracks
@@ -73,8 +74,8 @@ async function playTrackHandler(params: { trackId: number }): Promise<string> {
   }))
 
   const win = BrowserWindow.getAllWindows()[0]
-  if (win) {
-    win.webContents.send('music-play-track', {
+  if (win && !win.isDestroyed()) {
+    safeSend(win.webContents, 'music-play-track', {
       track: {
         id: String(track.id),
         filePath: track.file_path,

@@ -1,6 +1,7 @@
 import { ipcMain } from 'electron'
 import logger from 'electron-log'
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models'
+import { safeSend } from '../safe-send'
 import { settingsStore } from '../context'
 import { getProviderService } from '../provider/service'
 import { KnowledgeGraphService, BuildConfig } from '../graph'
@@ -97,7 +98,7 @@ export function registerGraphIpc(): void {
         model = await getProviderService().createModel(defaultModelId)
       } catch (error) {
         logger.error('Error in graph-build-start (model):', error)
-        event.sender.send('graph-build-error', {
+        safeSend(event.sender, 'graph-build-error', {
           wikiId,
           error: '未配置图谱构建模型：请先到「系统设置 → 图谱」中选择用于构建知识图谱的大模型。'
         })
@@ -119,18 +120,18 @@ export function registerGraphIpc(): void {
         const result = await graphService.buildGraph(
           wikiId,
           (progress) => {
-            event.sender.send('graph-build-progress', progress)
+            safeSend(event.sender, 'graph-build-progress', progress)
           },
           mergedConfig
         )
-        event.sender.send('graph-build-complete', {
+        safeSend(event.sender, 'graph-build-complete', {
           wikiId,
           entityCount: result.entities.length,
           relationCount: result.relations.length
         })
       } catch (error) {
         logger.error('Error in graph-build-start:', error)
-        event.sender.send('graph-build-error', {
+        safeSend(event.sender, 'graph-build-error', {
           wikiId,
           error: error instanceof Error ? error.message : String(error)
         })
@@ -159,7 +160,7 @@ export function registerGraphIpc(): void {
       model = await getProviderService().createModel(defaultModelId)
     } catch (error) {
       logger.error('Error in graph-docs-append (model):', error)
-      event.sender.send('graph-build-error', {
+      safeSend(event.sender, 'graph-build-error', {
         wikiId,
         error: '未配置图谱构建模型：请先到「系统设置 → 图谱」中选择用于构建知识图谱的大模型。'
       })
@@ -168,9 +169,9 @@ export function registerGraphIpc(): void {
     const graphService = new KnowledgeGraphService(model)
     try {
       const result = await graphService.appendDocs(wikiId, docIds, (progress) => {
-        event.sender.send('graph-build-progress', progress)
+        safeSend(event.sender, 'graph-build-progress', progress)
       })
-      event.sender.send('graph-build-complete', {
+      safeSend(event.sender, 'graph-build-complete', {
         wikiId,
         entityCount: result.entitiesAdded,
         relationCount: result.relationsAdded
@@ -178,7 +179,7 @@ export function registerGraphIpc(): void {
       return result
     } catch (error) {
       logger.error('Error in graph-docs-append:', error)
-      event.sender.send('graph-build-error', {
+      safeSend(event.sender, 'graph-build-error', {
         wikiId,
         error: error instanceof Error ? error.message : String(error)
       })

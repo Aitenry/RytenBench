@@ -1,6 +1,7 @@
 import { ipcMain } from 'electron'
 import logger from 'electron-log'
 import { fetchWeatherApi } from 'openmeteo'
+import { safeSend } from './safe-send'
 import { settingsStore } from './context'
 import { getMainWindow } from './windows/window-manager'
 import { getIp } from './address'
@@ -90,7 +91,7 @@ export function startWeatherAutoRefresh(): void {
   const cached = settingsStore.get('weatherData') as Record<string, unknown> | undefined
   const mainWindow = getMainWindow()
   if (cached && mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('weather-update', cached)
+    safeSend(mainWindow.webContents, 'weather-update', cached)
   }
 
   const doFetch = async (): Promise<void> => {
@@ -98,7 +99,7 @@ export function startWeatherAutoRefresh(): void {
       const data = await fetchWeatherData(lat, lon, city)
       const win = getMainWindow()
       if (win && !win.isDestroyed()) {
-        win.webContents.send('weather-update', data)
+        safeSend(win.webContents, 'weather-update', data)
       }
     } catch (err) {
       logger.error('Weather auto-refresh failed:', err)

@@ -6,13 +6,19 @@ import type { SubAgentConfig } from '../types'
 import { buildAgentGraph, buildGraphInput, MAX_TOOL_CALLS, type QueueRef } from './agent'
 import { buildFsTools } from './fs-backend'
 import { buildTodoTools, todoStore } from './todo'
+import { buildGoalTools, goalStore } from './goal'
+import { buildJobTools, jobsRegistry } from './jobs'
+import { buildAskUserTool } from './ask'
+import { buildSubagentControlTools, subagentSessions } from './subagent-sessions'
+import { buildWorkflowTool } from './workflow'
 import { buildSkillsPromptSection, loadSkills } from './skills'
 import { buildSubAgentTools as buildSubAgentToolsFromRegistry } from '../tools/builders'
 import { createTaskTool } from './subagent'
 import { RecordQueue, startGraphStream, invokeGraph, type GraphRunOptions } from './graph'
+import { SpillStore } from './spill'
 import type { MnemonComponent } from './mnemon'
 import type { RuntimeStream } from './types'
-import type { MemoryInjection } from '../types'
+import type { MemoryInjection, TurnMeta } from '../types'
 
 /**
  * AgentRuntime — 声明式组件组装入口（对应论文 §5.2 声明式配置 + 协调）
@@ -59,7 +65,10 @@ export class Runtime {
   private readonly opts: AgentRuntimeOptions
   private readonly fsTools: StructuredToolInterface[]
   private readonly queueRef: QueueRef = {}
+  /** 溢出存储引用：stream/invoke 时按 topicId 创建（子代理图通过引用共享同一次请求的实例） */
+  private readonly spillRef: { current?: SpillStore } = {}
   private readonly taskTool?: StructuredToolInterface
+  private readonly workflowTool: StructuredToolInterface
   private readonly systemPrompt: string
   private readonly mnemon?: MnemonComponent
   /** 图递归上限：远宽于 MAX_TOOL_CALLS 护栏（每轮约 2 个节点步 + 收尾余量），
@@ -84,6 +93,7 @@ export class Runtime {
         workspaceId: opts.workspaceId,
         buildTools: (sa) => this.buildSubAgentTools(sa),
         queue: this.queueRef,
+        spillRef: this.spillRef,
         recursionLimit: this.recursionLimit,
         // 子代理专属记忆根（<memoryPath>/workspace-<wsId>/ 下 sub-agents/<name>/memories/AGENTS.md）
         memoryPath: opts.memoryPath,
@@ -92,17 +102,34 @@ export class Runtime {
       })
     }
 
+    // 工作流工具：脚本编排多代理 fan-out（子代理 = 业务工具 + 文件工具，防递归嵌套）
+    this.workflowTool = buildWorkflowTool({
+      mainModel: opts.model,
+      resolveModel: (spec) => this.resolveSubAgentModel(spec),
+      buildAgentTools: () => [...this.opts.tools, ...this.fsTools],
+      recursionLimit: this.recursionLimit,
+      spillRef: this.spillRef
+    })
+
     logger.info(
       `[Runtime] initialized (recursionLimit=${this.recursionLimit}, maxToolCalls=${MAX_TOOL_CALLS}, fsTools=${this.fsTools.length}, subAgents=${opts.subAgents.length}, taskTool=${this.taskTool ? 'yes' : 'no'}, mnemon=${this.mnemon ? `yes(${this.mnemon.tools.length} tools)` : 'no'}, workspacePath=${opts.workspacePath ?? 'disabled'}, memoryPath=${opts.memoryPath ?? 'disabled'}, skillsPath=${opts.skillsPath ?? 'disabled'})`
     )
   }
 
-  /** 组装主代理工具集（业务工具 + 文件工具 + 待办 + Mnemon + task） */
+  /**
+   * 组装主代理工具集
+   * （业务工具 + 文件工具 + 待办 + 目标 + 后台任务 + 提问 + 子代理续接控制 + 工作流 + Mnemon + task）
+   */
   private buildAllTools(topicId: number): StructuredToolInterface[] {
     return [
       ...this.opts.tools,
       ...this.fsTools,
       ...buildTodoTools(todoStore, topicId),
+      ...buildGoalTools(goalStore, topicId),
+      ...buildJobTools(jobsRegistry, topicId),
+      buildAskUserTool(topicId),
+      ...buildSubagentControlTools(subagentSessions, topicId),
+      this.workflowTool,
       ...(this.mnemon ? this.mnemon.tools : []),
       ...(this.taskTool ? [this.taskTool] : [])
     ]
@@ -173,10 +200,24 @@ ${list}
   }
 
   /** 图执行配置（递归上限触顶时由 graph 层优雅收尾，不再报错） */
-  private graphOptions(signal?: AbortSignal): GraphRunOptions {
+  private graphOptions(signal?: AbortSignal, turnMeta?: TurnMeta, topicId = 0): GraphRunOptions {
     return {
       recursionLimit: this.recursionLimit,
-      signal
+      signal,
+      // 本轮来源与话题归属：工具层经 config.configurable 读取
+      //（目标工具 authority 校验、后台任务的 owner 隔离）
+      configurable: {
+        topicId,
+        turnSource: turnMeta?.source ?? 'user',
+        goalRound:
+          turnMeta?.source === 'goal-round'
+            ? {
+                goalId: turnMeta.goalId,
+                revision: turnMeta.goalRevision,
+                round: turnMeta.goalRound
+              }
+            : undefined
+      }
     }
   }
 
@@ -207,29 +248,53 @@ ${list}
    * 清单跨请求/跨轮次保留（进程级单例），模型可在后续轮次继续维护；
    * 取消/结束时仅关闭记录队列，不清空清单（中断的任务可继续追问）。
    */
-  stream(messages: BaseMessage[], signal?: AbortSignal, topicId = 0): RuntimeStream {
+  stream(
+    messages: BaseMessage[],
+    signal?: AbortSignal,
+    topicId = 0,
+    turnMeta?: TurnMeta
+  ): RuntimeStream {
     const queue = new RecordQueue()
     this.queueRef.current = queue
+    // 按话题创建溢出存储（工作区 .spill 优先，其次记忆目录；均无则禁用溢出）
+    this.spillRef.current = new SpillStore(this.opts.workspacePath, this.opts.memoryPath, topicId)
     const graph = buildAgentGraph({
       model: this.opts.model,
       tools: this.buildAllTools(topicId),
       systemPrompt: this.systemPrompt,
-      queue: this.queueRef
+      queue: this.queueRef,
+      spill: this.spillRef.current
     })
-    return startGraphStream(graph, buildGraphInput(messages), this.graphOptions(signal), queue)
+    return startGraphStream(
+      graph,
+      buildGraphInput(messages),
+      this.graphOptions(signal, turnMeta, topicId),
+      queue
+    )
   }
 
   /**
    * 非流式执行：返回最终消息列表。
    */
-  async invoke(messages: BaseMessage[], signal?: AbortSignal, topicId = 0): Promise<BaseMessage[]> {
+  async invoke(
+    messages: BaseMessage[],
+    signal?: AbortSignal,
+    topicId = 0,
+    turnMeta?: TurnMeta
+  ): Promise<BaseMessage[]> {
     this.queueRef.current = undefined
+    this.spillRef.current = new SpillStore(this.opts.workspacePath, this.opts.memoryPath, topicId)
     const graph = buildAgentGraph({
       model: this.opts.model,
       tools: this.buildAllTools(topicId),
       systemPrompt: this.systemPrompt,
-      queue: this.queueRef
+      queue: this.queueRef,
+      spill: this.spillRef.current
     })
-    return await invokeGraph(graph, buildGraphInput(messages), this.graphOptions(signal))
+    return await invokeGraph(
+      graph,
+      buildGraphInput(messages),
+      this.graphOptions(signal, turnMeta, topicId)
+    )
   }
 }

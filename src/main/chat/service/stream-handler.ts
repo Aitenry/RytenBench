@@ -52,7 +52,12 @@ export async function* runStream(
     if (contextMessages.length > 0) {
       logger.info(`[Chat] Context roles: ${contextMessages.map((m) => m._getType()).join(' → ')}`)
     }
-    const run = runtime.stream([...contextMessages, userMessage], signal, options?.topicId)
+    const run = runtime.stream(
+      [...contextMessages, userMessage],
+      signal,
+      options?.topicId,
+      options?.turnMeta
+    )
 
     // 使用队列实现消息和工具调用的并发流式输出
     const queue: StructuredMessage[] = []

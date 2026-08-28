@@ -9,6 +9,8 @@ import * as path from 'path'
 import type { SubAgentRecord } from './types'
 import { buildAgentGraph, pushMessageRecords, type QueueRef, type StreamMessageLike } from './agent'
 import { buildSkillsPromptSection, loadSkills } from './skills'
+import type { SpillStore } from './spill'
+import { subagentSessions } from './subagent-sessions'
 import type { SubAgentConfig } from '../types'
 
 /**
@@ -37,6 +39,8 @@ export interface SubAgentRuntimeContext {
   buildTools: (subAgent: SubAgentConfig) => StructuredToolInterface[]
   /** 记录队列引用（流式时注入） */
   queue: QueueRef
+  /** 溢出存储引用（与主图共享同一次请求的实例；子代理工具输出同样走溢出策略） */
+  spillRef?: { current?: SpillStore }
   /** 子代理图递归上限（由主运行时工程常量推导） */
   recursionLimit: number
   /** 子代理记忆存储根（<memoryPath>/workspace-<wsId>/，其下 sub-agents/<name>/memories/AGENTS.md） */
@@ -119,14 +123,36 @@ export function createTaskTool(ctx: SubAgentRuntimeContext): StructuredToolInter
   const taskSchema = z.object({
     subagent_type: z.string().describe(`要委托的子智能体类型名称。${availableNames}`),
     description: z.string().optional().describe('任务的简短描述（展示用）'),
-    prompt: z.string().describe('要交给子智能体的完整任务指令')
+    prompt: z.string().describe('要交给子智能体的完整任务指令'),
+    background: z
+      .boolean()
+      .optional()
+      .describe(
+        '为 true 时在后台执行：立即返回 job_id，用 job_output(job_id, wait=true) 轮询结果、job_list 查看任务、job_kill 终止。适合耗时较长的任务。'
+      )
   })
 
   return tool(
-    async ({ subagent_type, description, prompt }, config) => {
+    async ({ subagent_type, description, prompt, background }, config) => {
       const sa = ctx.subAgents.find((s) => s.name === subagent_type)
       if (!sa) {
         return `子智能体 "${subagent_type}" 不存在。可用子智能体：${ctx.subAgents.map((s) => s.name).join(', ') || '（无）'}`
+      }
+
+      // 后台模式：启动可续接的子代理会话（send_message/list_agents/interrupt_agent 续接），
+      // 会话运行同时注册为同名后台任务（job_output/job_kill 监控）
+      if (background) {
+        const configurable = (config?.configurable ?? {}) as Record<string, unknown>
+        const topicId = typeof configurable.topicId === 'number' ? configurable.topicId : 0
+        const row = subagentSessions.start(topicId, sa, prompt, {
+          mainModel: ctx.mainModel,
+          resolveModel: ctx.resolveModel,
+          buildTools: ctx.buildTools,
+          recursionLimit: ctx.recursionLimit,
+          spillRef: ctx.spillRef,
+          extendSystemPrompt: (s) => buildSubAgentSystemPrompt(ctx, s)
+        })
+        return `已启动后台子智能体会话（subagent_id=${row.id}）：${row.label}。会话在后台继续执行，用 job_output(job_id="${row.id}", wait=true) 读取当前轮输出；send_message(subagent_id="${row.id}", message=...) 让它继续下一轮工作；interrupt_agent(agent_id="${row.id}") 中断当前轮；list_agents 查看全部会话状态。`
       }
 
       const causeId =
@@ -153,6 +179,7 @@ export function createTaskTool(ctx: SubAgentRuntimeContext): StructuredToolInter
           tools,
           systemPrompt,
           queue,
+          spill: ctx.spillRef?.current,
           subagentCtx: { name: sa.name, causeId }
         })
 

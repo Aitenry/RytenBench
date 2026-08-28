@@ -5,6 +5,20 @@ export interface ChatOptions {
   topicId?: number
   /** 用于取消流式输出的 AbortSignal */
   signal?: AbortSignal
+  /** 本轮来源元信息（目标系统 authority 校验用；用户消息为空缺省，自动续跑轮由驱动器注入） */
+  turnMeta?: TurnMeta
+}
+
+/** 本轮来源元信息（经图 configurable 注入工具层，供目标工具做执行期权限校验） */
+export interface TurnMeta {
+  /** 来源：user=用户直接发起的轮次（缺省）；goal-round=目标自动续跑轮 */
+  source?: 'user' | 'goal-round'
+  /** goal-round 时携带的目标身份（精确匹配当前目标轮才有 complete/blocked 权威） */
+  goalId?: string
+  goalRevision?: number
+  goalRound?: number
+  /** goal-round 时的目标描述（前端横幅展示用） */
+  objective?: string
 }
 
 export interface ChatMessage {
@@ -57,6 +71,8 @@ export interface StructuredMessage {
 /** IPC 发送的流式 chunk（StructuredMessage + 主进程注入的 topicId） */
 export interface StreamChunk extends StructuredMessage {
   __topicId?: number
+  /** 目标自动续跑轮的起始标记（流首 chunk；前端据此挂载新的用户消息与助手占位） */
+  goalRound?: { round: number; objective: string }
 }
 
 /** 智能体定义 */

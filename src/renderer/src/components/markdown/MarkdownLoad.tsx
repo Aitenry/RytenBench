@@ -105,6 +105,12 @@ const MarkdownLoad = React.memo(
     .markdown-body blockquote { border-left: 4px solid; padding-left: 1em; margin: 1em 0; font-style: italic; }
     .markdown-body table { width: 100%; border-collapse: collapse; margin: 1em 0; }
     .markdown-body th, .markdown-body td { padding: 0.75em; border: 1px solid; text-align: left; }
+    /* 防横向溢出：根容器兜底断词；内联代码（如 Nav/Footer/... 含斜杠长串）在超宽时断行，
+       代码块（pre code）保持原样不换行（pre 自带 overflow-x） */
+    .markdown-body { overflow-wrap: break-word; }
+    .markdown-body a { overflow-wrap: anywhere; }
+    .markdown-body code { overflow-wrap: anywhere; }
+    .markdown-body pre code { overflow-wrap: normal; white-space: pre; }
     .markdown-body code {
       background: ${isDarkMode ? '#374151' : '#f3f4f6'};
       color: ${isDarkMode ? '#e5e7eb' : '#374151'};

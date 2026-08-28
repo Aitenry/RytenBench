@@ -7,6 +7,7 @@ import * as path from 'path'
 import { ChatOptions, StructuredMessage, SubAgentConfig } from '../types'
 import { Runtime } from '../runtime/runtime'
 import { getMnemonComponent } from '../mnemon-singleton'
+import { summarizeDialogues, compactionCache } from '../runtime/compaction'
 import type { HistoryDialogue, LoadHistoryFn } from './history'
 import { extractStructuredMessages, convertDialoguesToMessages } from './history'
 import { buildHumanMessage } from './message-builder'
@@ -152,7 +153,13 @@ class ChatService {
         return []
       }
 
-      const messages = convertDialoguesToMessages(historyDialogues)
+      const messages = await convertDialoguesToMessages(historyDialogues, {
+        // 摘要压缩：压力达标时把最老对话压缩为 checkpoint（增量缓存），失败回退字符截断
+        summarizer: (transcript, priorSummary) =>
+          summarizeDialogues(this.model, transcript, priorSummary),
+        cache: compactionCache,
+        topicId
+      })
       logger.info(`[Chat] Loaded ${messages.messages.length} history messages for topic ${topicId}`)
       return messages.messages
     } catch (err) {
@@ -183,7 +190,8 @@ class ChatService {
       const resultMessages = await runtime.invoke(
         [...contextMessages, userMessage],
         options?.signal,
-        options?.topicId
+        options?.topicId,
+        options?.turnMeta
       )
 
       const structured = extractStructuredMessages(resultMessages)

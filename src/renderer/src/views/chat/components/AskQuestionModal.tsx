@@ -1,0 +1,174 @@
+import React, { useState, useEffect, useRef } from 'react'
+import { Modal, Radio, Checkbox, Input, theme } from 'antd'
+import { RiQuestionAnswerLine } from '@remixicon/react'
+import { Window } from '../../../../resource/types/window'
+import type { PendingQuestionView } from '../../../../../main/chat/runtime/ask'
+
+/**
+ * 提问弹窗（ask_user_question）— 模型执行 ask_user_question 工具时挂起等待，
+ * 主进程广播 chat-question-asked；本组件弹出表单收集答案并回写，流在原轮内继续。
+ *
+ * - 只响应当前话题的提问（topicId 匹配）；
+ * - 单选（Radio）/ 多选（Checkbox）/ 自由文本（Input → custom）；
+ * - 无跳过按钮（DSH 语义：无超时、必须回答）；用户点「停止生成」中止整条流，
+ *   挂起提问随之取消（主进程 questionService.abortAll），本组件在 done/error 时收起；
+ * - 提交 → api.chat.answerQuestion(requestId, answers) → 主进程回写 → 模型继续。
+ */
+
+interface AnswerDraft {
+  selected: string[]
+  custom?: string
+}
+
+const AskQuestionModal: React.FC<{ currentTopicId: number | null }> = ({ currentTopicId }) => {
+  const { token } = theme.useToken()
+
+  const [pending, setPending] = useState<PendingQuestionView | null>(null)
+  const [drafts, setDrafts] = useState<Record<string, AnswerDraft>>({})
+  const [submitting, setSubmitting] = useState(false)
+
+  const currentTopicIdRef = useRef(currentTopicId)
+  currentTopicIdRef.current = currentTopicId
+
+  useEffect(() => {
+    const unsubscribe = (window as unknown as Window).api.chat.onQuestionAsked((p) => {
+      if (p.topicId === currentTopicIdRef.current) {
+        setPending(p)
+        setDrafts({})
+      }
+    })
+    return unsubscribe
+  }, [])
+
+  // 流结束/出错 → 收起弹窗（提问已取消或已无意义）
+  useEffect(() => {
+    const close = (): void => setPending(null)
+    const unDone = (window as unknown as Window).api.chat.onStreamDone(close)
+    const unErr = (window as unknown as Window).api.chat.onStreamError(close)
+    return () => {
+      unDone()
+      unErr()
+    }
+  }, [])
+
+  const updateDraft = (id: string, patch: Partial<AnswerDraft>): void => {
+    setDrafts((prev) => ({
+      ...prev,
+      [id]: { selected: prev[id]?.selected ?? [], custom: prev[id]?.custom, ...patch }
+    }))
+  }
+
+  const canSubmit = (): boolean => {
+    if (!pending) return false
+    return pending.questions.every((q) => {
+      const d = drafts[q.id]
+      const hasSelection = (d?.selected.length ?? 0) > 0
+      const hasCustom = Boolean(d?.custom && d.custom.trim())
+      return hasSelection || hasCustom
+    })
+  }
+
+  const handleSubmit = async (): Promise<void> => {
+    if (!pending || submitting) return
+    setSubmitting(true)
+    try {
+      const answers = pending.questions.map((q) => ({
+        id: q.id,
+        selected: drafts[q.id]?.selected ?? [],
+        custom: drafts[q.id]?.custom?.trim() || undefined
+      }))
+      await (window as unknown as Window).api.chat.answerQuestion(pending.requestId, answers)
+      setPending(null)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  if (!pending) return null
+
+  return (
+    <Modal
+      open
+      title={
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+          <RiQuestionAnswerLine size={16} style={{ color: token.colorPrimary }} />
+          需要你的确认
+        </span>
+      }
+      closable={false}
+      maskClosable={false}
+      okText="提交回答"
+      cancelButtonProps={{ style: { display: 'none' } }}
+      okButtonProps={{ disabled: !canSubmit(), loading: submitting }}
+      onOk={() => void handleSubmit()}
+      width={520}
+      styles={{ body: { maxHeight: 'calc(100vh - 260px)', overflowY: 'auto' } }}
+    >
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 18, paddingTop: 4 }}>
+        {pending.questions.map((q, qi) => {
+          const draft = drafts[q.id]
+          return (
+            <div key={q.id}>
+              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
+                {q.header && <span style={{ color: token.colorTextSecondary }}>{q.header} · </span>}
+                {qi + 1}. {q.question}
+              </div>
+              {q.options && q.options.length > 0 ? (
+                q.multi_select ? (
+                  <Checkbox.Group
+                    value={draft?.selected ?? []}
+                    onChange={(values) => updateDraft(q.id, { selected: values as string[] })}
+                    style={{ display: 'flex', flexDirection: 'column', gap: 6 }}
+                  >
+                    {q.options.map((opt, oi) => (
+                      <Checkbox key={oi} value={opt.label}>
+                        <span style={{ fontSize: 13 }}>{opt.label}</span>
+                        {opt.description && (
+                          <span style={{ fontSize: 12, color: token.colorTextTertiary }}>
+                            {' '}
+                            — {opt.description}
+                          </span>
+                        )}
+                      </Checkbox>
+                    ))}
+                  </Checkbox.Group>
+                ) : (
+                  <Radio.Group
+                    value={draft?.selected?.[0]}
+                    onChange={(e) => updateDraft(q.id, { selected: [e.target.value as string] })}
+                    style={{ display: 'flex', flexDirection: 'column', gap: 6 }}
+                  >
+                    {q.options.map((opt, oi) => (
+                      <Radio key={oi} value={opt.label}>
+                        <span style={{ fontSize: 13 }}>{opt.label}</span>
+                        {opt.description && (
+                          <span style={{ fontSize: 12, color: token.colorTextTertiary }}>
+                            {' '}
+                            — {opt.description}
+                          </span>
+                        )}
+                      </Radio>
+                    ))}
+                  </Radio.Group>
+                )
+              ) : (
+                <Input.TextArea
+                  autoSize={{ minRows: 2, maxRows: 4 }}
+                  placeholder="输入你的回答…"
+                  value={draft?.custom ?? ''}
+                  onChange={(e) => updateDraft(q.id, { custom: e.target.value })}
+                />
+              )}
+              {!q.options && draft?.selected?.[0] && null}
+            </div>
+          )
+        })}
+        <div style={{ fontSize: 11, color: token.colorTextTertiary }}>
+          提交后模型将在本轮对话中继续执行；点「停止生成」可取消提问并中止本轮。
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+export default AskQuestionModal

@@ -121,6 +121,8 @@ export interface GraphRunOptions {
   /** 递归上限（工程常量，远宽于工具护栏；触顶时优雅收尾） */
   recursionLimit: number
   signal?: AbortSignal
+  /** 透传给工具节点的 configurable（如 turnSource / goalRound，供执行期权限校验） */
+  configurable?: Record<string, unknown>
 }
 
 /** 工具调用轮次耗尽时的收尾提示（推送为文本记录，而非让整条流报错） */
@@ -173,7 +175,8 @@ export function startGraphStream(
       const stream = await graph.stream(input, {
         streamMode: ['messages'] as const,
         recursionLimit: options.recursionLimit,
-        signal: options.signal
+        signal: options.signal,
+        configurable: options.configurable
       })
       for await (const item of stream) {
         const [mode, payload] = item as readonly [string, [StreamMessageLike, unknown]]
@@ -186,7 +189,7 @@ export function startGraphStream(
       queue.close()
     } catch (err) {
       if (options.signal?.aborted) {
-        logger.info('[Graph] 流已被用户取消')
+        logger.info('[Graph] 流已中止（用户取消或渲染进程失效）')
         queue.close()
         return
       }
@@ -219,7 +222,8 @@ export async function invokeGraph(
   try {
     const result = await graph.invoke(input, {
       recursionLimit: options.recursionLimit,
-      signal: options.signal
+      signal: options.signal,
+      configurable: options.configurable
     })
     const state = result as { messages?: BaseMessage[] }
     return state.messages ?? []

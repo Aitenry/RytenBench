@@ -781,6 +781,59 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
     [applyChunkToMessages, syncLoadingTopics]
   )
 
+  // ── 目标自动续跑轮监听（常驻，不随普通轮的 done 清理）──
+  // 目标轮次驱动器在主进程发起新轮时先下发 goalRound 标记 chunk：
+  // 挂载「自动续跑」用户消息 + 助手占位，并为本轮注册流监听（普通用户轮由 handleSend 挂载）。
+  useEffect(() => {
+    const cleanup = (window as unknown as Window).api.chat.onStreamChunk(
+      (chunk: StreamChunk) => {
+        if (!chunk.goalRound) return
+        const topicId = chunk.__topicId ?? 0
+        if (!topicId) return
+        const { round, objective } = chunk.goalRound
+
+        const userMessage: Message = {
+          id: `goal-user-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          role: 'user',
+          content: objective,
+          blocks: [{ type: 'goalRound', round }],
+          timestamp: Date.now()
+        }
+        const aiMessageId = `goal-ai-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+        const initialAiMessage: Message = {
+          id: aiMessageId,
+          role: 'assistant',
+          content: '',
+          blocks: [],
+          timestamp: Date.now(),
+          toolCalls: [],
+          loading: true
+        }
+
+        // 标记加载状态（停止按钮可用、侧边栏转圈）
+        isLoadingMapRef.current.set(topicId, true)
+        syncLoadingTopics()
+        if (currentTopicIdRef.current === topicId) {
+          setIsLoading(true)
+          setMessages((prev) => [...prev, userMessage, initialAiMessage])
+        }
+
+        // 更新会话缓存并启动本轮监听（后续 chunk 由本轮监听器处理）
+        const session = sessionsRef.current.get(topicId)
+        const base = session?.messages ?? []
+        sessionsRef.current.set(topicId, {
+          messages: [...base, userMessage, initialAiMessage],
+          inputValue: session?.inputValue ?? '',
+          attachments: session?.attachments ?? [],
+          sessionId: aiMessageId
+        })
+        currentSessionIdRef.current = aiMessageId
+        startStreamListener(topicId, aiMessageId)
+      }
+    )
+    return cleanup
+  }, [startStreamListener, syncLoadingTopics])
+
   // ── Handlers ──
 
   const handleNewChat = useCallback((): void => {

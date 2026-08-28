@@ -7,6 +7,16 @@ import {
 } from '@langchain/core/messages'
 import logger from 'electron-log'
 import type { StructuredMessage, ToolCallDetail } from '../types'
+import {
+  pruneToolOutput,
+  buildCheckpointMessage,
+  buildTranscript,
+  compactionError,
+  PRESSURE_RATIO,
+  RETAIN_RATIO,
+  type CompactionCache,
+  type SummarizerFn
+} from '../runtime/compaction'
 
 /** 数据库中的对话记录（精简版，避免循环依赖） */
 export interface HistoryDialogue {
@@ -95,32 +105,68 @@ export const HISTORY_MAX_CHARS = 24000
 /** 历史上下文转换结果 */
 export interface HistoryContext {
   messages: BaseMessage[]
-  /** 是否发生了截断（更早的对话被省略） */
+  /** 是否发生了截断（更早的对话被省略；摘要压缩可用时不再发生） */
   truncated: boolean
+  /** 是否发生了摘要压缩（早期对话被压缩为 checkpoint 摘要） */
+  compacted?: boolean
+}
+
+/** 历史转换选项（摘要压缩可选开启） */
+export interface HistoryConvertOptions {
+  /** 字符预算（默认 HISTORY_MAX_CHARS） */
+  maxChars?: number
+  /** 摘要回调：由 ChatService 用当前模型注入；缺省时超预算回退为字符截断 */
+  summarizer?: SummarizerFn
+  /** 摘要缓存（进程级单例，按 topicId 增量合并） */
+  cache?: CompactionCache
+  /** 话题 ID（缓存键） */
+  topicId?: number
+}
+
+/** 单条对话的字符成本（正文 + blocks） */
+function dialogueChars(d: HistoryDialogue): number {
+  return d.content.length + (d.blocks ? d.blocks.length : 0)
 }
 
 /**
  * 将数据库中的对话记录转换为 LangChain BaseMessage 数组。
- * 上下文压缩策略：从最近一条向前累计字符数，超过预算即停止（自动省略更早内容）；
- * 发生截断时在消息头部插入 SystemMessage 说明，避免模型困惑于缺失的历史。
+ *
+ * 上下文压缩策略（参考 dsh-compaction-basic 的阈值/保留机制）：
+ * 1. 字符总量 ≥ 预算 × PRESSURE_RATIO 且提供了摘要器时：把最老一段对话用一次
+ *    LLM 调用压缩为 checkpoint 摘要（增量缓存合并），最近 RETAIN_RATIO 段保持原样；
+ * 2. 无摘要器或摘要失败：回退为原有字符预算截断（省略更早对话 + 头部说明）；
+ * 3. 工具结果统一经智能裁剪（pruneToolOutput），原始内容保留在数据库中可精确回放。
  */
-export function convertDialoguesToMessages(
+export async function convertDialoguesToMessages(
   dialogues: HistoryDialogue[],
-  maxChars: number = HISTORY_MAX_CHARS
-): HistoryContext {
-  // 从后往前选取最近的对话，直到累计字符数超过预算（至少保留最后一条）
+  options?: HistoryConvertOptions
+): Promise<HistoryContext> {
+  const maxChars = options?.maxChars ?? HISTORY_MAX_CHARS
+  const totalChars = dialogues.reduce((sum, d) => sum + dialogueChars(d), 0)
+
+  // 摘要压缩路径：压力达标且有摘要器
+  if (options?.summarizer && options.topicId != null && totalChars >= maxChars * PRESSURE_RATIO) {
+    try {
+      const result = await compactWithSummarizer(dialogues, maxChars, options)
+      if (result) return result
+    } catch (err) {
+      compactionError(err)
+      options.cache?.clear(options.topicId)
+    }
+  }
+
+  // 回退路径：从后往前选取最近的对话，直到累计字符数超过预算（至少保留最后一条）
   const selected: HistoryDialogue[] = []
-  let totalChars = 0
+  let total = 0
   let truncated = false
   for (let i = dialogues.length - 1; i >= 0; i--) {
     const d = dialogues[i]
-    const chars = d.content.length + (d.blocks ? d.blocks.length : 0)
-    if (totalChars + chars > maxChars && selected.length > 0) {
+    if (total + dialogueChars(d) > maxChars && selected.length > 0) {
       truncated = true
       break
     }
     selected.unshift(d)
-    totalChars += chars
+    total += dialogueChars(d)
   }
 
   const messages: BaseMessage[] = []
@@ -132,6 +178,54 @@ export function convertDialoguesToMessages(
     )
   }
 
+  appendDialogueMessages(messages, selected)
+  return { messages, truncated }
+}
+
+/**
+ * 摘要压缩编排：切分最老段 → （增量合并）LLM 摘要 → checkpoint 置于消息头。
+ * 返回 null 表示无需要压缩的最老段（由调用方回退常规路径）。
+ */
+async function compactWithSummarizer(
+  dialogues: HistoryDialogue[],
+  maxChars: number,
+  options: HistoryConvertOptions
+): Promise<HistoryContext | null> {
+  // 最近段：从尾部向前累计至保留预算（至少保留最后一条）
+  const retainBudget = Math.max(1, Math.floor(maxChars * RETAIN_RATIO))
+  let retainStart = dialogues.length
+  let retainChars = 0
+  for (let i = dialogues.length - 1; i >= 0; i--) {
+    retainChars += dialogueChars(dialogues[i])
+    retainStart = i
+    if (retainChars >= retainBudget) break
+  }
+  const old = dialogues.slice(0, retainStart)
+  const recent = dialogues.slice(retainStart)
+  if (old.length === 0) return null
+
+  // 增量合并：缓存边界之前的已摘要，只把新增的早期对话并入既有摘要
+  const prior = options.cache?.get(options.topicId!)
+  const lastOldId = old[old.length - 1].id
+  let summary: string
+  if (prior && prior.boundaryId < lastOldId) {
+    const newlyOld = old.filter((d) => d.id > prior.boundaryId)
+    summary = await options.summarizer!(buildTranscript(newlyOld), prior.summary)
+  } else {
+    summary = await options.summarizer!(buildTranscript(old))
+  }
+  options.cache?.set(options.topicId!, { boundaryId: lastOldId, summary })
+
+  const messages: BaseMessage[] = [buildCheckpointMessage(summary)]
+  appendDialogueMessages(messages, recent)
+  logger.info(
+    `[History] 摘要压缩完成 topicId=${options.topicId}（压缩 ${old.length} 条 → checkpoint，保留最近 ${recent.length} 条）`
+  )
+  return { messages, truncated: false, compacted: true }
+}
+
+/** 将选中的对话追加为 LangChain 消息（工具结果经智能裁剪） */
+function appendDialogueMessages(messages: BaseMessage[], selected: HistoryDialogue[]): void {
   for (const d of selected) {
     if (d.role === 'user') {
       messages.push(new HumanMessage(d.content))
@@ -177,10 +271,12 @@ export function convertDialoguesToMessages(
           // 每个工具调用后跟一个 ToolMessage
           for (let ti = 0; ti < toolCalls.length; ti++) {
             const tb = toolBlocks[ti]
+            // 智能裁剪：超长工具结果在回灌时裁剪为 head/中间标记/tail（无模型成本；
+            // 完整内容保留在数据库 blocks 中供精确回放与前端展示）
             const rawOutput = tb.tool!.output
             messages.push(
               new ToolMessage({
-                content: rawOutput,
+                content: pruneToolOutput(rawOutput),
                 tool_call_id: toolCalls[ti].id
               })
             )
@@ -194,6 +290,4 @@ export function convertDialoguesToMessages(
       }
     }
   }
-
-  return { messages, truncated }
 }

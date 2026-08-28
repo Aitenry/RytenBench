@@ -9,6 +9,8 @@ import ChatHeader from './components/ChatHeader'
 import ChatMessageArea from './components/ChatMessageArea'
 import ChatInput from './components/ChatInput'
 import TaskProgressCard from './components/TaskProgressCard'
+import GoalBar from './components/GoalBar'
+import AskQuestionModal from './components/AskQuestionModal'
 import WorkspacePanel from './components/WorkspacePanel'
 
 const Index: React.FC = () => {
@@ -424,6 +426,7 @@ const Index: React.FC = () => {
               <div className="px-16 pb-8">
                 <div className="max-w-4xl mx-auto">
                   <TaskProgressCard currentTopicId={currentTopicId} />
+                  <GoalBar currentTopicId={currentTopicId} />
                   <ChatInput
                     inputValue={inputValue}
                     onInputChange={setInputValue}
@@ -480,6 +483,9 @@ const Index: React.FC = () => {
           </>
         )}
       </div>
+
+      {/* 提问弹窗：ask_user_question 工具挂起时收集用户回答 */}
+      <AskQuestionModal currentTopicId={currentTopicId} />
     </div>
   )
 }

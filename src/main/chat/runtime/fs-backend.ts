@@ -23,10 +23,18 @@ const ACCESS_DENIED_CODES = new Set(['EPERM', 'EACCES'])
 
 /** 单文件读取/搜索结果上限 */
 const MAX_FILE_CHARS = 20_000
+/** read_file 内存保护上限（超大文件截断到 2M 字符，防止把整个文件读进内存/上下文） */
+const MAX_FILE_READ_CHARS = 2_000_000
 /** 命令输出上限 */
 const MAX_EXEC_CHARS = 8_000
 /** 递归搜索条目上限 */
 const MAX_SCAN_ENTRIES = 2_000
+/**
+ * 工具输出硬上限（内存保护；正常业务输出远达不到）。
+ * 12K~500K 区间的超长输出由溢出策略（spill.ts）保存全文并返回预览，
+ * 因此这里不再提前截断到 20K——否则溢出保存的是截断后的内容，失去意义。
+ */
+const MAX_OUTPUT_CHARS = 500_000
 
 interface FsMount {
   /** 虚拟前缀，如 '/' 或 '/memories/' */
@@ -81,12 +89,12 @@ function resolveVirtualPath(
   return { error: `路径 "${vp}" 未挂载到任何虚拟目录` }
 }
 
-/** 工具输出统一格式化（字符串原样；对象 JSON 序列化；超长截断） */
+/** 工具输出统一格式化（字符串原样；对象 JSON 序列化；超硬上限截断，溢出策略负责内联预览） */
 function formatOutput(output: unknown): string {
   if (output == null) return 'OK'
   const text = typeof output === 'string' ? output : JSON.stringify(output)
-  if (text.length > MAX_FILE_CHARS) {
-    return `${text.slice(0, MAX_FILE_CHARS)}\n...（输出过长，已截断，共 ${text.length} 字符）`
+  if (text.length > MAX_OUTPUT_CHARS) {
+    return `${text.slice(0, MAX_OUTPUT_CHARS)}\n...（输出过大，已截断，共 ${text.length} 字符）`
   }
   return text
 }
@@ -147,15 +155,31 @@ export function buildFsTools(options: FsBackendOptions): StructuredToolInterface
 
   const tools: StructuredToolInterface[] = [
     tool(
-      async ({ file_path }) => {
+      async ({ file_path, offset, limit }) => {
         const resolved = resolve(file_path)
         if ('error' in resolved) return resolved.error
         try {
           const stat = fs.statSync(resolved.realPath)
           if (!stat.isFile()) return `路径不是文件: ${file_path}`
-          const content = fs.readFileSync(resolved.realPath, 'utf-8')
+          let content = fs.readFileSync(resolved.realPath, 'utf-8')
+          // 内存保护：超过 2M 字符的文件只保留前 2M 字符
+          const oversized = content.length > MAX_FILE_READ_CHARS
+          if (oversized) {
+            content = content.slice(0, MAX_FILE_READ_CHARS)
+          }
+          // 行区间读取（offset 从 1 开始）：大文件按需读取指定片段
+          if (offset != null || limit != null) {
+            const startLine = Math.max(1, offset ?? 1)
+            const lines = content.split('\n')
+            const endLine = limit != null ? startLine + limit - 1 : lines.length
+            const sliced = lines.slice(startLine - 1, endLine)
+            const lineNote = `（第 ${startLine}-${Math.min(endLine, lines.length)} 行 / 共 ${lines.length} 行${oversized ? '，文件超大仅索引前 2M 字符' : ''}）\n`
+            return lineNote + sliced.join('\n')
+          }
+          // 内联读取上限：超出部分不进入模型上下文（read 工具自有边界，不走溢出策略，
+          // 参考 dsh-spill-policy 的 read 豁免——大文件用 offset/limit 或 grep 按需读取）
           if (content.length > MAX_FILE_CHARS) {
-            return `${content.slice(0, MAX_FILE_CHARS)}\n...（文件过长，已截断，共 ${content.length} 字符）`
+            return `${content.slice(0, MAX_FILE_CHARS)}\n...（文件过长，共 ${content.length.toLocaleString()} 字符，已省略中间内容。可用 offset/limit 参数按行读取任意片段，或用 grep 检索关键字。）`
           }
           return content
         } catch (err) {
@@ -165,9 +189,16 @@ export function buildFsTools(options: FsBackendOptions): StructuredToolInterface
       {
         name: 'read_file',
         description:
-          '读取虚拟文件系统中的文件内容（UTF-8）。路径使用虚拟路径，如 /uploads/report.txt 或 /memories/_global/memories/AGENTS.md',
+          '读取虚拟文件系统中的文件内容（UTF-8）。路径使用虚拟路径，如 /uploads/report.txt 或 /memories/_global/memories/AGENTS.md。大文件超出内联上限时会给出溢出文件定位符，可用 offset/limit 按行读取其中片段，或用 grep 检索。',
         schema: z.object({
-          file_path: z.string().describe('要读取的文件的虚拟路径')
+          file_path: z.string().describe('要读取的文件的虚拟路径'),
+          offset: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe('起始行号（从 1 开始），用于按需读取大文件的片段'),
+          limit: z.number().int().positive().optional().describe('读取的行数，与 offset 配合使用')
         })
       }
     ),

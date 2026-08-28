@@ -8,6 +8,7 @@ import { migrateWorkspaceData } from '../database/workspace-migration'
 import { getDatabaseRef, setDatabaseInstance, setInitializationPromise } from '../database/instance'
 import { initKeystore } from '../crypto/provider-key'
 import { settingsStore } from '../context'
+import { safeSend } from '../safe-send'
 import { GraphSettings, ChatSettings } from '../types/settings'
 import { getIp } from '../address'
 import { preloadChatData } from '../chat/preload-cache'
@@ -22,7 +23,7 @@ function sendInitProgress(
 ): void {
   const loadingWindow = getLoadingWindow()
   if (!loadingWindow) return
-  loadingWindow.webContents.send('init-progress', {
+  safeSend(loadingWindow.webContents, 'init-progress', {
     currentTask,
     progress: Math.round(progress),
     taskIndex,
@@ -185,7 +186,7 @@ export async function createLoadingWindow(): Promise<void> {
       // 加载页定时器可能被后台节流延迟数秒，交接由主进程直接控制）
       const win = getLoadingWindow()
       if (win) {
-        win.webContents.send('init-complete')
+        safeSend(win.webContents, 'init-complete')
       }
       markInitComplete()
     })
@@ -193,7 +194,7 @@ export async function createLoadingWindow(): Promise<void> {
       logger.error('Initialization failed:', err)
       const win = getLoadingWindow()
       if (win) {
-        win.webContents.send('init-error', err.message)
+        safeSend(win.webContents, 'init-error', err.message)
       }
     })
   setInitializationPromise(initPromise)

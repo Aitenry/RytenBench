@@ -2,6 +2,7 @@ import { BrowserWindow, ipcMain } from 'electron'
 import * as fs from 'fs'
 import { join } from 'path'
 import logger from 'electron-log'
+import { safeSend } from '../safe-send'
 import { settingsStore } from '../context'
 import { getProviderService } from '../provider/service'
 import { type FetchedModelInfo, findModelProfile, geminiModelId } from '../provider/model-tags'
@@ -40,7 +41,9 @@ import {
 
 /** 通知所有窗口供应商列表已变更 */
 function broadcastProvidersChanged(): void {
-  BrowserWindow.getAllWindows().forEach((w) => w.webContents.send('providers-changed'))
+  BrowserWindow.getAllWindows().forEach((w) => {
+    if (!w.isDestroyed()) safeSend(w.webContents, 'providers-changed')
+  })
 }
 
 /**

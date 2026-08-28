@@ -8,6 +8,11 @@ import type { LlmProviderInput, LlmProviderConfig } from '../main/database/mappe
 import type { AgentConfigRow, AgentConfigInput } from '../main/database/mapper/agent'
 import type { PaginatedResult as AgentPaginatedResult } from '../main/database/mapper/agent'
 import type { TodoItem } from '../main/chat/runtime/todo'
+import type { GoalView } from '../main/chat/runtime/goal'
+import type { JobSnapshot } from '../main/chat/runtime/jobs'
+import type { PendingQuestionView, AskAnswer } from '../main/chat/runtime/ask'
+
+type AskAnswerItem = AskAnswer['answers'][number]
 import type { SystemSettings } from '../main/types/settings'
 
 interface WeatherData {
@@ -214,6 +219,46 @@ const api = {
         ipcRenderer.removeListener('chat-todos-updated', listener)
       }
     },
+    // 目标系统（goal）
+    getGoal: (topicId: number) => ipcRenderer.invoke('chat-goal-get', topicId),
+    onGoalUpdated: (callback: (data: { topicId: number; goal: GoalView | null }) => void) => {
+      const listener = (
+        _event: Electron.IpcRendererEvent,
+        data: { topicId: number; goal: GoalView | null }
+      ): void => {
+        callback(data)
+      }
+      ipcRenderer.on('chat-goal-updated', listener)
+      return () => {
+        ipcRenderer.removeListener('chat-goal-updated', listener)
+      }
+    },
+    // 后台任务系统（jobs）
+    onJobsUpdated: (callback: (data: { topicId: number; jobs: JobSnapshot[] }) => void) => {
+      const listener = (
+        _event: Electron.IpcRendererEvent,
+        data: { topicId: number; jobs: JobSnapshot[] }
+      ): void => {
+        callback(data)
+      }
+      ipcRenderer.on('chat-jobs-updated', listener)
+      return () => {
+        ipcRenderer.removeListener('chat-jobs-updated', listener)
+      }
+    },
+    // 向用户提问（ask_user_question）
+    onQuestionAsked: (callback: (pending: PendingQuestionView) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, pending: PendingQuestionView): void => {
+        callback(pending)
+      }
+      ipcRenderer.on('chat-question-asked', listener)
+      return () => {
+        ipcRenderer.removeListener('chat-question-asked', listener)
+      }
+    },
+    answerQuestion: (requestId: string, answers: AskAnswerItem[]) =>
+      ipcRenderer.invoke('chat-question-answer', requestId, answers),
+    getQuestion: (topicId: number) => ipcRenderer.invoke('chat-question-get', topicId),
     cancelStream: () => {
       ipcRenderer.send('chat-cancel-stream')
     },

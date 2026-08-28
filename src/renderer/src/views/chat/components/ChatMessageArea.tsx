@@ -156,7 +156,7 @@ const ChatMessageArea: React.FC<ChatMessageAreaProps> = ({
         ref={scrollRef}
         // 底部 pb-20 为悬浮的「回到底部」按钮预留空间：
         // 任务卡（输入框上方）展开压缩消息区高度时，按钮也不会盖住最后一条消息
-        className="flex-1 overflow-y-scroll my-1 mr-1 ml-3 px-16 pt-8 pb-20 chat-scrollbar"
+        className="flex-1 overflow-y-scroll my-1 mr-1 ml-3 px-16 pt-7 chat-scrollbar"
       >
         <div ref={contentRef} className={messages.length === 0 ? 'h-full' : 'max-w-4xl mx-auto'}>
           {messages.length === 0 ? (
@@ -184,6 +184,7 @@ const ChatMessageArea: React.FC<ChatMessageAreaProps> = ({
                     message={message}
                     isDarkMode={isDarkMode}
                     colorText={colorText}
+                    colorTextSecondary={colorTextSecondary}
                     colorBorderSecondary={colorBorderSecondary}
                   />
                 ) : (

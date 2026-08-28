@@ -44,7 +44,15 @@ export interface MemoryInjectionBlock {
 
 /** 消息块 */
 export interface MessageBlock {
-  type: 'text' | 'tool' | 'reasoning' | 'image' | 'document' | 'subAgent' | 'memoryInjected'
+  type:
+    | 'text'
+    | 'tool'
+    | 'reasoning'
+    | 'image'
+    | 'document'
+    | 'subAgent'
+    | 'memoryInjected'
+    | 'goalRound'
   text?: string
   tool?: ToolCall
   reasoning?: string
@@ -53,6 +61,8 @@ export interface MessageBlock {
   subAgent?: SubAgentEvent
   /** 本轮注入的热记忆内容（memoryInjected 类型使用） */
   memory?: MemoryInjectionBlock
+  /** 目标自动续跑轮次号（goalRound 类型使用） */
+  round?: number
   /** 智能体嵌套的子块（仅 subAgent 类型使用，用于流式构建智能体的 text/tool/reasoning） */
   children?: MessageBlock[]
 }

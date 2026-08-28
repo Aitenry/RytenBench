@@ -1,7 +1,14 @@
 import { ipcMain } from 'electron'
 import logger from 'electron-log'
 import { todoStore } from '../chat/runtime/todo'
+import { goalStore } from '../chat/runtime/goal'
+import { jobsRegistry } from '../chat/runtime/jobs'
+import { subagentSessions } from '../chat/runtime/subagent-sessions'
+import { SpillStore } from '../chat/runtime/spill'
+import { compactionCache } from '../chat/runtime/compaction'
+import { settingsStore } from '../context'
 import { clearTopicCache } from '../chat/preload-cache'
+import type { ChatSettings } from '../types/settings'
 import {
   getAllWorkspaces,
   createWorkspace,
@@ -129,6 +136,21 @@ export function registerChatTopicIpc(): void {
       clearTopicCache()
       // 清理该话题的对话计划清单（进程级 todoStore）
       todoStore.clear(id)
+      // 清理该话题的对话目标（goalStore：缓存 + 数据库行）
+      await goalStore.delete(id)
+      // 清理该话题的后台任务（全部 kill）
+      jobsRegistry.clearTopic(id)
+      // 清理该话题的子代理续接会话（全部中断）
+      subagentSessions.clearTopic(id)
+      // 清理该话题的摘要压缩缓存（进程级 compactionCache）
+      compactionCache.clear(id)
+      // 清理该话题的工具结果溢出文件（spill 目录）
+      const chatSettings = settingsStore.get('chat') as ChatSettings | undefined
+      SpillStore.pruneTopic(
+        chatSettings?.workspacePath || undefined,
+        chatSettings?.memoryPath || undefined,
+        id
+      )
       return await deleteTopic(id)
     } catch (error) {
       logger.error('Error in chat-topic-delete:', error)
