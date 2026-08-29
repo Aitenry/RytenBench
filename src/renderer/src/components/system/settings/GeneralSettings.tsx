@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { Switch, Button, Segmented, Modal, Form, Input } from 'antd'
-import { LockOutlined, BgColorsOutlined } from '@ant-design/icons'
+import { LockOutlined, BgColorsOutlined, NotificationOutlined } from '@ant-design/icons'
 import CryptoJS from 'crypto-js'
 import { useMessage } from '@renderer/hooks/useMessage'
 import { useTheme } from '@renderer/contexts/useTheme'
@@ -93,6 +93,24 @@ const GeneralSettings: React.FC = () => {
                 { label: '暗色', value: 'dark' },
                 { label: '自动', value: 'auto' }
               ]}
+            />
+          }
+        />
+      </SettingsSection>
+
+      {/* 系统托盘设置 */}
+      <SettingsSection
+        title="系统托盘"
+        icon={<NotificationOutlined size={14} />}
+        description="关闭窗口时的后台驻留行为"
+      >
+        <SettingRow
+          title="关闭到系统托盘"
+          description="开启后关闭窗口将隐藏到系统托盘继续运行，可随时从托盘图标恢复或退出；关闭后关闭窗口将直接退出应用"
+          control={
+            <Switch
+              checked={settings?.tray?.closeToTray ?? true}
+              onChange={(checked) => updateSettings({ tray: { closeToTray: checked } })}
             />
           }
         />

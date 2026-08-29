@@ -1,4 +1,4 @@
-import { BrowserWindow, ipcMain, screen, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, screen, shell } from 'electron'
 import { join } from 'path'
 import { is } from '@electron-toolkit/utils'
 import icon from '../../../resources/logo.png?asset'
@@ -6,6 +6,8 @@ import logger from 'electron-log'
 import { safeSend } from '../safe-send'
 import { getMainWindow, markMainWindowReady, setMainWindow } from './window-manager'
 import { setupWeather } from '../weather'
+import { isCloseToTrayEnabled, isTrayAvailable, syncTrayState } from '../tray'
+import { isQuittingNow, markQuitting } from '../lifecycle'
 
 export function createMainWindow(): void {
   const win = new BrowserWindow({
@@ -34,6 +36,25 @@ export function createMainWindow(): void {
 
   win.on('closed', () => {
     if (getMainWindow() === win) setMainWindow(null)
+  })
+
+  // 关闭拦截：开启「关闭到系统托盘」时，关闭窗口改为隐藏到托盘（真正退出时放行）
+  win.on('close', (event) => {
+    if (isCloseToTrayEnabled() && isTrayAvailable() && !isQuittingNow()) {
+      event.preventDefault()
+      win.hide()
+    }
+  })
+
+  // 窗口显隐时同步托盘状态（右键菜单文案实时反映）
+  win.on('show', () => syncTrayState())
+  win.on('hide', () => syncTrayState())
+
+  // 系统关机/注销（Windows）：窗口事件（Electron 43 中 session-end 为窗口事件而非 app 事件）。
+  // 托盘驻留时窗口不会关闭，若不放行，Windows 只能强杀进程，可能丢失未落盘数据。
+  win.on('session-end', () => {
+    markQuitting()
+    app.quit()
   })
 
   // 渲染进程退出诊断：记录原因（崩溃/OOM/被杀/正常退出），便于排查「运行运行突然白屏」

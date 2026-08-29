@@ -9,7 +9,7 @@ import { getDatabaseRef, setDatabaseInstance, setInitializationPromise } from '.
 import { initKeystore } from '../crypto/provider-key'
 import { settingsStore } from '../context'
 import { safeSend } from '../safe-send'
-import { GraphSettings, ChatSettings } from '../types/settings'
+import { GraphSettings, ChatSettings, TraySettings } from '../types/settings'
 import { getIp } from '../address'
 import { preloadChatData } from '../chat/preload-cache'
 import { getLoadingWindow, markInitComplete, setLoadingWindow } from './window-manager'
@@ -69,6 +69,13 @@ async function loadConfig(): Promise<void> {
     configPromises.push(
       Promise.resolve().then(() => {
         settingsStore.set('chat', {} as ChatSettings)
+      })
+    )
+  }
+  if (!settingsStore.get('tray')) {
+    configPromises.push(
+      Promise.resolve().then(() => {
+        settingsStore.set('tray', { closeToTray: true } as TraySettings)
       })
     )
   }

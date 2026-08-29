@@ -3,6 +3,7 @@ import logger from 'electron-log'
 import { settingsStore } from '../context'
 import { awaitInitialized } from '../database/instance'
 import { SystemSettings } from '../types/settings'
+import { syncTrayState } from '../tray'
 
 /** 系统设置 + 锁屏 IPC */
 export function registerSettingsIpc(): void {
@@ -41,6 +42,7 @@ export function registerSettingsIpc(): void {
         defaultEmbeddingModelId: all.defaultEmbeddingModelId,
         musicDirectory: all.musicDirectory,
         theme: all.theme,
+        tray: all.tray,
         weatherRefreshInterval: all.weatherRefreshInterval,
         weatherLastFetched: all.weatherLastFetched,
         weatherData: all.weatherData
@@ -64,6 +66,10 @@ export function registerSettingsIpc(): void {
             settingsStore.set(key as keyof SystemSettings, value)
           }
         }
+      }
+      // 托盘设置变化时即时同步（关闭行为 / 菜单勾选态）
+      if ('tray' in updates) {
+        syncTrayState()
       }
       logger.info('System settings updated:', Object.keys(updates).join(', '))
       return true

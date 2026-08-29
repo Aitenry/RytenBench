@@ -6,6 +6,7 @@ import { registerLifecycleHooks } from './lifecycle'
 import { createLoadingWindow } from './windows/loading-window'
 import { createMainWindow } from './windows/main-window'
 import { registerMermaidPreviewIpc } from './windows/mermaid-preview'
+import { createTray } from './tray'
 
 // 单实例锁：防止多开，同时确保安装程序能正确检测和关闭进程
 const gotTheLock = app.requestSingleInstanceLock()
@@ -13,9 +14,11 @@ if (!gotTheLock) {
   app.quit()
 } else {
   app.on('second-instance', () => {
+    // 再次启动时恢复主窗口（包括隐藏在系统托盘中的情况）
     const win = BrowserWindow.getAllWindows().find((w) => !w.isDestroyed())
     if (win) {
       if (win.isMinimized()) win.restore()
+      if (!win.isVisible()) win.show()
       win.focus()
     }
   })
@@ -45,6 +48,9 @@ app.whenReady().then(async () => {
   // 初始化完成后直接交接显示，省去「加载窗口结束后再等 2~3 秒」的空白期。
   // 注：此时 initializationPromise 已赋值，渲染进程早期 IPC 会等待数据库初始化完成。
   createMainWindow()
+
+  // 系统托盘：关闭窗口可驻留后台（是否驻留由「通用设置 → 系统托盘」控制）
+  createTray()
 
   app.on('activate', function () {
     if (BrowserWindow.getAllWindows().length === 0) {

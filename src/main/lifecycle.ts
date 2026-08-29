@@ -5,6 +5,16 @@ import { getDatabaseRef } from './database/instance'
 
 let isQuitting = false
 
+/** 应用是否正在退出（托盘「关闭窗口→隐藏」拦截用：真正退出时放行） */
+export function isQuittingNow(): boolean {
+  return isQuitting
+}
+
+/** 标记应用正在退出（系统关机等场景下提前放行关闭拦截） */
+export function markQuitting(): void {
+  isQuitting = true
+}
+
 /** 注册应用生命周期钩子：退出前保存流式数据 / 全窗口关闭退出 */
 export function registerLifecycleHooks(): void {
   app.on('before-quit', (event) => {

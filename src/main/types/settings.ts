@@ -25,6 +25,12 @@ export interface ChatSettings {
 
 export type ThemeMode = 'light' | 'dark' | 'auto'
 
+/** 系统托盘设置 */
+export interface TraySettings {
+  /** 关闭窗口时最小化到系统托盘（默认开启）；关闭后应用完全退出 */
+  closeToTray: boolean
+}
+
 export interface SystemSettings {
   ip?: Record<string, unknown>
   lock: Lock
@@ -34,6 +40,8 @@ export interface SystemSettings {
   defaultEmbeddingModelId?: number
   musicDirectory?: string
   theme?: ThemeMode
+  /** 系统托盘设置 */
+  tray?: TraySettings
   /** 天气缓存数据 */
   weatherData?: Record<string, unknown>
   /** 天气自动刷新间隔（分钟），默认 60 */
