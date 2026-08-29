@@ -1,6 +1,6 @@
 import { BaseMessage } from '@langchain/core/messages'
 import logger from 'electron-log'
-import { ChatOptions, StructuredMessage } from '../types'
+import { ChatOptions, StructuredMessage, HistoryCompaction } from '../types'
 import { Runtime } from '../runtime/runtime'
 import { buildHumanMessage } from './message-builder'
 import type { UploadedFileRef } from './message-builder'
@@ -11,7 +11,12 @@ export interface StreamDeps {
   /** 创建运行时（LangChain/LangGraph） */
   createRuntime(): Runtime
 
-  loadContextMessages(topicId: number): Promise<BaseMessage[]>
+  /** 加载历史上下文（含本轮摘要压缩信息与压缩开始回调） */
+  loadContextMessages(
+    topicId: number,
+    onCompactionStart?: () => void,
+    contextBudget?: number
+  ): Promise<{ messages: BaseMessage[]; compaction?: HistoryCompaction }>
 
   /** 将上传文件复制到 agent 工作区，返回虚拟路径引用 */
   copyUploadedFiles(
@@ -45,12 +50,23 @@ export async function* runStream(
 
     const uploadedRefs = await deps.copyUploadedFiles(options?.documents)
     const userMessage = buildHumanMessage(message, options?.images, uploadedRefs)
-    const contextMessages = options?.topicId ? await deps.loadContextMessages(options.topicId) : []
+    const context = options?.topicId
+      ? await deps.loadContextMessages(
+          options.topicId,
+          options?.onCompactionStart,
+          options?.contextBudget
+        )
+      : undefined
+    const contextMessages = context?.messages ?? []
     logger.info(
       `[Chat] Passing ${contextMessages.length} context messages + 1 user message to runtime (topicId=${options?.topicId})`
     )
     if (contextMessages.length > 0) {
       logger.info(`[Chat] Context roles: ${contextMessages.map((m) => m._getType()).join(' → ')}`)
+    }
+    // 本轮早期对话被压缩为 checkpoint：在正文流开始前下发，前端在 AI 消息顶部显示压缩卡片
+    if (context?.compaction) {
+      yield { historyCompacted: context.compaction }
     }
     const run = runtime.stream(
       [...contextMessages, userMessage],

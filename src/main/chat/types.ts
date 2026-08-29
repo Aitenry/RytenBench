@@ -7,6 +7,10 @@ export interface ChatOptions {
   signal?: AbortSignal
   /** 本轮来源元信息（目标系统 authority 校验用；用户消息为空缺省，自动续跑轮由驱动器注入） */
   turnMeta?: TurnMeta
+  /** 摘要压缩开始回调：历史超长触发 LLM 压缩时立即调用（前端展示「压缩中」过渡卡） */
+  onCompactionStart?: () => void
+  /** 历史上下文字符预算（由当前模型上下文窗口换算，最小 60,000；缺省用默认值） */
+  contextBudget?: number
 }
 
 /** 本轮来源元信息（经图 configurable 注入工具层，供目标工具做执行期权限校验） */
@@ -58,6 +62,16 @@ export interface MemoryInjection {
   usage: { user: string; memory: string }
 }
 
+/** 本轮发生的早期对话摘要压缩（用于前端展示「上下文已压缩」卡片） */
+export interface HistoryCompaction {
+  /** 被压缩为 checkpoint 摘要的早期对话条数 */
+  compressedCount: number
+  /** 保持原样的最近对话条数 */
+  retainedCount: number
+  /** 压缩边界（被压缩段最后一条对话的 ID；边界推进才视为新的压缩事件） */
+  boundaryId: number
+}
+
 export interface StructuredMessage {
   tool?: ToolCallDetail
   content?: string
@@ -66,6 +80,10 @@ export interface StructuredMessage {
   subAgent?: SubAgentEvent
   /** 本轮注入的热记忆内容（Mnemon 启用且热记忆非空时，由流开头下发） */
   memoryInjected?: MemoryInjection
+  /** 本轮发生的早期对话摘要压缩（历史超长被压缩为 checkpoint 时，由流开头下发） */
+  historyCompacted?: HistoryCompaction
+  /** 摘要压缩已开始（过渡信号：前端先显示「压缩中」，随后 historyCompacted 携带结果） */
+  historyCompacting?: boolean
 }
 
 /** IPC 发送的流式 chunk（StructuredMessage + 主进程注入的 topicId） */

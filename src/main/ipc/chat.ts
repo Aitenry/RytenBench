@@ -5,7 +5,13 @@ import logger from 'electron-log'
 import { isSenderAlive, safeSend } from '../safe-send'
 import { settingsStore, streamAbortControllers, activeChatStreams } from '../context'
 import { ChatService, buildTools } from '../chat'
-import type { ToolCallDetail, SubAgentEvent, MemoryInjection, TurnMeta } from '../chat/types'
+import type {
+  ToolCallDetail,
+  SubAgentEvent,
+  MemoryInjection,
+  TurnMeta,
+  HistoryCompaction
+} from '../chat/types'
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models'
 import { getProviderService } from '../provider/service'
 import { getSubAgentDefs } from '../chat/preload-cache'
@@ -29,7 +35,6 @@ interface RunChatTurnParams {
     turnMeta?: TurnMeta
   }
 }
-
 /**
  * 执行一轮完整对话：建模型 → 建话题 → 存用户消息 → 流式 → 存 AI 回复 → 通知前端。
  * 返回 { topicId, cancelled }（cancelled=true 表示用户点了停止）。
@@ -64,6 +69,22 @@ async function runChatTurn(
   }
 
   const chatSettings = settingsStore.get('chat') as ChatSettings | undefined
+
+  // 按模型上下文窗口换算历史上下文字符预算（默认 20,000 token；1 token ≈ 1 字符的保守换算）
+  let contextBudget: number | undefined
+  try {
+    const providerConfig = await getProviderService().getConfig(options?.providerId)
+    const windowTokens =
+      typeof providerConfig.metadata?.context_window === 'number'
+        ? providerConfig.metadata.context_window
+        : 0
+    contextBudget = Math.max(20_000, windowTokens)
+    logger.info(
+      `[Chat] Model context window=${windowTokens} tokens → history budget=${contextBudget} chars`
+    )
+  } catch (err) {
+    logger.warn('[Chat] 读取模型上下文窗口失败，使用默认历史预算 20000:', err)
+  }
 
   // 创建 AbortController 用于取消流式输出
   const abortController = new AbortController()
@@ -158,7 +179,13 @@ async function runChatTurn(
   const stream = chatService.sendMessageStream(question, {
     ...options,
     topicId,
-    signal: abortController.signal
+    signal: abortController.signal,
+    contextBudget,
+    // 摘要压缩开始：立即推送「压缩中」过渡 chunk（不落库，结果由流尾 historyCompacted 携带，
+    // 渲染进程收到结果块后原地替换过渡块，形成「压缩中 → 压缩结果」的转变）
+    onCompactionStart: () => {
+      safeSend(event.sender, 'chat-stream-chunk', { historyCompacting: true, __topicId: topicId })
+    }
   })
   const accumulatedBlocks: {
     type: string
@@ -168,6 +195,8 @@ async function runChatTurn(
     subAgent?: SubAgentEvent
     /** 本轮注入的热记忆（memoryInjected 类型；随 blocks 持久化，历史对话可恢复显示） */
     memory?: MemoryInjection
+    /** 本轮早期对话摘要压缩（historyCompacted 类型；随 blocks 持久化） */
+    compaction?: HistoryCompaction
     children?: {
       type: string
       text?: string
@@ -197,6 +226,16 @@ async function runChatTurn(
           accumulatedBlocks.unshift({
             type: 'memoryInjected',
             memory: chunk.memoryInjected
+          })
+        }
+      }
+      // 本轮早期对话摘要压缩：紧随注入记忆块（正文流开始前到达，仅累积一次）
+      if (chunk.historyCompacted) {
+        const exists = accumulatedBlocks.some((b) => b.type === 'historyCompacted')
+        if (!exists) {
+          accumulatedBlocks.push({
+            type: 'historyCompacted',
+            compaction: chunk.historyCompacted
           })
         }
       }

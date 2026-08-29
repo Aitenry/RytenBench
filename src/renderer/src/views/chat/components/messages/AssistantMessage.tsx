@@ -16,7 +16,8 @@ import {
   RiFolderOpenLine,
   RiSearchLine,
   RiTerminalBoxLine,
-  RiBrain4Line
+  RiBrain4Line,
+  RiPictureInPicture2Line
 } from '@remixicon/react'
 import MarkdownLoad from '@renderer/components/markdown/MarkdownLoad'
 import LoadingMessage from './LoadingMessage'
@@ -111,14 +112,16 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
       }
     })
 
-    // 仅有「注入记忆」块时仍渲染（卡片可见），其余空消息走 LoadingMessage
+    // 仅有「注入记忆」/「压缩中」块时仍渲染（卡片可见），其余空消息走 LoadingMessage
     const hasMemoryBlock = message.blocks.some((b) => b.type === 'memoryInjected')
+    const hasCompactingBlock = message.blocks.some((b) => b.type === 'historyCompacting')
     if (
       message.loading &&
       !message.content &&
       !message.reasoning_content &&
       (!message.toolCalls || message.toolCalls.length === 0) &&
-      !hasMemoryBlock
+      !hasMemoryBlock &&
+      !hasCompactingBlock
     ) {
       return <LoadingMessage colorTextSecondary={colorTextSecondary} />
     }
@@ -280,10 +283,7 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
           }}
         >
           {icon}
-          <TruncatedTooltipText
-            text={label}
-            style={{ color: colorText, fontSize, flex: 1 }}
-          />
+          <TruncatedTooltipText text={label} style={{ color: colorText, fontSize, flex: 1 }} />
           {extra}
         </div>
       )
@@ -792,6 +792,65 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
       }
 
       return mergedBlocks.map((block, blockIndex) => {
+        // 摘要压缩进行中（过渡态：流式替换为 historyCompacted 结果块；失败则随消息结束隐藏）
+        if (block.type === 'historyCompacting' && message.loading) {
+          return (
+            <div
+              key={blockIndex}
+              style={{
+                background: collapseBg,
+                border: 'var(--ant-line-width) var(--ant-line-type) var(--ant-color-border)',
+                marginBottom: '6px',
+                borderRadius: '8px',
+                padding: '9px 12px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px'
+              }}
+            >
+              <RiLoader4Line
+                size={16}
+                className="animate-spin"
+                style={{ color: colorTextSecondary, flexShrink: 0 }}
+              />
+              <TruncatedTooltipText
+                text="正在压缩早期对话…"
+                style={{ color: colorText, fontSize: '13px', flex: 1 }}
+              />
+            </div>
+          )
+        }
+        // 早期对话摘要压缩（置于消息顶部，紧随注入记忆；仅提示，不可展开）
+        if (block.type === 'historyCompacted' && block.compaction) {
+          const c = block.compaction
+          return (
+            <div
+              key={blockIndex}
+              style={{
+                background: collapseBg,
+                border: 'var(--ant-line-width) var(--ant-line-type) var(--ant-color-border)',
+                marginBottom: '6px',
+                borderRadius: '8px',
+                padding: '9px 12px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px'
+              }}
+            >
+              <RiPictureInPicture2Line
+                size={16}
+                style={{ color: colorTextSecondary, flexShrink: 0 }}
+              />
+              <TruncatedTooltipText
+                text="早期对话已压缩"
+                style={{ color: colorText, fontSize: '13px', flex: 1 }}
+              />
+              <span style={{ color: colorTextTertiary, fontSize: '13px', flexShrink: 0 }}>
+                {c.compressedCount} 条 → 保留 {c.retainedCount} 条
+              </span>
+            </div>
+          )
+        }
         // 本轮注入的热记忆（置于消息顶部，默认折叠）
         if (block.type === 'memoryInjected' && block.memory) {
           const mem = block.memory
@@ -1307,81 +1366,85 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
       <div className="flex mb-6">
         <div className="w-full">
           {renderBlocks()}
-          {/* 仅展示「注入记忆」卡片期间的生成中指示 */}
+          {/* 仅展示「注入记忆」卡片期间的生成中指示（压缩进行中不显示，避免与压缩卡重复） */}
           {message.loading &&
           !message.content &&
           !message.reasoning_content &&
           (!message.toolCalls || message.toolCalls.length === 0) &&
-          hasMemoryBlock ? (
+          hasMemoryBlock &&
+          !hasCompactingBlock ? (
             <div className="flex items-center gap-2 mt-1" style={{ color: colorTextSecondary }}>
               <RiLoader4Line size={14} className="animate-spin" />
               <span style={{ fontSize: 13 }}>正在生成…</span>
             </div>
           ) : null}
-          <div className="flex items-center gap-2 mt-3">
-            <Tooltip title={isCopied ? '已复制' : '复制'}>
-              <button
-                onClick={() => onCopy(message.content, message.id)}
-                className="p-1.5 rounded-lg transition-colors"
-                style={{
-                  color: colorTextTertiary,
-                  background: 'transparent'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = colorFillAlter
-                  e.currentTarget.style.color = colorTextSecondary
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'transparent'
-                  e.currentTarget.style.color = colorTextTertiary
-                }}
-              >
-                {isCopied ? <RiCheckLine size={16} /> : <RiFileCopyLine size={16} />}
-              </button>
-            </Tooltip>
-            <Tooltip title="重新生成">
-              <button
-                className="p-1.5 rounded-lg transition-colors"
-                style={{ color: colorTextTertiary, background: 'transparent' }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = colorFillAlter
-                  e.currentTarget.style.color = colorTextSecondary
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'transparent'
-                  e.currentTarget.style.color = colorTextTertiary
-                }}
-              >
-                <RiRefreshLine size={16} />
-              </button>
-            </Tooltip>
-            <Tooltip title="删除此轮对话">
-              <button
-                onClick={() =>
-                  modal.confirm({
-                    title: '确认删除',
-                    content: '将删除这一轮对话，删除后不可恢复。',
-                    okText: '删除',
-                    cancelText: '取消',
-                    okButtonProps: { danger: true },
-                    onOk: () => onDelete(index)
-                  })
-                }
-                className="p-1.5 rounded-lg transition-colors"
-                style={{ color: colorTextTertiary, background: 'transparent' }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = colorFillAlter
-                  e.currentTarget.style.color = '#ef4444'
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'transparent'
-                  e.currentTarget.style.color = colorTextTertiary
-                }}
-              >
-                <RiDeleteBin6Line size={16} />
-              </button>
-            </Tooltip>
-          </div>
+          {/* 内容输出中不展示操作按钮 */}
+          {!message.loading && (
+            <div className="flex items-center gap-2 mt-3">
+              <Tooltip title={isCopied ? '已复制' : '复制'}>
+                <button
+                  onClick={() => onCopy(message.content, message.id)}
+                  className="p-1.5 rounded-lg transition-colors"
+                  style={{
+                    color: colorTextTertiary,
+                    background: 'transparent'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = colorFillAlter
+                    e.currentTarget.style.color = colorTextSecondary
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'transparent'
+                    e.currentTarget.style.color = colorTextTertiary
+                  }}
+                >
+                  {isCopied ? <RiCheckLine size={16} /> : <RiFileCopyLine size={16} />}
+                </button>
+              </Tooltip>
+              <Tooltip title="重新生成">
+                <button
+                  className="p-1.5 rounded-lg transition-colors"
+                  style={{ color: colorTextTertiary, background: 'transparent' }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = colorFillAlter
+                    e.currentTarget.style.color = colorTextSecondary
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'transparent'
+                    e.currentTarget.style.color = colorTextTertiary
+                  }}
+                >
+                  <RiRefreshLine size={16} />
+                </button>
+              </Tooltip>
+              <Tooltip title="删除此轮对话">
+                <button
+                  onClick={() =>
+                    modal.confirm({
+                      title: '确认删除',
+                      content: '将删除这一轮对话，删除后不可恢复。',
+                      okText: '删除',
+                      cancelText: '取消',
+                      okButtonProps: { danger: true },
+                      onOk: () => onDelete(index)
+                    })
+                  }
+                  className="p-1.5 rounded-lg transition-colors"
+                  style={{ color: colorTextTertiary, background: 'transparent' }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = colorFillAlter
+                    e.currentTarget.style.color = '#ef4444'
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'transparent'
+                    e.currentTarget.style.color = colorTextTertiary
+                  }}
+                >
+                  <RiDeleteBin6Line size={16} />
+                </button>
+              </Tooltip>
+            </div>
+          )}
         </div>
       </div>
     )

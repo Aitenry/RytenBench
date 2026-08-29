@@ -815,7 +815,11 @@ const ChatInput: React.FC<ChatInputProps> = ({
                 {SelectedIcon ? (
                   <SelectedIcon style={{ fontSize: 14, color: selectedColor }} />
                 ) : selectedProviderType ? (
-                  <ProviderMark providerType={selectedProviderType} size={14} color={selectedColor} />
+                  <ProviderMark
+                    providerType={selectedProviderType}
+                    size={14}
+                    color={selectedColor}
+                  />
                 ) : null}
                 <span className="truncate">{props.label}</span>
               </span>

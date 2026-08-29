@@ -5,7 +5,7 @@ import { goalStore } from '../chat/runtime/goal'
 import { jobsRegistry } from '../chat/runtime/jobs'
 import { subagentSessions } from '../chat/runtime/subagent-sessions'
 import { SpillStore } from '../chat/runtime/spill'
-import { compactionCache } from '../chat/runtime/compaction'
+import { deleteCompactionByTopic } from '../database/mapper/compaction'
 import { settingsStore } from '../context'
 import { clearTopicCache } from '../chat/preload-cache'
 import type { ChatSettings } from '../types/settings'
@@ -142,8 +142,8 @@ export function registerChatTopicIpc(): void {
       jobsRegistry.clearTopic(id)
       // 清理该话题的子代理续接会话（全部中断）
       subagentSessions.clearTopic(id)
-      // 清理该话题的摘要压缩缓存（进程级 compactionCache）
-      compactionCache.clear(id)
+      // 清理该话题的摘要压缩 checkpoint（topic_compactions 表）
+      await deleteCompactionByTopic(id)
       // 清理该话题的工具结果溢出文件（spill 目录）
       const chatSettings = settingsStore.get('chat') as ChatSettings | undefined
       SpillStore.pruneTopic(

@@ -356,6 +356,36 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
           }
         }
 
+        // 摘要压缩开始：插入「压缩中」过渡块（仅当前轮展示，不落库；
+        // 结果块到达后在原位置替换，压缩失败时随消息结束隐藏）
+        if (chunk.historyCompacting) {
+          const exists = updatedBlocks.some(
+            (b) => b.type === 'historyCompacting' || b.type === 'historyCompacted'
+          )
+          if (!exists) {
+            updatedBlocks.push({ type: 'historyCompacting' })
+          }
+        }
+
+        // 本轮早期对话摘要压缩：紧随记忆注入块（正文流开始前到达，仅插入一次）
+        if (chunk.historyCompacted) {
+          const compacted = {
+            type: 'historyCompacted' as const,
+            compaction: {
+              compressedCount: chunk.historyCompacted.compressedCount,
+              retainedCount: chunk.historyCompacted.retainedCount,
+              boundaryId: chunk.historyCompacted.boundaryId
+            }
+          }
+          // 原地替换「压缩中」过渡块（保持卡片位置稳定）
+          const compactingIdx = updatedBlocks.findIndex((b) => b.type === 'historyCompacting')
+          if (compactingIdx >= 0) {
+            updatedBlocks[compactingIdx] = compacted
+          } else if (!updatedBlocks.some((b) => b.type === 'historyCompacted')) {
+            updatedBlocks.push(compacted)
+          }
+        }
+
         if (chunk.reasoning_content) {
           const reasoningDelta = computeTextDelta(
             String(chunk.reasoning_content),
@@ -785,52 +815,50 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
   // 目标轮次驱动器在主进程发起新轮时先下发 goalRound 标记 chunk：
   // 挂载「自动续跑」用户消息 + 助手占位，并为本轮注册流监听（普通用户轮由 handleSend 挂载）。
   useEffect(() => {
-    const cleanup = (window as unknown as Window).api.chat.onStreamChunk(
-      (chunk: StreamChunk) => {
-        if (!chunk.goalRound) return
-        const topicId = chunk.__topicId ?? 0
-        if (!topicId) return
-        const { round, objective } = chunk.goalRound
+    const cleanup = (window as unknown as Window).api.chat.onStreamChunk((chunk: StreamChunk) => {
+      if (!chunk.goalRound) return
+      const topicId = chunk.__topicId ?? 0
+      if (!topicId) return
+      const { round, objective } = chunk.goalRound
 
-        const userMessage: Message = {
-          id: `goal-user-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-          role: 'user',
-          content: objective,
-          blocks: [{ type: 'goalRound', round }],
-          timestamp: Date.now()
-        }
-        const aiMessageId = `goal-ai-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-        const initialAiMessage: Message = {
-          id: aiMessageId,
-          role: 'assistant',
-          content: '',
-          blocks: [],
-          timestamp: Date.now(),
-          toolCalls: [],
-          loading: true
-        }
-
-        // 标记加载状态（停止按钮可用、侧边栏转圈）
-        isLoadingMapRef.current.set(topicId, true)
-        syncLoadingTopics()
-        if (currentTopicIdRef.current === topicId) {
-          setIsLoading(true)
-          setMessages((prev) => [...prev, userMessage, initialAiMessage])
-        }
-
-        // 更新会话缓存并启动本轮监听（后续 chunk 由本轮监听器处理）
-        const session = sessionsRef.current.get(topicId)
-        const base = session?.messages ?? []
-        sessionsRef.current.set(topicId, {
-          messages: [...base, userMessage, initialAiMessage],
-          inputValue: session?.inputValue ?? '',
-          attachments: session?.attachments ?? [],
-          sessionId: aiMessageId
-        })
-        currentSessionIdRef.current = aiMessageId
-        startStreamListener(topicId, aiMessageId)
+      const userMessage: Message = {
+        id: `goal-user-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        role: 'user',
+        content: objective,
+        blocks: [{ type: 'goalRound', round }],
+        timestamp: Date.now()
       }
-    )
+      const aiMessageId = `goal-ai-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+      const initialAiMessage: Message = {
+        id: aiMessageId,
+        role: 'assistant',
+        content: '',
+        blocks: [],
+        timestamp: Date.now(),
+        toolCalls: [],
+        loading: true
+      }
+
+      // 标记加载状态（停止按钮可用、侧边栏转圈）
+      isLoadingMapRef.current.set(topicId, true)
+      syncLoadingTopics()
+      if (currentTopicIdRef.current === topicId) {
+        setIsLoading(true)
+        setMessages((prev) => [...prev, userMessage, initialAiMessage])
+      }
+
+      // 更新会话缓存并启动本轮监听（后续 chunk 由本轮监听器处理）
+      const session = sessionsRef.current.get(topicId)
+      const base = session?.messages ?? []
+      sessionsRef.current.set(topicId, {
+        messages: [...base, userMessage, initialAiMessage],
+        inputValue: session?.inputValue ?? '',
+        attachments: session?.attachments ?? [],
+        sessionId: aiMessageId
+      })
+      currentSessionIdRef.current = aiMessageId
+      startStreamListener(topicId, aiMessageId)
+    })
     return cleanup
   }, [startStreamListener, syncLoadingTopics])
 

@@ -26,11 +26,30 @@ export interface ToolCallDetail {
   id?: string
 }
 
+export interface HistoryCompaction {
+  /** 被压缩为 checkpoint 摘要的早期对话条数 */
+  compressedCount: number
+  /** 保持原样的最近对话条数 */
+  retainedCount: number
+  /** 压缩边界（被压缩段最后一条对话的 ID） */
+  boundaryId: number
+}
+
 export interface StructuredMessage {
   tool?: ToolCallDetail
   content?: string
   reasoning_content?: string
   subAgent?: SubAgentEvent
+  /** 本轮注入的热记忆内容 */
+  memoryInjected?: {
+    user: string[]
+    memory: string[]
+    usage: { user: string; memory: string }
+  }
+  /** 本轮早期对话摘要压缩 */
+  historyCompacted?: HistoryCompaction
+  /** 摘要压缩已开始（过渡信号，随后 historyCompacted 携带结果） */
+  historyCompacting?: boolean
 }
 
 export interface SubAgentEvent {

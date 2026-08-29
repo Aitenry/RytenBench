@@ -158,6 +158,7 @@ export class SubagentSessionRegistry {
 
   /** 会话运行一次的 runtime 引用缓存（send 唤醒时复用；start 时注入） */
   private runtimes = new WeakMap<SessionRecord, SubagentSessionRuntime>()
+
   private lastRuntime(record: SessionRecord): SubagentSessionRuntime | undefined {
     return this.runtimes.get(record)
   }

@@ -39,8 +39,7 @@ export function createMainWindow(): void {
   // 渲染进程退出诊断：记录原因（崩溃/OOM/被杀/正常退出），便于排查「运行运行突然白屏」
   // 等异常；主进程本身不会因渲染进程退出而崩溃。
   win.webContents.on('render-process-gone', (_event, details) => {
-    const abnormal =
-      details.reason !== 'clean-exit' && details.reason !== 'killed'
+    const abnormal = details.reason !== 'clean-exit' && details.reason !== 'killed'
     const msg = `[Window] 渲染进程退出 reason=${details.reason} exitCode=${details.exitCode}`
     if (abnormal) logger.error(msg)
     else logger.info(msg)

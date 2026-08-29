@@ -8,13 +8,16 @@
  *      （spill.ts）负责内联上限；
  *    - 回放安全：原始完整结果保留在会话记录（chat_dialogue.blocks），裁剪文本只进
  *      本轮模型上下文（参考 dsh-compaction-tool-result-pruner）。
- * 2. LLM 摘要压缩（summarizeDialogues + CompactionCache）：
+ * 2. LLM 摘要压缩（summarizeDialogues + topic_compactions 持久化 checkpoint）：
  *    - 压力触发：历史字符总量 ≥ 窗口 × PRESSURE_RATIO 时，把最老一段对话用一次
  *      LLM 调用压缩为结构化 checkpoint，最近 RETAIN_RATIO 段保持原样
  *      （参考 dsh-compaction-basic 的 thresholdRatio/retainRatio）；
- *    - 增量缓存：进程级 CompactionCache 按 topicId 记住上次摘要边界，后续轮次只把
- *      新增的早期对话合并进既有摘要（一次调用），避免每轮全量重摘要；
- *    - 失败兜底：摘要失败时回退为原有字符预算截断行为。
+ *    - 持久化复用：checkpoint 落库（topic_compactions，每话题一行）。压缩边界
+ *      未推进（无新对话进入压缩段）时直接复用既有摘要，不重复调用 LLM；
+ *      边界推进（上下文又超预算）时只把新增的早期对话增量合并进既有摘要，
+ *      一次调用后更新落库；
+ *    - 失败兜底：摘要失败时回退为原有字符预算截断行为（旧 checkpoint 保留，
+ *      下次仍可复用）。
  */
 
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models'
@@ -146,36 +149,12 @@ export function buildCheckpointMessage(summary: string): SystemMessage {
   )
 }
 
-/** 压缩缓存条目（进程级，按 topicId 隔离） */
-interface CompactionCacheEntry {
-  /** 已摘要部分的最末对话记录 id（边界；后续只合并新增的早期对话） */
+/** 压缩 checkpoint（持久化于 topic_compactions 表，每话题一行） */
+export interface CompactionCheckpoint {
+  /** 已摘要段的最末对话记录 id（边界；后续只合并新增的早期对话） */
   boundaryId: number
   summary: string
 }
-
-/**
- * 压缩摘要缓存（进程级单例）：避免长对话每轮重复全量摘要。
- * 增量为「既有摘要 + 新增早期对话 → 合并出新摘要」一次调用。
- */
-export class CompactionCache {
-  private readonly entries = new Map<number, CompactionCacheEntry>()
-
-  get(topicId: number): CompactionCacheEntry | undefined {
-    return this.entries.get(topicId)
-  }
-
-  set(topicId: number, entry: CompactionCacheEntry): void {
-    this.entries.set(topicId, entry)
-  }
-
-  /** 摘要失败或话题删除时清理 */
-  clear(topicId: number): void {
-    this.entries.delete(topicId)
-  }
-}
-
-/** 进程级单例：跨请求共享（与 todoStore 同一模式） */
-export const compactionCache = new CompactionCache()
 
 /**
  * 工具结果裁剪：超预算时保留有界头/尾，中间替换为省略标记。

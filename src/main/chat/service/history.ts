@@ -6,7 +6,7 @@ import {
   SystemMessage
 } from '@langchain/core/messages'
 import logger from 'electron-log'
-import type { StructuredMessage, ToolCallDetail } from '../types'
+import type { StructuredMessage, ToolCallDetail, HistoryCompaction } from '../types'
 import {
   pruneToolOutput,
   buildCheckpointMessage,
@@ -14,7 +14,7 @@ import {
   compactionError,
   PRESSURE_RATIO,
   RETAIN_RATIO,
-  type CompactionCache,
+  type CompactionCheckpoint,
   type SummarizerFn
 } from '../runtime/compaction'
 
@@ -96,11 +96,11 @@ export function extractStructuredMessages(messages: BaseMessage[]): StructuredMe
 }
 
 /**
- * 历史上下文默认字符预算：超出后自动省略更早的对话（仅保留最近内容），
- * 防止长对话累积导致上下文溢出。工程自动处理，不再暴露为设置项。
- * （24,000 字符 ≈ 中文约 2-3 万 token，对主流上下文窗口均安全）
+ * 历史上下文默认字符预算：未配置模型上下文窗口时的默认值（20,000 字符）。
+ * 实际预算随当前模型的上下文窗口动态调整（见 HistoryConvertOptions.contextBudget），
+ * 字符 ≈ token 的保守换算（中文 1:1，英文更保守）。
  */
-export const HISTORY_MAX_CHARS = 24000
+export const DEFAULT_HISTORY_BUDGET = 20_000
 
 /** 历史上下文转换结果 */
 export interface HistoryContext {
@@ -109,18 +109,24 @@ export interface HistoryContext {
   truncated: boolean
   /** 是否发生了摘要压缩（早期对话被压缩为 checkpoint 摘要） */
   compacted?: boolean
+  /** 本轮新发生的摘要压缩信息（仅边界推进/首次压缩时携带，供前端展示卡片） */
+  compaction?: HistoryCompaction
 }
 
 /** 历史转换选项（摘要压缩可选开启） */
 export interface HistoryConvertOptions {
-  /** 字符预算（默认 HISTORY_MAX_CHARS） */
+  /** 字符预算（默认 DEFAULT_HISTORY_BUDGET；由当前模型的上下文窗口换算注入） */
   maxChars?: number
   /** 摘要回调：由 ChatService 用当前模型注入；缺省时超预算回退为字符截断 */
   summarizer?: SummarizerFn
-  /** 摘要缓存（进程级单例，按 topicId 增量合并） */
-  cache?: CompactionCache
   /** 话题 ID（缓存键） */
   topicId?: number
+  /** 读取既有压缩 checkpoint（持久化表；缺省视为无） */
+  getCheckpoint?: (topicId: number) => Promise<CompactionCheckpoint | undefined>
+  /** 落库压缩 checkpoint（持久化表；缺省不保存） */
+  saveCheckpoint?: (topicId: number, checkpoint: CompactionCheckpoint) => Promise<void>
+  /** 压缩开始回调：确认本轮将产生新的压缩事件时、LLM 摘要调用前立即调用 */
+  onCompactionStart?: () => void
 }
 
 /** 单条对话的字符成本（正文 + blocks） */
@@ -133,7 +139,9 @@ function dialogueChars(d: HistoryDialogue): number {
  *
  * 上下文压缩策略（参考 dsh-compaction-basic 的阈值/保留机制）：
  * 1. 字符总量 ≥ 预算 × PRESSURE_RATIO 且提供了摘要器时：把最老一段对话用一次
- *    LLM 调用压缩为 checkpoint 摘要（增量缓存合并），最近 RETAIN_RATIO 段保持原样；
+ *    LLM 调用压缩为 checkpoint 摘要（topic_compactions 表持久化，每话题一行）。
+ *    后续轮次只要「既有摘要 + 未压缩新内容」未超预算就直接复用，不重复压缩；
+ *    只有再次超预算才把新内容最老部分增量合并进摘要（一次调用）；
  * 2. 无摘要器或摘要失败：回退为原有字符预算截断（省略更早对话 + 头部说明）；
  * 3. 工具结果统一经智能裁剪（pruneToolOutput），原始内容保留在数据库中可精确回放。
  */
@@ -141,7 +149,7 @@ export async function convertDialoguesToMessages(
   dialogues: HistoryDialogue[],
   options?: HistoryConvertOptions
 ): Promise<HistoryContext> {
-  const maxChars = options?.maxChars ?? HISTORY_MAX_CHARS
+  const maxChars = options?.maxChars ?? DEFAULT_HISTORY_BUDGET
   const totalChars = dialogues.reduce((sum, d) => sum + dialogueChars(d), 0)
 
   // 摘要压缩路径：压力达标且有摘要器
@@ -150,8 +158,8 @@ export async function convertDialoguesToMessages(
       const result = await compactWithSummarizer(dialogues, maxChars, options)
       if (result) return result
     } catch (err) {
+      // 摘要失败：回退字符截断；已落库的旧 checkpoint 保留，后续轮次仍可复用
       compactionError(err)
-      options.cache?.clear(options.topicId)
     }
   }
 
@@ -182,8 +190,32 @@ export async function convertDialoguesToMessages(
   return { messages, truncated }
 }
 
+/** 按字符预算从尾部切分对话：返回 { old, recent }（old 为最老部分，可为空） */
+function splitByBudget(
+  dialogues: HistoryDialogue[],
+  budget: number
+): { old: HistoryDialogue[]; recent: HistoryDialogue[] } {
+  let retainStart = dialogues.length
+  let retainChars = 0
+  for (let i = dialogues.length - 1; i >= 0; i--) {
+    retainChars += dialogueChars(dialogues[i])
+    retainStart = i
+    if (retainChars >= budget) break
+  }
+  return { old: dialogues.slice(0, retainStart), recent: dialogues.slice(retainStart) }
+}
+
 /**
- * 摘要压缩编排：切分最老段 → （增量合并）LLM 摘要 → checkpoint 置于消息头。
+ * 摘要压缩编排（checkpoint 持久化于 topic_compactions 表，压缩一次后续复用）：
+ *
+ * - 无 checkpoint 或边界倒退（对话被删除）：初始全量摘要（按保留预算切分最老段），
+ *   落库，上报压缩卡片；
+ * - 既有摘要 + 未压缩新内容 ≤ 总预算：直接复用既有摘要，把未压缩对话整体带进
+ *   上下文，不调用 LLM、不上报压缩卡片——这是「压缩一次，后续复用」的核心：
+ *   新对话只是让未压缩段变大，只要总量未满预算就绝不重复压缩；
+ * - 总量超预算（又满了）：只把未压缩段中最老的部分（超出保留预算的部分）增量合并
+ *   进既有摘要，一次调用后落库、上报压缩卡片，之后又能吸收大量新对话。
+ *
  * 返回 null 表示无需要压缩的最老段（由调用方回退常规路径）。
  */
 async function compactWithSummarizer(
@@ -191,37 +223,85 @@ async function compactWithSummarizer(
   maxChars: number,
   options: HistoryConvertOptions
 ): Promise<HistoryContext | null> {
-  // 最近段：从尾部向前累计至保留预算（至少保留最后一条）
+  const topicId = options.topicId!
   const retainBudget = Math.max(1, Math.floor(maxChars * RETAIN_RATIO))
-  let retainStart = dialogues.length
-  let retainChars = 0
-  for (let i = dialogues.length - 1; i >= 0; i--) {
-    retainChars += dialogueChars(dialogues[i])
-    retainStart = i
-    if (retainChars >= retainBudget) break
-  }
-  const old = dialogues.slice(0, retainStart)
-  const recent = dialogues.slice(retainStart)
-  if (old.length === 0) return null
+  const lastDialogueId = dialogues[dialogues.length - 1].id
+  const prior = options.getCheckpoint ? await options.getCheckpoint(topicId) : undefined
 
-  // 增量合并：缓存边界之前的已摘要，只把新增的早期对话并入既有摘要
-  const prior = options.cache?.get(options.topicId!)
-  const lastOldId = old[old.length - 1].id
-  let summary: string
-  if (prior && prior.boundaryId < lastOldId) {
-    const newlyOld = old.filter((d) => d.id > prior.boundaryId)
-    summary = await options.summarizer!(buildTranscript(newlyOld), prior.summary)
-  } else {
-    summary = await options.summarizer!(buildTranscript(old))
+  // 无 checkpoint / 边界倒退（对话被删除，摘要含已删除内容）：初始或全量重摘要
+  if (!prior || prior.boundaryId > lastDialogueId) {
+    const { old, recent } = splitByBudget(dialogues, retainBudget)
+    if (old.length === 0) return null
+    options.onCompactionStart?.()
+    const summary = await options.summarizer!(buildTranscript(old))
+    const boundaryId = old[old.length - 1].id
+    await saveCheckpointSafe(topicId, { boundaryId, summary }, options)
+    const messages: BaseMessage[] = [buildCheckpointMessage(summary)]
+    appendDialogueMessages(messages, recent)
+    logger.info(
+      `[History] 摘要压缩完成 topicId=${topicId}（压缩 ${old.length} 条 → checkpoint，保留最近 ${recent.length} 条，边界 ${boundaryId}）`
+    )
+    return {
+      messages,
+      truncated: false,
+      compacted: true,
+      compaction: { compressedCount: old.length, retainedCount: recent.length, boundaryId }
+    }
   }
-  options.cache?.set(options.topicId!, { boundaryId: lastOldId, summary })
 
+  // 既有 checkpoint 有效：未压缩的新内容 = 边界之后的全部对话
+  const pending = dialogues.filter((d) => d.id > prior.boundaryId)
+  const pendingChars = pending.reduce((sum, d) => sum + dialogueChars(d), 0)
+
+  // 复用分支：摘要 + 未压缩新内容未超总预算 → 直接复用，不调用 LLM。
+  // 未压缩对话（即使远超保留预算）整体进上下文，直到总量再次超预算才压缩。
+  if (prior.summary.length + pendingChars <= maxChars) {
+    logger.info(
+      `[History] 复用既有压缩摘要 topicId=${topicId}（边界 ${prior.boundaryId}，未压缩 ${pending.length} 条 / ${pendingChars} 字符，摘要+未压缩 ${prior.summary.length + pendingChars} ≤ ${maxChars}）`
+    )
+    const messages: BaseMessage[] = [buildCheckpointMessage(prior.summary)]
+    appendDialogueMessages(messages, pending)
+    return { messages, truncated: false, compacted: true }
+  }
+
+  // 又满了：把未压缩段中最老的部分（超出保留预算）增量合并进既有摘要
+  const { old, recent } = splitByBudget(pending, retainBudget)
+  if (old.length === 0) {
+    // 极端情况：单条对话就超保留预算，未压缩段全部保留也超总预算——
+    // 直接全量重摘要（含既有摘要的转录会失真，走增量语义最接近：整段并入）
+    // 但 old 为空意味着 retainBudget 覆盖 pending 全部，此时不压缩直接带上
+    //（预算检查已通过的前提不存在），保守回退常规路径。
+    return null
+  }
+  options.onCompactionStart?.()
+  const summary = await options.summarizer!(buildTranscript(old), prior.summary)
+  const boundaryId = old[old.length - 1].id
+  await saveCheckpointSafe(topicId, { boundaryId, summary }, options)
   const messages: BaseMessage[] = [buildCheckpointMessage(summary)]
   appendDialogueMessages(messages, recent)
   logger.info(
-    `[History] 摘要压缩完成 topicId=${options.topicId}（压缩 ${old.length} 条 → checkpoint，保留最近 ${recent.length} 条）`
+    `[History] 摘要压缩完成 topicId=${topicId}（增量合并 ${old.length} 条 → checkpoint，保留最近 ${recent.length} 条，边界 ${boundaryId}）`
   )
-  return { messages, truncated: false, compacted: true }
+  return {
+    messages,
+    truncated: false,
+    compacted: true,
+    compaction: { compressedCount: old.length, retainedCount: recent.length, boundaryId }
+  }
+}
+
+/** 落库 checkpoint（失败不阻断本轮，仅丢失持久化复用能力） */
+async function saveCheckpointSafe(
+  topicId: number,
+  checkpoint: CompactionCheckpoint,
+  options: HistoryConvertOptions
+): Promise<void> {
+  if (!options.saveCheckpoint) return
+  try {
+    await options.saveCheckpoint(topicId, checkpoint)
+  } catch (err) {
+    logger.warn('[History] 压缩 checkpoint 落库失败（不影响本轮）:', err)
+  }
 }
 
 /** 将选中的对话追加为 LangChain 消息（工具结果经智能裁剪） */

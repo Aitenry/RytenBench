@@ -4,10 +4,14 @@ import { BaseMessage } from '@langchain/core/messages'
 import logger from 'electron-log'
 import * as fs from 'fs'
 import * as path from 'path'
-import { ChatOptions, StructuredMessage, SubAgentConfig } from '../types'
+import { ChatOptions, StructuredMessage, SubAgentConfig, HistoryCompaction } from '../types'
 import { Runtime } from '../runtime/runtime'
 import { getMnemonComponent } from '../mnemon-singleton'
-import { summarizeDialogues, compactionCache } from '../runtime/compaction'
+import { summarizeDialogues } from '../runtime/compaction'
+import {
+  getCompactionByTopic,
+  upsertCompaction
+} from '../../database/mapper/compaction'
 import type { HistoryDialogue, LoadHistoryFn } from './history'
 import { extractStructuredMessages, convertDialoguesToMessages } from './history'
 import { buildHumanMessage } from './message-builder'
@@ -129,16 +133,22 @@ class ChatService {
   /**
    * 从数据库加载历史消息上下文
    * @param topicId 话题 ID
-   * @returns 转换后的 LangChain BaseMessage 数组
+   * @param onCompactionStart 摘要压缩开始时回调（LLM 调用前触发，前端展示「压缩中」）
+   * @param contextBudget 历史上下文字符预算（由模型上下文窗口换算，缺省用默认下限）
+   * @returns 转换后的 LangChain BaseMessage 数组及本轮发生的摘要压缩信息
    */
-  private async loadContextMessages(topicId: number): Promise<BaseMessage[]> {
+  private async loadContextMessages(
+    topicId: number,
+    onCompactionStart?: () => void,
+    contextBudget?: number
+  ): Promise<{ messages: BaseMessage[]; compaction?: HistoryCompaction }> {
     if (!this.loadHistory) {
       logger.warn('[Chat] loadHistory callback not provided, skipping history')
-      return []
+      return { messages: [] }
     }
     if (topicId <= 0) {
       logger.warn(`[Chat] Invalid topicId=${topicId}, skipping history`)
-      return []
+      return { messages: [] }
     }
 
     try {
@@ -150,21 +160,31 @@ class ChatService {
         logger.info(
           `[Chat] No prior dialogues for topic ${topicId} after excluding current message`
         )
-        return []
+        return { messages: [] }
       }
 
-      const messages = await convertDialoguesToMessages(historyDialogues, {
-        // 摘要压缩：压力达标时把最老对话压缩为 checkpoint（增量缓存），失败回退字符截断
+      const context = await convertDialoguesToMessages(historyDialogues, {
+        // 摘要压缩：压力达标时把最老对话压缩为 checkpoint（持久化复用，增量合并），
+        // 失败回退字符截断。checkpoint 存于 topic_compactions 表：
+        // 压缩一次后后续轮次直接复用，仅边界推进（又超预算）时增量合并再落库。
+        maxChars: contextBudget,
         summarizer: (transcript, priorSummary) =>
           summarizeDialogues(this.model, transcript, priorSummary),
-        cache: compactionCache,
-        topicId
+        topicId,
+        getCheckpoint: async (tid) => {
+          const row = await getCompactionByTopic(tid)
+          return row ? { boundaryId: row.boundary_id, summary: row.summary } : undefined
+        },
+        saveCheckpoint: async (tid, cp) => {
+          await upsertCompaction({ topic_id: tid, boundary_id: cp.boundaryId, summary: cp.summary })
+        },
+        onCompactionStart
       })
-      logger.info(`[Chat] Loaded ${messages.messages.length} history messages for topic ${topicId}`)
-      return messages.messages
+      logger.info(`[Chat] Loaded ${context.messages.length} history messages for topic ${topicId}`)
+      return { messages: context.messages, compaction: context.compaction }
     } catch (err) {
       logger.error('Failed to load chat history:', err)
-      return []
+      return { messages: [] }
     }
   }
 
@@ -181,23 +201,26 @@ class ChatService {
       // 将上传文件复制到 agent 可访问的工作区目录
       const uploadedRefs = await this.copyUploadedFiles(options?.documents)
       const userMessage = buildHumanMessage(message, options?.images, uploadedRefs)
-      const contextMessages = options?.topicId
-        ? await this.loadContextMessages(options.topicId)
-        : []
+      const context = options?.topicId
+        ? await this.loadContextMessages(options.topicId, undefined, options?.contextBudget)
+        : { messages: [] as BaseMessage[] }
       logger.info(
-        `[Chat] Passing ${contextMessages.length} context messages + 1 user message to runtime (topicId=${options?.topicId})`
+        `[Chat] Passing ${context.messages.length} context messages + 1 user message to runtime (topicId=${options?.topicId})`
       )
       const resultMessages = await runtime.invoke(
-        [...contextMessages, userMessage],
+        [...context.messages, userMessage],
         options?.signal,
         options?.topicId,
         options?.turnMeta
       )
 
       const structured = extractStructuredMessages(resultMessages)
-      // 非流式路径同样携带本轮热记忆注入信息（前端据此显示「注入记忆」）
+      // 非流式路径同样携带本轮热记忆注入与摘要压缩信息（前端据此显示卡片）
+      const meta: StructuredMessage[] = []
+      if (context.compaction) meta.push({ historyCompacted: context.compaction })
       const injection = runtime.memoryInjection
-      return injection ? [{ memoryInjected: injection }, ...structured] : structured
+      if (injection) meta.push({ memoryInjected: injection })
+      return meta.length > 0 ? [...meta, ...structured] : structured
     } catch (error) {
       logger.error('Error in sendMessage:', error)
       return [
@@ -221,7 +244,11 @@ class ChatService {
     yield* runStream(
       {
         createRuntime: () => this.createRuntime(),
-        loadContextMessages: (topicId: number) => this.loadContextMessages(topicId),
+        loadContextMessages: (
+          topicId: number,
+          onCompactionStart?: () => void,
+          contextBudget?: number
+        ) => this.loadContextMessages(topicId, onCompactionStart, contextBudget),
         copyUploadedFiles: (docs) => this.copyUploadedFiles(docs)
       },
       message,

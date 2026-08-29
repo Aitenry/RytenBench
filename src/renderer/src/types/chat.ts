@@ -42,6 +42,16 @@ export interface MemoryInjectionBlock {
   usage: { user: string; memory: string }
 }
 
+/** 早期对话摘要压缩块数据（主进程 HistoryCompaction 透传） */
+export interface HistoryCompactionBlock {
+  /** 被压缩为 checkpoint 摘要的早期对话条数 */
+  compressedCount: number
+  /** 保持原样的最近对话条数 */
+  retainedCount: number
+  /** 压缩边界（被压缩段最后一条对话的 ID） */
+  boundaryId: number
+}
+
 /** 消息块 */
 export interface MessageBlock {
   type:
@@ -52,6 +62,8 @@ export interface MessageBlock {
     | 'document'
     | 'subAgent'
     | 'memoryInjected'
+    | 'historyCompacting'
+    | 'historyCompacted'
     | 'goalRound'
   text?: string
   tool?: ToolCall
@@ -61,6 +73,8 @@ export interface MessageBlock {
   subAgent?: SubAgentEvent
   /** 本轮注入的热记忆内容（memoryInjected 类型使用） */
   memory?: MemoryInjectionBlock
+  /** 本轮早期对话摘要压缩信息（historyCompacted 类型使用） */
+  compaction?: HistoryCompactionBlock
   /** 目标自动续跑轮次号（goalRound 类型使用） */
   round?: number
   /** 智能体嵌套的子块（仅 subAgent 类型使用，用于流式构建智能体的 text/tool/reasoning） */
