@@ -1,7 +1,7 @@
 import { BrowserWindow, ipcMain } from 'electron'
 import { join } from 'path'
 import { is } from '@electron-toolkit/utils'
-import icon from '../../../resources/icon.png?asset'
+import icon from '../../../resources/logo.png?asset'
 import logger from 'electron-log'
 import { createDatabase, listSqlFiles } from '../database/loading'
 import { migrateWorkspaceData } from '../database/workspace-migration'

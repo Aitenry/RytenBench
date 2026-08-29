@@ -1,4 +1,4 @@
-/* loading.css */
+/* loading.css —— 编辑风格：暖纸 + 墨色 + 朱砂单强调色（与 logo 一致） */
 body {
   margin: 0;
   padding: 0;
@@ -16,9 +16,9 @@ body {
 .loading-container {
   width: 360px;
   height: 230px;
-  background-color: white;
+  background-color: #f7f1e6;
   border-radius: 16px;
-  box-shadow: 0 12px 40px rgba(74, 144, 226, 0.18);
+  box-shadow: 0 12px 40px rgba(28, 24, 18, 0.18);
   box-sizing: border-box;
   overflow: hidden;
   position: relative;
@@ -57,7 +57,7 @@ body {
 }
 
 .title {
-  color: #4A90E2;
+  color: #1c1812;
   font-size: 1.2em;
   font-weight: 600;
   margin: 0;
@@ -68,18 +68,18 @@ body {
 }
 
 .version {
-  color: #a0c4ff;
+  color: #7a6a50;
   font-size: 0.7em;
   font-weight: 500;
   letter-spacing: 1px;
-  background-color: #f0f7ff;
+  background-color: #ede3d0;
   padding: 2px 6px;
   border-radius: 4px;
   white-space: nowrap;
 }
 
 .subtitle {
-  color: #88a8d6;
+  color: #8a7a60;
   font-size: 0.75em;
   margin: 0;
   letter-spacing: 1px;
@@ -102,17 +102,17 @@ body {
 .progress-bar {
   width: 100%;
   height: 6px;
-  background-color: #f0f7ff;
+  background-color: #e9dfcc;
   border-radius: 3px;
   overflow: hidden;
   margin-bottom: 6px;
   position: relative;
-  box-shadow: inset 0 1px 2px rgba(74, 144, 226, 0.1);
+  box-shadow: inset 0 1px 2px rgba(28, 24, 18, 0.1);
 }
 
 .progress-fill {
   height: 100%;
-  background: linear-gradient(90deg, #4A90E2, #6bb1ff);
+  background: linear-gradient(90deg, #c13e26, #d9603f);
   width: 0;
   transition: width 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94);
   border-radius: 3px;
@@ -148,7 +148,7 @@ body {
 
 .progress-text {
   text-align: right;
-  color: #4A90E2;
+  color: #1c1812;
   font-weight: 600;
   font-size: 0.9em;
   margin: 0 0 6px 0;
@@ -167,7 +167,7 @@ body {
 }
 
 .current-task {
-  color: #5a9ee2;
+  color: #4a463d;
   font-size: 0.85em;
   margin: 0;
   font-weight: 500;
@@ -179,7 +179,7 @@ body {
 }
 
 .task-progress {
-  color: #a0c4ff;
+  color: #a3927a;
   font-size: 0.75em;
   margin: 0;
   letter-spacing: 1px;
