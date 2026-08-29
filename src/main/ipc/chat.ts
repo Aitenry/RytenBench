@@ -35,6 +35,7 @@ interface RunChatTurnParams {
     turnMeta?: TurnMeta
   }
 }
+
 /**
  * 执行一轮完整对话：建模型 → 建话题 → 存用户消息 → 流式 → 存 AI 回复 → 通知前端。
  * 返回 { topicId, cancelled }（cancelled=true 表示用户点了停止）。

@@ -8,10 +8,7 @@ import { ChatOptions, StructuredMessage, SubAgentConfig, HistoryCompaction } fro
 import { Runtime } from '../runtime/runtime'
 import { getMnemonComponent } from '../mnemon-singleton'
 import { summarizeDialogues } from '../runtime/compaction'
-import {
-  getCompactionByTopic,
-  upsertCompaction
-} from '../../database/mapper/compaction'
+import { getCompactionByTopic, upsertCompaction } from '../../database/mapper/compaction'
 import type { HistoryDialogue, LoadHistoryFn } from './history'
 import { extractStructuredMessages, convertDialoguesToMessages } from './history'
 import { buildHumanMessage } from './message-builder'

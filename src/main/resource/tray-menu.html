@@ -1,251 +1,310 @@
 <!doctype html>
 <html lang="zh-CN" data-theme="dark">
 <head>
-<meta charset="utf-8" />
-<style>
-  /* 自绘托盘菜单（面板式）：仿参考稿的深色面板视觉（#242423 底 + 暖灰棕文字 + 行式布局），
-     暗色为默认主视觉；亮色主题沿用品牌暖纸/墨。随应用主题明暗切换。 */
-  :root {
-    --bg: #242423;              /* 面板底（参考稿主色） */
-    --hover: #2e2d2b;
-    --ink: #c9c1b2;             /* 主文字：暖灰棕（参考稿 #827665 提亮，保证可读） */
-    --sub: #8a8375;             /* 次级文字（参考稿 #827665） */
-    --hair: rgba(200, 190, 170, 0.14);
-    --accent: #e0553a;          /* 朱砂（提亮，用于开关 ON / 退出项） */
-    --accent-soft: rgba(224, 85, 58, 0.1);
-    --switch-frame: #6e6a63;    /* 开关外框（参考稿浅色框） */
-    --switch-track: #3a3937;    /* 开关轨道（参考稿深色轨道） */
-    --switch-thumb: #e8e4da;    /* 开关滑块（亮） */
-    --shadow: 0 12px 32px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.35);
-    --radius: 12px;
-  }
-  html[data-theme='light'] {
-    --bg: #f6f0e3;              /* 暖纸 */
-    --hover: #efe5cf;
-    --ink: #1c1812;             /* 墨 */
-    --sub: #6f6759;
-    --hair: rgba(28, 24, 18, 0.12);
-    --accent: #c13e26;
-    --accent-soft: rgba(193, 62, 38, 0.08);
-    --switch-frame: #b9b2a4;
-    --switch-track: #e0dacb;
-    --switch-thumb: #ffffff;
-    --shadow: 0 12px 32px rgba(28, 24, 18, 0.22), 0 2px 8px rgba(28, 24, 18, 0.12);
-  }
+  <meta charset="utf-8" />
+  <style>
+    /* 自绘托盘菜单（面板式）：仿参考稿的深色面板视觉（#242423 底 + 暖灰棕文字 + 行式布局），
+       暗色为默认主视觉；亮色主题沿用品牌暖纸/墨。随应用主题明暗切换。 */
+    :root {
+      --bg: #242423; /* 面板底（参考稿主色） */
+      --hover: #2e2d2b;
+      --ink: #c9c1b2; /* 主文字：暖灰棕（参考稿 #827665 提亮，保证可读） */
+      --sub: #8a8375; /* 次级文字（参考稿 #827665） */
+      --hair: rgba(200, 190, 170, 0.14);
+      --accent: #e0553a; /* 朱砂（提亮，用于开关 ON / 退出项） */
+      --accent-soft: rgba(224, 85, 58, 0.1);
+      --switch-frame: #6e6a63; /* 开关外框（参考稿浅色框） */
+      --switch-track: #3a3937; /* 开关轨道（参考稿深色轨道） */
+      --switch-thumb: #e8e4da; /* 开关滑块（亮） */
+      --shadow: 0 12px 32px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.35);
+      --radius: 12px;
+    }
 
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  html, body {
-    background: transparent;
-    /* 固定尺寸窗口：内容与窗口恰好等高时 DPI 取整可能溢出触发滚动条，
-       滚动条会盖住阴影留白区，这里直接裁剪 */
-    overflow: hidden;
-    font-family: -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
-    -webkit-font-smoothing: antialiased;
-    user-select: none;
-  }
+    html[data-theme='light'] {
+      --bg: #f6f0e3; /* 暖纸 */
+      --hover: #efe5cf;
+      --ink: #1c1812; /* 墨 */
+      --sub: #6f6759;
+      --hair: rgba(28, 24, 18, 0.12);
+      --accent: #c13e26;
+      --accent-soft: rgba(193, 62, 38, 0.08);
+      --switch-frame: #b9b2a4;
+      --switch-track: #e0dacb;
+      --switch-thumb: #ffffff;
+      --shadow: 0 12px 32px rgba(28, 24, 18, 0.22), 0 2px 8px rgba(28, 24, 18, 0.12);
+    }
 
-  /* 窗口四周留出阴影区（主进程窗口尺寸 = 菜单体 + 2×16） */
-  body { padding: 16px; }
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
 
-  .menu {
-    background: var(--bg);
-    border: 1px solid var(--hair);
-    border-radius: var(--radius);
-    box-shadow: var(--shadow);
-    padding: 10px;
-    opacity: 0;
-  }
-  html.open .menu { animation: pop 0.13s ease-out forwards; }
-  html[data-flip='down'] .menu { animation-name: pop-down; }
+    html, body {
+      background: transparent;
+      /* 固定尺寸窗口：内容与窗口恰好等高时 DPI 取整可能溢出触发滚动条，
+         滚动条会盖住阴影留白区，这里直接裁剪 */
+      overflow: hidden;
+      font-family: -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+      -webkit-font-smoothing: antialiased;
+      user-select: none;
+    }
 
-  @keyframes pop {
-    from { opacity: 0; transform: translateY(6px) scale(0.98); }
-    to   { opacity: 1; transform: translateY(0) scale(1); }
-  }
-  @keyframes pop-down {
-    from { opacity: 0; transform: translateY(-6px) scale(0.98); }
-    to   { opacity: 1; transform: translateY(0) scale(1); }
-  }
+    /* 窗口四周留出阴影区（主进程窗口尺寸 = 菜单体 + 2×16） */
+    body {
+      padding: 16px;
+    }
 
-  /* 头部：品牌徽标 + 名称/副标题 + 版本号（参考稿 HEAD 区） */
-  .head {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 2px 6px 10px;
-    border-bottom: 1px solid var(--hair);
-    margin-bottom: 5px;
-  }
-  .head .brand {
-    width: 34px;
-    height: 34px;
-    flex-shrink: 0;
-    border-radius: 9px;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
-  }
-  .head .meta { min-width: 0; flex: 1; }
-  .head .name {
-    font-family: Georgia, 'Times New Roman', serif;
-    font-weight: 700;
-    font-size: 14.5px;
-    line-height: 17px;
-    color: var(--ink);
-    letter-spacing: 0.01em;
-  }
-  .head .desc {
-    font-size: 11px;
-    line-height: 14px;
-    color: var(--sub);
-    margin-top: 1px;
-  }
-  .head .ver {
-    font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
-    font-size: 10px;
-    color: var(--sub);
-    flex-shrink: 0;
-  }
+    .menu {
+      background: var(--bg);
+      border: 1px solid var(--hair);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 10px;
+      opacity: 0;
+    }
 
-  /* 菜单项行：左文字右图标（参考稿行式布局） */
-  .item {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    height: 36px;
-    padding: 0 10px;
-    border-radius: 8px;
-    font-size: 13px;
-    color: var(--ink);
-    cursor: default;
-    transition: background-color 0.12s ease;
-    white-space: nowrap;
-  }
-  .item:hover { background: var(--hover); }
+    html.open .menu {
+      animation: pop 0.13s ease-out forwards;
+    }
 
-  .item .icon {
-    flex-shrink: 0;
-    color: var(--sub);
-    display: flex;
-    transition: transform 0.12s ease, color 0.12s ease;
-  }
-  .item:hover .icon { color: var(--ink); }
-  .item:hover .icon.chevron { transform: translateX(1.5px); }
+    html[data-flip='down'] .menu {
+      animation-name: pop-down;
+    }
 
-  /* 危险项（退出）：朱砂文字 + 朱砂图标，悬停朱砂底 */
-  .item.danger { color: var(--accent); }
-  .item.danger .icon { color: var(--accent); }
-  .item.danger:hover { background: var(--accent-soft); }
+    @keyframes pop {
+      from {
+        opacity: 0;
+        transform: translateY(6px) scale(0.98);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+      }
+    }
 
-  .sep {
-    height: 1px;
-    background: var(--hair);
-    margin: 5px 8px;
-  }
+    @keyframes pop-down {
+      from {
+        opacity: 0;
+        transform: translateY(-6px) scale(0.98);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+      }
+    }
 
-  /* iOS 风格开关（参考稿：亮外框 + 深轨道 + 亮滑块；ON 用朱砂轨道） */
-  .switch {
-    position: relative;
-    width: 34px;
-    height: 20px;
-    flex-shrink: 0;
-    border: 1.5px solid var(--switch-frame);
-    border-radius: 10px;
-    background: var(--switch-track);
-    transition: background-color 0.15s ease, border-color 0.15s ease;
-  }
-  .switch::after {
-    content: '';
-    position: absolute;
-    top: 1.5px;
-    left: 1.5px;
-    width: 15px;
-    height: 15px;
-    border-radius: 50%;
-    background: var(--switch-thumb);
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
-    transition: left 0.15s ease;
-  }
-  .switch.on {
-    border-color: var(--accent);
-    background: var(--accent);
-  }
-  .switch.on::after { left: 15.5px; }
-</style>
+    /* 头部：品牌徽标 + 名称/副标题 + 版本号（参考稿 HEAD 区） */
+    .head {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 2px 6px 10px;
+      border-bottom: 1px solid var(--hair);
+      margin-bottom: 5px;
+    }
+
+    .head .brand {
+      width: 34px;
+      height: 34px;
+      flex-shrink: 0;
+      border-radius: 9px;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+    }
+
+    .head .meta {
+      min-width: 0;
+      flex: 1;
+    }
+
+    .head .name {
+      font-family: Georgia, 'Times New Roman', serif;
+      font-weight: 700;
+      font-size: 14.5px;
+      line-height: 17px;
+      color: var(--ink);
+      letter-spacing: 0.01em;
+    }
+
+    .head .desc {
+      font-size: 11px;
+      line-height: 14px;
+      color: var(--sub);
+      margin-top: 1px;
+    }
+
+    .head .ver {
+      font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+      font-size: 10px;
+      color: var(--sub);
+      flex-shrink: 0;
+    }
+
+    /* 菜单项行：左文字右图标（参考稿行式布局） */
+    .item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      height: 36px;
+      padding: 0 10px;
+      border-radius: 8px;
+      font-size: 13px;
+      color: var(--ink);
+      cursor: default;
+      transition: background-color 0.12s ease;
+      white-space: nowrap;
+    }
+
+    .item:hover {
+      background: var(--hover);
+    }
+
+    .item .icon {
+      flex-shrink: 0;
+      color: var(--sub);
+      display: flex;
+      transition: transform 0.12s ease, color 0.12s ease;
+    }
+
+    .item:hover .icon {
+      color: var(--ink);
+    }
+
+    .item:hover .icon.chevron {
+      transform: translateX(1.5px);
+    }
+
+    /* 危险项（退出）：朱砂文字 + 朱砂图标，悬停朱砂底 */
+    .item.danger {
+      color: var(--accent);
+    }
+
+    .item.danger .icon {
+      color: var(--accent);
+    }
+
+    .item.danger:hover {
+      background: var(--accent-soft);
+    }
+
+    .sep {
+      height: 1px;
+      background: var(--hair);
+      margin: 5px 8px;
+    }
+
+    /* iOS 风格开关（参考稿：亮外框 + 深轨道 + 亮滑块；ON 用朱砂轨道） */
+    .switch {
+      position: relative;
+      width: 34px;
+      height: 20px;
+      flex-shrink: 0;
+      border: 1.5px solid var(--switch-frame);
+      border-radius: 10px;
+      background: var(--switch-track);
+      transition: background-color 0.15s ease, border-color 0.15s ease;
+    }
+
+    .switch::after {
+      content: '';
+      position: absolute;
+      top: 1.5px;
+      left: 1.5px;
+      width: 15px;
+      height: 15px;
+      border-radius: 50%;
+      background: var(--switch-thumb);
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+      transition: left 0.15s ease;
+    }
+
+    .switch.on {
+      border-color: var(--accent);
+      background: var(--accent);
+    }
+
+    .switch.on::after {
+      left: 15.5px;
+    }
+  </style>
 </head>
 <body>
-  <div class="menu" id="menu">
-    <div class="head">
-      <svg class="brand" viewBox="0 0 1024 1024" aria-hidden="true">
-        <rect x="64" y="64" width="896" height="896" rx="224" fill="#F6F0E3"/>
-        <text x="487" y="743" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-weight="700" font-size="800" fill="#1C1812">R</text>
-        <rect x="215" y="777" width="594" height="40" rx="20" fill="#C13E26" transform="rotate(-3 512 797)"/>
-      </svg>
-      <div class="meta">
-        <div class="name" id="name">RytenBench</div>
-        <div class="desc">AI 桌面工作台</div>
-      </div>
-      <span class="ver" id="ver"></span>
+<div class="menu" id="menu">
+  <div class="head">
+    <svg class="brand" viewBox="0 0 1024 1024" aria-hidden="true">
+      <rect x="64" y="64" width="896" height="896" rx="224" fill="#F6F0E3" />
+      <text x="487" y="743" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-weight="700"
+            font-size="800" fill="#1C1812">R
+      </text>
+      <rect x="215" y="777" width="594" height="40" rx="20" fill="#C13E26" transform="rotate(-3 512 797)" />
+    </svg>
+    <div class="meta">
+      <div class="name" id="name">RytenBench</div>
+      <div class="desc">AI 桌面工作台</div>
     </div>
-    <div id="list"></div>
+    <span class="ver" id="ver"></span>
   </div>
-  <script>
-    // 主进程下发菜单数据（items / theme / flip / version），点击项回传 id
-    const { ipcRenderer } = window.electron
+  <div id="list"></div>
+</div>
+<script>
+  // 主进程下发菜单数据（items / theme / flip / version），点击项回传 id
+  const { ipcRenderer } = window.electron
 
-    const ICONS = {
-      chevron:
-        '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3.5 10.5 8 6 12.5"/></svg>',
-      power:
-        '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v5.2"/><path d="M3.6 5.1a5.6 5.6 0 1 0 8.8 0"/></svg>'
-    }
+  const ICONS = {
+    chevron:
+      '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3.5 10.5 8 6 12.5"/></svg>',
+    power:
+      '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v5.2"/><path d="M3.6 5.1a5.6 5.6 0 1 0 8.8 0"/></svg>'
+  }
 
-    function render(data) {
-      const list = document.getElementById('list')
-      list.textContent = ''
-      for (const item of data.items) {
-        if (item.type === 'separator') {
-          const sep = document.createElement('div')
-          sep.className = 'sep'
-          list.appendChild(sep)
-          continue
-        }
-        const row = document.createElement('div')
-        row.className = 'item' + (item.danger ? ' danger' : '')
-        row.dataset.id = item.id
-        const label = document.createElement('span')
-        label.textContent = item.label
-        row.appendChild(label)
-        if (item.type === 'checkbox') {
-          const sw = document.createElement('span')
-          sw.className = 'switch' + (item.checked ? ' on' : '')
-          row.appendChild(sw)
-        } else if (item.icon && ICONS[item.icon]) {
-          const icon = document.createElement('span')
-          icon.className = 'icon ' + item.icon
-          icon.innerHTML = ICONS[item.icon]
-          row.appendChild(icon)
-        }
-        list.appendChild(row)
+  function render(data) {
+    const list = document.getElementById('list')
+    list.textContent = ''
+    for (const item of data.items) {
+      if (item.type === 'separator') {
+        const sep = document.createElement('div')
+        sep.className = 'sep'
+        list.appendChild(sep)
+        continue
       }
-      document.documentElement.dataset.theme = data.theme
-      document.documentElement.dataset.flip = data.flip || 'up'
-      document.getElementById('ver').textContent = 'v' + (data.version || '')
+      const row = document.createElement('div')
+      row.className = 'item' + (item.danger ? ' danger' : '')
+      row.dataset.id = item.id
+      const label = document.createElement('span')
+      label.textContent = item.label
+      row.appendChild(label)
+      if (item.type === 'checkbox') {
+        const sw = document.createElement('span')
+        sw.className = 'switch' + (item.checked ? ' on' : '')
+        row.appendChild(sw)
+      } else if (item.icon && ICONS[item.icon]) {
+        const icon = document.createElement('span')
+        icon.className = 'icon ' + item.icon
+        icon.innerHTML = ICONS[item.icon]
+        row.appendChild(icon)
+      }
+      list.appendChild(row)
     }
+    document.documentElement.dataset.theme = data.theme
+    document.documentElement.dataset.flip = data.flip || 'up'
+    document.getElementById('ver').textContent = 'v' + (data.version || '')
+  }
 
-    ipcRenderer.on('tray-menu-data', (_event, data) => render(data))
+  ipcRenderer.on('tray-menu-data', (_event, data) => render(data))
 
-    document.addEventListener('click', (e) => {
-      const row = e.target.closest('.item')
-      if (row && row.dataset.id) ipcRenderer.send('tray-menu-click', row.dataset.id)
-    })
+  document.addEventListener('click', (e) => {
+    const row = e.target.closest('.item')
+    if (row && row.dataset.id) ipcRenderer.send('tray-menu-click', row.dataset.id)
+  })
 
-    // 打开动画：先移除再挂类（窗口 show 后下一帧触发，动画干净重放；
-    // 主进程在「刚关闭又立刻弹出」时会抑制本信号，此时保留终态不闪屏）
-    ipcRenderer.on('tray-menu-open', () => {
-      const html = document.documentElement
-      html.classList.remove('open')
-      requestAnimationFrame(() => html.classList.add('open'))
-    })
-  </script>
+  // 打开动画：先移除再挂类（窗口 show 后下一帧触发，动画干净重放；
+  // 主进程在「刚关闭又立刻弹出」时会抑制本信号，此时保留终态不闪屏）
+  ipcRenderer.on('tray-menu-open', () => {
+    const html = document.documentElement
+    html.classList.remove('open')
+    requestAnimationFrame(() => html.classList.add('open'))
+  })
+</script>
 </body>
 </html>
