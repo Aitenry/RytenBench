@@ -30,7 +30,9 @@ import {
   OllamaFilled,
   MistralFilled,
   AnthropicFilled,
-  GeminiFilled
+  GeminiFilled,
+  CheckSquareOutlined,
+  MinusSquareOutlined
 } from '@ant-design/icons'
 import { useMessage } from '@renderer/hooks/useMessage'
 import { Window } from '../../../../resource/types/window'
@@ -444,13 +446,8 @@ const ModelSettings: React.FC = () => {
       const existingIds = new Set(providers.map((p) => p.model))
       const newModels = result.filter((m) => !existingIds.has(m.id))
       setFetchModels(newModels)
-      // 默认勾选档案中为文本生成（或档案缺失）的模型，跳过图像生成等非对话模型；
-      // 无档案的模型也可添加，之后由用户在编辑表单中自行填写元数据
-      setCheckedModels(
-        newModels
-          .filter((m) => !m.metadata || m.metadata.type === 'text-generation')
-          .map((m) => m.id)
-      )
+      // 默认全选新拉取到的模型，用户可在列表中取消勾选后再一键添加
+      setCheckedModels(newModels.map((m) => m.id))
     } catch (error) {
       viewMessage('fetch-models', 'error', `拉取失败: ${error}`)
     } finally {
@@ -701,6 +698,9 @@ const ModelSettings: React.FC = () => {
       }
     })
   }
+
+  // 拉取列表中是否已全选（checkedModels 恒为 fetchModels 的子集，数量相等即全选）
+  const fetchAllChecked = fetchModels.length > 0 && checkedModels.length === fetchModels.length
 
   return (
     <div>
@@ -989,9 +989,11 @@ const ModelSettings: React.FC = () => {
               style={{ flex: '1 1 0%', minWidth: 80 }}
               placeholder="选择供应商类型"
             />
-            {fetchProviderType === 'custom' && (
+            {(fetchProviderType === 'custom' || fetchProviderType === 'ollama') && (
               <Input
-                placeholder="自定义 API 地址（必填）"
+                placeholder={
+                  fetchProviderType === 'custom' ? '自定义 API 地址（必填）' : 'Ollama API 地址'
+                }
                 value={fetchBaseUrl}
                 onChange={(e) => setFetchBaseUrl(e.target.value)}
                 allowClear
@@ -1043,13 +1045,17 @@ const ModelSettings: React.FC = () => {
                 <span style={{ color: colorTextSecondary, fontSize: 13 }}>
                   共 {fetchModels.length} 个模型
                 </span>
-                <Button
-                  type="link"
-                  size="small"
-                  onClick={() => setCheckedModels(fetchModels.map((m) => m.id))}
-                >
-                  全选
-                </Button>
+                <Tooltip title={fetchAllChecked ? '不全选' : '全选'}>
+                  <Button
+                    type="text"
+                    size="small"
+                    aria-label={fetchAllChecked ? '不全选' : '全选'}
+                    icon={fetchAllChecked ? <MinusSquareOutlined /> : <CheckSquareOutlined />}
+                    onClick={() =>
+                      setCheckedModels(fetchAllChecked ? [] : fetchModels.map((m) => m.id))
+                    }
+                  />
+                </Tooltip>
               </div>
               <Checkbox.Group
                 value={checkedModels}
