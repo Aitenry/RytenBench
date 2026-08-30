@@ -102,16 +102,45 @@ function buildToolCard(
 // 消息流生产者：推理增量 / 文本增量 / 工具块
 // ============================================================================
 
-/** 文本增量去重：兼容「累积全文」与「纯增量」两种 provider 形态 */
-function computeDelta(tokenText: string, lastSent: string): string | undefined {
-  if (!tokenText) return undefined
-  if (tokenText.startsWith(lastSent) && tokenText.length > lastSent.length) {
-    return tokenText.slice(lastSent.length)
-  }
-  if (tokenText !== lastSent) {
+/** 流式增量形态：unknown=未确定 / cumulative=累积全文 / incremental=纯增量 */
+type DeltaMode = 'unknown' | 'cumulative' | 'incremental'
+
+/**
+ * 文本增量计算器（带形态锁定）：
+ * - 前两条 chunk 确定 provider 形态：第二条是第一条的扩展 → 累积全文，否则纯增量；
+ * - 累积全文形态：仅返回新增后缀；等长重复 = 无新内容，跳过；
+ * - 纯增量形态：一律下发——包括与前一条相同的「重复短语」（"好的，好的，…"是模型
+ *   真实输出）与「后者恰好以前者开头」的相邻 chunk（如 '\n' 与 '\n| 表格行'），
+ *   误做 startsWith/slice 会吃掉真实内容。
+ */
+function makeDeltaComputer(): (tokenText: string, lastSent: string) => string | undefined {
+  let mode: DeltaMode = 'unknown'
+  return (tokenText: string, lastSent: string): string | undefined => {
+    if (!tokenText) return undefined
+    if (mode === 'incremental') return tokenText
+    if (mode === 'cumulative') {
+      if (tokenText.startsWith(lastSent)) {
+        if (tokenText.length > lastSent.length) {
+          return tokenText.slice(lastSent.length)
+        }
+        return undefined
+      }
+      // 异常（形态中途变化）：按增量下发，避免丢内容
+      return tokenText
+    }
+    // unknown：首条直接下发；第二条起确定形态
+    if (!lastSent) return tokenText
+    if (tokenText.startsWith(lastSent)) {
+      if (tokenText.length > lastSent.length) {
+        mode = 'cumulative'
+        return tokenText.slice(lastSent.length)
+      }
+      // 与上一条完全相同：仍无法确定形态（增量形态的重复短语），按增量下发
+      return tokenText
+    }
+    mode = 'incremental'
     return tokenText
   }
-  return undefined
 }
 
 export async function produceMessages(
@@ -123,19 +152,21 @@ export async function produceMessages(
   // lastSent 跨所有记录共享：某些 provider 会把整段文本拆成多条重复发送
   let lastSentReasoning = ''
   let lastSentContent = ''
+  const reasoningDelta = makeDeltaComputer()
+  const contentDelta = makeDeltaComputer()
   const toolBlocks = new Map<number, { id?: string; name: string }>()
   let lastProgressAt = 0
   try {
     for await (const rec of run.messages as AsyncIterable<MessageRecord>) {
       if (signal?.aborted) break
       if (rec.kind === 'reasoning') {
-        const delta = computeDelta(rec.text, lastSentReasoning)
+        const delta = reasoningDelta(rec.text, lastSentReasoning)
         if (delta) {
           enqueue({ reasoning_content: delta })
         }
         lastSentReasoning = rec.text
       } else if (rec.kind === 'text') {
-        const delta = computeDelta(rec.text, lastSentContent)
+        const delta = contentDelta(rec.text, lastSentContent)
         if (delta) {
           enqueue({ content: delta })
         }
@@ -259,6 +290,8 @@ export async function produceToolCalls(
 interface SubAgentGroupState {
   lastSentReasoning: string
   lastSentContent: string
+  reasoningDelta: (tokenText: string, lastSent: string) => string | undefined
+  contentDelta: (tokenText: string, lastSent: string) => string | undefined
 }
 
 export async function produceSubAgents(
@@ -275,7 +308,12 @@ export async function produceSubAgents(
       const key = `${rec.name}:${rec.causeId ?? ''}`
       let group = groups.get(key)
       if (!group) {
-        group = { lastSentReasoning: '', lastSentContent: '' }
+        group = {
+          lastSentReasoning: '',
+          lastSentContent: '',
+          reasoningDelta: makeDeltaComputer(),
+          contentDelta: makeDeltaComputer()
+        }
         groups.set(key, group)
       }
 
@@ -283,7 +321,7 @@ export async function produceSubAgents(
         // started 生命周期事件由 toolCalls 流的 task 记录发出，此处跳过
         continue
       } else if (rec.kind === 'sub_reasoning') {
-        const delta = computeDelta(rec.text, group.lastSentReasoning)
+        const delta = group.reasoningDelta(rec.text, group.lastSentReasoning)
         if (delta) {
           enqueue({
             subAgent: {
@@ -296,7 +334,7 @@ export async function produceSubAgents(
         }
         group.lastSentReasoning = rec.text
       } else if (rec.kind === 'sub_text') {
-        const delta = computeDelta(rec.text, group.lastSentContent)
+        const delta = group.contentDelta(rec.text, group.lastSentContent)
         if (delta) {
           enqueue({
             subAgent: { name: rec.name, causeId: rec.causeId, status: 'running', content: delta }

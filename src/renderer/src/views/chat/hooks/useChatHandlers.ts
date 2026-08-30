@@ -319,9 +319,7 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
         const updatedContent = chunk.content
           ? msg.content && chunk.content.startsWith(msg.content)
             ? chunk.content
-            : msg.content && msg.content.endsWith(chunk.content)
-              ? msg.content
-              : msg.content + chunk.content
+            : msg.content + chunk.content
           : msg.content
 
         let updatedToolCalls = msg.toolCalls || []

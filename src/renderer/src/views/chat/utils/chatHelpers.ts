@@ -26,15 +26,15 @@ export const isSameToolCall = (
 /**
  * 计算文本增量：兼容 provider 下发完整文本而非增量的场景。
  * - 若 incoming 是 previous 的扩展，仅返回新增后缀；
- * - 若 incoming 是 previous 的重复后缀，返回空字符串；
- * - 否则返回 incoming 本身。
+ * - 否则按增量处理，返回 incoming 本身。
+ *
+ * 注意：不再做「previous.endsWith(incoming) → ''」的后缀去重——主进程已按形态去重，
+ * 增量形态下后缀相同往往是模型真实输出的重复内容（如表格相邻相同行、"好的，好的，…"），
+ * 误判为重复发送会导致真实内容被丢弃，且后续增量全部错位。
  */
 export const computeTextDelta = (incoming: string, previous: string): string => {
   if (incoming.startsWith(previous) && incoming.length > previous.length) {
     return incoming.slice(previous.length)
-  }
-  if (previous.endsWith(incoming)) {
-    return ''
   }
   return incoming
 }
