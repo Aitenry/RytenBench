@@ -1,5 +1,6 @@
 import React from 'react'
-import { RiLoader4Line } from '@remixicon/react'
+import { RiSparkling2Line } from '@remixicon/react'
+import { ShinyIcon, ShinyText } from '@renderer/components/effects/ShinyText'
 
 interface LoadingMessageProps {
   colorTextSecondary: string
@@ -9,8 +10,8 @@ const LoadingMessage: React.FC<LoadingMessageProps> = ({ colorTextSecondary }) =
   <div className="flex mb-6">
     <div className="w-full">
       <div className="flex items-center gap-2" style={{ color: colorTextSecondary }}>
-        <RiLoader4Line size={16} className="animate-spin" />
-        <span>正在生成...</span>
+        <ShinyIcon icon={RiSparkling2Line} size={16} baseColor={colorTextSecondary} />
+        <ShinyText baseColor={colorTextSecondary}>正在生成...</ShinyText>
       </div>
     </div>
   </div>

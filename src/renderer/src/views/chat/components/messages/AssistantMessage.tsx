@@ -5,7 +5,6 @@ import {
   RiCheckLine,
   RiRefreshLine,
   RiDeleteBin6Line,
-  RiLoader4Line,
   RiAiAgentLine,
   RiListCheck,
   RiCheckboxCircleLine,
@@ -17,11 +16,32 @@ import {
   RiSearchLine,
   RiTerminalBoxLine,
   RiBrain4Line,
-  RiPictureInPicture2Line
+  RiPictureInPicture2Line,
+  RiSparkling2Line
 } from '@remixicon/react'
 import MarkdownLoad from '@renderer/components/markdown/MarkdownLoad'
+import { ShinyText, ShinyIcon } from '@renderer/components/effects/ShinyText'
 import LoadingMessage from './LoadingMessage'
 import type { Message, MessageBlock, ToolCall } from '@renderer/types/chat'
+
+/** 工具进行中折叠头展示的语义图标：与工具完成后的定制卡片图标保持一致 */
+const TOOL_IN_PROGRESS_ICONS: Record<
+  string,
+  React.ComponentType<{
+    size?: number | string
+    color?: string
+    className?: string
+    style?: React.CSSProperties
+  }>
+> = {
+  read_file: RiFileSearchLine,
+  write_file: RiFileEditLine,
+  edit_file: RiPencilLine,
+  ls: RiFolderOpenLine,
+  glob: RiSearchLine,
+  grep: RiSearchLine,
+  execute: RiTerminalBoxLine
+}
 
 interface AssistantMessageProps {
   message: Message
@@ -771,7 +791,13 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
         if (message.content) {
           return (
             <div style={{ color: colorText }} className="mb-2">
-              <MarkdownLoad content={message.content} isDarkMode={isDarkMode} />
+              {message.loading ? (
+                <ShinyText baseColor={colorText} className="shiny-text-block">
+                  <MarkdownLoad content={message.content} isDarkMode={isDarkMode} />
+                </ShinyText>
+              ) : (
+                <MarkdownLoad content={message.content} isDarkMode={isDarkMode} />
+              )}
             </div>
           )
         }
@@ -808,15 +834,13 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                 gap: '8px'
               }}
             >
-              <RiLoader4Line
-                size={16}
-                className="animate-spin"
-                style={{ color: colorTextSecondary, flexShrink: 0 }}
-              />
-              <TruncatedTooltipText
-                text="正在压缩早期对话…"
-                style={{ color: colorText, fontSize: '13px', flex: 1 }}
-              />
+              <ShinyIcon icon={RiPictureInPicture2Line} size={16} baseColor={colorTextSecondary} />
+              <ShinyText baseColor={colorText}>
+                <TruncatedTooltipText
+                  text="正在压缩早期对话…"
+                  style={{ color: colorText, fontSize: '13px', flex: 1 }}
+                />
+              </ShinyText>
             </div>
           )
         }
@@ -922,20 +946,21 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
             .some((b) => b.type !== 'reasoning')
           const thinkingDone = hasContentAfter || !message.loading
           const thinkingLabel = thinkingDone ? '思考过程' : '思考中…'
+          const thinkingLabelNode = (
+            <span style={{ color: colorTextTertiary }} className="text-xs">
+              {thinkingDone ? (
+                thinkingLabel
+              ) : (
+                <ShinyText baseColor={colorTextTertiary}>{thinkingLabel}</ShinyText>
+              )}
+            </span>
+          )
           const extra = thinkingDone
             ? ({
-                label: (
-                  <span style={{ color: colorTextTertiary }} className="text-xs">
-                    {thinkingLabel}
-                  </span>
-                )
+                label: thinkingLabelNode
               } as const)
             : ({
-                label: (
-                  <span style={{ color: colorTextTertiary }} className="text-xs">
-                    {thinkingLabel}
-                  </span>
-                ),
+                label: thinkingLabelNode,
                 collapsible: 'disabled' as const
               } as const)
           return (
@@ -959,13 +984,7 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
               expandIcon={
                 thinkingDone
                   ? undefined
-                  : () => (
-                      <RiLoader4Line
-                        size={14}
-                        className="animate-spin"
-                        style={{ color: colorTextTertiary }}
-                      />
-                    )
+                  : () => <ShinyIcon icon={RiBrain4Line} size={14} baseColor={colorTextTertiary} />
               }
               defaultActiveKey={thinkingDone ? [] : [blockIndex]}
               size="small"
@@ -977,7 +996,13 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
         if (block.type === 'text' && block.text) {
           return (
             <div key={blockIndex} style={{ color: colorText }} className="mb-2">
-              <MarkdownLoad content={block.text} isDarkMode={isDarkMode} />
+              {message.loading ? (
+                <ShinyText baseColor={colorText} className="shiny-text-block">
+                  <MarkdownLoad content={block.text} isDarkMode={isDarkMode} />
+                </ShinyText>
+              ) : (
+                <MarkdownLoad content={block.text} isDarkMode={isDarkMode} />
+              )}
             </div>
           )
         }
@@ -1007,13 +1032,22 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
           const toolLabel = inProgress
             ? `${toolName}${isPreparing ? ' · 生成中…' : ' · 执行中…'}`
             : toolName
+          // 进行中折叠头展示该工具完成后的定制卡片同款图标；mnemon 记忆工具用大脑图标；其余不显示
+          const inProgressIcon =
+            inProgress &&
+            (TOOL_IN_PROGRESS_ICONS[toolName] ||
+              (toolName.startsWith('mnemon_') ? RiBrain4Line : undefined))
           return (
             <Collapse
               key={blockIndex}
               items={[
                 {
                   key: blockIndex,
-                  label: toolLabel,
+                  label: inProgress ? (
+                    <ShinyText baseColor={colorTextSecondary}>{toolLabel}</ShinyText>
+                  ) : (
+                    toolLabel
+                  ),
                   collapsible: inProgress ? 'disabled' : undefined,
                   children: (
                     <div
@@ -1045,13 +1079,9 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                 }
               ]}
               expandIcon={
-                inProgress
+                inProgressIcon
                   ? () => (
-                      <RiLoader4Line
-                        size={14}
-                        className="animate-spin"
-                        style={{ color: colorTextTertiary }}
-                      />
+                      <ShinyIcon icon={inProgressIcon} size={14} baseColor={colorTextSecondary} />
                     )
                   : undefined
               }
@@ -1114,7 +1144,13 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                             className="max-h-48 overflow-y-auto chat-scrollbar text-xs border-l-2 pl-3 px-1.5"
                             style={{ borderColor: colorBorderSecondary }}
                           >
-                            <MarkdownLoad content={child.reasoning} isDarkMode={isDarkMode} />
+                            {message.loading ? (
+                              <ShinyText baseColor={colorText} className="shiny-text-block">
+                                <MarkdownLoad content={child.reasoning} isDarkMode={isDarkMode} />
+                              </ShinyText>
+                            ) : (
+                              <MarkdownLoad content={child.reasoning} isDarkMode={isDarkMode} />
+                            )}
                           </div>
                         )
                       }
@@ -1128,7 +1164,13 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
               if (child.type === 'text' && child.text) {
                 return (
                   <div key={ci} style={{ color: colorText }} className="mb-1">
-                    <MarkdownLoad content={child.text} isDarkMode={isDarkMode} />
+                    {message.loading ? (
+                      <ShinyText baseColor={colorText} className="shiny-text-block">
+                        <MarkdownLoad content={child.text} isDarkMode={isDarkMode} />
+                      </ShinyText>
+                    ) : (
+                      <MarkdownLoad content={child.text} isDarkMode={isDarkMode} />
+                    )}
                   </div>
                 )
               }
@@ -1157,6 +1199,11 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                 const toolLabel = inProgress
                   ? `${toolName}${isPreparing ? ' · 生成中…' : ' · 执行中…'}`
                   : toolName
+                // 进行中折叠头展示该工具完成后的定制卡片同款图标；mnemon 记忆工具用大脑图标；其余不显示
+                const inProgressIcon =
+                  inProgress &&
+                  (TOOL_IN_PROGRESS_ICONS[toolName] ||
+                    (toolName.startsWith('mnemon_') ? RiBrain4Line : undefined))
                 return (
                   <Collapse
                     key={ci}
@@ -1165,7 +1212,11 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                         key: ci,
                         label: (
                           <span style={{ color: colorTextSecondary }} className="text-xs">
-                            {toolLabel}
+                            {inProgress ? (
+                              <ShinyText baseColor={colorTextSecondary}>{toolLabel}</ShinyText>
+                            ) : (
+                              toolLabel
+                            )}
                           </span>
                         ),
                         collapsible: inProgress ? 'disabled' : undefined,
@@ -1209,12 +1260,12 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                       }
                     ]}
                     expandIcon={
-                      inProgress
+                      inProgressIcon
                         ? () => (
-                            <RiLoader4Line
+                            <ShinyIcon
+                              icon={inProgressIcon}
                               size={12}
-                              className="animate-spin"
-                              style={{ color: colorTextTertiary }}
+                              baseColor={colorTextSecondary}
                             />
                           )
                         : undefined
@@ -1248,9 +1299,21 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                         key: ci,
                         label: (
                           <span className="flex items-center gap-2">
-                            <RiAiAgentLine size={12} style={{ color: childSaIconColor }} />
+                            {childIsActive ? (
+                              <ShinyIcon
+                                icon={RiAiAgentLine}
+                                size={12}
+                                baseColor={childSaIconColor}
+                              />
+                            ) : (
+                              <RiAiAgentLine size={12} style={{ color: childSaIconColor }} />
+                            )}
                             <span style={{ color: colorTextSecondary }} className="text-xs">
-                              {childSaLabel}
+                              {childIsActive ? (
+                                <ShinyText baseColor={colorTextSecondary}>{childSaLabel}</ShinyText>
+                              ) : (
+                                childSaLabel
+                              )}
                             </span>
                           </span>
                         ),
@@ -1276,17 +1339,6 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                         )
                       }
                     ]}
-                    expandIcon={
-                      childIsActive
-                        ? () => (
-                            <RiLoader4Line
-                              size={12}
-                              className="animate-spin"
-                              style={{ color: colorTextTertiary }}
-                            />
-                          )
-                        : undefined
-                    }
                     defaultActiveKey={childIsActive ? [ci] : []}
                     size="small"
                     style={{
@@ -1310,8 +1362,18 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                   key: blockIndex,
                   label: (
                     <span className="flex items-center gap-2">
-                      <RiAiAgentLine size={14} style={{ color: saIconColor }} />
-                      <span style={{ color: colorTextSecondary }}>{saLabel}</span>
+                      {isActive ? (
+                        <ShinyIcon icon={RiAiAgentLine} size={14} baseColor={saIconColor} />
+                      ) : (
+                        <RiAiAgentLine size={14} style={{ color: saIconColor }} />
+                      )}
+                      <span style={{ color: colorTextSecondary }}>
+                        {isActive ? (
+                          <ShinyText baseColor={colorTextSecondary}>{saLabel}</ShinyText>
+                        ) : (
+                          saLabel
+                        )}
+                      </span>
                     </span>
                   ),
                   collapsible: isActive ? 'disabled' : undefined,
@@ -1340,17 +1402,6 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                   )
                 }
               ]}
-              expandIcon={
-                isActive
-                  ? () => (
-                      <RiLoader4Line
-                        size={14}
-                        className="animate-spin"
-                        style={{ color: colorTextTertiary }}
-                      />
-                    )
-                  : undefined
-              }
               defaultActiveKey={isActive ? [blockIndex] : []}
               size="small"
               style={{ marginBottom: '6px', background: collapseBg }}
@@ -1374,8 +1425,10 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
           hasMemoryBlock &&
           !hasCompactingBlock ? (
             <div className="flex items-center gap-2 mt-1" style={{ color: colorTextSecondary }}>
-              <RiLoader4Line size={14} className="animate-spin" />
-              <span style={{ fontSize: 13 }}>正在生成…</span>
+              <ShinyIcon icon={RiSparkling2Line} size={14} baseColor={colorTextSecondary} />
+              <ShinyText baseColor={colorTextSecondary}>
+                <span style={{ fontSize: 13 }}>正在生成…</span>
+              </ShinyText>
             </div>
           ) : null}
           {/* 内容输出中不展示操作按钮 */}

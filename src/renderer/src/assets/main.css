@@ -341,3 +341,71 @@ body.home-resizing {
 body.home-resizing * {
   cursor: col-resize !important;
 }
+
+/* ======== ShinyText 光泽扫过动效（reactbits ShinyText 移植） ======== */
+/* 文字：基底色→白色高光→基底色渐变填充，光泽带周期扫过（background-position 100% → -100%） */
+.shiny-text {
+  display: inline-block;
+  background-image: linear-gradient(
+    120deg,
+    var(--shiny-base, #b5b5b5) 0%,
+    var(--shiny-base, #b5b5b5) 35%,
+    var(--shiny-shine, rgba(255, 255, 255, 0.9)) 50%,
+    var(--shiny-base, #b5b5b5) 65%,
+    var(--shiny-base, #b5b5b5) 100%
+  );
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shiny-shine 1.5s linear infinite;
+}
+
+/* 包裹 markdown 正文时恢复块级布局（inline-block 会收缩宽度导致排版异常） */
+.shiny-text.shiny-text-block {
+  display: block;
+}
+
+/* 自带背景的元素（行内代码/代码块）恢复实色文字，避免透明填充下文字不可见 */
+.shiny-text code,
+.shiny-text pre {
+  -webkit-text-fill-color: initial;
+}
+
+/* 图标：双层叠加——底层基底色图标 + 上层白色图标，上层用渐变 mask 带裁剪出光泽扫过 */
+.shiny-icon {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+.shiny-icon .shiny-icon-sweep {
+  position: absolute;
+  inset: 0;
+  color: var(--shiny-shine, #fff);
+  -webkit-mask-image: linear-gradient(120deg, transparent 40%, #000 50%, transparent 60%);
+  mask-image: linear-gradient(120deg, transparent 40%, #000 50%, transparent 60%);
+  -webkit-mask-size: 200% 100%;
+  mask-size: 200% 100%;
+  animation: shiny-shine-mask 1.5s linear infinite;
+}
+
+@keyframes shiny-shine {
+  0% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: -100% 50%;
+  }
+}
+
+@keyframes shiny-shine-mask {
+  0% {
+    -webkit-mask-position: 100% 0;
+    mask-position: 100% 0;
+  }
+  100% {
+    -webkit-mask-position: -100% 0;
+    mask-position: -100% 0;
+  }
+}
