@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { theme, Button, Tooltip } from 'antd'
+import { theme, Button, Tooltip, App } from 'antd'
 import {
   RiArrowDownSLine,
   RiArrowRightSLine,
@@ -39,6 +39,7 @@ const TaskListView: React.FC<Props> = ({
   onEditTask
 }) => {
   const { token } = theme.useToken()
+  const { modal } = App.useApp()
   const [hoveredId, setHoveredId] = useState<number | null>(null)
 
   const cellStyle = (width: number, right = false): React.CSSProperties => ({
@@ -67,7 +68,7 @@ const TaskListView: React.FC<Props> = ({
     const hasChildren = node.children.length > 0
     const isSelected = selectedId === node.id
     const isHovered = hoveredId === node.id
-    const p = PRIORITY_MAP[node.priority] ?? PRIORITY_MAP[7]
+    const p = PRIORITY_MAP[node.priority] ?? PRIORITY_MAP[4]
     const typeMeta = TYPE_LABELS[node.type] ?? {
       label: node.type,
       color: token.colorTextSecondary,
@@ -225,18 +226,20 @@ const TaskListView: React.FC<Props> = ({
               transition: 'opacity 0.15s'
             }}
           >
-            <Tooltip title="添加子任务">
-              <Button
-                type="text"
-                size="small"
-                icon={<RiAddLine size={14} />}
-                style={{ width: 22, height: 22, padding: 0 }}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  onAddTask(node.id)
-                }}
-              />
-            </Tooltip>
+            {node.type !== 'task' && (
+              <Tooltip title="添加子任务">
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<RiAddLine size={14} />}
+                  style={{ width: 22, height: 22, padding: 0 }}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onAddTask(node.id)
+                  }}
+                />
+              </Tooltip>
+            )}
             <Tooltip title="编辑">
               <Button
                 type="text"
@@ -258,7 +261,15 @@ const TaskListView: React.FC<Props> = ({
                 style={{ width: 22, height: 22, padding: 0 }}
                 onClick={(e) => {
                   e.stopPropagation()
-                  onDeleteTask(node.id)
+                  // 与树视图一致的二次确认（修复：此前一行误点即删整棵子树且无撤销）
+                  modal.confirm({
+                    title: '删除任务',
+                    content: `确定删除「${node.title}」及其所有子任务吗？`,
+                    okText: '删除',
+                    cancelText: '取消',
+                    okButtonProps: { danger: true },
+                    onOk: () => onDeleteTask(node.id)
+                  })
                 }}
               />
             </Tooltip>

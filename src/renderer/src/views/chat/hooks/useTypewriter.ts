@@ -14,24 +14,27 @@ export const useTypewriter = (
     setIsDone(false)
     let i = 0
     let cancelled = false
+    let interval: ReturnType<typeof setInterval> | null = null
 
     const timeout = setTimeout(() => {
-      const interval = setInterval(() => {
+      interval = setInterval(() => {
         if (cancelled) return
         if (i < text.length) {
           setDisplayedText(text.slice(0, i + 1))
           i++
         } else {
-          clearInterval(interval)
+          if (interval) clearInterval(interval)
           setIsDone(true)
         }
       }, speed)
-      return () => clearInterval(interval)
     }, startDelay)
 
+    // 修复：interval 句柄提升到 effect 作用域,cleanup 时一并清除
+    //（此前外层 return 只清 timeout,已启动的 interval 永久空转）
     return () => {
       cancelled = true
       clearTimeout(timeout)
+      if (interval) clearInterval(interval)
     }
   }, [text, speed, startDelay])
 

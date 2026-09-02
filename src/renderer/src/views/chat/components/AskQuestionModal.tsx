@@ -42,7 +42,18 @@ const AskQuestionModal: React.FC<{ currentTopicId: number | null }> = ({ current
 
   // 流结束/出错 → 收起弹窗（提问已取消或已无意义）
   useEffect(() => {
-    const close = (): void => setPending(null)
+    const close = (payload?: { topicId?: number }): void => {
+      // 只响应当前话题的流结束（修复：此前任意话题 done/error 都会误关当前话题挂起的
+      // 提问——如后台目标自动续跑流结束,弹窗被误关而主进程提问仍挂起）
+      if (
+        payload &&
+        typeof payload.topicId === 'number' &&
+        payload.topicId !== currentTopicIdRef.current
+      ) {
+        return
+      }
+      setPending(null)
+    }
     const unDone = (window as unknown as Window).api.chat.onStreamDone(close)
     const unErr = (window as unknown as Window).api.chat.onStreamError(close)
     return () => {

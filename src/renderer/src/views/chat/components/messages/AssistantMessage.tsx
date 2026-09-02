@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useCallback, useState } from 'react'
+import React, { useRef, useEffect, useCallback, useState, useMemo } from 'react'
 import { Tooltip, Collapse, App } from 'antd'
 import {
   RiFileCopyLine,
@@ -113,6 +113,24 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
   }) => {
     const { modal } = App.useApp()
     const isCopied = copiedId === message.id
+
+    // 复制文本：优先拼接 blocks 中的正文（修复：此前只取 message.content,
+    // 子智能体/工具型消息复制为空或缺失文本,与展示内容不一致）
+    const copyText = useMemo(() => {
+      const parts: string[] = []
+      const collect = (blocks: MessageBlock[] | undefined): void => {
+        for (const b of blocks ?? []) {
+          if (b.type === 'text' && b.text) parts.push(b.text)
+          else if (b.type === 'subAgent') {
+            if (b.subAgent?.output) parts.push(b.subAgent.output)
+            collect(b.children)
+          }
+        }
+      }
+      collect(message.blocks)
+      const joined = parts.join('\n\n').trim()
+      return joined || message.content
+    }, [message])
 
     // 折叠内容滚动容器管理 & 流式输出时自动滚动到底部
     const scrollRefs = useRef<Record<string, HTMLDivElement | null>>({})
@@ -791,13 +809,7 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
         if (message.content) {
           return (
             <div style={{ color: colorText }} className="mb-2">
-              {message.loading ? (
-                <ShinyText baseColor={colorText} className="shiny-text-block">
-                  <MarkdownLoad content={message.content} isDarkMode={isDarkMode} />
-                </ShinyText>
-              ) : (
-                <MarkdownLoad content={message.content} isDarkMode={isDarkMode} />
-              )}
+              <MarkdownLoad content={message.content} isDarkMode={isDarkMode} />
             </div>
           )
         }
@@ -996,13 +1008,7 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
         if (block.type === 'text' && block.text) {
           return (
             <div key={blockIndex} style={{ color: colorText }} className="mb-2">
-              {message.loading ? (
-                <ShinyText baseColor={colorText} className="shiny-text-block">
-                  <MarkdownLoad content={block.text} isDarkMode={isDarkMode} />
-                </ShinyText>
-              ) : (
-                <MarkdownLoad content={block.text} isDarkMode={isDarkMode} />
-              )}
+              <MarkdownLoad content={block.text} isDarkMode={isDarkMode} />
             </div>
           )
         }
@@ -1164,13 +1170,7 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
               if (child.type === 'text' && child.text) {
                 return (
                   <div key={ci} style={{ color: colorText }} className="mb-1">
-                    {message.loading ? (
-                      <ShinyText baseColor={colorText} className="shiny-text-block">
-                        <MarkdownLoad content={child.text} isDarkMode={isDarkMode} />
-                      </ShinyText>
-                    ) : (
-                      <MarkdownLoad content={child.text} isDarkMode={isDarkMode} />
-                    )}
+                    <MarkdownLoad content={child.text} isDarkMode={isDarkMode} />
                   </div>
                 )
               }
@@ -1293,7 +1293,9 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                     : '#52c41a'
                 return (
                   <Collapse
-                    key={`${child.subAgent?.causeId || child.subAgent?.name || ci}-${childIsActive ? 'a' : 'd'}`}
+                    // key 用数组序号（修复：此前 `name-${isActive?'a':'d'}` 在状态翻转时强制换 key
+                    // 重挂 Collapse 丢失展开态,同名子智能体两次委派还会产生重复 key 致 React 复用错位）
+                    key={`nested-sa-${ci}`}
                     items={[
                       {
                         key: ci,
@@ -1356,7 +1358,9 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
 
           return (
             <Collapse
-              key={`${block.subAgent?.causeId || block.subAgent?.name || blockIndex}-${isActive ? 'a' : 'd'}`}
+              // key 用数组序号（修复：状态翻转换 key 重挂 Collapse 丢失展开态；同名子智能体
+              // 两次委派产生重复 key 致 React 复用错位）
+              key={`sa-${blockIndex}`}
               items={[
                 {
                   key: blockIndex,
@@ -1436,7 +1440,7 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
             <div className="flex items-center gap-2 mt-3">
               <Tooltip title={isCopied ? '已复制' : '复制'}>
                 <button
-                  onClick={() => onCopy(message.content, message.id)}
+                  onClick={() => onCopy(copyText, message.id)}
                   className="p-1.5 rounded-lg transition-colors"
                   style={{
                     color: colorTextTertiary,

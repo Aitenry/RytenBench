@@ -1,5 +1,6 @@
 // AppContent.tsx
 import React, { useState, useEffect, useCallback } from 'react'
+import { useLocation } from 'react-router-dom'
 import CustomFrame from '@renderer/components/system/CustomFrame'
 import LockScreen from '@renderer/components/system/LockScreen'
 import CryptoJS from 'crypto-js'
@@ -9,6 +10,7 @@ import { useMessage } from '@renderer/hooks/useMessage'
 
 const AppContent: React.FC = () => {
   const { viewMessage } = useMessage()
+  const location = useLocation()
   const [current, setCurrent] = useState('home')
   const [isLocked, setIsLocked] = useState(false)
   const [lockCode, setLockCode] = useState<string | null>(null)
@@ -65,6 +67,15 @@ const AppContent: React.FC = () => {
       viewMessage('unlock-error', 'error', '解锁验证失败')
     }
   }
+
+  // 侧栏高亮与路由同步（修复：此前 currentKey 只随菜单点击更新——刷新后停留在
+  // #/planner 等非菜单路径进入的视图时,侧栏仍高亮 home/旧项）
+  useEffect(() => {
+    const key = location.pathname.replace(/^\/+/, '').split('/')[0]
+    if (key && ['home', 'chat', 'planner', 'music'].includes(key)) {
+      setCurrent(key)
+    }
+  }, [location.pathname])
 
   useEffect(() => {
     const handleKeyPress = (e: KeyboardEvent): void => {

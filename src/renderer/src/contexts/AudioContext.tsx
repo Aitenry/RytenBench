@@ -407,6 +407,12 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       if (index === currentIndex && audioRef.current && playlistRef.current[index]) {
         // 同一首歌：已播放则忽略，已暂停则直接恢复（src 未变，canplay 不会触发）
         if (isPlayingRef.current) return
+        // 修复：文件读取失败的曲目 src 为空,tryPlay 会静默 return 形成死路
+        //（再点该行永远无法重试）——此时重新走 loadAndPlay 完整重载
+        if (!audioRef.current.src) {
+          loadAndPlay(index)
+          return
+        }
         const ldId = ++loadIdRef.current
         shouldPlayLoadIdRef.current = 0
         pendingPlayRef.current = false

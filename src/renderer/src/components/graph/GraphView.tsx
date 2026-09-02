@@ -58,9 +58,10 @@ const GraphView: React.FC<GraphViewProps> = ({
     try {
       const data = await (window as unknown as Window).api.graph.getData(wikiId, undefined, docIds)
       setGraphData(data)
-      if (data.entities.length === 0) {
-        setSelectedEntity(null)
-      }
+      // 修复：筛选/重建后旧选中实体可能已不在图内,详情面板残留过期实体
+      setSelectedEntity((prev) =>
+        prev && data.entities.some((e) => e.id === prev.id) ? prev : null
+      )
     } catch (error) {
       console.error('Failed to load graph data:', error)
     } finally {
@@ -105,9 +106,31 @@ const GraphView: React.FC<GraphViewProps> = ({
   const graphChartData = useMemo((): GraphChartData | null => {
     if (!graphData) return null
 
+    // 搜索/类型过滤（修复：搜索框与类型筛选状态此前无人消费,输入任何文字都无反应）
+    const query = searchQuery.trim().toLowerCase()
+    const filteredEntities =
+      query || typeFilter
+        ? graphData.entities.filter((e) => {
+            if (typeFilter && e.type !== typeFilter) return false
+            if (!query) return true
+            let aliases: string[] = []
+            if (e.aliases) {
+              try {
+                aliases = JSON.parse(e.aliases) as string[]
+              } catch {
+                aliases = []
+              }
+            }
+            return (
+              e.name.toLowerCase().includes(query) ||
+              aliases.some((a) => a.toLowerCase().includes(query))
+            )
+          })
+        : graphData.entities
+
     const entityMap = new Map<number, GraphEntity>()
     const entityTypeSet = new Set<string>()
-    for (const entity of graphData.entities) {
+    for (const entity of filteredEntities) {
       entityMap.set(entity.id, entity)
       entityTypeSet.add(entity.type)
     }
@@ -122,7 +145,7 @@ const GraphView: React.FC<GraphViewProps> = ({
       }
     })
 
-    const nodes = graphData.entities.map((entity) => ({
+    const nodes = filteredEntities.map((entity) => ({
       id: String(entity.id),
       name: entity.name,
       category: typeToIndex.get(entity.type) ?? 0,
@@ -140,7 +163,7 @@ const GraphView: React.FC<GraphViewProps> = ({
       }))
 
     return { nodes, links, categories }
-  }, [graphData])
+  }, [graphData, searchQuery, typeFilter])
 
   useEffect(() => {
     loadDocs(selectedWiki.id).then()

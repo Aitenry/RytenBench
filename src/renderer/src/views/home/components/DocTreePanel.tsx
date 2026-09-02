@@ -152,9 +152,16 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
   /* ── 加载 / 刷新知识库目录树 ── */
   const treeCacheRef = useRef(treeCache)
   treeCacheRef.current = treeCache
+  /** 加载中收到的 force 刷新请求（当前加载完成后自动补发,防被 loading 守卫静默吞掉） */
+  const pendingForceRef = useRef(new Set<number>())
   const loadWikiTree = useCallback(
     async (wikiId: number, force = false) => {
-      if ((treeCache[wikiId] && !force) || loadingWikis.has(wikiId)) return
+      if (treeCache[wikiId] && !force) return
+      if (loadingWikis.has(wikiId)) {
+        // 修复：加载中收到 force 刷新（新建/重命名目录后）被静默丢弃——记录待重试
+        if (force) pendingForceRef.current.add(wikiId)
+        return
+      }
       setLoadingWikis((prev) => new Set(prev).add(wikiId))
       try {
         const dirs = await api.wikis.getDirectories(wikiId)
@@ -185,6 +192,9 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
           next.delete(wikiId)
           return next
         })
+        if (pendingForceRef.current.delete(wikiId)) {
+          loadWikiTreeRef.current(wikiId, true).then()
+        }
       }
     },
     [api, treeCache, loadingWikis]
@@ -216,16 +226,21 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
 
   const toggleWiki = useCallback(
     (wikiId: number) => {
+      // 修复：网络加载移出 setState updater（updater 应保持纯函数,
+      // StrictMode 双调用会触发两次 loadWikiTree 造成重复请求）
+      const willExpand = !expandedWikisRef.current.has(wikiId)
       setExpandedWikis((prev) => {
         const next = new Set(prev)
         if (next.has(wikiId)) {
           next.delete(wikiId)
         } else {
           next.add(wikiId)
-          loadWikiTree(wikiId).then()
         }
         return next
       })
+      if (willExpand) {
+        loadWikiTree(wikiId).then()
+      }
     },
     [loadWikiTree]
   )
@@ -822,32 +837,42 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
         {matchedWikis.length > 0 && (
           <>
             <div style={searchGroupStyle(token)}>知识库 · {matchedWikis.length}</div>
-            {matchedWikis.map((w) => (
-              <div key={`wiki-${w.id}`} style={rowStyle(false, 1)} onClick={() => toggleWiki(w.id)}>
-                {toggleArrow(expandedWikis.has(w.id), () => toggleWiki(w.id))}
-                <RiBook2Line size={13} style={{ color: token.colorWarning, flexShrink: 0 }} />
-                <span
-                  style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}
-                >
-                  {w.title}
-                </span>
-                {rowMenu([
-                  {
-                    key: 'graph',
-                    label: '查看图谱',
-                    icon: <RiMindMap size={14} />,
-                    onClick: () => onOpenGraph(w)
-                  },
-                  { key: 'edit', label: '编辑知识库', onClick: () => onEditWiki(w) },
-                  {
-                    key: 'delete',
-                    label: '删除知识库',
-                    danger: true,
-                    onClick: () => onDeleteWiki(w)
-                  }
-                ])}
-              </div>
-            ))}
+            {matchedWikis.map((w) => {
+              // 修复：搜索视图不渲染知识库子树,点行/箭头只有状态翻转与网络请求而无任何
+              // 可见反馈——改为退出搜索并展开该知识库（正常树中可见）
+              const openWikiFromSearch = (): void => {
+                setSearch('')
+                if (!expandedWikis.has(w.id)) {
+                  toggleWiki(w.id)
+                }
+              }
+              return (
+                <div key={`wiki-${w.id}`} style={rowStyle(false, 1)} onClick={openWikiFromSearch}>
+                  {toggleArrow(expandedWikis.has(w.id), openWikiFromSearch)}
+                  <RiBook2Line size={13} style={{ color: token.colorWarning, flexShrink: 0 }} />
+                  <span
+                    style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}
+                  >
+                    {w.title}
+                  </span>
+                  {rowMenu([
+                    {
+                      key: 'graph',
+                      label: '查看图谱',
+                      icon: <RiMindMap size={14} />,
+                      onClick: () => onOpenGraph(w)
+                    },
+                    { key: 'edit', label: '编辑知识库', onClick: () => onEditWiki(w) },
+                    {
+                      key: 'delete',
+                      label: '删除知识库',
+                      danger: true,
+                      onClick: () => onDeleteWiki(w)
+                    }
+                  ])}
+                </div>
+              )
+            })}
           </>
         )}
       </>

@@ -558,12 +558,20 @@ const ModelSettings: React.FC = () => {
     [checkedKeys]
   )
 
-  // 数据加载 / 刷新后默认展开所有分组（保留用户手动折叠过的分组）
+  // 数据加载 / 刷新后默认展开「新增」分组（修复：此前无条件把所有分组加回展开,
+  // 用户手动折叠过的分组每次刷新都被强制重新展开）
   useEffect(() => {
     setExpandedKeys((prev) => {
-      const merged = new Set<React.Key>(prev)
-      for (const node of treeData) merged.add(node.key)
-      return [...merged]
+      const known = new Set<React.Key>(prev)
+      const next = new Set<React.Key>(prev)
+      let changed = false
+      for (const node of treeData) {
+        if (!known.has(node.key)) {
+          next.add(node.key)
+          changed = true
+        }
+      }
+      return changed ? [...next] : prev
     })
   }, [treeData])
 

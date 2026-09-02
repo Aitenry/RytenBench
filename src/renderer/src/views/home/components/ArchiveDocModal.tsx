@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { Modal, Spin, Empty, theme } from 'antd'
 import { RiBook2Line, RiFolder2Line } from '@remixicon/react'
 import { Window } from '../../../../resource/types/window'
@@ -44,6 +44,8 @@ const ArchiveDocModal: React.FC<ArchiveDocModalProps> = ({
   const [directories, setDirectories] = useState<WikiDirectoryRow[]>([])
   const [selectedDirId, setSelectedDirId] = useState<number | null>(null)
   const [dirsLoading, setDirsLoading] = useState(false)
+  /* 请求序号：只接受最新一次请求的响应（修复：快速切换知识库时慢响应覆盖新列表） */
+  const dirsReqSeqRef = useRef(0)
 
   /* 重置 */
   useEffect(() => {
@@ -56,16 +58,20 @@ const ArchiveDocModal: React.FC<ArchiveDocModalProps> = ({
 
   const handleSelectWiki = useCallback(
     async (wikiId: number): Promise<void> => {
+      const reqSeq = dirsReqSeqRef.current + 1
+      dirsReqSeqRef.current = reqSeq
       setSelectedWikiId(wikiId)
       setSelectedDirId(null)
       setDirsLoading(true)
       try {
         const dirs = await api.wikis.getDirectories(wikiId)
+        // 过期响应丢弃（修复：先点 A 慢、再点 B 快时,A 的目录列表覆盖 B）
+        if (dirsReqSeqRef.current !== reqSeq) return
         setDirectories(dirs)
       } catch (error) {
         console.error('Failed to load directories:', error)
       } finally {
-        setDirsLoading(false)
+        if (dirsReqSeqRef.current === reqSeq) setDirsLoading(false)
       }
     },
     [api]

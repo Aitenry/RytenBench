@@ -139,15 +139,59 @@ const DocEditorPane: React.FC<DocEditorPaneProps> = ({
       cancelled = true
       /* 卸载（切换文档）时若还有未保存修改，立即冲刷一次 */
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
-      const last = lastSavedRef.current
-      const curTitle = titleRef.current
-      const curContent = contentRef.current
-      if (last && (curTitle !== last.title || curContent !== last.content)) {
-        void api.docs.update(docId, { title: curTitle || '未命名文档', content: curContent })
+      const flush = async (): Promise<void> => {
+        // 修复：此前冲刷与在途 doSave 并发双写（无版本号/序号，旧快照可能后到覆盖新内容）；
+        // 现在先等在途保存结束，再按最新内容补写；冲刷失败也提示
+        while (savingRef.current) {
+          await new Promise((resolve) => setTimeout(resolve, 50))
+        }
+        const last = lastSavedRef.current
+        const curTitle = titleRef.current
+        const curContent = contentRef.current
+        if (last && (curTitle !== last.title || curContent !== last.content)) {
+          try {
+            await api.docs.update(docId, { title: curTitle || '未命名文档', content: curContent })
+          } catch (err) {
+            console.error('Failed to flush doc on unmount:', err)
+          }
+        }
       }
+      void flush()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docId])
+
+  /* ── 外部修改同步（修复：此前对工具写入完全无感知,继续编辑会把工具刚写入的内容整体覆盖）── */
+  useEffect(() => {
+    const unsubscribe = api.chat.onDocChanged((data) => {
+      if (data.docId !== docIdRef.current) return
+      if (data.action === 'deleted') {
+        setNotFound(true)
+        return
+      }
+      const last = lastSavedRef.current
+      const dirty =
+        last != null && (titleRef.current !== last.title || contentRef.current !== last.content)
+      if (dirty) {
+        // 本地有未保存修改：不覆盖本地,仅提示（用户保存会覆盖工具写入,属已知取舍）
+        console.warn(`文档 [${data.docId}] 被聊天工具修改,本地存在未保存编辑,保留本地内容`)
+        return
+      }
+      // 未修改：直接重载工具写入的最新内容
+      void (async () => {
+        try {
+          const doc = await api.docs.getById(data.docId)
+          if (!doc || docIdRef.current !== data.docId) return
+          setTitle(doc.title ?? '')
+          setContent(doc.content ?? '')
+          lastSavedRef.current = { title: doc.title ?? '', content: doc.content ?? '' }
+        } catch (err) {
+          console.error('Failed to reload doc after tool update:', err)
+        }
+      })()
+    })
+    return unsubscribe
+  }, [api])
 
   /* ── 保存 ── */
   const doSave = useCallback(async (): Promise<void> => {
@@ -181,6 +225,17 @@ const DocEditorPane: React.FC<DocEditorPaneProps> = ({
       setSaveState('error')
     } finally {
       savingRef.current = false
+      // 修复：保存期间的新编辑此前被 savingRef 静默吞掉（timer 已消耗且无重排，
+      // 状态还被置回「已保存」而 DB 里根本没有这些编辑）——完成后若仍有未落库修改，
+      // 立即补排一次保存
+      const lastNow = lastSavedRef.current
+      const cur = { title: titleRef.current, content: contentRef.current }
+      if (lastNow && (cur.title !== lastNow.title || cur.content !== lastNow.content)) {
+        if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+        saveTimerRef.current = setTimeout(() => {
+          doSave().then()
+        }, AUTO_SAVE_DELAY)
+      }
     }
   }, [api])
 

@@ -88,7 +88,9 @@ const BottomBar: React.FC<BottomBarProps> = ({
     return () => {
       if (timerRef.current) clearInterval(timerRef.current)
     }
-  }, [carouselPaused])
+    // 依赖条目数（修复：此前只依赖 carouselPaused——首启无音乐时定时器永不建立,
+    // 播放中清空列表时旧定时器以旧 length 自旋导致索引越界/内容错位）
+  }, [carouselPaused, carouselItems.length])
 
   const handleCarouselEnter = useCallback(() => {
     setCarouselPaused(true)

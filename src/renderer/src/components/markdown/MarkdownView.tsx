@@ -58,7 +58,8 @@ const rehypePlugins: PluggableList = [
   rehypeRaw,
   [rehypeSanitize, sanitizeSchema] as unknown as Pluggable,
   rehypeHighlight,
-  rehypeKatex
+  // strict:'ignore'：与 MarkdownLoad 一致，避免中文入数学模式的告警刷屏
+  [rehypeKatex, { strict: 'ignore' }]
 ]
 
 // Context to tell code component whether it's inside a <pre> (code block) or standalone (inline)

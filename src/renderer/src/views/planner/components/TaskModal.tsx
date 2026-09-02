@@ -209,6 +209,32 @@ const AddTaskModal: React.FC<Props> = ({ open, parentId, editTask, tree, onOk, o
       }
     }
 
+    // 5. 编辑时反向校验子孙仍落在自身新时间范围内（修复：此前只校验「被编辑节点 vs 其父」,
+    // 把项目/阶段日期改小可保存出子任务越出父级的时间层级,甘特图/依赖计算基于该树错乱）
+    if (isEdit && editTask) {
+      const found: { violation: { title: string; date: string } | null } = { violation: null }
+      const walk = (node: NonNullable<typeof editTask>): void => {
+        if (found.violation) return
+        if (node.start_date && node.end_date) {
+          const cStart = dayjs(node.start_date)
+          const cEnd = dayjs(node.end_date)
+          if (cStart.isBefore(startDate, 'day')) {
+            found.violation = { title: node.title, date: cStart.format('YYYY-MM-DD') }
+            return
+          }
+          if (cEnd.isAfter(endDate, 'day')) {
+            found.violation = { title: node.title, date: cEnd.format('YYYY-MM-DD') }
+            return
+          }
+        }
+        node.children.forEach(walk)
+      }
+      editTask.children.forEach(walk)
+      if (found.violation) {
+        return `子任务「${found.violation.title}」（${found.violation.date}）超出新的时间范围，无法保存`
+      }
+    }
+
     return null
   }
 

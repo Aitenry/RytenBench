@@ -889,6 +889,11 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
         // 从缓存恢复，同步 loading 状态
         setIsLoading(isLoadingMapRef.current.get(topic.id) ?? false)
         messagesBelongToTopicRef.current = topic.id
+        // 重置分页状态（修复：此前早退不重置,残留上一话题的 messagesPage/messagesHasMore,
+        // 点「加载更多」会用上一话题的页码对当前话题取数,造成漏页/重叠）
+        currentSessionIdRef.current = null
+        setMessagesPage(0)
+        setMessagesHasMore(true)
         return
       }
 
@@ -1132,9 +1137,14 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
     syncLoadingTopics
   ])
 
+  // 用 ref 持有最新消息快照（修复：handleDeleteMessagePair 此前依赖 [messages],流式期间
+  // 每个 chunk 重建回调,作为 onDelete 传给全部消息组件击穿 React.memo → 每 chunk 全量重渲染历史消息）
+  const messagesSnapshotRef = useRef<Message[]>([])
+  messagesSnapshotRef.current = messages
+
   const handleDeleteMessagePair = useCallback(
     async (msgIndex: number): Promise<void> => {
-      const msgs = [...messages]
+      const msgs = [...messagesSnapshotRef.current]
       const current = msgs[msgIndex]
       if (!current) return
 
@@ -1163,23 +1173,26 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
         console.error('Failed to delete dialogue:', err)
       }
 
-      const toDelete = new Set(indicesToDelete)
-      const newMsgs = msgs.filter((_, i) => !toDelete.has(i))
-      setMessages(newMsgs)
-
-      if (newMsgs.length === 0) {
-        const deletedTopicId = currentTopicIdRef.current
-        currentTopicIdRef.current = null
-        messagesBelongToTopicRef.current = null
-        setCurrentTopicId(null)
-        if (deletedTopicId != null) {
-          sessionsRef.current.delete(deletedTopicId)
-          isLoadingMapRef.current.delete(deletedTopicId)
-          syncLoadingTopics()
+      const targetIds = new Set(
+        indicesToDelete.map((i) => msgs[i]?.id).filter((id): id is string => typeof id === 'string')
+      )
+      setMessages((prev) => {
+        const next = prev.filter((m) => !targetIds.has(m.id))
+        if (next.length === 0) {
+          const deletedTopicId = currentTopicIdRef.current
+          currentTopicIdRef.current = null
+          messagesBelongToTopicRef.current = null
+          setCurrentTopicId(null)
+          if (deletedTopicId != null) {
+            sessionsRef.current.delete(deletedTopicId)
+            isLoadingMapRef.current.delete(deletedTopicId)
+            syncLoadingTopics()
+          }
         }
-      }
+        return next
+      })
     },
-    [messages, syncLoadingTopics]
+    [syncLoadingTopics]
   )
 
   const handleKeyDown = useCallback(

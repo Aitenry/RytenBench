@@ -4,12 +4,12 @@ import { WikiRow, WikiDirectoryRow } from '../../../main/database/mapper/wiki'
 import { ChatTopicRow, ChatDialogueRow, WorkspaceRow } from '../../../main/database/mapper/chat'
 import { GraphEntity, GraphBuildJob, GraphData } from '../../../main/database/mapper/graph'
 import { Lock } from '@renderer/types/settings'
-import { LlmProviderInput, LlmProviderConfig } from '../../../../main/database/mapper/provider'
-import { AgentConfigRow, AgentConfigInput } from '../../../../main/database/mapper/agent'
-import { TodoItem } from '../../../../main/chat/runtime/todo'
-import { GoalView } from '../../../../main/chat/runtime/goal'
-import { JobSnapshot } from '../../../../main/chat/runtime/jobs'
-import { PendingQuestionView } from '../../../../main/chat/runtime/ask'
+import { LlmProviderInput, LlmProviderConfig } from '../../../main/database/mapper/provider'
+import { AgentConfigRow, AgentConfigInput } from '../../../main/database/mapper/agent'
+import { TodoItem } from '../../../main/chat/runtime/todo'
+import { GoalView } from '../../../main/chat/runtime/goal'
+import { JobSnapshot } from '../../../main/chat/runtime/jobs'
+import { PendingQuestionView } from '../../../main/chat/runtime/ask'
 import { SystemSettings } from '@renderer/types/settings'
 
 export interface PaginatedResult<T> {
@@ -50,6 +50,12 @@ export interface StructuredMessage {
   historyCompacted?: HistoryCompaction
   /** 摘要压缩已开始（过渡信号，随后 historyCompacted 携带结果） */
   historyCompacting?: boolean
+  /** 流式执行失败（部分输出后图执行失败；IPC 层据此跳过落库） */
+  streamError?: { message: string }
+  /** 主进程注入的话题 ID（每次 chat-stream-chunk 均携带） */
+  __topicId?: number
+  /** 目标自动续跑轮的起始标记（流首 chunk） */
+  goalRound?: { round: number; objective: string }
 }
 
 export interface SubAgentEvent {
@@ -91,13 +97,14 @@ export interface Window {
     onInitComplete: (callback: () => void) => void
     onInitError: (callback: (event: Event, errorMessage: string) => void) => void
     notifyInitComplete: () => void
+    getAppVersion: () => Promise<string>
   }
   api: {
     todoItems: {
       getById: (id: number) => Promise<TodoItemRow[]>
       getByTitle: (title: string) => Promise<TodoItemRow[]>
       getByPriority: (priority: number) => Promise<TodoItemRow[]>
-      getByCompletedStatus: (completed: boolean) => Promise<TodoItemRow[]>
+      getByCompletedStatus: (status: number | boolean) => Promise<TodoItemRow[]>
       getAll: () => Promise<TodoItemRow[]>
       getAllPaginated: (page?: number, pageSize?: number) => Promise<PaginatedResult<TodoItemRow>>
       getByDueDate: (dueDate: string) => Promise<TodoItemRow[]>
@@ -184,7 +191,7 @@ export interface Window {
     }
     setting: {
       getLockScreenCode: () => Promise<Lock>
-      setLockScreenView: (open) => void
+      setLockScreenView: (open: boolean) => void
     }
     chat: {
       sendMessage: (
@@ -198,6 +205,9 @@ export interface Window {
       onStreamChunk: (callback: (chunk: StructuredMessage) => void) => () => void
       onStreamDone: (callback: (result: { topicId: number }) => void) => () => void
       onStreamError: (callback: (error: { error: string; topicId?: number }) => void) => () => void
+      onDocChanged: (
+        callback: (data: { docId: number; action: 'updated' | 'deleted' }) => void
+      ) => () => void
       onChatTodosUpdated: (
         callback: (data: { topicId: number; todos: TodoItem[] }) => void
       ) => () => void
@@ -524,17 +534,17 @@ export interface Window {
         folderId: string,
         fields: { name?: string; description?: string | null }
       ) => Promise<void>
-      addTracks: (folderId: string) => Promise<
-        | {
-            filePath: string
-            title: string
-            artist: string
-            album: string
-            duration: number
-            coverDataUrl: string | null
-          }[]
-        | null
-      >
+      addTracks: (folderId: string) => Promise<{
+        added: {
+          filePath: string
+          title: string
+          artist: string
+          album: string
+          duration: number
+          coverDataUrl: string | null
+        }[]
+        skipped: string[]
+      } | null>
       updateTrack: (
         trackId: number,
         fields: { title?: string; artist?: string; album?: string }

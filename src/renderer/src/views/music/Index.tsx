@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react'
+import React, { useState, useCallback, useEffect, useRef } from 'react'
 import { theme, App } from 'antd'
 import { useAudioState } from '../../contexts/AudioContext'
 import type { MusicFolder, Track } from '../../types/music'
@@ -43,6 +43,9 @@ const Index: React.FC = () => {
 
   const [folders, setFolders] = useState<MusicFolder[]>([])
   const [createModalOpen, setCreateModalOpen] = useState(false)
+  /** 当前选中歌单的实时引用（异步响应守卫用） */
+  const selectedFolderIdRef = useRef(selectedFolderId)
+  selectedFolderIdRef.current = selectedFolderId
   const [editingFolder, setEditingFolder] = useState<MusicFolder | null>(null)
 
   const specialFolders: MusicFolder[] = [
@@ -86,6 +89,9 @@ const Index: React.FC = () => {
         } else {
           tracks = await window.api.music.getTracks(folder.id)
         }
+        // 修复：快速连续切换歌单时,旧请求晚到会把旧列表写进当前 state
+        //（列表与侧栏高亮不一致,且同 id 重复点击被提前 return 无法靠再点纠正）
+        if (folder.id !== selectedFolderIdRef.current) return
         // 只更新列表数据，不中断当前播放信息
         updatePlaylist(tracks, folder.id)
       } catch {
@@ -229,7 +235,15 @@ const Index: React.FC = () => {
       if (!track) return
 
       // 内置歌单的歌曲不能从磁盘删除（不是真实歌单）
-      if (selectedFolderId === RECENTLY_PLAYED_ID || selectedFolderId === LIKED_TRACKS_ID) {
+      if (selectedFolderId === LIKED_TRACKS_ID) {
+        // 「我喜欢」移除 = 取消收藏并落库（修复：此前仅 splice 内存列表,
+        // 切走再切回/重启即原样复现）
+        await window.api.music.toggleLike(Number(track.id))
+        removeFromPlaylist(index)
+        message.success('已取消收藏')
+        return
+      }
+      if (selectedFolderId === RECENTLY_PLAYED_ID) {
         removeFromPlaylist(index)
         return
       }

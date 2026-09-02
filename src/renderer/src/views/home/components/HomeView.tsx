@@ -93,18 +93,41 @@ const HomeView: React.FC = () => {
   /* ── 加载数据 ── */
   const loadAll = useCallback(async (): Promise<void> => {
     try {
+      // 分页拉全量（修复：此前硬编码 300 条截断,超出部分在树/搜索/仪表盘不可达且无入口）
+      const fetchAllDocs = async (excludeWikiId?: number): Promise<DocListItem[]> => {
+        const items: DocListItem[] = []
+        let page = 1
+        for (;;) {
+          const result = await api.docs.getAll(page, 500, excludeWikiId)
+          items.push(...result.items)
+          if (!result.hasMore || page > 200) break
+          page += 1
+        }
+        return items
+      }
+      const fetchAllWikis = async (): Promise<WikiRow[]> => {
+        const items: WikiRow[] = []
+        let page = 1
+        for (;;) {
+          const result = await api.wikis.getAll(page, 500)
+          items.push(...result.items)
+          if (!result.hasMore || page > 200) break
+          page += 1
+        }
+        return items
+      }
       const [allResult, standaloneResult, todoResult, wikiResult] = await Promise.all([
         /* 全部文档：树内标题解析与搜索 */
-        api.docs.getAll(1, 300),
+        fetchAllDocs(),
         /* exclude=-1：只取未归档（未关联任何知识库目录）的文档 */
-        api.docs.getAll(1, 300, -1),
+        fetchAllDocs(-1),
         api.todoItems.getAll(),
-        api.wikis.getAll(1, 300)
+        fetchAllWikis()
       ])
-      setAllDocs(allResult.items)
-      setStandaloneDocs(standaloneResult.items)
+      setAllDocs(allResult)
+      setStandaloneDocs(standaloneResult)
       setTodos(todoResult)
-      setWikis(wikiResult.items)
+      setWikis(wikiResult)
     } catch (error) {
       console.error('Failed to load home data:', error)
     } finally {
@@ -394,7 +417,12 @@ const HomeView: React.FC = () => {
   const handleArchived = useCallback(async (): Promise<void> => {
     await loadAll()
     setTreeRefreshKey((k) => k + 1)
-  }, [loadAll])
+    // 修复：归档正在编辑的文档后,文档从「文档库」分区消失但编辑器仍停留,树中无选中态
+    // 且看不到归属——关闭编辑器回到仪表盘
+    if (selection?.kind === 'doc') {
+      setSelection(null)
+    }
+  }, [loadAll, selection])
 
   /* 树内操作改变了文档与目录的关联（删除目录/从目录移除）→ 刷新文档列表 */
   const handleTreeDocsChanged = useCallback((): void => {

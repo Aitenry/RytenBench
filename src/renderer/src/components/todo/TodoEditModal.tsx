@@ -97,6 +97,8 @@ const TodoEditModal: React.FC<TodoEditModalProps> = ({
         priority: values.priority,
         category: values.category || null
       })
+      // 修复：成功后表单不重置,下次新建预填上次内容（旧 description/priority/category 一并写入新待办）
+      addForm.resetFields()
     } catch {
       // Validation failed
     }

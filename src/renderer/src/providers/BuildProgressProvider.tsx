@@ -214,12 +214,16 @@ export const BuildProgressProvider: React.FC<BuildProgressProviderProps> = ({ ch
   useEffect(() => {
     buildMap.forEach((state, wikiId) => {
       const notifId = `build-${wikiId}`
+      // 修复：已完成的构建通知点击后是「恢复一个不会再渲染的 completed 状态」= 无任何反馈
+      // 且通知永不清理——完成态改为直达该知识库图谱（navigateToGraph 会移除通知与状态）
       updateNotification(
         notifId,
-        buildStateToNotification(notifId, state, () => restoreBuild(wikiId))
+        buildStateToNotification(notifId, state, () =>
+          state.completed ? navigateToGraph(wikiId) : restoreBuild(wikiId)
+        )
       )
     })
-  }, [buildMap, updateNotification, restoreBuild])
+  }, [buildMap, updateNotification, restoreBuild, navigateToGraph])
 
   const activeBuilds = Array.from(buildMap.values())
 

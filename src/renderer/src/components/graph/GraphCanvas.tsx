@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import * as echarts from 'echarts'
 import type { EChartsOption } from 'echarts'
 import { Button, theme } from 'antd'
@@ -30,13 +30,17 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({ data, onEntityClick, onEntity
   const isDarkMode = effectiveTheme === 'dark'
 
   // Count isolated nodes (no connections) — used by both chart and hint overlay
-  const connectedNodeIds = new Set<string>()
-  for (const link of data.links) {
-    connectedNodeIds.add(String(link.source))
-    connectedNodeIds.add(String(link.target))
-  }
-  const connectedNodes = data.nodes.filter((n) => connectedNodeIds.has(n.id))
-  const isolatedCount = data.nodes.length - connectedNodes.length
+  //（修复：此前每次渲染新建 connectedNodes 引用,父级任何重渲染（如点选实体）都触发
+  // 下方 effect 重跑 → 整图重建、缩放/平移视口被重置）
+  const { connectedNodes, isolatedCount } = useMemo(() => {
+    const connectedNodeIds = new Set<string>()
+    for (const link of data.links) {
+      connectedNodeIds.add(String(link.source))
+      connectedNodeIds.add(String(link.target))
+    }
+    const connected = data.nodes.filter((n) => connectedNodeIds.has(n.id))
+    return { connectedNodes: connected, isolatedCount: data.nodes.length - connected.length }
+  }, [data])
 
   useEffect(() => {
     if (!containerRef.current || !data) return

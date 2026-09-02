@@ -38,7 +38,11 @@ const GoalBar: React.FC<{ currentTopicId: number | null }> = ({ currentTopicId }
     // 话题切换/重新打开：清空旧目标，加载新话题的目标（空则隐藏）
     setGoal(null)
     if (currentTopicId == null) return
-    void (window as unknown as Window).api.chat.getGoal(currentTopicId).then((g) => {
+    const requestedTopicId = currentTopicId
+    void (window as unknown as Window).api.chat.getGoal(requestedTopicId).then((g) => {
+      // 异步竞态守卫（修复：快速切话题时慢响应可能晚于新话题的 setGoal(null) 到达,
+      // 把 A 的目标横幅展示在 B 上——与 onGoalUpdated 的 topicIdRef 守卫对齐）
+      if (currentTopicIdRef.current !== requestedTopicId) return
       // 已完成的目标是历史记录：重新进入话题时不展示横幅
       // （会话内实时完成仍经下方广播显示「已完成」；历史行保留在数据库，供新目标替换）
       if (g && g.phase !== 'complete') setGoal(g)

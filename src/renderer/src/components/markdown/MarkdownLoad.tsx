@@ -36,7 +36,9 @@ const rehypePlugins: PluggableList = [
   rehypeRaw,
   [rehypeSanitize, sanitizeSchema] as unknown as Pluggable,
   rehypeHighlight,
-  rehypeKatex
+  // strict:'ignore'：模型常把中文写进 $...$ 数学模式，KaTeX 默认 strict='warn' 会为每个
+  // 字符刷一条 console.warning（一次渲染数百条，灌爆日志）；ignore 静默降级渲染。
+  [rehypeKatex, { strict: 'ignore' }]
 ]
 
 // Context to tell code component whether it's inside a <pre> (code block) or standalone (inline)

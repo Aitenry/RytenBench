@@ -62,6 +62,7 @@ const ChatMessageArea: React.FC<ChatMessageAreaProps> = ({
   const contentRef = useRef<HTMLDivElement>(null)
   const prevScrollHeightRef = useRef(0)
   const prevMessagesLengthRef = useRef(0)
+  const prevFirstIdRef = useRef<string | null>(null)
 
   /** 贴底跟随开关：true 时新内容自动滚到底部；用户上滑阅读历史时关闭，回到底部或点击按钮恢复 */
   const stickToBottomRef = useRef(true)
@@ -73,6 +74,8 @@ const ChatMessageArea: React.FC<ChatMessageAreaProps> = ({
   useEffect(() => {
     stickToBottomRef.current = true
     setAtBottom(true)
+    // 重置前插判定基线（话题切换后消息整体替换,不能按「首条 id 变化」判前插）
+    prevFirstIdRef.current = null
   }, [currentTopicId])
 
   // 加载更多历史消息后，保持滚动位置不跳动
@@ -81,14 +84,19 @@ const ChatMessageArea: React.FC<ChatMessageAreaProps> = ({
     if (!el) return
     const prevLen = prevMessagesLengthRef.current
     const newLen = messages.length
-    if (newLen > prevLen && prevLen > 0) {
-      // 有新消息被 prepend 到头部，补偿滚动位置
+    const prevFirstId = prevFirstIdRef.current
+    const firstId = messages[0]?.id ?? null
+    // 仅当「头部出现新消息」（加载更早历史前插）时补偿滚动位置。
+    // 修复：此前长度增长一律按前插补偿——用户上滑阅读历史时，目标自动续跑向当前话题
+    // 尾部追加消息（首条 id 不变）也会强制下移阅读位置
+    if (newLen > prevLen && prevLen > 0 && prevFirstId !== null && firstId !== prevFirstId) {
       const newScrollHeight = el.scrollHeight
       const delta = newScrollHeight - prevScrollHeightRef.current
       el.scrollTop += delta
     }
     prevScrollHeightRef.current = el.scrollHeight
     prevMessagesLengthRef.current = messages.length
+    prevFirstIdRef.current = firstId
   }, [messages])
 
   const handleScroll = useCallback(() => {

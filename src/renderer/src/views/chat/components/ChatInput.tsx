@@ -516,18 +516,43 @@ const ChatInput: React.FC<ChatInputProps> = ({
   }, [getViewDom])
   updateCaretRef.current = updateCaret
 
-  // 父组件清空 inputValue 时（发送后），同步清空编辑器
+  /** 把纯文本恢复到编辑器（行→hardBreak，与 navigateHistory 的恢复方式同构） */
+  const restorePlainText = useCallback((ed: Editor, text: string): void => {
+    const lines = text.replace(/\r\n?/g, '\n').split('\n')
+    const nodes: ProseMirrorNode[] = []
+    lines.forEach((line, i) => {
+      if (i > 0) nodes.push(ed.schema.nodes.hardBreak.create())
+      if (line) nodes.push(ed.schema.text(line))
+    })
+    ed.commands.setContent(
+      {
+        type: 'doc',
+        content: [{ type: 'paragraph', content: nodes.map((n) => n.toJSON()) }]
+      },
+      { emitUpdate: false }
+    )
+  }, [])
+
+  // 父组件 inputValue 变化时同步编辑器（修复：此前只做「变空清空编辑器」单方向，
+  // 恢复会话缓存的非空草稿时编辑器仍显示上一话题内容/空白——隐藏草稿不可见且可被盲发）：
+  // - 变空（发送后/切话题清空）：清空编辑器；
+  // - 变非空且与编辑器内容不同（恢复缓存草稿）：恢复编辑器内容
   useEffect(() => {
     const ed = editorRef.current
     if (!ed || ed.isDestroyed) return
-    if (inputValue === '' && !ed.isEmpty) {
-      ed.commands.clearContent()
-      ed.commands.focus()
-      // 外部清空输入（发送/新对话/切话题）时重置历史浏览位置
+    if (inputValue === '') {
+      if (!ed.isEmpty) {
+        ed.commands.clearContent()
+        ed.commands.focus()
+        // 外部清空输入（发送/新对话/切话题）时重置历史浏览位置
+        historyIndexRef.current = -1
+      }
+    } else if (getEditorText(ed) !== inputValue) {
+      restorePlainText(ed, inputValue)
       historyIndexRef.current = -1
     }
     updateCaret()
-  }, [inputValue, updateCaret])
+  }, [inputValue, updateCaret, getEditorText, restorePlainText])
 
   // 光标位置随选区/窗口尺寸变化而更新
   useEffect(() => {

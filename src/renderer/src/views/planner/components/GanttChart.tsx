@@ -174,7 +174,21 @@ const GanttChart: React.FC<Props> = ({
     (row: FlatRow) => {
       if (!row.start_date) return null
       const startMs = new Date(row.start_date).getTime()
-      const endMs = row.end_date ? new Date(row.end_date).getTime() : startMs + MS_PER_DAY
+      let endMs = row.end_date ? new Date(row.end_date).getTime() : startMs + MS_PER_DAY
+      // 修复：RangePicker 的结束日恒为 00:00:00,而校验语义是「结束日包含当天」——
+      // 用 00:00 作右端会少画一天（跨 3 天只画 2 列、同日任务只剩 2px 细条）。
+      // 结束时刻为 0 点时归一为当天 23:59:59.999
+      if (row.end_date) {
+        const endDate = new Date(row.end_date)
+        if (
+          endDate.getHours() === 0 &&
+          endDate.getMinutes() === 0 &&
+          endDate.getSeconds() === 0 &&
+          endDate.getMilliseconds() === 0
+        ) {
+          endMs += MS_PER_DAY - 1
+        }
+      }
 
       const visibleStart = Math.max(startMs, ganttStartMs)
       const visibleEnd = Math.min(endMs, ganttEndMs)

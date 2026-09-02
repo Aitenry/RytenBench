@@ -63,6 +63,11 @@ const FileExplorer: React.FC<FileExplorerProps> = ({
           }))
         )
       })
+      // 修复：此前无 catch,目录被删/权限异常时产生未处理 rejection,界面只有空白
+      .catch((err) => {
+        console.error('Failed to load workspace root:', err)
+        setRootNodes([])
+      })
       .finally(() => setLoading(false))
   }, [workspacePath, fetchDir])
 

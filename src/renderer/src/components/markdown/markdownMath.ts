@@ -132,7 +132,7 @@ function createMathNodeView(displayMode: boolean) {
           outputEl.textContent = displayMode ? '$$' : '$ $'
           outputEl.classList.add('tiptap-math-empty')
         } else {
-          katex.render(tex, outputEl, { displayMode, throwOnError: false })
+          katex.render(tex, outputEl, { displayMode, throwOnError: false, strict: 'ignore' })
         }
       } catch {
         outputEl.textContent = tex || '$$'
