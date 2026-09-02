@@ -46,6 +46,8 @@ export function buildMnemon(storageRoot: string, workspaceName?: string): Mnemon
           description: 'MEMORY 热记忆溢出的自动归档目标；内容为项目长期事实与经验。'
         })
       }
+      // 契约：archivedIndexes 为「传入 entries 子数组内的局部索引」，
+      // 由 RuntimeMemoryController.runArchive 换算为数据文件的全局索引
       const archivedIndexes: number[] = []
       for (const entry of entries) {
         try {
@@ -56,12 +58,11 @@ export function buildMnemon(storageRoot: string, workspaceName?: string): Mnemon
             source: 'agent',
             memoryBodyId: body.id
           })
-          archivedIndexes.push(entries.indexOf(entry))
         } catch (err) {
           logger.warn(`[Mnemon] 归档条目失败（可能重复）:`, err)
           // 重复内容视为已归档（查重失败仍移除热记忆条目，避免热层被同一内容占满）
-          archivedIndexes.push(entries.indexOf(entry))
         }
+        archivedIndexes.push(entries.indexOf(entry))
       }
       return { archivedIndexes, memoryBodyIds: [body.id] }
     }

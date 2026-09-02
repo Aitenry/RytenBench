@@ -47,6 +47,16 @@ export function registerMnemonIpc(): void {
     ) => {
       const component = await currentMnemonComponent()
       if (!component) return { success: false, message: '未配置记忆存储目录' }
+      // 参数守卫（修复：request 为 undefined 时 `request.action` 直接 TypeError，
+      // 且该 handler 无 try/catch，异常会挂起调用方）
+      if (
+        !request ||
+        typeof request !== 'object' ||
+        typeof request.action !== 'string' ||
+        typeof request.target !== 'string'
+      ) {
+        return { success: false, message: '请求参数无效' }
+      }
       return await component.runtimeMemory.mutate({
         action: request.action as 'add' | 'replace' | 'remove',
         target: request.target as 'user' | 'memory',

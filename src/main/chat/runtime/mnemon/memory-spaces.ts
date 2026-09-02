@@ -217,63 +217,84 @@ export class MemoryBodyRegistry {
     return body
   }
 
-  /** 非破坏性合并：把源空间内容导入目标空间；默认将源空间设为未激活 */
+  /**
+   * 非破坏性合并：把源空间内容导入目标空间；默认将源空间设为未激活。
+   * openDb 注入式数据库获取（可选）：service 层传缓存 provider，避免同目录多实例；
+   * 缺省直开并在用完后关闭。
+   */
   async merge(
     targetBodyId: string,
     sourceBodyIds: string[],
-    deactivateSources = true
+    deactivateSources = true,
+    openDb?: (bodyId: string) => Promise<{ db: PGlite; release: () => Promise<void> }>
   ): Promise<{ imported: number; skippedDuplicates: number }> {
     const target = this.get(targetBodyId)
     if (!target) throw new Error(`目标记忆空间不存在: ${targetBodyId}`)
-    const targetDb = await openSpaceDatabase(target.dbPath)
+
+    const open =
+      openDb ??
+      (async (bodyId: string): Promise<{ db: PGlite; release: () => Promise<void> }> => {
+        const body = this.get(bodyId)
+        if (!body) throw new Error(`记忆空间不存在: ${bodyId}`)
+        const db = await openSpaceDatabase(body.dbPath)
+        return { db, release: async () => await db.close() }
+      })
+
+    const targetHandle = await open(targetBodyId)
+    const targetDb = targetHandle.db
 
     let imported = 0
     let skippedDuplicates = 0
-    for (const sourceId of sourceBodyIds) {
-      const source = this.get(sourceId)
-      if (!source) {
-        logger.warn(`[Mnemon] 合并跳过：源空间不存在 ${sourceId}`)
-        continue
-      }
-      if (source.id === target.id) continue
-      const sourceDb = await openSpaceDatabase(source.dbPath)
-      try {
-        const result = await sourceDb.query<InsightRow>('SELECT * FROM insights WHERE deleted = 0')
-        for (const row of result.rows) {
-          const existing = await targetDb.query<{ c: number }>(
-            'SELECT COUNT(*) AS c FROM insights WHERE source_hash = $1 AND deleted = 0',
-            [row.source_hash ?? hashOf(row.content)]
-          )
-          if (Number(existing.rows[0]?.c ?? 0) > 0) {
-            skippedDuplicates++
-            continue
-          }
-          await targetDb.query(
-            `INSERT INTO insights (id, content, category, importance, tags, entities, source, score, confidence, intent, source_hash, created_at, updated_at, deleted)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,0)`,
-            [
-              crypto.randomUUID(),
-              row.content,
-              row.category,
-              row.importance,
-              row.tags,
-              row.entities,
-              row.source,
-              row.score,
-              row.confidence,
-              row.intent,
-              row.source_hash ?? hashOf(row.content),
-              row.created_at,
-              this.now().toISOString()
-            ]
-          )
-          imported++
+    try {
+      for (const sourceId of sourceBodyIds) {
+        const source = this.get(sourceId)
+        if (!source) {
+          logger.warn(`[Mnemon] 合并跳过：源空间不存在 ${sourceId}`)
+          continue
         }
-      } finally {
-        await sourceDb.close()
+        if (source.id === target.id) continue
+        const sourceHandle = await open(sourceId)
+        try {
+          const result = await sourceHandle.db.query<InsightRow>(
+            'SELECT * FROM insights WHERE deleted = 0'
+          )
+          for (const row of result.rows) {
+            const existing = await targetDb.query<{ c: number }>(
+              'SELECT COUNT(*) AS c FROM insights WHERE source_hash = $1 AND deleted = 0',
+              [row.source_hash ?? hashOf(row.content)]
+            )
+            if (Number(existing.rows[0]?.c ?? 0) > 0) {
+              skippedDuplicates++
+              continue
+            }
+            await targetDb.query(
+              `INSERT INTO insights (id, content, category, importance, tags, entities, source, score, confidence, intent, source_hash, created_at, updated_at, deleted)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,0)`,
+              [
+                crypto.randomUUID(),
+                row.content,
+                row.category,
+                row.importance,
+                row.tags,
+                row.entities,
+                row.source,
+                row.score,
+                row.confidence,
+                row.intent,
+                row.source_hash ?? hashOf(row.content),
+                row.created_at,
+                this.now().toISOString()
+              ]
+            )
+            imported++
+          }
+        } finally {
+          await sourceHandle.release()
+        }
       }
+    } finally {
+      await targetHandle.release()
     }
-    await targetDb.close()
 
     if (deactivateSources) {
       for (const sourceId of sourceBodyIds) {

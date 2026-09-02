@@ -34,7 +34,11 @@ interface RuntimeMemoryFile {
 }
 
 export interface MemoryMaintenanceHooks {
-  /** MEMORY 溢出时的归档回调：把条目写入长期层，返回已归档条目索引与目标空间 ID */
+  /**
+   * MEMORY 溢出时的归档回调：把条目写入长期层。
+   * 返回的 archivedIndexes 是「传入 entries 子数组内的局部索引」（而非数据文件全局索引），
+   * 调用方负责换算为全局索引后再删除条目。
+   */
   archiveEntries?: (
     entries: RuntimeMemoryEntry[]
   ) => Promise<{ archivedIndexes: number[]; memoryBodyIds: string[] }>
@@ -151,7 +155,14 @@ export class RuntimeMemoryController {
       const { archivedIndexes, memoryBodyIds } = await this.hooks.archiveEntries(
         selected.map((x) => x.entry)
       )
-      const removeSet = new Set(archivedIndexes)
+      // 钩子契约：archivedIndexes 是「传入子数组内的局部索引」，必须换算为 data.entries
+      // 的全局索引再删除——selected 不一定是文件最前的条目，user/memory 交错存放时
+      // 局部索引恰好等于全局索引只是巧合，直接使用会误删未归档条目（含 USER 画像）。
+      const removeSet = new Set(
+        archivedIndexes
+          .map((i) => selected[i]?.index)
+          .filter((i): i is number => typeof i === 'number')
+      )
       const remaining = selected.filter((x) => !removeSet.has(x.index))
       if (remaining.length === selected.length) {
         return { ok: false, message: '归档钩子未归档任何条目' }

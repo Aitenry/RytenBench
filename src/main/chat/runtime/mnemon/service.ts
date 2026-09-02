@@ -241,7 +241,15 @@ export class MnemonService {
     deactivateSources = true
   ): Promise<{ imported: number; skippedDuplicates: number }> {
     this.validateWrite()
-    return await this.registry.merge(targetBodyId, sourceBodyIds, deactivateSources)
+    // 经 openDb 缓存取数据库实例（修复：registry.merge 直开同目录新实例，与缓存实例并存，
+    // 同目录多实例存在锁冲突与一致性风险；缓存实例由 close() 统一收尾）
+    const provider = async (
+      bodyId: string
+    ): Promise<{ db: PGlite; release: () => Promise<void> }> => {
+      const db = await this.openDb(bodyId)
+      return { db, release: async () => {} }
+    }
+    return await this.registry.merge(targetBodyId, sourceBodyIds, deactivateSources, provider)
   }
 
   // --------------------------------------------------------------------------
