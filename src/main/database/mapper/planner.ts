@@ -1,4 +1,4 @@
-﻿import { getDatabaseInstance } from '../instance'
+import { getDatabaseInstance } from '../instance'
 import logger from 'electron-log'
 
 export interface PlannerTaskRow {
@@ -200,9 +200,11 @@ async function updateTask(
     let paramIdx = 1
 
     for (const field of allowedFields) {
-      if (field in updates) {
+      const value = (updates as Record<string, unknown>)[field]
+      // !== undefined（修复：此前 `field in updates` 会把显式 undefined 键拼进 SET）
+      if (value !== undefined) {
         updateFields.push(`${field} = $${paramIdx++}`)
-        updateValues.push((updates as Record<string, unknown>)[field])
+        updateValues.push(value)
       }
     }
 
@@ -247,13 +249,16 @@ async function reorderTasks(
 ): Promise<boolean> {
   try {
     const db = (await getDatabaseInstance()).getDatabase()
-    for (const item of orderList) {
-      await db.query('UPDATE planner_tasks SET sort_order = $1, parent_id = $2 WHERE id = $3', [
-        item.sort_order,
-        item.parent_id,
-        item.id
-      ])
-    }
+    // 单事务批量更新（修复：逐条 UPDATE 无事务,中断即半重排）
+    await db.transaction(async (tx) => {
+      for (const item of orderList) {
+        await tx.query('UPDATE planner_tasks SET sort_order = $1, parent_id = $2 WHERE id = $3', [
+          item.sort_order,
+          item.parent_id,
+          item.id
+        ])
+      }
+    })
     return true
   } catch (error) {
     logger.error('Failed to reorder planner tasks:', error)

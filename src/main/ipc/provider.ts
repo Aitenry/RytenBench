@@ -319,7 +319,8 @@ export function registerProviderIpc(): void {
           // Gemini 原生接口: GET /v1beta/models?key=...
           const base = (baseUrl || 'https://generativelanguage.googleapis.com').replace(/\/+$/, '')
           const url = `${base}/v1beta/models` + (apiKey ? `?key=${encodeURIComponent(apiKey)}` : '')
-          logger.info(`[FetchModels] Gemini: ${url}`)
+          // 脱敏（修复：此前把含 API key 的完整 URL 写进日志,密钥落盘）
+          logger.info(`[FetchModels] Gemini: ${base}/v1beta/models${apiKey ? '?key=***' : ''}`)
           const controller = new AbortController()
           const timeout = setTimeout(() => controller.abort(), 15000)
           const res = await fetch(url, { signal: controller.signal })

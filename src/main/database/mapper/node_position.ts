@@ -1,4 +1,4 @@
-﻿import { getDatabaseInstance } from '../instance'
+import { getDatabaseInstance } from '../instance'
 import logger from 'electron-log'
 
 export interface NodePosition {
@@ -46,15 +46,18 @@ async function saveNodePositions(
 ): Promise<void> {
   try {
     const db = (await getDatabaseInstance()).getDatabase()
-    for (const pos of positions) {
-      const sql = `
-        INSERT INTO node_positions (node_id, x, y, updated_at)
-        VALUES ($1, $2, $3, NOW())
-        ON CONFLICT (node_id)
-        DO UPDATE SET x = $2, y = $3, updated_at = NOW()
-      `
-      await db.query(sql, [pos.node_id, pos.x, pos.y])
-    }
+    // 单事务批量写入（修复：N 条独立 INSERT 无事务,中断即半写）
+    await db.transaction(async (tx) => {
+      for (const pos of positions) {
+        const sql = `
+          INSERT INTO node_positions (node_id, x, y, updated_at)
+          VALUES ($1, $2, $3, NOW())
+          ON CONFLICT (node_id)
+          DO UPDATE SET x = $2, y = $3, updated_at = NOW()
+        `
+        await tx.query(sql, [pos.node_id, pos.x, pos.y])
+      }
+    })
     logger.info(`Batch saved ${positions.length} node positions.`)
   } catch (error) {
     logger.error('Failed to batch save node positions:', error)

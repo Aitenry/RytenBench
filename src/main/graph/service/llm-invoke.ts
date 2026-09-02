@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { BaseChatModel } from '@langchain/core/language_models/chat_models'
 import { StructuredOutputParser } from '@langchain/core/output_parsers'
 import logger from 'electron-log'
@@ -20,7 +21,10 @@ export function createCachedInvoke(model: BaseChatModel, cache: Map<string, stri
     prompt: string,
     parser: StructuredOutputParser<z.ZodTypeAny>
   ): Promise<T | null> {
-    const cacheKey = prompt.slice(0, 200) + '|||' + prompt.slice(-200)
+    // 缓存键必须覆盖完整 prompt：此前只取首尾各 200 字符，模板首尾恒定、负载（实体列表等）
+    // 位于中部的调用（如实体合并/跨块补全的多批次）会共享同一键，第二批起命中第一批的
+    // 缓存答案，导致结果互相污染。整串哈希既保去重能力又避免键本身占用大量内存。
+    const cacheKey = createHash('sha256').update(prompt).digest('hex')
     const cached = cache.get(cacheKey)
 
     let rawContent: string

@@ -8,7 +8,8 @@ import {
   deleteRelationsByWikiId,
   getFullGraphData,
   GraphData,
-  updateBuildJob
+  updateBuildJob,
+  persistEntityMerges
 } from '../../database/mapper/graph'
 import { splitByMarkdownHeaders, filterEntitiesInText, applyHybridConfidence } from '../utils'
 import type {
@@ -166,7 +167,7 @@ export async function buildGraph(
 
     const allExtractedEntities: ExtractedEntity[] = []
     const allExtractedRelations: (ExtractedRelation & { source_note_id: number })[] = []
-    const entityNameToId = new Map<string, number>()
+    let entityNameToId = new Map<string, number>()
 
     for (let i = 0; i < allChunks.length; i += maxConcurrency) {
       const batch = allChunks.slice(i, i + maxConcurrency)
@@ -335,7 +336,7 @@ export async function buildGraph(
       entityCount: entityNameToId.size,
       relationCount: allExtractedRelations.length
     })
-    let mergedEntities = await mergeEntities(ctx, allExtractedEntities, (done, total) => {
+    const mergedResult = await mergeEntities(ctx, allExtractedEntities, (done, total) => {
       phaseProgress = Math.min(1, done / total)
       sendProgress('merge_entities', `实体消歧合并中... ${done}/${total} 批次`, {
         totalDocs,
@@ -344,12 +345,30 @@ export async function buildGraph(
         needsRefresh: true
       })
     })
+    let mergedEntities = mergedResult.entities
+    const renameMap = mergedResult.renameMap
     phaseProgress = 1
     sendProgress('merge_entities', `实体消歧合并完成，共 ${mergedEntities.length} 个实体`, {
       totalDocs,
       entityCount: mergedEntities.length,
       relationCount: allExtractedRelations.length
     })
+
+    // 合并结果落库（修复：此前合并只在内存——DB 里旧名行原样保留、新规范名没有 id，
+    // 导致消歧合并白跑，且置信度更新/关系保存对新规范名静默失败）：
+    // 规范名行 upsert（来源取并集），被合并掉的旧名行删除前把引用它的关系重指向规范行
+    entityNameToId = await persistEntityMerges(
+      wikiId,
+      mergedEntities.map((e) => ({
+        name: e.name,
+        type: e.type,
+        description: e.description,
+        aliases: e.aliases,
+        confidence: e.confidence,
+        source_doc_ids: e.source_doc_ids
+      })),
+      renameMap
+    )
 
     // ========== Phase 4: 跨块关系补全 ==========
     const allEntityNames = mergedEntities.map((e) => e.name)
@@ -512,8 +531,9 @@ export async function buildGraph(
 
     const relationSet = new Map<string, (typeof allExtractedRelations)[0]>()
     for (const rel of allExtractedRelations) {
-      const sourceId = entityNameToId.get(rel.source)
-      const targetId = entityNameToId.get(rel.target)
+      // 端点可能是被合并掉的旧名：先经 renameMap 换算到规范名再取 id，避免关系被静默丢弃
+      const sourceId = entityNameToId.get(renameMap.get(rel.source) ?? rel.source)
+      const targetId = entityNameToId.get(renameMap.get(rel.target) ?? rel.target)
       if (!sourceId || !targetId || sourceId === targetId) continue
 
       const key = `${sourceId}:${targetId}:${rel.relation_type}`
@@ -526,8 +546,8 @@ export async function buildGraph(
     const savedRelationCount = await batchUpsertRelations(
       relationsToSave.map((rel) => ({
         wiki_id: wikiId,
-        source_id: entityNameToId.get(rel.source)!,
-        target_id: entityNameToId.get(rel.target)!,
+        source_id: entityNameToId.get(renameMap.get(rel.source) ?? rel.source)!,
+        target_id: entityNameToId.get(renameMap.get(rel.target) ?? rel.target)!,
         relation_type: rel.relation_type,
         description: rel.description,
         properties: null,

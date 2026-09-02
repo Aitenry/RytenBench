@@ -1,6 +1,7 @@
 import { dialog, ipcMain } from 'electron'
 import * as fs from 'fs'
 import crypto from 'crypto'
+import { resolve, sep } from 'path'
 import { settingsStore } from '../context'
 import {
   getAllFolders,
@@ -184,6 +185,7 @@ export function registerMusicIpc(): void {
 
       for (const srcPath of result.filePaths) {
         const origName = srcPath.split(/[/\\]/).pop() || 'unknown'
+        let destPath: string | null = null
 
         try {
           // 计算源文件 MD5 用于去重
@@ -201,7 +203,7 @@ export function registerMusicIpc(): void {
           const ext = srcPath.split('.').pop() || ''
           const uuid = crypto.randomUUID()
           const fileName = `${uuid}.${ext}`
-          const destPath = `${folder.path}\\${fileName}`.replace(/\//g, '\\')
+          destPath = `${folder.path}\\${fileName}`.replace(/\//g, '\\')
           fs.copyFileSync(srcPath, destPath)
           const meta = await parseFile(destPath)
           const { title, artist, album } = meta.common
@@ -223,6 +225,15 @@ export function registerMusicIpc(): void {
             coverDataUrl
           })
         } catch {
+          // 复制成功但解析失败的文件清理掉（修复：此前留下 UUID 孤儿文件且不入
+          // existingHashes，下次再选又复制出新的孤儿）
+          if (destPath && fs.existsSync(destPath)) {
+            try {
+              fs.unlinkSync(destPath)
+            } catch {
+              // 清理失败不影响流程
+            }
+          }
           // skip files that can't be copied or parsed
         }
       }
@@ -321,7 +332,17 @@ export function registerMusicIpc(): void {
   })
 
   ipcMain.handle('music-read-file', async (_event, filePath: string) => {
-    const buffer = await fs.promises.readFile(filePath)
+    // 路径校验：渲染端传入的路径必须位于音乐目录内（防任意文件读取）
+    const musicDir = settingsStore.get('musicDirectory') as string | undefined
+    if (!musicDir || typeof filePath !== 'string') {
+      throw new Error('未设置音乐目录')
+    }
+    const root = resolve(musicDir)
+    const target = resolve(filePath)
+    if (target !== root && !target.startsWith(root + sep)) {
+      throw new Error('文件不在音乐目录内，已拒绝访问')
+    }
+    const buffer = await fs.promises.readFile(target)
     return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength)
   })
 

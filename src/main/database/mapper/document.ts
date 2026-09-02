@@ -1,4 +1,4 @@
-﻿import { getDatabaseInstance } from '../instance'
+import { getDatabaseInstance } from '../instance'
 import logger from 'electron-log'
 import { saveImage } from './image'
 
@@ -431,17 +431,54 @@ async function deleteDocsByTimeRange(
 ): Promise<number> {
   try {
     const db = (await getDatabaseInstance()).getDatabase()
-
-    await db.query(
-      'DELETE FROM documents_content WHERE doc_id IN (SELECT id FROM documents WHERE workspace_id = $1 AND created_at >= $2 AND created_at <= $3)',
-      [workspaceId, startTime, endTime]
-    )
-
-    const result = await db.query(
-      'DELETE FROM documents WHERE workspace_id = $1 AND created_at >= $2 AND created_at <= $3',
-      [workspaceId, startTime, endTime]
-    )
-    const deleted = result.affectedRows ?? 0
+    let deleted = 0
+    await db.transaction(async (tx) => {
+      const rows = await tx.query<{ id: number }>(
+        'SELECT id FROM documents WHERE workspace_id = $1 AND created_at >= $2 AND created_at <= $3',
+        [workspaceId, startTime, endTime]
+      )
+      const ids = rows.rows.map((r) => r.id)
+      if (ids.length === 0) return
+      await tx.query('DELETE FROM documents_content WHERE doc_id = ANY($1)', [ids])
+      const result = await tx.query('DELETE FROM documents WHERE id = ANY($1)', [ids])
+      deleted = result.affectedRows ?? 0
+      // 与单删路径（deleteDoc）一致的图谱清理（修复：此前两条 DELETE 各自提交且完全
+      // 绕过图谱引用清理，实体/关系保留悬空引用；现在整体事务 + 逐 doc 摘除来源）
+      for (const docId of ids) {
+        await tx.query(
+          `UPDATE graph_entities
+           SET source_note_ids = COALESCE((
+             SELECT jsonb_agg(elem)::text
+             FROM jsonb_array_elements(source_note_ids::jsonb) AS elem
+             WHERE (elem)::int != CAST($1 AS int)
+           ), '[]')
+           WHERE EXISTS (
+             SELECT 1 FROM jsonb_array_elements(source_note_ids::jsonb) a
+             WHERE (a)::int = CAST($1 AS int)
+           )`,
+          [docId]
+        )
+        await tx.query(
+          `UPDATE graph_relations
+           SET source_note_ids = COALESCE((
+             SELECT jsonb_agg(elem)::text
+             FROM jsonb_array_elements(source_note_ids::jsonb) AS elem
+             WHERE (elem)::int != CAST($1 AS int)
+           ), '[]')
+           WHERE EXISTS (
+             SELECT 1 FROM jsonb_array_elements(source_note_ids::jsonb) a
+             WHERE (a)::int = CAST($1 AS int)
+           )`,
+          [docId]
+        )
+      }
+      await tx.query(
+        `DELETE FROM graph_entities WHERE source_note_ids = '[]' OR source_note_ids IS NULL OR source_note_ids = ''`
+      )
+      await tx.query(
+        `DELETE FROM graph_relations WHERE source_note_ids = '[]' OR source_note_ids IS NULL OR source_note_ids = ''`
+      )
+    })
     logger.info(`Deleted ${deleted} docs in time range [${startTime}, ${endTime}]`)
     return deleted
   } catch (error) {

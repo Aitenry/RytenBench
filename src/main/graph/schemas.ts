@@ -38,15 +38,16 @@ const ENTITY_TYPES = [
 /** 允许的实体类型集合（用于后处理过滤，O(1) 查找） */
 export const ALLOWED_ENTITY_TYPES: ReadonlySet<string> = new Set(ENTITY_TYPES)
 
-/** 实体类型枚举 */
-const EntityTypeSchema = z.enum(ENTITY_TYPES)
-
-/** 单个实体 */
+/**
+ * 单个实体（宽松化：type/confidence 的非法值由抽取后处理逐条兜底——
+ * 修复：此前严格 enum/min-max 校验,一条非法即整块 JSON parse 失败,整块抽取静默丢弃,
+ * 而后续的逐条过滤逻辑永远执行不到）
+ */
 export const EntitySchema = z.object({
   name: z.string().describe('实体规范化全称'),
-  type: EntityTypeSchema.describe('实体类型'),
-  description: z.string().describe('15字以内的简洁描述'),
-  confidence: z.number().min(0).max(1).describe('置信度 0-1，表示实体抽取的确定程度')
+  type: z.string().describe('实体类型'),
+  description: z.string().optional().describe('15字以内的简洁描述'),
+  confidence: z.number().optional().describe('置信度 0-1，表示实体抽取的确定程度')
 })
 
 /** 实体数组 —— 实体抽取 & Gleaning 使用 */
@@ -55,11 +56,11 @@ export const EntitiesArraySchema = z.array(EntitySchema)
 /** 合并后的实体（含别名等元信息） */
 export const MergedEntitySchema = z.object({
   name: z.string().describe('规范化名称'),
-  type: EntityTypeSchema.describe('实体类型'),
-  description: z.string().describe('综合描述'),
-  aliases: z.array(z.string()).describe('别名列表'),
-  confidence: z.number().describe('置信度 0-1'),
-  source_doc_ids: z.array(z.number()).describe('来源文档 ID 列表')
+  type: z.string().describe('实体类型'),
+  description: z.string().optional().describe('综合描述'),
+  aliases: z.array(z.string()).optional().describe('别名列表'),
+  confidence: z.number().optional().describe('置信度 0-1'),
+  source_doc_ids: z.array(z.number()).optional().describe('来源文档 ID 列表')
 })
 
 /** 实体消歧合并结果 */
@@ -106,15 +107,12 @@ const RELATION_TYPES = [
 /** 允许的关系类型集合（用于后处理过滤，O(1) 查找） */
 export const ALLOWED_RELATION_TYPES: ReadonlySet<string> = new Set(RELATION_TYPES)
 
-/** 关系类型枚举 */
-const RelationTypeSchema = z.enum(RELATION_TYPES)
-
-/** 单个关系 */
+/** 单个关系（宽松化：relation_type 非法值由后处理过滤,不再整块 parse 失败） */
 export const RelationSchema = z.object({
   source: z.string().describe('源实体名称'),
   target: z.string().describe('目标实体名称'),
-  relation_type: RelationTypeSchema.describe('关系类型'),
-  description: z.string().describe('15字以内的简短关系描述')
+  relation_type: z.string().describe('关系类型'),
+  description: z.string().optional().describe('15字以内的简短关系描述')
 })
 
 /** 关系数组 —— 关系抽取使用 */

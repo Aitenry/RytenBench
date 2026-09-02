@@ -1,4 +1,4 @@
-﻿import { getDatabaseInstance } from '../instance'
+import { getDatabaseInstance } from '../instance'
 import logger from 'electron-log'
 import crypto from 'crypto'
 
@@ -127,15 +127,30 @@ export async function upsertFolder(
 export async function deleteFolder(id: string): Promise<void> {
   try {
     const db = (await getDatabaseInstance()).getDatabase()
-    await db.query('DELETE FROM music_folders WHERE id = $1', [id])
-    // 清除未被任何 track 或 folder 引用的孤立封面图
-    await db.query(
-      `DELETE FROM images WHERE id NOT IN (
-        SELECT DISTINCT image_id FROM music_tracks WHERE image_id IS NOT NULL
-        UNION
-        SELECT DISTINCT image_id FROM music_folders WHERE image_id IS NOT NULL
-      )`
-    )
+    await db.transaction(async (tx) => {
+      const folder = await tx.query<{ image_id: string | null }>(
+        'SELECT image_id FROM music_folders WHERE id = $1',
+        [id]
+      )
+      const folderImageId = folder.rows[0]?.image_id ?? null
+      await tx.query('DELETE FROM music_folders WHERE id = $1', [id])
+      if (folderImageId) {
+        // 只清理本歌单的封面（修复：此前做「全局孤儿图片清理」，把文档/知识库封面也
+        // 纳入待删集——music 侧 md5 只 hash base64 段、image.ts hash 整个 dataUrl，
+        // 同一图两边 id 必不同 → 外键冲突抛错，而歌单行已删；现在仅当封面不再被任何
+        // 曲目/歌单引用时才删除，且整体在事务内）
+        const refs = await tx.query<{ c: number }>(
+          `SELECT COUNT(*)::int AS c FROM (
+             SELECT 1 FROM music_tracks WHERE image_id = $1
+             UNION ALL SELECT 1 FROM music_folders WHERE image_id = $1
+           ) r`,
+          [folderImageId]
+        )
+        if (Number(refs.rows[0]?.c ?? 0) === 0) {
+          await tx.query('DELETE FROM images WHERE id = $1', [folderImageId])
+        }
+      }
+    })
   } catch (error) {
     logger.error('Failed to delete music folder:', error)
     throw error

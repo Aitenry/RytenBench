@@ -57,6 +57,12 @@ export function groupEntitiesByPrefix(entities: ExtractedEntity[]): ExtractedEnt
   return clusters.map((c) => c.entities)
 }
 
+/** 合并结果：合并后的实体列表 + 旧名 → 规范名映射（供落库阶段重指向关系/清理旧行） */
+export interface EntityMergeResult {
+  entities: ExtractedEntity[]
+  renameMap: Map<string, string>
+}
+
 /**
  * 实体消歧合并（Stage 1 程序化去重 → Stage 2 按名前缀分批次 LLM 合并）
  * onProgress(processedBatches, totalBatches) 用于上报阶段详情进度
@@ -65,10 +71,13 @@ export async function mergeEntities(
   ctx: ServiceContext,
   entities: ExtractedEntity[],
   onProgress?: (processed: number, total: number) => void
-): Promise<ExtractedEntity[]> {
+): Promise<EntityMergeResult> {
+  /** 旧名 → 规范名：被合并掉的实体名指向保留名 */
+  const renameMap = new Map<string, string>()
+
   if (entities.length <= 1) {
     onProgress?.(1, 1)
-    return entities
+    return { entities, renameMap }
   }
 
   // Stage 1: 程序化合并（完全同名 + 简单别名匹配）
@@ -83,7 +92,12 @@ export async function mergeEntities(
       existing.confidence = Math.max(existing.confidence, entity.confidence)
       if (entity.description.length > existing.description.length) {
         existing.description = entity.description
+        if (entity.name !== existing.name) {
+          renameMap.set(existing.name, entity.name)
+        }
         existing.name = entity.name
+      } else if (entity.name !== existing.name) {
+        renameMap.set(entity.name, existing.name)
       }
     } else {
       nameMap.set(key, { ...entity })
@@ -93,7 +107,7 @@ export async function mergeEntities(
   const stage1Entities = Array.from(nameMap.values())
   if (stage1Entities.length <= 1) {
     onProgress?.(1, 1)
-    return stage1Entities
+    return { entities: stage1Entities, renameMap }
   }
 
   // Stage 2: 按名前缀分组 → 分批次 LLM 合并
@@ -114,19 +128,34 @@ export async function mergeEntities(
         )
 
         if (parsed?.merged && Array.isArray(parsed.merged)) {
-          allMerged.push(
-            ...parsed.merged.map(
-              (e) =>
-                ({
-                  name: e.name,
-                  type: e.type || 'other',
-                  description: e.description || '',
-                  aliases: e.aliases || [],
-                  confidence: e.confidence ?? 0.9,
-                  source_doc_ids: e.source_doc_ids || []
-                }) as ExtractedEntity
-            )
+          const batchNames = new Set(batch.map((e) => e.name))
+          const merged = parsed.merged.map(
+            (e) =>
+              ({
+                name: e.name,
+                type: e.type || 'other',
+                description: e.description || '',
+                aliases: e.aliases || [],
+                confidence: e.confidence ?? 0.9,
+                source_doc_ids: e.source_doc_ids || []
+              }) as ExtractedEntity
           )
+          // 记录旧名 → 规范名：合并结果别名中属于本批次的实体名，以及 removed_names
+          for (const m of merged) {
+            for (const alias of m.aliases) {
+              if (batchNames.has(alias) && alias !== m.name) {
+                renameMap.set(alias, m.name)
+              }
+            }
+          }
+          for (const removed of parsed.removed_names ?? []) {
+            if (!batchNames.has(removed) || renameMap.has(removed)) continue
+            const owner = merged.find((m) => (m.aliases ?? []).includes(removed))
+            if (owner && owner.name !== removed) {
+              renameMap.set(removed, owner.name)
+            }
+          }
+          allMerged.push(...merged)
         } else {
           allMerged.push(...batch)
         }
@@ -141,5 +170,24 @@ export async function mergeEntities(
     onProgress?.(i + 1, batches.length)
   }
 
-  return allMerged
+  // 重命名链收敛：A→B、B→C 统一落到 C；并清理映射到自身的冗余项
+  const resolveChain = (name: string): string => {
+    let current = name
+    const seen = new Set<string>([name])
+    while (renameMap.has(current)) {
+      const next = renameMap.get(current)!
+      if (next === current || seen.has(next)) break
+      seen.add(next)
+      current = next
+    }
+    return current
+  }
+  for (const key of [...renameMap.keys()]) {
+    renameMap.set(key, resolveChain(key))
+  }
+  for (const [from, to] of [...renameMap]) {
+    if (from === to) renameMap.delete(from)
+  }
+
+  return { entities: allMerged, renameMap }
 }

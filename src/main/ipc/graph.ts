@@ -91,46 +91,56 @@ export function registerGraphIpc(): void {
   ipcMain.on(
     'graph-build-start',
     async (event, wikiId: number, config?: Record<string, unknown>) => {
-      // 未配置图谱构建模型时，不进入构建流程——通过错误事件通知渲染层弹出友好提醒
-      let model: BaseChatModel
+      // 整段包 try（修复：ipcMain.on 的 async 回调返回的 promise 无人观察，
+      // 构造/合并配置段抛错会成 unhandled rejection，渲染端收不到任何错误事件）
       try {
-        const defaultModelId = settingsStore.get('defaultModelId') as number | undefined
-        model = await getProviderService().createModel(defaultModelId)
+        // 未配置图谱构建模型时，不进入构建流程——通过错误事件通知渲染层弹出友好提醒
+        let model: BaseChatModel
+        try {
+          const defaultModelId = settingsStore.get('defaultModelId') as number | undefined
+          model = await getProviderService().createModel(defaultModelId)
+        } catch (error) {
+          logger.error('Error in graph-build-start (model):', error)
+          safeSend(event.sender, 'graph-build-error', {
+            wikiId,
+            error: '未配置图谱构建模型：请先到「系统设置 → 图谱」中选择用于构建知识图谱的大模型。'
+          })
+          return
+        }
+        const graphService = new KnowledgeGraphService(model)
+        // 从系统设置读取图谱构建默认值，用户传入的config可覆盖
+        const graphSettings = settingsStore.get('graph') as GraphSettings | undefined
+        const mergedConfig: BuildConfig = {
+          maxConcurrency: (config?.maxConcurrency as number) ?? graphSettings?.maxConcurrency ?? 8,
+          enableGleaning:
+            (config?.enableGleaning as boolean) ?? graphSettings?.enableGleaning ?? true,
+          gleaningThreshold:
+            (config?.gleaningThreshold as number) ?? graphSettings?.gleaningThreshold ?? 50,
+          maxChunkSize: (config?.maxChunkSize as number) ?? graphSettings?.maxChunkSize ?? 2000,
+          force: config?.force as boolean | undefined
+        }
+        try {
+          const result = await graphService.buildGraph(
+            wikiId,
+            (progress) => {
+              safeSend(event.sender, 'graph-build-progress', progress)
+            },
+            mergedConfig
+          )
+          safeSend(event.sender, 'graph-build-complete', {
+            wikiId,
+            entityCount: result.entities.length,
+            relationCount: result.relations.length
+          })
+        } catch (error) {
+          logger.error('Error in graph-build-start:', error)
+          safeSend(event.sender, 'graph-build-error', {
+            wikiId,
+            error: error instanceof Error ? error.message : String(error)
+          })
+        }
       } catch (error) {
-        logger.error('Error in graph-build-start (model):', error)
-        safeSend(event.sender, 'graph-build-error', {
-          wikiId,
-          error: '未配置图谱构建模型：请先到「系统设置 → 图谱」中选择用于构建知识图谱的大模型。'
-        })
-        return
-      }
-      const graphService = new KnowledgeGraphService(model)
-      // 从系统设置读取图谱构建默认值，用户传入的config可覆盖
-      const graphSettings = settingsStore.get('graph') as GraphSettings | undefined
-      const mergedConfig: BuildConfig = {
-        maxConcurrency: (config?.maxConcurrency as number) ?? graphSettings?.maxConcurrency ?? 8,
-        enableGleaning:
-          (config?.enableGleaning as boolean) ?? graphSettings?.enableGleaning ?? true,
-        gleaningThreshold:
-          (config?.gleaningThreshold as number) ?? graphSettings?.gleaningThreshold ?? 50,
-        maxChunkSize: (config?.maxChunkSize as number) ?? graphSettings?.maxChunkSize ?? 2000,
-        force: config?.force as boolean | undefined
-      }
-      try {
-        const result = await graphService.buildGraph(
-          wikiId,
-          (progress) => {
-            safeSend(event.sender, 'graph-build-progress', progress)
-          },
-          mergedConfig
-        )
-        safeSend(event.sender, 'graph-build-complete', {
-          wikiId,
-          entityCount: result.entities.length,
-          relationCount: result.relations.length
-        })
-      } catch (error) {
-        logger.error('Error in graph-build-start:', error)
+        logger.error('Error in graph-build-start (unexpected):', error)
         safeSend(event.sender, 'graph-build-error', {
           wikiId,
           error: error instanceof Error ? error.message : String(error)

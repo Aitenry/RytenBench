@@ -1,4 +1,4 @@
-﻿import { getDatabaseInstance } from '../instance'
+import { getDatabaseInstance } from '../instance'
 import logger from 'electron-log'
 
 export interface GraphEntity {
@@ -105,12 +105,14 @@ async function getEntityById(id: number): Promise<GraphEntity | null> {
 async function searchEntities(wikiId: number, query: string): Promise<GraphEntity[]> {
   try {
     const db = (await getDatabaseInstance()).getDatabase()
+    // LIKE 通配符转义（修复：搜索词含 %/_/\ 时结果异常放大,普通字符搜索应视为字面量）
+    const escaped = query.replace(/[\\%_]/g, (m) => `\\${m}`)
     const result = await db.query<GraphEntity>(
       `SELECT * FROM graph_entities
        WHERE wiki_id = $1
          AND (LOWER(name) LIKE LOWER($2) OR LOWER(aliases) LIKE LOWER($2))
        ORDER BY name`,
-      [wikiId, `%${query}%`]
+      [wikiId, `%${escaped}%`]
     )
     return result.rows
   } catch (error) {
@@ -519,10 +521,17 @@ async function batchUpsertEntities(
         const existingId = existingMap.get(key)
         if (existingId !== undefined) {
           nameToId.set(entity.name, existingId)
+          // source_note_ids 取并集（修复：此前整列覆盖,跨文档来源只留最后一篇,
+          // 删文档按「摘除 doc_id、摘空才删」工作时会误删仍受其它文档支撑的实体）
           await tx.query(
             `UPDATE graph_entities
              SET type = $1, description = $2, aliases = $3, properties = $4,
-                 confidence = $5, source_note_ids = $6, updated_at = NOW()
+                 confidence = $5,
+                 source_note_ids = COALESCE((
+                   SELECT jsonb_agg(DISTINCT elem)::text
+                   FROM jsonb_array_elements(COALESCE(source_note_ids::jsonb, '[]'::jsonb) || $6::jsonb) AS elem
+                 ), '[]'),
+                 updated_at = NOW()
              WHERE id = $7`,
             [
               entity.type,
@@ -551,6 +560,9 @@ async function batchUpsertEntities(
           )
           const id = result.rows[0].id
           nameToId.set(entity.name, id)
+          // 修复：批内同名实体（不同 chunk 抽到同一实体是常态）第二个不再走 INSERT,
+          // 否则画布出现重复节点
+          existingMap.set(key, id)
         }
       }
     })
@@ -659,6 +671,146 @@ async function batchUpdateEntityConfidence(
   }
 }
 
+/**
+ * 持久化实体合并结果（build-graph 消歧合并阶段专用）：
+ * - 规范名行存在则更新（source_note_ids 取自身与全部被合并行的并集），不存在则插入；
+ * - 被合并掉的旧名行删除前，把引用它的关系 source_id/target_id 重指向规范行
+ *   （graph_relations 对实体是 ON DELETE CASCADE，不重指向会连关系一起删掉）；
+ * - renameMap 未覆盖的旧名保守保留，不删除。
+ * 返回合并后「实体名 → id」映射（含新建规范名），供置信度更新与关系保存使用。
+ */
+async function persistEntityMerges(
+  wikiId: number,
+  merged: Array<{
+    name: string
+    type: string
+    description: string
+    aliases: string[]
+    confidence: number
+    source_doc_ids: number[]
+  }>,
+  renameMap: Map<string, string>
+): Promise<Map<string, number>> {
+  const nameToId = new Map<string, number>()
+  if (merged.length === 0) return nameToId
+
+  try {
+    const db = (await getDatabaseInstance()).getDatabase()
+    await db.transaction(async (tx) => {
+      const rowsResult = await tx.query<{
+        id: number
+        name: string
+        source_note_ids: string | null
+      }>('SELECT id, name, source_note_ids FROM graph_entities WHERE wiki_id = $1', [wikiId])
+
+      const rowsByName = new Map<string, { id: number; sourceIds: number[] }>()
+      for (const row of rowsResult.rows) {
+        let sourceIds: number[] = []
+        if (row.source_note_ids) {
+          try {
+            const parsed = JSON.parse(row.source_note_ids)
+            if (Array.isArray(parsed)) sourceIds = parsed as number[]
+          } catch {
+            sourceIds = []
+          }
+        }
+        rowsByName.set(row.name, { id: row.id, sourceIds })
+      }
+
+      // 规范名 → 被合并掉的旧名列表
+      const removedByCanonical = new Map<string, string[]>()
+      for (const [oldName, canonical] of renameMap) {
+        if (oldName === canonical) continue
+        const list = removedByCanonical.get(canonical)
+        if (list) list.push(oldName)
+        else removedByCanonical.set(canonical, [oldName])
+      }
+
+      for (const entity of merged) {
+        const canonical = entity.name
+        const existing = rowsByName.get(canonical)
+        const removed = removedByCanonical.get(canonical) ?? []
+
+        // 来源并集：自身 + 既有行 + 被合并行的 source_note_ids
+        const unionSourceIds = new Set<number>(entity.source_doc_ids)
+        if (existing) {
+          for (const id of existing.sourceIds) unionSourceIds.add(id)
+        }
+        for (const oldName of removed) {
+          const oldRow = rowsByName.get(oldName)
+          if (oldRow) {
+            for (const id of oldRow.sourceIds) unionSourceIds.add(id)
+          }
+        }
+        const sourceIds = [...unionSourceIds]
+
+        let canonicalId: number
+        if (existing) {
+          canonicalId = existing.id
+          await tx.query(
+            `UPDATE graph_entities
+             SET type = $1, description = $2, aliases = $3, properties = $4,
+                 confidence = $5, source_note_ids = $6, updated_at = NOW()
+             WHERE id = $7`,
+            [
+              entity.type,
+              entity.description,
+              JSON.stringify(entity.aliases),
+              null,
+              entity.confidence,
+              JSON.stringify(sourceIds),
+              canonicalId
+            ]
+          )
+        } else {
+          const insert = await tx.query<{ id: number }>(
+            `INSERT INTO graph_entities (wiki_id, name, type, description, aliases, properties, confidence, source_note_ids)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+            [
+              wikiId,
+              canonical,
+              entity.type,
+              entity.description,
+              JSON.stringify(entity.aliases),
+              null,
+              entity.confidence,
+              JSON.stringify(sourceIds)
+            ]
+          )
+          canonicalId = insert.rows[0].id
+          rowsByName.set(canonical, { id: canonicalId, sourceIds })
+        }
+        nameToId.set(canonical, canonicalId)
+
+        // 旧名行：先重指向引用它的关系，再删除行本身（外键为 CASCADE，不重指向会连带删关系）
+        for (const oldName of removed) {
+          const oldRow = rowsByName.get(oldName)
+          if (!oldRow || oldRow.id === canonicalId) continue
+          await tx.query(
+            'UPDATE graph_relations SET source_id = $1 WHERE wiki_id = $2 AND source_id = $3',
+            [canonicalId, wikiId, oldRow.id]
+          )
+          await tx.query(
+            'UPDATE graph_relations SET target_id = $1 WHERE wiki_id = $2 AND target_id = $3',
+            [canonicalId, wikiId, oldRow.id]
+          )
+          await tx.query('DELETE FROM graph_entities WHERE id = $1', [oldRow.id])
+          rowsByName.delete(oldName)
+        }
+      }
+
+      // 重指向可能产生自环关系（A→B 且 B 合并进 A），抽取阶段本就过滤自环，这里兜底清理
+      await tx.query('DELETE FROM graph_relations WHERE wiki_id = $1 AND source_id = target_id', [
+        wikiId
+      ])
+    })
+  } catch (error) {
+    logger.error('Failed to persist entity merges:', error)
+    throw error
+  }
+  return nameToId
+}
+
 export {
   getEntitiesByWikiId,
   getEntityById,
@@ -677,6 +829,7 @@ export {
   getBuildJobByWikiId,
   getLatestBuildJob,
   batchUpsertEntities,
+  persistEntityMerges,
   batchUpsertRelations,
   batchUpdateEntityConfidence
 }

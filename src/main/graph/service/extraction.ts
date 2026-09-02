@@ -40,7 +40,10 @@ export async function extractEntitiesAndRelations(
           type: ALLOWED_ENTITY_TYPES.has(e.type) ? e.type : 'other',
           description: e.description || '',
           aliases: [] as string[],
-          confidence: e.confidence >= 0 && e.confidence <= 1 ? e.confidence : 0.7
+          confidence:
+            typeof e.confidence === 'number' && e.confidence >= 0 && e.confidence <= 1
+              ? e.confidence
+              : 0.7
         }))
         .filter((e) => e.name.length > 0)
 
@@ -111,7 +114,10 @@ export async function gleanEntities(
           type: e.type || 'other',
           description: e.description || '',
           aliases: [] as string[],
-          confidence: e.confidence >= 0 && e.confidence <= 1 ? e.confidence : 0.65
+          confidence:
+            typeof e.confidence === 'number' && e.confidence >= 0 && e.confidence <= 1
+              ? e.confidence
+              : 0.65
         }))
         .filter((e) => e.name.length > 0 && !existingNames.includes(e.name))
     }

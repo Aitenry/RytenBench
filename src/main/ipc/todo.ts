@@ -6,6 +6,7 @@ import {
   getTodoItemById,
   getTodoItemByTitle,
   getTodoItemsByPriority,
+  getTodoItemsByStatus,
   getAllTodoItems,
   getTodoItemsPaginated,
   getTodoItemsByDueDate,
@@ -51,9 +52,15 @@ export function registerTodoIpc(): void {
     }
   })
 
-  ipcMain.handle('todo-items-get-by-completed-status', async (_event, status: number) => {
+  ipcMain.handle('todo-items-get-by-completed-status', async (_event, status: number | boolean) => {
     try {
-      return await getTodoItemsByPriority(getActiveWorkspaceId(), status)
+      // 修复：此前错接成 getTodoItemsByPriority（按优先级查询），语义损坏；
+      // 兼容布尔（true=已完成=2 / false=未完成=0）与数字两种口径
+      const normalized = typeof status === 'boolean' ? (status ? 2 : 0) : status
+      if (![0, 1, 2].includes(normalized)) {
+        throw new Error('status 必须为 0（未开始）/ 1（进行中）/ 2（已完成）')
+      }
+      return await getTodoItemsByStatus(getActiveWorkspaceId(), normalized)
     } catch (error) {
       console.error('Error in todo-items-get-by-completed-status:', error)
       throw error
@@ -100,6 +107,10 @@ export function registerTodoIpc(): void {
     'todo-items-update',
     async (_event, id: number, updates: Partial<Omit<TodoItemRow, 'id'>>) => {
       try {
+        // 状态枚举校验（修复：此前可写任意整数,前端只认 0/1/2）
+        if (updates.status !== undefined && ![0, 1, 2].includes(updates.status)) {
+          throw new Error('status 必须为 0（未开始）/ 1（进行中）/ 2（已完成）')
+        }
         return await updateTodoItem(id, updates)
       } catch (error) {
         console.error('Error in todo-items-update:', error)

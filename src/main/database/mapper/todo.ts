@@ -1,4 +1,4 @@
-﻿import { getDatabaseInstance } from '../instance'
+import { getDatabaseInstance } from '../instance'
 import logger from 'electron-log'
 
 export interface TodoItemRow {
@@ -105,7 +105,10 @@ async function getTodoItemsPaginated(
 ): Promise<PaginatedResult<TodoItemRow>> {
   try {
     const db = (await getDatabaseInstance()).getDatabase()
-    const offset = (page - 1) * pageSize
+    // 页码/页大小钳制（修复：pageSize 传 0/负数 → LIMIT 0 空页且 hasMore 恒真）
+    const safePage = Math.max(1, Number.isFinite(page) ? Math.floor(page) : 1)
+    const safePageSize = Math.max(1, Number.isFinite(pageSize) ? Math.floor(pageSize) : 10)
+    const offset = (safePage - 1) * safePageSize
 
     const countResult = await db.query<{ total: number }>(
       'SELECT COUNT(*) as total FROM todo_items WHERE workspace_id = $1 AND status != 2',
@@ -119,7 +122,7 @@ async function getTodoItemsPaginated(
       ORDER BY updated_at DESC
       LIMIT $2 OFFSET $3
     `
-    const result = await db.query<TodoItemRow>(dataSql, [workspaceId, pageSize, offset])
+    const result = await db.query<TodoItemRow>(dataSql, [workspaceId, safePageSize, offset])
     const hasMore = offset + result.rows.length < total
     logger.info(
       `Paginated todo items page=${page} pageSize=${pageSize}: ${result.rows.length} rows, total=${total}, hasMore=${hasMore}`
@@ -225,11 +228,17 @@ async function updateTodoItem(
     if (updates.status !== undefined) {
       updateFields.push(`status = $${paramIndex++}`)
       updateValues.push(updates.status)
+      // 时间戳随状态推进/回退（修复：①status=1 时调用方若同传 started_at 会 SET 同列两次
+      // 导致整条 UPDATE 失败；②状态回退时时间戳残留，前端按时间戳判状态会错）
       if (updates.status === 2) {
         updateFields.push('completed_at = NOW()')
+      } else if (updates.completed_at === undefined) {
+        updateFields.push('completed_at = NULL')
       }
       if (updates.status === 1) {
-        updateFields.push('started_at = NOW()')
+        if (updates.started_at === undefined) updateFields.push('started_at = NOW()')
+      } else if (updates.started_at === undefined) {
+        updateFields.push('started_at = NULL')
       }
     }
     if (updates.category !== undefined) {

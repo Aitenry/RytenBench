@@ -1,4 +1,4 @@
-﻿import { getDatabaseInstance } from '../instance'
+import { getDatabaseInstance } from '../instance'
 import logger from 'electron-log'
 
 // --- 类型定义 ---
@@ -108,6 +108,16 @@ async function deleteWorkspace(id: number): Promise<boolean> {
       await tx.query('DELETE FROM documents WHERE workspace_id = $1', [id])
       await tx.query('DELETE FROM wiki WHERE workspace_id = $1', [id])
       await tx.query('DELETE FROM todo_items WHERE workspace_id = $1', [id])
+      // 修复：chat_goals 与 topic_compactions 表无外键级联（023/024 均无 REFERENCES），
+      // 工作区删除后目标行与压缩 checkpoint 会成孤儿永久残留——先按话题枚举删除
+      await tx.query(
+        `DELETE FROM chat_goals WHERE topic_id IN (SELECT id FROM chat_topic WHERE workspace_id = $1)`,
+        [id]
+      )
+      await tx.query(
+        `DELETE FROM topic_compactions WHERE topic_id IN (SELECT id FROM chat_topic WHERE workspace_id = $1)`,
+        [id]
+      )
       // 聊天话题与子代理配置有外键级联，删除工作区行即可
       const result = await tx.query('DELETE FROM workspace WHERE id = $1', [id])
       const changes = result.affectedRows ?? 0
@@ -144,7 +154,8 @@ async function getAllTopicsPaginated(
 ): Promise<PaginatedResult<ChatTopicRow>> {
   try {
     const safePage = Number.isFinite(page) ? Math.floor(page) : 0
-    const safePageSize = Number.isFinite(pageSize) ? Math.floor(pageSize) : 20
+    // 页大小钳制 ≥1（修复：pageSize 传 0/负数 → LIMIT 0 空页且 hasMore 恒真）
+    const safePageSize = Math.max(1, Number.isFinite(pageSize) ? Math.floor(pageSize) : 20)
     const safeWorkspaceId = Number.isFinite(workspaceId) ? Math.floor(workspaceId) : 0
 
     const db = (await getDatabaseInstance()).getDatabase()
@@ -321,10 +332,17 @@ async function addDialogue(dialogue: Omit<ChatDialogueRow, 'id' | 'created_at'>)
   try {
     const db = (await getDatabaseInstance()).getDatabase()
     const { topic_id, role, content, blocks } = dialogue
-    const sql =
-      'INSERT INTO chat_dialogue (topic_id, role, content, blocks) VALUES ($1, $2, $3, $4) RETURNING id'
-    const result = await db.query<{ id: number }>(sql, [topic_id, role, content, blocks || null])
-    const newId = result.rows[0].id
+    let newId = 0
+    await db.transaction(async (tx) => {
+      const result = await tx.query<{ id: number }>(
+        'INSERT INTO chat_dialogue (topic_id, role, content, blocks) VALUES ($1, $2, $3, $4) RETURNING id',
+        [topic_id, role, content, blocks || null]
+      )
+      newId = result.rows[0].id
+      // 修复：新消息要刷新话题活跃时间——此前 updated_at 只在编辑标题时写入，
+      // 「活跃排序」实为「创建/编辑排序」
+      await tx.query('UPDATE chat_topic SET updated_at = NOW() WHERE id = $1', [topic_id])
+    })
     logger.info(`Added dialogue ID=${newId} to topic=${topic_id}`)
     return newId
   } catch (error) {

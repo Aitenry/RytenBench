@@ -10,7 +10,9 @@ export function registerSettingsIpc(): void {
   ipcMain.handle('lock-screen-code', async () => {
     try {
       await awaitInitialized()
-      return settingsStore.get('lock') as string
+      // 返回完整 lock 对象 { code, view }（修复：此前 `as string` 类型谎言,
+      // 运行时返回对象而类型声明与 preload d.ts 互相矛盾）
+      return settingsStore.get('lock')
     } catch (error) {
       console.error('Error in lock-screen-code:', error)
       throw error
@@ -19,9 +21,11 @@ export function registerSettingsIpc(): void {
 
   ipcMain.handle('lock-screen-view', async (_event, open: boolean) => {
     try {
-      const lock = settingsStore.get('lock')
-      lock.view = open
-      settingsStore.set('lock', lock)
+      const lock = settingsStore.get('lock') as { code: string; view: boolean } | undefined
+      if (lock) {
+        lock.view = open
+        settingsStore.set('lock', lock)
+      }
     } catch (error) {
       console.error('Error in lock-screen-view:', error)
       throw error
@@ -55,16 +59,35 @@ export function registerSettingsIpc(): void {
 
   ipcMain.handle('system-settings-update', async (_event, updates: Partial<SystemSettings>) => {
     try {
+      // 键白名单（修复：此前任意顶层键/类型直接落盘——拼错键被永久持久化，
+      // 或把 lock/chat/graph 整键写成非对象,下游读取无兜底）
+      const ALLOWED_KEYS: Array<keyof SystemSettings> = [
+        'ip',
+        'lock',
+        'graph',
+        'chat',
+        'defaultModelId',
+        'defaultEmbeddingModelId',
+        'musicDirectory',
+        'theme',
+        'tray',
+        'weatherRefreshInterval',
+        'weatherLastFetched',
+        'weatherData'
+      ]
       for (const [key, value] of Object.entries(updates)) {
-        if (value !== undefined) {
-          // 对于对象类型的设置（如 chat），与现有值合并而非替换
-          if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-            const existing = settingsStore.get(key as keyof SystemSettings) as
-              Record<string, unknown> | undefined
-            settingsStore.set(key as keyof SystemSettings, { ...existing, ...value } as never)
-          } else {
-            settingsStore.set(key as keyof SystemSettings, value)
-          }
+        if (value === undefined) continue
+        if (!ALLOWED_KEYS.includes(key as keyof SystemSettings)) {
+          logger.warn(`[Settings] 拒绝未知设置键: ${key}`)
+          continue
+        }
+        // 对于对象类型的设置（如 chat），与现有值合并而非替换
+        if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+          const existing = settingsStore.get(key as keyof SystemSettings) as
+            Record<string, unknown> | undefined
+          settingsStore.set(key as keyof SystemSettings, { ...(existing ?? {}), ...value } as never)
+        } else {
+          settingsStore.set(key as keyof SystemSettings, value)
         }
       }
       // 托盘设置变化时即时同步（关闭行为 / 菜单勾选态）

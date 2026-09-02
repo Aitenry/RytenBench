@@ -356,7 +356,7 @@ export async function appendDocs(
     entityCount: entityNameToId.size,
     relationCount: allNewRelations.length
   })
-  let mergedEntities = await mergeEntities(ctx, allEntitiesForMerge, (done, total) => {
+  const mergedResult = await mergeEntities(ctx, allEntitiesForMerge, (done, total) => {
     phaseProgress = Math.min(1, done / total)
     sendProgress('merge_entities', `实体消歧合并中... ${done}/${total} 批次`, {
       totalDocs,
@@ -365,6 +365,7 @@ export async function appendDocs(
       needsRefresh: true
     })
   })
+  let mergedEntities = mergedResult.entities
   phaseProgress = 1
   sendProgress('merge_entities', `实体消歧合并完成，共 ${mergedEntities.length} 个实体`, {
     totalDocs,

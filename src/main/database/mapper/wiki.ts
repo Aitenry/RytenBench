@@ -1,4 +1,4 @@
-﻿import { getDatabaseInstance } from '../instance'
+import { getDatabaseInstance } from '../instance'
 import logger from 'electron-log'
 import { saveImage } from './image'
 
@@ -192,13 +192,41 @@ async function deleteWiki(id: number): Promise<boolean> {
 
     // 2. 在事务中删除文档及知识库
     await db.transaction(async (tx) => {
+      const wikiRow = await tx.query<{ image_id: string | null }>(
+        'SELECT image_id FROM wiki WHERE id = $1',
+        [id]
+      )
       if (docIds.length > 0) {
-        await tx.query(`DELETE FROM documents WHERE id = ANY($1)`, [docIds])
+        // 修复：文档是工作区级实体、可被多个知识库目录共享——只删除不再被任何
+        // 知识库目录引用的文档（此前整行删除，连坐其他知识库静默丢文）
+        await tx.query(
+          `DELETE FROM documents WHERE id = ANY($1) AND NOT EXISTS (
+             SELECT 1 FROM directory_documents dd2 WHERE dd2.doc_id = documents.id
+           )`,
+          [docIds]
+        )
       }
       await tx.query('DELETE FROM wiki WHERE id = $1', [id])
+
+      // 知识库封面不再被任何表引用时删除（修复：images 只增不删,换封面/删库后残留）
+      const wikiImageId = wikiRow.rows[0]?.image_id ?? null
+      if (wikiImageId) {
+        const refs = await tx.query<{ c: number }>(
+          `SELECT COUNT(*)::int AS c FROM (
+             SELECT 1 FROM wiki WHERE image_id = $1
+             UNION ALL SELECT 1 FROM documents_content WHERE image_id = $1
+             UNION ALL SELECT 1 FROM music_folders WHERE image_id = $1
+             UNION ALL SELECT 1 FROM music_tracks WHERE image_id = $1
+           ) r`,
+          [wikiImageId]
+        )
+        if (Number(refs.rows[0]?.c ?? 0) === 0) {
+          await tx.query('DELETE FROM images WHERE id = $1', [wikiImageId])
+        }
+      }
     })
 
-    logger.info(`Deleted wiki ${id} along with ${docIds.length} associated document(s).`)
+    logger.info(`Deleted wiki ${id}; ${docIds.length} associated doc(s) handled (shared kept).`)
     return true
   } catch (error) {
     logger.error('Failed to delete wiki:', error)
