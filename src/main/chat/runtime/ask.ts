@@ -47,6 +47,8 @@ interface PendingRecord extends PendingQuestionView {
   resolve: (answer: AskAnswer) => void
   reject: (err: Error) => void
   signal?: AbortSignal
+  /** signal 的中止处理器（解决/中止后用于移除监听，防闭包滞留） */
+  onAbort?: () => void
 }
 
 export type AskListener = (pending: PendingQuestionView) => void
@@ -72,6 +74,7 @@ export class QuestionService {
         reject(err)
       }
       const record: PendingRecord = { topicId, requestId, questions, resolve, reject, signal }
+      record.onAbort = onAbort
       this.pending.set(requestId, record)
       if (signal) {
         if (signal.aborted) {
@@ -99,11 +102,19 @@ export class QuestionService {
     })
   }
 
+  /** 清理挂起记录的信号监听（修复：解决后监听器仍挂在 signal 上直至其触发/GC） */
+  private detach(record: PendingRecord): void {
+    if (record.signal && record.onAbort) {
+      record.signal.removeEventListener('abort', record.onAbort)
+    }
+  }
+
   /** 用户回答：命中挂起提问则回写答案；不存在返回 false */
   answer(requestId: string, answers: AskAnswer['answers']): boolean {
     const record = this.pending.get(requestId)
     if (!record) return false
     this.pending.delete(requestId)
+    this.detach(record)
     record.resolve({ answers })
     logger.info(`[Ask] 提问 ${requestId} 已回答（${answers.length} 项）`)
     return true
@@ -124,6 +135,7 @@ export class QuestionService {
     for (const [id, record] of this.pending) {
       if (record.topicId !== topicId) continue
       this.pending.delete(id)
+      this.detach(record)
       const err = new Error('提问已取消（ASK_ABORTED）')
       err.name = 'AskAbortedError'
       record.reject(err)
@@ -134,6 +146,7 @@ export class QuestionService {
   abortAll(): void {
     for (const [id, record] of this.pending) {
       this.pending.delete(id)
+      this.detach(record)
       const err = new Error('提问已取消（ASK_ABORTED）')
       err.name = 'AskAbortedError'
       record.reject(err)

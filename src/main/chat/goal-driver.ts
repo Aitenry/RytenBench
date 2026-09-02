@@ -30,15 +30,29 @@ export class GoalRoundDriver {
     return this.running.has(topicId)
   }
 
-  /** 轮次结束后调度：满足条件则自动发起下一轮（内部递归直至停止条件） */
+  /** 轮次结束后调度：满足条件则自动发起下一轮（循环派发直至停止条件） */
   async maybeDrive(topicId: number, drive: DriveTurnFn): Promise<void> {
     if (this.running.has(topicId)) return
+    // 先占位再 await（修复：此前占用点位于多个 await 之后，「守卫通过」与「占用」之间
+    // 存在竞态窗口，两个并发完成点可重复 incrementRound 并双派发自动轮）
+    this.running.add(topicId)
+    try {
+      while (await this.driveOnce(topicId, drive)) {
+        // 一轮完成且未达停止条件：继续派发下一轮
+      }
+    } finally {
+      this.running.delete(topicId)
+    }
+  }
+
+  /** 检查并派发一轮；返回 true 表示本轮已派发完成且应继续检查下一轮 */
+  private async driveOnce(topicId: number, drive: DriveTurnFn): Promise<boolean> {
     const goal = await goalStore.load(topicId)
     if (!goal || goal.phase !== 'active' || !goalStore.isArmed(topicId)) {
       if (goal && goal.phase === 'active' && !goalStore.isArmed(topicId)) {
         logger.info(`[GoalDriver] topicId=${topicId} 目标 active 但未武装，不自动续跑`)
       }
-      return
+      return false
     }
 
     // 达轮次上限：标记 blocked(round-limit) 并停止
@@ -53,12 +67,12 @@ export class GoalRoundDriver {
       } catch (err) {
         logger.warn('[GoalDriver] 标记 round-limit 失败:', err)
       }
-      return
+      return false
     }
 
     // 派发时结算：roundsStarted + 1（round = 结算后的轮次号）
     const updated = await goalStore.incrementRound(topicId)
-    if (!updated || updated.phase !== 'active') return
+    if (!updated || updated.phase !== 'active') return false
 
     const round = updated.roundsStarted
     const question = `<goal_round>
@@ -76,7 +90,6 @@ export class GoalRoundDriver {
       objective: updated.objective
     }
 
-    this.running.add(topicId)
     logger.info(
       `[GoalDriver] 派发自动轮 topicId=${topicId} round=${round}/${updated.maxGoalRounds} goalId=${updated.id}`
     )
@@ -86,18 +99,15 @@ export class GoalRoundDriver {
         // 用户取消自动轮：停止自动续跑（armed → disarmed），目标保持 active
         logger.info('[GoalDriver] 自动轮被用户取消，目标 disarm')
         goalStore.disarm(topicId)
-        return
+        return false
       }
     } catch (err) {
       logger.warn('[GoalDriver] 自动轮执行失败，目标 disarm:', err)
       goalStore.disarm(topicId)
-      return
-    } finally {
-      this.running.delete(topicId)
+      return false
     }
 
-    // 递归调度下一轮（complete/blocked/pause 会使 phase 变化而自然停止）
-    await this.maybeDrive(topicId, drive)
+    return true
   }
 }
 

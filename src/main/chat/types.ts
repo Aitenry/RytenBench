@@ -84,6 +84,8 @@ export interface StructuredMessage {
   historyCompacted?: HistoryCompaction
   /** 摘要压缩已开始（过渡信号：前端先显示「压缩中」，随后 historyCompacted 携带结果） */
   historyCompacting?: boolean
+  /** 流式执行失败（部分输出后图执行失败时下发；IPC 层据此跳过把残缺回复落库） */
+  streamError?: { message: string }
 }
 
 /** IPC 发送的流式 chunk（StructuredMessage + 主进程注入的 topicId） */

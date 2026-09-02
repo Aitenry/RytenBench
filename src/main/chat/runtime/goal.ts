@@ -173,11 +173,13 @@ export class GoalStore {
       maxGoalRounds,
       activation: 'armed'
     }
+    const persisted = await this.persist(topicId, view)
+    // 持久化成功后再武装（修复：先改内存态后落库,落库失败会留下 armed 但无目标的假状态）
     this.armedTopics.add(topicId)
     logger.info(
       `[Goal] 目标已创建 topicId=${topicId} id=${view.id}（maxGoalRounds=${maxGoalRounds}，创建轮计为第 1 轮）`
     )
-    return this.persist(topicId, view)
+    return persisted
   }
 
   /** 更新目标（CAS + 状态机转移；authority 由调用方（工具层）先行校验） */
@@ -193,7 +195,11 @@ export class GoalStore {
     }
   ): Promise<GoalView> {
     const current = await this.load(topicId)
-    const view = this.assertCurrent(goalId, revision, current)
+    // 浅拷贝后再修改（修复：此前直接改 load 返回的缓存对象——persist 失败时缓存已携带
+    // 未落库的假状态，后续 load/CAS 读到脏数据）
+    const base = this.assertCurrent(goalId, revision, current)
+    const view: GoalView = { ...base }
+    let armChange: 'add' | 'delete' | null = null
 
     switch (action) {
       case 'edit': {
@@ -206,7 +212,7 @@ export class GoalStore {
       case 'pause': {
         if (view.phase !== 'active') throw new Error(`当前 phase=${view.phase}，不能暂停。`)
         view.phase = 'paused'
-        this.armedTopics.delete(topicId)
+        armChange = 'delete'
         break
       }
       case 'resume': {
@@ -216,13 +222,13 @@ export class GoalStore {
         }
         view.phase = 'active'
         view.blockedReason = undefined
-        this.armedTopics.add(topicId)
+        armChange = 'add'
         break
       }
       case 'complete': {
         if (view.phase === 'complete') throw new Error('目标已完成。')
         view.phase = 'complete'
-        this.armedTopics.delete(topicId)
+        armChange = 'delete'
         break
       }
       case 'blocked': {
@@ -232,7 +238,7 @@ export class GoalStore {
           code: 'unspecified',
           message: '（未提供原因）'
         }
-        this.armedTopics.delete(topicId)
+        armChange = 'delete'
         break
       }
       default:
@@ -240,16 +246,26 @@ export class GoalStore {
     }
 
     view.revision += 1
-    return this.persist(topicId, view)
+    const persisted = await this.persist(topicId, view)
+    // 落库成功后再应用武装态变更（修复：先改内存态后落库，失败时状态分歧）
+    if (armChange === 'add') {
+      this.armedTopics.add(topicId)
+    } else if (armChange === 'delete') {
+      this.armedTopics.delete(topicId)
+    }
+    return persisted
   }
 
   /** 自动续跑轮次结算：roundsStarted + 1（驱动器在轮次完成后调用） */
   async incrementRound(topicId: number): Promise<GoalView | null> {
     const current = await this.load(topicId)
     if (!current || current.phase !== 'active') return current
-    current.roundsStarted += 1
-    current.revision += 1
-    return this.persist(topicId, current)
+    // 拷贝后修改（修复：直接改缓存对象，persist 失败留下未落库的假状态）
+    return this.persist(topicId, {
+      ...current,
+      roundsStarted: current.roundsStarted + 1,
+      revision: current.revision + 1
+    })
   }
 
   /** 话题删除时清理目标（DB + 缓存 + 武装态） */

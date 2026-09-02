@@ -104,6 +104,9 @@ export function buildGetWeatherTool(): StructuredToolInterface {
         .describe('地点名称。支持中英文城市名、区县名，如 "Beijing"、"广州"、"Tokyo"'),
       forecast_days: z
         .number()
+        .int()
+        .min(1)
+        .max(16)
         .optional()
         .default(3)
         .describe('预报天数（1-16），默认 3 天。问"今天"或"当前"=1，"明天"=2，"这周"=7')

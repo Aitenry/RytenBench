@@ -51,6 +51,8 @@ interface SessionRecord {
   lastRunAt?: number
   /** 当前运行的取消控制器（interrupt 用） */
   currentAbort?: AbortController
+  /** 话题删除后置位：禁止投递与收件箱续跑（防僵尸会话继续执行） */
+  dead?: boolean
 }
 
 export type SubagentSessionsListener = (topicId: number, rows: SubagentSessionRow[]) => void
@@ -105,6 +107,9 @@ export class SubagentSessionRegistry {
     if (!record || record.topicId !== topicId) {
       throw new Error(`子代理会话 ${id} 不存在或不属于当前话题。`)
     }
+    if (record.dead) {
+      throw new Error(`子代理会话 ${id} 已随话题删除。`)
+    }
     record.inbox.push(message)
     if (record.status === 'idle') {
       const next = record.inbox.shift()!
@@ -131,10 +136,12 @@ export class SubagentSessionRegistry {
       .map((s) => this.row(s))
   }
 
-  /** 话题删除时清理（先中断全部会话） */
+  /** 话题删除时清理（先中断全部会话，并置 dead 阻止在途闭包续跑收件箱） */
   clearTopic(topicId: number): void {
     for (const [id, record] of this.sessions) {
       if (record.topicId !== topicId) continue
+      record.dead = true
+      record.inbox.length = 0
       record.currentAbort?.abort()
       this.sessions.delete(id)
     }
@@ -251,6 +258,19 @@ export class SubagentSessionRegistry {
       record.messages.push(new AIMessage({ content: output }))
       job.settle('completed', output)
     } catch (err) {
+      // 中断（interrupt_agent/job_kill）在流式中途会以 AbortError 抛出——结算为 killed
+      // 而非 failed（修复：此前落入 failed 分支，英文中止错误文案混进历史且状态语义错误）
+      if (abortSignal.aborted) {
+        const partial = fullText.trim()
+        record.messages.push(new HumanMessage(message))
+        if (partial) record.messages.push(new AIMessage({ content: partial }))
+        job.settle(
+          'killed',
+          partial ? `${partial}\n（本轮已被中断）` : '（本轮已被中断）',
+          'interrupted'
+        )
+        return
+      }
       const isRecursion =
         err instanceof GraphRecursionError || (err as Error)?.name === 'GraphRecursionError'
       const messageText = isRecursion
@@ -273,10 +293,14 @@ export class SubagentSessionRegistry {
       record.status = 'idle'
       this.broadcast(record.topicId)
 
-      // 收件箱非空 → 继续下一轮（FIFO）
-      const next = record.inbox.shift()
-      if (next) {
-        void this.run(record, next, rt)
+      // 话题已删除（clearTopic 置位 dead）：不再续跑收件箱（修复：此前僵尸会话闭包
+      // 仍逐条跑完收件箱，并在已删除话题下注册不可管理的幽灵任务）
+      if (!record.dead) {
+        // 收件箱非空 → 继续下一轮（FIFO）
+        const next = record.inbox.shift()
+        if (next) {
+          void this.run(record, next, rt)
+        }
       }
     }
   }

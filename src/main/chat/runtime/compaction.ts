@@ -117,19 +117,35 @@ export function buildTranscript(dialogues: TranscriptDialogue[]): string {
 /** 摘要回调契约：transcript 为早期对话转录，priorSummary 为既有摘要（增量合并时传入） */
 export type SummarizerFn = (transcript: string, priorSummary?: string) => Promise<string>
 
-/** 用 LLM 生成 checkpoint 摘要（一次调用，只取文本输出；失败抛错由调用方兜底） */
+/** 构造标准 AbortError（调用方按 name 识别为「用户取消」，静默放弃而非报错） */
+function compactionAbortError(): Error {
+  const err = new Error('Compaction aborted')
+  err.name = 'AbortError'
+  return err
+}
+
+/**
+ * 用 LLM 生成 checkpoint 摘要（一次调用，只取文本输出；失败抛错由调用方兜底）。
+ * signal 贯通后：已中止时立即抛 AbortError（不发起请求）；请求途中中止由底层
+ * model.invoke 以 AbortError 拒绝，真正中断摘要调用（不再白烧 token）。
+ */
 export async function summarizeDialogues(
   model: BaseChatModel,
   transcript: string,
-  priorSummary?: string
+  priorSummary?: string,
+  signal?: AbortSignal
 ): Promise<string> {
+  if (signal?.aborted) throw compactionAbortError()
   const mergeBlock = priorSummary
     ? `以下为既有 checkpoint（需要保留的旧摘要）：\n<compacted-summary>\n${priorSummary}\n</compacted-summary>\n\n以下为摘要之后新增的早期对话，请合并进上述 checkpoint：\n\n${transcript}`
     : `以下是需要压缩的对话内容：\n\n${transcript}`
-  const response = await model.invoke([
-    new SystemMessage('你是对话压缩引擎，只输出 checkpoint 文本，不调用任何工具。'),
-    new HumanMessage(`${mergeBlock}\n\n${COMPACTION_INSTRUCTION}`)
-  ])
+  const response = await model.invoke(
+    [
+      new SystemMessage('你是对话压缩引擎，只输出 checkpoint 文本，不调用任何工具。'),
+      new HumanMessage(`${mergeBlock}\n\n${COMPACTION_INSTRUCTION}`)
+    ],
+    { signal }
+  )
   const text =
     typeof response.content === 'string'
       ? response.content

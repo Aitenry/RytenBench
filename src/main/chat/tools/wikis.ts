@@ -184,7 +184,11 @@ async function createDirectoryHandler(params: {
   if (params.parentId) {
     const dirs = await getDirectoriesByWikiId(params.wikiId)
     const parent = dirs.find((d) => d.id === params.parentId)
-    if (parent) level = parent.level + 1
+    if (!parent) {
+      // 修复：父目录不存在/不属于本知识库时,parent_id 仍原值写入会造出跨库/悬空父节点
+      return `父目录不存在或不属于知识库 [${params.wikiId}]，创建已取消。`
+    }
+    level = parent.level + 1
   }
 
   const id = await addDirectory({

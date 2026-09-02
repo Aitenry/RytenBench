@@ -208,8 +208,9 @@ export function buildFsTools(options: FsBackendOptions): StructuredToolInterface
         const resolved = resolve(file_path)
         if ('error' in resolved) return resolved.error
         try {
-          fs.mkdirSync(path.dirname(resolved.realPath), { recursive: true })
-          fs.writeFileSync(resolved.realPath, content, 'utf-8')
+          // 异步写（修复：同步写阻塞主进程事件循环）
+          await fs.promises.mkdir(path.dirname(resolved.realPath), { recursive: true })
+          await fs.promises.writeFile(resolved.realPath, content, 'utf-8')
           return `已写入 ${file_path}（${Buffer.byteLength(content, 'utf-8')} 字节）`
         } catch (err) {
           return `写入文件失败: ${(err as Error).message}`
@@ -227,6 +228,11 @@ export function buildFsTools(options: FsBackendOptions): StructuredToolInterface
 
     tool(
       async ({ file_path, old_string, new_string, replace_all }) => {
+        // 空 old_string 会使下方的非重叠计数循环永不终止（indexOf('', idx) 恒等于 idx，
+        // idx = found + 0 永不前进）——同步死循环直接卡死主进程事件循环，入口必须显式拒绝
+        if (!old_string) {
+          return 'old_string 不能为空：请提供文件中真实存在的原文片段作为查找目标。'
+        }
         const resolved = resolve(file_path)
         if ('error' in resolved) return resolved.error
         try {
@@ -261,7 +267,10 @@ export function buildFsTools(options: FsBackendOptions): StructuredToolInterface
           '编辑虚拟文件系统中的文件：将 old_string 替换为 new_string。要求 old_string 唯一匹配；多匹配时需提供更长上下文或设置 replace_all。',
         schema: z.object({
           file_path: z.string().describe('要编辑的文件的虚拟路径'),
-          old_string: z.string().describe('要查找并替换的原文（必须与文件内容完全一致）'),
+          old_string: z
+            .string()
+            .min(1, 'old_string 不能为空')
+            .describe('要查找并替换的原文（必须与文件内容完全一致）'),
           new_string: z.string().describe('替换后的新内容'),
           replace_all: z
             .boolean()
@@ -381,9 +390,9 @@ export function buildFsTools(options: FsBackendOptions): StructuredToolInterface
   if (options.workspacePath) {
     tools.push(
       tool(
-        async ({ command }) => {
+        async ({ command }, config) => {
           return await new Promise<string>((resolvePromise) => {
-            exec(
+            const child = exec(
               command,
               {
                 cwd: options.workspacePath,
@@ -411,6 +420,23 @@ export function buildFsTools(options: FsBackendOptions): StructuredToolInterface
                 resolvePromise(JSON.stringify({ exitCode, stdout: text }))
               }
             )
+            // 取消贯通（修复：此前 execute 不响应「停止」，命令最多再跑 30s 且副作用不随取消中止）
+            const signal = config?.signal
+            const onAbort = (): void => {
+              try {
+                child.kill()
+              } catch {
+                // 进程已退出
+              }
+            }
+            if (signal) {
+              if (signal.aborted) onAbort()
+              else signal.addEventListener('abort', onAbort, { once: true })
+            }
+            // 子进程关闭后移除监听，避免 listener 泄漏
+            child.on('close', () => {
+              if (signal) signal.removeEventListener('abort', onAbort)
+            })
           })
         },
         {

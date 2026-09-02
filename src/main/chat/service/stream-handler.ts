@@ -11,11 +11,12 @@ export interface StreamDeps {
   /** 创建运行时（LangChain/LangGraph） */
   createRuntime(): Runtime
 
-  /** 加载历史上下文（含本轮摘要压缩信息与压缩开始回调） */
+  /** 加载历史上下文（含本轮摘要压缩信息与压缩开始回调；signal 贯通到摘要压缩调用） */
   loadContextMessages(
     topicId: number,
     onCompactionStart?: () => void,
-    contextBudget?: number
+    contextBudget?: number,
+    signal?: AbortSignal
   ): Promise<{ messages: BaseMessage[]; compaction?: HistoryCompaction }>
 
   /** 将上传文件复制到 agent 工作区，返回虚拟路径引用 */
@@ -36,7 +37,11 @@ export async function* runStream(
   message: string,
   options?: ChatOptions
 ): AsyncGenerator<StructuredMessage> {
-  logger.info(`options: ${JSON.stringify(options)}`)
+  // 修复：此前 JSON.stringify(options) 会把图片 base64 整张写进日志（数 MB/条，含用户截图内容）
+  // 且 signal 不可序列化——改为只记录关键字段
+  logger.info(
+    `[Chat] Stream options: topicId=${options?.topicId ?? 'none'}, images=${options?.images?.length ?? 0}, documents=${options?.documents?.length ?? 0}`
+  )
   const signal = options?.signal
 
   try {
@@ -54,7 +59,8 @@ export async function* runStream(
       ? await deps.loadContextMessages(
           options.topicId,
           options?.onCompactionStart,
-          options?.contextBudget
+          options?.contextBudget,
+          signal
         )
       : undefined
     const contextMessages = context?.messages ?? []
@@ -138,15 +144,21 @@ export async function* runStream(
     // 等待所有生产者完成（捕获潜在错误）
     await Promise.allSettled([msgProducer, toolProducer, subAgentProducer])
 
-    // 完全无输出：图执行失败被静默吞掉时向前端透传错误，避免"没有任何内容"
-    if (emittedCount === 0 && !signal?.aborted) {
-      if (run.error) {
+    // 图执行失败透传（修复：此前只有「零输出」才透传，模型已流出部分内容后失败会被
+    // 静默吞掉，截断的不完整回复被当作完整消息落库）：
+    // - 零输出：直接下发失败文本；
+    // - 已有输出：下发 streamError 标记，由 IPC 层转发错误事件并跳过落库
+    if (run.error && !signal?.aborted) {
+      if (emittedCount === 0) {
         logger.error('[Chat] 运行时执行失败，无任何输出:', run.error)
         yield { content: `Failed to get response: ${run.error.message}` }
       } else {
-        logger.warn('[Chat] 运行时未产生任何输出（无错误信息）')
-        yield { content: 'Failed to get response: 模型未返回任何内容，请查看日志或重试。' }
+        logger.error('[Chat] 运行时部分输出后失败:', run.error)
+        yield { streamError: { message: run.error.message } }
       }
+    } else if (emittedCount === 0 && !signal?.aborted) {
+      logger.warn('[Chat] 运行时未产生任何输出（无错误信息）')
+      yield { content: 'Failed to get response: 模型未返回任何内容，请查看日志或重试。' }
     }
   } catch (error) {
     logger.error('Error in sendMessageStream:', error)

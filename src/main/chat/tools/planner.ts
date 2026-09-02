@@ -125,6 +125,10 @@ async function createTaskHandler(params: {
     return '开始日期不能为空（格式 YYYY-MM-DDTHH:mm:ss，如 2026-07-20T09:00:00）。'
   if (!params.end_date)
     return '结束日期不能为空（格式 YYYY-MM-DDTHH:mm:ss，如 2026-07-27T18:00:00）。'
+  // 时间倒挂校验（修复：此前允许结束早于开始,甘特图出现倒挂任务）
+  if (new Date(params.start_date).getTime() > new Date(params.end_date).getTime()) {
+    return '结束日期不能早于开始日期。'
+  }
 
   // ── 父级时间范围约束（与前端 TaskModal 一致）──
   if (params.parent_id) {
@@ -191,21 +195,16 @@ async function updateTaskHandler(params: {
 }): Promise<string> {
   const { updateTask, getTaskById } = await import('../../database/mapper/planner')
 
-  // ── 必填校验 ──
+  // ── 部分更新语义（修复：此前 schema 全 optional 却强制全字段必填,模型只传 id+改项
+  // 即被判「进度不能为空」,需多轮往返）──
   if (params.id === undefined || params.id === null) return '任务 ID 不能为空。'
-  if (!params.title?.trim()) return '标题不能为空。'
-  if (params.progress === undefined || params.progress === null) return '进度不能为空（可设为 0）。'
-  if (params.progress < 0 || params.progress > 100) return '进度范围 0-100。'
-  if (params.work_hours === undefined || params.work_hours === null) return '工时不能为空。'
-  if (params.work_hours < 0) return '工时不能为负数。'
-  if (params.priority === undefined || params.priority === null) return '优先级不能为空。'
-  if (params.priority < 0 || params.priority > 7) {
+  if (params.title !== undefined && !params.title.trim()) return '标题不能为空。'
+  if (params.progress !== undefined && (params.progress < 0 || params.progress > 100))
+    return '进度范围 0-100。'
+  if (params.work_hours !== undefined && params.work_hours < 0) return '工时不能为负数。'
+  if (params.priority !== undefined && (params.priority < 0 || params.priority > 7)) {
     return `无效优先级 P${params.priority}，有效范围：P0–P7。`
   }
-  if (!params.start_date)
-    return '开始日期不能为空（格式 YYYY-MM-DDTHH:mm:ss，如 2026-07-20T09:00:00）。'
-  if (!params.end_date)
-    return '结束日期不能为空（格式 YYYY-MM-DDTHH:mm:ss，如 2026-07-27T18:00:00）。'
 
   const existing = await getTaskById(params.id)
   if (!existing) return `未找到 ID 为 ${params.id} 的任务。`
@@ -216,34 +215,41 @@ async function updateTaskHandler(params: {
     params.progress !== undefined &&
     params.progress !== existing.progress
   ) {
-    return `「${TYPE_LABELS[existing.type]}」类型的进度由子节点聚合计算，不能手动修改。如需更新其他字段，请保持 progress=${existing.progress}。`
+    return `「${TYPE_LABELS[existing.type]}」类型的进度由子节点聚合计算，不能手动修改。如需更新其他字段，请保持 progress 不变（当前 ${existing.progress}）。`
   }
 
-  // ── 父级时间范围约束（与前端 TaskModal 一致）──
-  if (existing.parent_id) {
-    const parent = await getTaskById(existing.parent_id)
-    if (parent && parent.start_date && parent.end_date) {
-      const pStart = new Date(parent.start_date).getTime()
-      const pEnd = new Date(parent.end_date).getTime()
-      const tStart = new Date(params.start_date!).getTime()
-      const tEnd = new Date(params.end_date!).getTime()
-      if (tStart < pStart) {
-        return `开始日期不能早于父级「${parent.title}」的开始日期（${parent.start_date}）`
-      }
-      if (tEnd > pEnd) {
-        return `结束日期不能晚于父级「${parent.title}」的结束日期（${parent.end_date}）`
+  const effStart = params.start_date ?? existing.start_date
+  const effEnd = params.end_date ?? existing.end_date
+
+  // ── 时间倒挂 + 父级时间范围约束（修复：此前不校验自身 start<=end）──
+  if (effStart && effEnd) {
+    if (new Date(effStart).getTime() > new Date(effEnd).getTime()) {
+      return '结束日期不能早于开始日期。'
+    }
+    if (existing.parent_id) {
+      const parent = await getTaskById(existing.parent_id)
+      if (parent && parent.start_date && parent.end_date) {
+        const pStart = new Date(parent.start_date).getTime()
+        const pEnd = new Date(parent.end_date).getTime()
+        if (new Date(effStart).getTime() < pStart) {
+          return `开始日期不能早于父级「${parent.title}」的开始日期（${parent.start_date}）`
+        }
+        if (new Date(effEnd).getTime() > pEnd) {
+          return `结束日期不能晚于父级「${parent.title}」的结束日期（${parent.end_date}）`
+        }
       }
     }
   }
 
-  const updates: Record<string, unknown> = {
-    title: params.title,
-    progress: Math.max(0, Math.min(100, params.progress)),
-    work_hours: params.work_hours,
-    priority: params.priority,
-    start_date: params.start_date,
-    end_date: params.end_date
-  }
+  const updates: Record<string, unknown> = {}
+  if (params.title !== undefined) updates.title = params.title
+  if (params.progress !== undefined) updates.progress = Math.max(0, Math.min(100, params.progress))
+  if (params.work_hours !== undefined) updates.work_hours = params.work_hours
+  if (params.priority !== undefined) updates.priority = params.priority
+  if (params.start_date !== undefined) updates.start_date = params.start_date
+  if (params.end_date !== undefined) updates.end_date = params.end_date
+
+  if (Object.keys(updates).length === 0) return '没有需要更新的字段。'
 
   await updateTask(params.id, updates as Parameters<typeof updateTask>[1])
   const parts = Object.entries(updates).map(([k, v]) => `${k}=${v}`)

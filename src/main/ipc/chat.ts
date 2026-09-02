@@ -55,7 +55,53 @@ async function runChatTurn(
   const mainAgentDefaults = settingsStore.get('mainAgent') as
     { tools?: string[]; skills?: string[] } | undefined
   const tools = buildTools(mainAgentDefaults?.tools ?? [])
+  const chatSettings = settingsStore.get('chat') as ChatSettings | undefined
   logger.info(`[Chat] Creating model with providerId: ${options?.providerId ?? 'default'}`)
+
+  // 1. 确保话题存在
+  let topicId = options?.topicId
+  if (!topicId) {
+    const title = question.slice(0, 50)
+    const workspaceId = chatSettings?.activeWorkspaceId ?? 0
+    try {
+      topicId = await createTopic(
+        workspaceId,
+        title,
+        undefined,
+        mainAgentDefaults?.tools?.length ? JSON.stringify(mainAgentDefaults.tools) : undefined
+      )
+    } catch (err) {
+      logger.error('Failed to create topic:', err)
+      topicId = 0
+    }
+  }
+
+  // 2. 保存用户消息（含图片、文档与目标自动续跑标记）。
+  // 提前到模型创建之前（修复：模型创建失败时直接 return,用户消息不落库,重载后丢失）
+  try {
+    const userBlocks: { type: string; image_url?: string; fileName?: string; round?: number }[] = []
+    if (options?.images?.length) {
+      for (const img of options.images) {
+        userBlocks.push({ type: 'image', image_url: img })
+      }
+    }
+    if (options?.documents?.length) {
+      for (const doc of options.documents) {
+        userBlocks.push({ type: 'document', fileName: doc.fileName })
+      }
+    }
+    if (options?.turnMeta?.source === 'goal-round') {
+      userBlocks.push({ type: 'goalRound', round: options.turnMeta.goalRound })
+    }
+    await addDialogue({
+      topic_id: topicId,
+      role: 'user',
+      content: question,
+      blocks: JSON.stringify(userBlocks)
+    })
+  } catch (err) {
+    logger.error('Failed to save user message:', err)
+  }
 
   // 模型创建可能因供应商不存在、被禁用、模型名称为空等原因失败，需要捕获并通知前端
   let model: BaseChatModel
@@ -64,12 +110,10 @@ async function runChatTurn(
   } catch (modelErr) {
     const errMsg = modelErr instanceof Error ? modelErr.message : String(modelErr)
     logger.error('[Chat] Model creation failed:', errMsg)
-    safeSend(event.sender, 'chat-stream-error', { error: errMsg, topicId: options?.topicId })
-    safeSend(event.sender, 'chat-stream-done', { topicId: options?.topicId ?? 0 })
-    return { topicId: options?.topicId ?? 0, cancelled: false }
+    safeSend(event.sender, 'chat-stream-error', { error: errMsg, topicId })
+    safeSend(event.sender, 'chat-stream-done', { topicId })
+    return { topicId, cancelled: false }
   }
-
-  const chatSettings = settingsStore.get('chat') as ChatSettings | undefined
 
   // 按模型上下文窗口换算历史上下文字符预算（默认 20,000 token；1 token ≈ 1 字符的保守换算）
   let contextBudget: number | undefined
@@ -104,50 +148,6 @@ async function runChatTurn(
   }
   event.sender.on('render-process-gone', onSenderGone)
   event.sender.once('destroyed', onSenderGone)
-
-  // 1. 确保话题存在
-  let topicId = options?.topicId
-  if (!topicId) {
-    const title = question.slice(0, 50)
-    const workspaceId = chatSettings?.activeWorkspaceId ?? 0
-    try {
-      topicId = await createTopic(
-        workspaceId,
-        title,
-        undefined,
-        mainAgentDefaults?.tools?.length ? JSON.stringify(mainAgentDefaults.tools) : undefined
-      )
-    } catch (err) {
-      logger.error('Failed to create topic:', err)
-      topicId = 0
-    }
-  }
-
-  // 2. 保存用户消息（含图片、文档与目标自动续跑标记）
-  try {
-    const userBlocks: { type: string; image_url?: string; fileName?: string; round?: number }[] = []
-    if (options?.images?.length) {
-      for (const img of options.images) {
-        userBlocks.push({ type: 'image', image_url: img })
-      }
-    }
-    if (options?.documents?.length) {
-      for (const doc of options.documents) {
-        userBlocks.push({ type: 'document', fileName: doc.fileName })
-      }
-    }
-    if (options?.turnMeta?.source === 'goal-round') {
-      userBlocks.push({ type: 'goalRound', round: options.turnMeta.goalRound })
-    }
-    await addDialogue({
-      topic_id: topicId,
-      role: 'user',
-      content: question,
-      blocks: JSON.stringify(userBlocks)
-    })
-  } catch (err) {
-    logger.error('Failed to save user message:', err)
-  }
 
   // 2.5. 历史对话上下文由 ChatService 内部从数据库加载（超长自动压缩）
 
@@ -207,6 +207,8 @@ async function runChatTurn(
   }[] = []
   let fullContent = ''
   let lastReasoning = ''
+  /** 流式执行失败（部分输出后图执行失败）：跳过把残缺回复落库 */
+  let streamFailed = false
 
   try {
     for await (const chunk of stream) {
@@ -219,6 +221,12 @@ async function runChatTurn(
       if (abortController.signal.aborted) {
         logger.info('[Chat] Stream cancelled by user')
         break
+      }
+      // 部分输出后流失败：转发错误事件给前端，并标记跳过落库
+      if (chunk.streamError) {
+        streamFailed = true
+        logger.error('[Chat] 流式执行失败（已有部分输出）:', chunk.streamError.message)
+        safeSend(event.sender, 'chat-stream-error', { error: chunk.streamError.message, topicId })
       }
       // 本轮热记忆注入：置于消息块最顶部（首个 chunk 到达，仅累积一次，随 blocks 持久化）
       if (chunk.memoryInjected) {
@@ -242,7 +250,10 @@ async function runChatTurn(
       }
       if (chunk.reasoning_content) {
         const rc = String(chunk.reasoning_content)
-        // 兼容 provider 可能下发完整文本而非增量：若新内容是已有内容的前缀/后缀，则替换/忽略
+        // 兼容 provider 可能下发完整文本而非增量：新内容是已有内容的前缀时仅取新增后缀。
+        // 不再做 endsWith 去重（修复）：主进程增量已按形态去重，此处收到的是真实增量，
+        // 「增量恰好等于已累积尾部」往往是模型真实重复输出，误判会丢真实内容，
+        // 且落库结果与渲染端显示不一致。
         if (lastReasoning && rc.startsWith(lastReasoning) && rc.length > lastReasoning.length) {
           const delta = rc.slice(lastReasoning.length)
           const lastBlock = accumulatedBlocks[accumulatedBlocks.length - 1]
@@ -252,10 +263,8 @@ async function runChatTurn(
             accumulatedBlocks.push({ type: 'reasoning', reasoning: delta })
           }
           lastReasoning = rc
-        } else if (lastReasoning && lastReasoning.endsWith(rc)) {
-          // 重复内容，忽略
         } else {
-          lastReasoning = rc
+          lastReasoning += rc
           const lastBlock = accumulatedBlocks[accumulatedBlocks.length - 1]
           if (lastBlock && lastBlock.type === 'reasoning') {
             lastBlock.reasoning = (lastBlock.reasoning || '') + rc
@@ -266,7 +275,8 @@ async function runChatTurn(
       }
       if (chunk.content) {
         const c = String(chunk.content)
-        // 兼容 provider 可能下发完整文本而非增量：若新内容是已有内容的前缀/后缀，则替换/忽略
+        // 同 reasoning 分支：只做 startsWith 后缀切片（完整形态防御），不做 endsWith 去重；
+        // 累积形态下新建文本块时同样只存增量，避免与渲染端（存后缀）出现双重计数
         if (fullContent && c.startsWith(fullContent) && c.length > fullContent.length) {
           const delta = c.slice(fullContent.length)
           fullContent = c
@@ -274,10 +284,8 @@ async function runChatTurn(
           if (lastBlock && lastBlock.type === 'text') {
             lastBlock.text = (lastBlock.text || '') + delta
           } else {
-            accumulatedBlocks.push({ type: 'text', text: c })
+            accumulatedBlocks.push({ type: 'text', text: delta })
           }
-        } else if (fullContent && fullContent.endsWith(c)) {
-          // 重复内容，忽略
         } else {
           fullContent += c
           const lastBlock = accumulatedBlocks[accumulatedBlocks.length - 1]
@@ -505,11 +513,11 @@ async function runChatTurn(
           }
         }
       }
-      // 发送失败（渲染帧已失效）时中止流，避免持续向死帧发送
-      try {
-        event.sender.send('chat-stream-chunk', { ...chunk, __topicId: topicId })
-      } catch (sendErr) {
-        logger.warn('[Chat] Failed to send stream chunk (renderer disposed):', sendErr)
+      // 发送失败（渲染帧已失效）时中止流，避免持续向死帧发送。
+      // 统一走 safeSend（修复：裸 send 在帧失效窗口期不抛异常、try/catch 是死代码，
+      // 且违反项目「主进程推送统一走 safeSend」约定）
+      if (!safeSend(event.sender, 'chat-stream-chunk', { ...chunk, __topicId: topicId })) {
+        logger.warn('[Chat] Failed to send stream chunk (renderer disposed)')
         senderDead = true
         abortController.abort()
         break
@@ -531,16 +539,18 @@ async function runChatTurn(
     event.sender.removeListener('destroyed', onSenderGone)
   }
 
-  // 4. 保存完整的 AI 回复
-  try {
-    await addDialogue({
-      topic_id: topicId,
-      role: 'assistant',
-      content: fullContent,
-      blocks: JSON.stringify(accumulatedBlocks)
-    })
-  } catch (err) {
-    logger.error('Failed to save AI message:', err)
+  // 4. 保存完整的 AI 回复（流执行失败时跳过：截断的不完整回复不应落库为完整消息）
+  if (!streamFailed) {
+    try {
+      await addDialogue({
+        topic_id: topicId,
+        role: 'assistant',
+        content: fullContent,
+        blocks: JSON.stringify(accumulatedBlocks)
+      })
+    } catch (err) {
+      logger.error('Failed to save AI message:', err)
+    }
   }
 
   // 5. 清理并通知渲染进程流式输出已完成
@@ -603,15 +613,33 @@ export function registerChatIpc(): void {
     ) => {
       // 跟踪进行中的流：应用退出时统一中止并等待数据保存完成。
       // 用户轮次完成后触发目标轮次驱动器（自动续跑轮由驱动器内部递归调度）
-      const streamPromise = runChatTurn({ event, question, options })
-        .then(({ topicId }) => {
+      // 每个轮次（含目标驱动器派发的自动轮）都登记进 activeChatStreams，
+      // 退出时 lifecycle 才能拦截并等待落库（修复：此前只跟踪首轮，自动轮运行中退出会丢回复）
+      const trackTurn = (
+        p: Promise<{ topicId: number; cancelled: boolean }>
+      ): Promise<{ topicId: number; cancelled: boolean }> => {
+        activeChatStreams.add(p)
+        p.finally(() => activeChatStreams.delete(p))
+        return p
+      }
+      const streamPromise = trackTurn(runChatTurn({ event, question, options }))
+        .then(({ topicId, cancelled }) => {
           if (options?.turnMeta?.source !== 'goal-round') {
+            if (cancelled) {
+              // 用户停止本轮：disarm 目标并跳过自动续跑调度（修复：此前 cancelled 被丢弃，
+              // 停止后立即白烧一轮自动轮；目标保持 active，用户要求「继续」时经 resume 重新武装）
+              logger.info('[Chat] 本轮被用户取消，目标 disarm，跳过自动续跑调度')
+              goalStore.disarm(topicId)
+              return
+            }
             void goalRoundDriver.maybeDrive(topicId, (p) =>
-              runChatTurn({
-                event,
-                question: p.question,
-                options: { ...options, topicId: p.topicId, turnMeta: p.turnMeta }
-              })
+              trackTurn(
+                runChatTurn({
+                  event,
+                  question: p.question,
+                  options: { ...options, topicId: p.topicId, turnMeta: p.turnMeta }
+                })
+              )
             )
           }
         })

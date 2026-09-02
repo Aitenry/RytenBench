@@ -142,6 +142,12 @@ function validateSubset(schema: Record<string, unknown>, value: unknown, path = 
 const MAX_CONCURRENT_AGENTS = 4
 /** 总代理数上限 */
 const DEFAULT_MAX_TOTAL_AGENTS = 50
+/**
+ * 工作流脚本墙钟硬上限：vm 的 timeout 只约束同步执行段，脚本若返回永不 settle 的
+ * Promise（如 `await new Promise(() => {})`）会让工具调用永久挂起——宿主侧加一道竞速
+ * 保证工具能返回；正常编排（即使 50 个子代理串行）也远达不到 30 分钟。
+ */
+const WORKFLOW_HARD_TIMEOUT_MS = 30 * 60 * 1000
 
 /** 运行一次工作流脚本 */
 export async function runWorkflow(
@@ -180,12 +186,23 @@ export async function runWorkflow(
 
   let agentsStarted = 0
   let cancelled = false
+  let rejectGuard: ((reason: Error) => void) | null = null
+  // 工作流级取消控制器：外部取消/脚本失败/超时都会中止在飞的子代理
+  //（修复：此前脚本出错后已启动的子代理继续跑完，白烧 token 且输出无人消费）
+  const workflowAbort = new AbortController()
   const onSignalAbort = (): void => {
     cancelled = true
+    workflowAbort.abort()
+    // 唤醒墙钟竞速（见下方 hardGuard）：用户停止后工具调用立即返回，不等脚本自行结束
+    rejectGuard?.(new Error('CANCELLED'))
   }
   if (signal) {
-    if (signal.aborted) cancelled = true
-    else signal.addEventListener('abort', onSignalAbort, { once: true })
+    if (signal.aborted) {
+      cancelled = true
+      workflowAbort.abort()
+    } else {
+      signal.addEventListener('abort', onSignalAbort, { once: true })
+    }
   }
 
   // 并发信号量
@@ -249,7 +266,7 @@ export async function runWorkflow(
       const messages = await invokeGraph(
         graph,
         { messages: [new HumanMessage(prompt)] },
-        { recursionLimit: ctx.recursionLimit, signal }
+        { recursionLimit: ctx.recursionLimit, signal: workflowAbort.signal }
       )
       const last = messages[messages.length - 1]
       const text =
@@ -281,6 +298,7 @@ export async function runWorkflow(
     }
   }
 
+  // 宿主侧钩子实现（不直接注入沙箱，经下方 vm realm 包装函数暴露）
   const hooks = {
     agent: agentHook,
     pipeline: async (
@@ -320,19 +338,61 @@ export async function runWorkflow(
     },
     log: (message: string): void => {
       logger.info(`[Workflow] ${message}`)
-    },
-    args
+    }
   }
 
-  const sandbox = { ...hooks, console: undefined }
-  const code = `(async () => {\n${script}\n})()`
-  const context = vm.createContext(sandbox)
+  // 沙箱硬化（修复：宿主 realm 函数直入沙箱时，脚本内 `agent.constructor("return process")()`
+  // 可借宿主 Function 构造器在主进程执行任意代码；实测 Node 22 下 vm 上下文全局代理的
+  // 构造链（this/globalThis.constructor.constructor）同样可逃逸，注入宿主对象亦会泄漏）：
+  // 1. 上下文目标用 null 原型对象，切断 globalThis/this 的原型链；
+  // 2. codeGeneration 禁用字符串编译，沙箱内 eval/Function 全部失效；
+  // 3. 钩子以 vm realm 内创建的包装函数暴露（闭包持有宿主实现）——沙箱代码经
+  //    constructor 链只能拿到沙箱自己的 Function，且其字符串编译被禁用；
+  // 4. 跨边界数据 JSON 深拷贝：args 在 vm 内解析、宿主返回值在 vm 内重建，宿主对象不回流入沙箱。
+  const context = vm.createContext(Object.create(null), {
+    codeGeneration: { strings: false, wasm: false }
+  })
+  const makeBridge = vm.runInContext(
+    '(fn) => (...a) => Promise.resolve(fn(...a)).then((v) => (v == null ? null : JSON.parse(JSON.stringify(v))))',
+    context,
+    { timeout: 5000 }
+  ) as (fn: (...a: never[]) => unknown) => (...a: never[]) => Promise<unknown>
+  context.agent = makeBridge(hooks.agent)
+  context.pipeline = makeBridge(hooks.pipeline)
+  context.parallel = makeBridge(hooks.parallel)
+  context.phase = makeBridge(hooks.phase)
+  context.log = makeBridge(hooks.log)
+  context.args = vm.runInContext('(j) => JSON.parse(j)', context, { timeout: 5000 })(
+    JSON.stringify(args ?? null)
+  )
+  context.console = undefined
 
+  const code = `(async () => {\n${script}\n})()`
+  let hardTimer: NodeJS.Timeout | null = null
+  let vmExecution: Promise<unknown> | null = null
   try {
-    const value = await vm.runInContext(code, context, { timeout: 5000 })
+    vmExecution = vm.runInContext(code, context, { timeout: 5000 }) as Promise<unknown>
+    const hardGuard = new Promise<never>((_, reject) => {
+      rejectGuard = reject
+      hardTimer = setTimeout(() => {
+        // 置 cancelled 拦截仍在后台运行的脚本的后续钩子调用（不再启动新子代理），
+        // 并中止已启动的在飞子代理
+        cancelled = true
+        workflowAbort.abort()
+        reject(new Error('WORKFLOW_TIMEOUT: 脚本执行超过 30 分钟，已强制停止'))
+      }, WORKFLOW_HARD_TIMEOUT_MS)
+    })
+    const value = await Promise.race([vmExecution, hardGuard])
+    if (hardTimer) clearTimeout(hardTimer)
     signal?.removeEventListener('abort', onSignalAbort)
     return { stopReason: 'completed', value, agentsStarted }
   } catch (err) {
+    if (hardTimer) clearTimeout(hardTimer)
+    // 脚本失败/取消/超时：中止仍在飞行的子代理（其输出已无人消费）
+    workflowAbort.abort()
+    // 竞速已结束（超时/取消先到），吞掉脚本晚到的拒绝，避免 unhandled rejection；
+    // 仍在后台运行的脚本后续钩子调用会被 cancelled 拦截（不再启动新子代理）
+    vmExecution?.catch(() => undefined)
     signal?.removeEventListener('abort', onSignalAbort)
     const message = err instanceof Error ? err.message : String(err)
     if (cancelled || message.includes('CANCELLED')) {

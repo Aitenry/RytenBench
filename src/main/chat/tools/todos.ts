@@ -13,8 +13,11 @@ async function listTodosHandler(params: {
   page?: number
   pageSize?: number
 }): Promise<string> {
-  const { getAllTodoItems, getTodoItemsPaginated } = await import('../../database/mapper/todo')
+  const { getAllTodoItems, getTodoItemsPaginated, getTodoItemsByStatus, getTodoItemsByPriority } =
+    await import('../../database/mapper/todo')
   const { page = 1, pageSize = 20, status, priority } = params
+  const safePage = Math.max(1, Math.floor(page))
+  const safePageSize = Math.max(1, Math.floor(pageSize))
   let items: Array<{
     id: number
     title: string
@@ -23,14 +26,21 @@ async function listTodosHandler(params: {
     due_date: string | null
     category: string | null
   }>
-  if (status !== undefined || priority !== undefined || page > 1) {
-    const result = await getTodoItemsPaginated(getActiveWorkspaceId(), page, pageSize)
+  if (status !== undefined) {
+    // 修复：此前「先分页后客户端过滤」只扫第一页,命中项在后续页即漏报；
+    // 且分页 SQL 恒排除已完成(status!=2),查「已完成」永远为空。
+    // 改为按状态全量查询后在内存分页（口径与不带过滤的 list 一致,含已完成）
+    const rows = await getTodoItemsByStatus(getActiveWorkspaceId(), status)
+    items = rows.slice((safePage - 1) * safePageSize, safePage * safePageSize)
+  } else if (priority !== undefined) {
+    const rows = await getTodoItemsByPriority(getActiveWorkspaceId(), priority)
+    items = rows.slice((safePage - 1) * safePageSize, safePage * safePageSize)
+  } else if (safePage > 1) {
+    const result = await getTodoItemsPaginated(getActiveWorkspaceId(), safePage, safePageSize)
     items = result.items
   } else {
     items = await getAllTodoItems(getActiveWorkspaceId())
   }
-  if (status !== undefined) items = items.filter((t) => t.status === status)
-  if (priority !== undefined) items = items.filter((t) => t.priority === priority)
   if (!items.length) return '没有找到待办事项。'
   const statusLabels = ['待办', '进行中', '已完成']
   const priorityLabels = ['', 'P0-紧急', 'P1-高', 'P2-中', 'P3-低']

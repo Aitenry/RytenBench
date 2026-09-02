@@ -57,6 +57,10 @@ export class JobsRegistry {
   private readonly jobs = new Map<string, JobRecord>()
   private readonly counters = new Map<string, number>()
 
+  /** 每个话题最多保留的「已上报终态」任务数（修复：此前终态任务永不清理，
+   *  long-running 会话中 job_list 全量序列化与广播输出线性膨胀） */
+  private static readonly MAX_TERMINAL_PER_TOPIC = 50
+
   /** 变更回调（主进程注入，广播 chat-jobs-updated） */
   onChange?: JobsUpdateListener
 
@@ -110,6 +114,7 @@ export class JobsRegistry {
         if (error) record.detail = error
         this.wakeWaiters(record)
         this.broadcast(topicId)
+        this.pruneTerminal(topicId)
         logger.info(`[Jobs] 任务 ${id} 结算为 ${status}`)
       }
     }
@@ -219,6 +224,19 @@ export class JobsRegistry {
       }
       this.jobs.delete(record.id)
     }
+  }
+
+  /** 裁剪已上报的终态任务：每个话题保留最近 MAX_TERMINAL_PER_TOPIC 条 */
+  private pruneTerminal(topicId: number): void {
+    const terminals = [...this.jobs.values()].filter(
+      (j) =>
+        j.topicId === topicId && j.status !== 'running' && j.status !== 'stopping' && j.reported
+    )
+    if (terminals.length <= JobsRegistry.MAX_TERMINAL_PER_TOPIC) return
+    terminals
+      .sort((a, b) => (a.finishedAt ?? 0) - (b.finishedAt ?? 0))
+      .slice(0, terminals.length - JobsRegistry.MAX_TERMINAL_PER_TOPIC)
+      .forEach((j) => this.jobs.delete(j.id))
   }
 
   private snapshot(record: JobRecord): JobSnapshot {

@@ -127,6 +127,8 @@ export interface HistoryConvertOptions {
   saveCheckpoint?: (topicId: number, checkpoint: CompactionCheckpoint) => Promise<void>
   /** 压缩开始回调：确认本轮将产生新的压缩事件时、LLM 摘要调用前立即调用 */
   onCompactionStart?: () => void
+  /** 取消信号：中止/取消时跳过摘要压缩，且不落库 checkpoint（前端「停止」贯通到压缩链路） */
+  signal?: AbortSignal
 }
 
 /** 单条对话的字符成本（正文 + blocks） */
@@ -206,6 +208,25 @@ function splitByBudget(
 }
 
 /**
+ * 感知取消的摘要调用：signal 已中止或请求途中被中止（AbortError）时返回 null，
+ * 由调用方跳过压缩与 checkpoint 落库（用户取消不留压缩副作用，也不误报失败）；
+ * 其余错误照常抛出（走「摘要失败回退字符截断」兜底）。
+ */
+async function summarizeForTurn(
+  options: HistoryConvertOptions,
+  transcript: string,
+  priorSummary?: string
+): Promise<string | null> {
+  if (options.signal?.aborted) return null
+  try {
+    return await options.summarizer!(transcript, priorSummary)
+  } catch (err) {
+    if ((err as Error)?.name === 'AbortError') return null
+    throw err
+  }
+}
+
+/**
  * 摘要压缩编排（checkpoint 持久化于 topic_compactions 表，压缩一次后续复用）：
  *
  * - 无 checkpoint 或边界倒退（对话被删除）：初始全量摘要（按保留预算切分最老段），
@@ -233,7 +254,10 @@ async function compactWithSummarizer(
     const { old, recent } = splitByBudget(dialogues, retainBudget)
     if (old.length === 0) return null
     options.onCompactionStart?.()
-    const summary = await options.summarizer!(buildTranscript(old))
+    // 用户已取消（onCompactionStart 推送后、调用前中止）：跳过压缩与落库，交回常规路径
+    if (options.signal?.aborted) return null
+    const summary = await summarizeForTurn(options, buildTranscript(old))
+    if (summary === null || options.signal?.aborted) return null
     const boundaryId = old[old.length - 1].id
     await saveCheckpointSafe(topicId, { boundaryId, summary }, options)
     const messages: BaseMessage[] = [buildCheckpointMessage(summary)]
@@ -274,7 +298,9 @@ async function compactWithSummarizer(
     return null
   }
   options.onCompactionStart?.()
-  const summary = await options.summarizer!(buildTranscript(old), prior.summary)
+  if (options.signal?.aborted) return null
+  const summary = await summarizeForTurn(options, buildTranscript(old), prior.summary)
+  if (summary === null || options.signal?.aborted) return null
   const boundaryId = old[old.length - 1].id
   await saveCheckpointSafe(topicId, { boundaryId, summary }, options)
   const messages: BaseMessage[] = [buildCheckpointMessage(summary)]

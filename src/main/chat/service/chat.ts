@@ -108,11 +108,17 @@ class ChatService {
     const refs: UploadedFileRef[] = []
     for (const doc of docs) {
       try {
-        const destPath = path.join(uploadsDir, doc.fileName)
+        // 文件名净化：renderer 传入的 fileName 可能含路径分隔符/..，直接拼接会写出 uploads 目录
+        const safeName = path.basename(doc.fileName)
+        if (!safeName) {
+          logger.warn(`[Chat] 忽略非法上传文件名: ${doc.fileName}`)
+          continue
+        }
+        const destPath = path.join(uploadsDir, safeName)
         fs.copyFileSync(doc.filePath, destPath)
         refs.push({
-          fileName: doc.fileName,
-          virtualPath: `/uploads/${doc.fileName}`
+          fileName: safeName,
+          virtualPath: `/uploads/${safeName}`
         })
       } catch (err) {
         logger.warn(`Failed to copy uploaded file ${doc.fileName}:`, err)
@@ -132,12 +138,14 @@ class ChatService {
    * @param topicId 话题 ID
    * @param onCompactionStart 摘要压缩开始时回调（LLM 调用前触发，前端展示「压缩中」）
    * @param contextBudget 历史上下文字符预算（由模型上下文窗口换算，缺省用默认下限）
+   * @param signal 取消信号（贯通到摘要压缩调用：停止后压缩请求真正中断，且不落库 checkpoint）
    * @returns 转换后的 LangChain BaseMessage 数组及本轮发生的摘要压缩信息
    */
   private async loadContextMessages(
     topicId: number,
     onCompactionStart?: () => void,
-    contextBudget?: number
+    contextBudget?: number,
+    signal?: AbortSignal
   ): Promise<{ messages: BaseMessage[]; compaction?: HistoryCompaction }> {
     if (!this.loadHistory) {
       logger.warn('[Chat] loadHistory callback not provided, skipping history')
@@ -166,7 +174,7 @@ class ChatService {
         // 压缩一次后后续轮次直接复用，仅边界推进（又超预算）时增量合并再落库。
         maxChars: contextBudget,
         summarizer: (transcript, priorSummary) =>
-          summarizeDialogues(this.model, transcript, priorSummary),
+          summarizeDialogues(this.model, transcript, priorSummary, signal),
         topicId,
         getCheckpoint: async (tid) => {
           const row = await getCompactionByTopic(tid)
@@ -175,7 +183,10 @@ class ChatService {
         saveCheckpoint: async (tid, cp) => {
           await upsertCompaction({ topic_id: tid, boundary_id: cp.boundaryId, summary: cp.summary })
         },
-        onCompactionStart
+        onCompactionStart,
+        // 取消信号贯通到压缩链路：中止后跳过摘要与 checkpoint 落库（此前漏传，
+        // history.ts 里的取消守卫全是死代码，取消窗口内仍会落库 checkpoint）
+        signal
       })
       logger.info(`[Chat] Loaded ${context.messages.length} history messages for topic ${topicId}`)
       return { messages: context.messages, compaction: context.compaction }
@@ -199,7 +210,12 @@ class ChatService {
       const uploadedRefs = await this.copyUploadedFiles(options?.documents)
       const userMessage = buildHumanMessage(message, options?.images, uploadedRefs)
       const context = options?.topicId
-        ? await this.loadContextMessages(options.topicId, undefined, options?.contextBudget)
+        ? await this.loadContextMessages(
+            options.topicId,
+            undefined,
+            options?.contextBudget,
+            options?.signal
+          )
         : { messages: [] as BaseMessage[] }
       logger.info(
         `[Chat] Passing ${context.messages.length} context messages + 1 user message to runtime (topicId=${options?.topicId})`
@@ -244,8 +260,9 @@ class ChatService {
         loadContextMessages: (
           topicId: number,
           onCompactionStart?: () => void,
-          contextBudget?: number
-        ) => this.loadContextMessages(topicId, onCompactionStart, contextBudget),
+          contextBudget?: number,
+          signal?: AbortSignal
+        ) => this.loadContextMessages(topicId, onCompactionStart, contextBudget, signal),
         copyUploadedFiles: (docs) => this.copyUploadedFiles(docs)
       },
       message,

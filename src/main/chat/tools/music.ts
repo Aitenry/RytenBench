@@ -127,7 +127,7 @@ export function buildManageMusicTool(): StructuredToolInterface {
           .string()
           .optional()
           .describe('[tracks] 歌单名称（模糊匹配），不填则返回第一个歌单'),
-        limit: z.number().optional().default(20).describe('[tracks] 返回曲目数量上限'),
+        limit: z.number().int().min(1).optional().default(20).describe('[tracks] 返回曲目数量上限'),
         trackId: z.number().optional().describe('[play] 曲目 ID')
       })
     }

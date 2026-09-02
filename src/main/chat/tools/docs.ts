@@ -1,7 +1,21 @@
+import { BrowserWindow } from 'electron'
 import { tool } from '@langchain/core/tools'
 import type { StructuredToolInterface } from '@langchain/core/tools'
 import * as z from 'zod/v4'
 import { getActiveWorkspaceId } from '../../database/workspace-context'
+import { safeSend } from '../../safe-send'
+
+/**
+ * 广播文档被工具修改/删除（修复：编辑器对工具写入完全无感知,继续编辑会把工具刚写入的
+ * 内容整体覆盖——广播后编辑器可重载或提示）
+ */
+function broadcastDocChanged(docId: number, action: 'updated' | 'deleted'): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) {
+      safeSend(win.webContents, 'chat-doc-changed', { docId, action })
+    }
+  }
+}
 
 // ============================================================================
 // Document Handlers — 渐进式浏览 + CRUD
@@ -179,6 +193,7 @@ async function updateDocHandler(params: {
   if (Object.keys(updates).length === 0) return '没有需要更新的字段。'
 
   await updateDoc(params.docId, updates)
+  broadcastDocChanged(params.docId, 'updated')
   return `文档 [${params.docId}] "${doc.title}" 更新成功。`
 }
 
@@ -187,6 +202,7 @@ async function deleteDocHandler(params: { docId: number }): Promise<string> {
   const doc = await getDocById(params.docId)
   if (!doc) return `未找到 ID 为 ${params.docId} 的文档。`
   await deleteDoc(params.docId)
+  broadcastDocChanged(params.docId, 'deleted')
   return `文档 [${params.docId}] "${doc.title}" 已彻底删除。`
 }
 
