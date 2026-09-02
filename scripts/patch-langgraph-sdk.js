@@ -50,14 +50,23 @@ const NEW_LINES =
   'const require_index$1 = require("p-queue");'
 
 if (!content.includes(OLD_LINES)) {
-  console.log(
-    '[patch-langgraph-sdk] Target lines not found (maybe already a different version?), skipping.'
+  // 修复：此前失配时静默 exit 0——依赖升级后补丁失效无人感知,打包产物里硬编码的
+  // pnpm 虚拟路径在运行期 MODULE_NOT_FOUND。改为显式失败并给出排查指引。
+  console.error(
+    '[patch-langgraph-sdk] Target lines not found — @langchain/langgraph-sdk was upgraded and ' +
+      'this patch no longer applies. Please update OLD_LINES/NEW_LINES in scripts/patch-langgraph-sdk.js ' +
+      '(or pin the dependency version) and reinstall.'
   )
-  process.exit(0)
+  process.exit(1)
 }
 
 content = content.replace(OLD_LINES, NEW_LINES)
-fs.writeFileSync(TARGET, content, 'utf8')
+// 修复：pnpm 的 node_modules 是 store 硬链接,writeFileSync 直写会连坐改写共享 store 内
+// 的文件（同 store 其他项目被污染）。经「临时文件 + rename」替换,只在本项目目录内
+// 断链生成新文件,store 内容保持不变。
+const tmpFile = `${TARGET}.patch-tmp`
+fs.writeFileSync(tmpFile, content, 'utf8')
+fs.renameSync(tmpFile, TARGET)
 
 // Clean up old wrapper files from previous approach
 const oldDirs = [path.join(path.dirname(path.dirname(TARGET)), 'node_modules')]
