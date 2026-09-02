@@ -207,6 +207,19 @@ const api = {
         streamErrorHandlers.delete(callback)
       }
     },
+    // 文档被聊天工具修改/删除（编辑器据此同步或提示,防覆盖工具写入）
+    onDocChanged: (callback: (data: { docId: number; action: 'updated' | 'deleted' }) => void) => {
+      const listener = (
+        _event: Electron.IpcRendererEvent,
+        data: { docId: number; action: 'updated' | 'deleted' }
+      ): void => {
+        callback(data)
+      }
+      ipcRenderer.on('chat-doc-changed', listener)
+      return () => {
+        ipcRenderer.removeListener('chat-doc-changed', listener)
+      }
+    },
     onChatTodosUpdated: (callback: (data: { topicId: number; todos: TodoItem[] }) => void) => {
       const listener = (
         _event: Electron.IpcRendererEvent,
@@ -658,6 +671,9 @@ const loadingAPI = {
 
   // 如果需要，添加初始化完成通知
   notifyInitComplete: () => ipcRenderer.send('init-complete'),
+
+  // 应用版本（加载页展示,替代 loading.html 硬编码版本号）
+  getAppVersion: () => ipcRenderer.invoke('app-version') as Promise<string>,
 
   // 添加初始化进度监听
   onInitProgress: (

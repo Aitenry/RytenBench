@@ -32,7 +32,7 @@ interface Api {
     getById: (id: number) => Promise<TodoItemRow[]>
     getByTitle: (title: string) => Promise<TodoItemRow[]>
     getByPriority: (priority: number) => Promise<TodoItemRow[]>
-    getByCompletedStatus: (status: number) => Promise<TodoItemRow[]>
+    getByCompletedStatus: (status: number | boolean) => Promise<TodoItemRow[]>
     getAll: () => Promise<TodoItemRow[]>
     getAllPaginated: (page?: number, pageSize?: number) => Promise<PaginatedResult<TodoItemRow>>
     getByDueDate: (dueDate: string) => Promise<TodoItemRow[]>
@@ -130,7 +130,7 @@ interface Api {
     getPathForFile: (file: File) => string
   }
   setting: {
-    getLockScreenCode: () => Promise<string>
+    getLockScreenCode: () => Promise<{ code: string; view: boolean }>
     setLockScreenView: (open: boolean) => Promise<void>
   }
   chat: {
@@ -148,7 +148,7 @@ interface Api {
     onStreamChunk: (callback: (chunk: StructuredMessage) => void) => () => void
     onStreamDone: (callback: (result: { topicId: number }) => void) => () => void
     // 话题管理
-    getAllTopics: () => Promise<ChatTopicRow[]>
+    getAllTopics: (workspaceId: number) => Promise<ChatTopicRow[]>
     getAllTopicsPaginated: (
       page: number,
       pageSize: number

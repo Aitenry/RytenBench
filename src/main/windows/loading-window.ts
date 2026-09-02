@@ -11,6 +11,7 @@ import { settingsStore } from '../context'
 import { safeSend } from '../safe-send'
 import { GraphSettings, ChatSettings, TraySettings } from '../types/settings'
 import { getIp } from '../address'
+import { startWeatherAutoRefresh } from '../weather'
 import { preloadChatData } from '../chat/preload-cache'
 import { getLoadingWindow, markInitComplete, setLoadingWindow } from './window-manager'
 
@@ -42,7 +43,12 @@ async function loadConfig(): Promise<void> {
     // IP 数据非关键依赖，后台静默获取，不阻塞初始化
     getIp()
       .then((ip) => {
-        if (ip) settingsStore.set('ip', ip)
+        if (ip) {
+          settingsStore.set('ip', ip)
+          // IP 就绪后补建天气自动刷新定时器（修复：主窗口创建时 ip 未到位，
+          // startWeatherAutoRefresh 提前 return，定时器本会话永不启动）
+          startWeatherAutoRefresh()
+        }
       })
       .catch(() => {})
   }

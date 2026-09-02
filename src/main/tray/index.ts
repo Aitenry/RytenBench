@@ -6,6 +6,7 @@ import tray32Icon from '../../../resources/tray-32.png?asset'
 import trayMenuHtml from '../resource/tray-menu.html?asset'
 import { settingsStore } from '../context'
 import { getMainWindow } from '../windows/window-manager'
+import { safeSend } from '../safe-send'
 import { ThemeMode, TraySettings } from '../types/settings'
 
 // 系统托盘：品牌视觉图标（暖纸圆角方 + 墨色 Georgia R + 朱砂划线，1x/2x 双表示）。
@@ -141,9 +142,22 @@ function getMenuWindow(): Promise<BrowserWindow> {
     })
     win.webContents.once('did-fail-load', (_event, code, desc) => {
       logger.error(`[Tray] 托盘菜单加载失败 (${code}): ${desc}`)
+      // 复位并销毁窗口，允许下次右键重建重试（修复：此前只 reject，窗口仍存活，
+      // getMenuWindow 短路返回同一个已 reject 的 promise，托盘菜单本会话永久失效）
+      const failed = menuWindow
+      menuWindow = null
+      menuReadyPromise = null
+      if (failed && !failed.isDestroyed()) failed.destroy()
       reject(new Error(`菜单加载失败: ${desc}`))
     })
-    void win.loadFile(trayMenuHtml)
+    win.loadFile(trayMenuHtml).catch((err) => {
+      logger.error('[Tray] 托盘菜单 loadFile 失败:', (err as Error)?.message)
+      const failed = menuWindow
+      menuWindow = null
+      menuReadyPromise = null
+      if (failed && !failed.isDestroyed()) failed.destroy()
+      reject(err as Error)
+    })
   })
   return menuReadyPromise
 }
@@ -178,7 +192,9 @@ function positionMenuWindow(): 'up' | 'down' {
 function sendMenuData(force = false): void {
   if (!menuWindow || menuWindow.isDestroyed()) return
   if (!force && !menuWindow.isVisible()) return
-  menuWindow.webContents.send('tray-menu-data', {
+  // 统一走 safeSend（修复：裸 webContents.send 在帧失效窗口期不抛异常、无法拦截，
+  // 且违反项目「主进程推送统一走 safeSend」约定）
+  safeSend(menuWindow.webContents, 'tray-menu-data', {
     items: buildMenuItems(),
     theme: getMenuTheme(),
     flip: menuFlip,
@@ -204,7 +220,7 @@ export async function showTrayMenu(): Promise<void> {
     // 刚关闭又立刻弹出（点击托盘图标时的 blur→right-click 竞态）不重放动画，避免闪屏；
     // 正常间隔弹出才播放入场动画
     if (Date.now() - lastMenuHideAt > MENU_ANIMATE_GAP) {
-      win.webContents.send('tray-menu-open')
+      safeSend(win.webContents, 'tray-menu-open')
     }
   } catch (error) {
     logger.error('[Tray] 弹出托盘菜单失败:', error)

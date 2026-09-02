@@ -1,6 +1,7 @@
 import { BrowserWindow, ipcMain, screen } from 'electron'
 import { join } from 'path'
 import * as fs from 'fs'
+import logger from 'electron-log'
 import mermaidPreviewHtmlPath from '../resource/mermaid-preview.html?asset'
 
 let mermaidPreviewWin: BrowserWindow | null = null
@@ -20,7 +21,11 @@ export function registerMermaidPreviewIpc(): void {
     const dataUrl =
       'data:text/html;charset=utf-8,' + encodeURIComponent(buildMermaidPreviewHtml(svg))
     if (mermaidPreviewWin && !mermaidPreviewWin.isDestroyed()) {
-      void mermaidPreviewWin.loadURL(dataUrl)
+      // 快速连续预览时上一次导航会被下一次取代并以 ERR_ABORTED 拒绝——吞掉
+      // 避免主进程 unhandled rejection（修复）
+      mermaidPreviewWin.loadURL(dataUrl).catch((err) => {
+        logger.warn('[Mermaid] 预览加载失败:', (err as Error)?.message)
+      })
       mermaidPreviewWin.focus()
       return
     }
@@ -48,6 +53,8 @@ export function registerMermaidPreviewIpc(): void {
     mermaidPreviewWin.on('ready-to-show', () => {
       mermaidPreviewWin?.show()
     })
-    void mermaidPreviewWin.loadURL(dataUrl)
+    mermaidPreviewWin.loadURL(dataUrl).catch((err) => {
+      logger.warn('[Mermaid] 预览加载失败:', (err as Error)?.message)
+    })
   })
 }

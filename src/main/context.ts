@@ -14,5 +14,5 @@ setActiveWorkspaceIdProvider(() => {
 
 // 流式输出取消控制器（按渲染进程 sender.id 区分）
 export const streamAbortControllers = new Map<number, AbortController>()
-// 进行中的对话流（退出前需等待其保存数据）
-export const activeChatStreams = new Set<Promise<void>>()
+// 进行中的对话流（退出前需等待其保存数据；含目标自动续跑轮）
+export const activeChatStreams = new Set<Promise<unknown>>()

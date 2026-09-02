@@ -6,6 +6,15 @@ document.addEventListener('DOMContentLoaded', () => {
   const currentTask = document.getElementById('currentTask') as HTMLElement
   const taskProgress = document.getElementById('taskProgress') as HTMLElement
 
+  // 应用版本随 package.json 动态展示（修复：loading.html 硬编码 v0.1.0,升版后启动页显示旧版本）
+  const versionEl = document.querySelector('.version')
+  ;(window as unknown as Window).loading
+    .getAppVersion()
+    .then((v) => {
+      if (versionEl) versionEl.textContent = `v${v}`
+    })
+    .catch(() => {})
+
   // 监听初始化进度更新 - 使用暴露的 API
   ;(window as unknown as Window).loading.onInitProgress((_event, data) => {
     // 更新进度条（逐步推进，细粒度百分比）

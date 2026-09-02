@@ -8,7 +8,19 @@ import { getIp } from './address'
 import { weatherCodeMap, formatDate, weekdayLabel } from './shared/weather-utils'
 
 const DEFAULT_REFRESH_MIN = 60
+/** 请求超时上限（open-meteo 无 AbortSignal 支持，用竞速兜底，防 IPC invoke 永久悬挂） */
+const FETCH_TIMEOUT_MS = 15_000
 let weatherTimer: ReturnType<typeof setInterval> | null = null
+
+/** 给无超时机制的请求加墙钟超时（底层请求无法中止，但调用方能按时返回） */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(`请求超时（${Math.round(ms / 1000)}s）`)), ms)
+    )
+  ])
+}
 
 async function fetchWeatherData(
   lat: number,
@@ -24,7 +36,10 @@ async function fetchWeatherData(
     forecast_days: 3,
     timezone: 'auto'
   }
-  const responses = await fetchWeatherApi('https://api.open-meteo.com/v1/forecast', params)
+  const responses = await withTimeout(
+    fetchWeatherApi('https://api.open-meteo.com/v1/forecast', params),
+    FETCH_TIMEOUT_MS
+  )
   const response = responses[0]
 
   const current = response.current()
@@ -94,7 +109,11 @@ export function startWeatherAutoRefresh(): void {
     safeSend(mainWindow.webContents, 'weather-update', cached)
   }
 
+  let fetching = false
   const doFetch = async (): Promise<void> => {
+    // 并发互斥（修复：手动刷新与自动定时叠加、上次请求超过刷新间隔时重复发起）
+    if (fetching) return
+    fetching = true
     try {
       const data = await fetchWeatherData(lat, lon, city)
       const win = getMainWindow()
@@ -103,6 +122,8 @@ export function startWeatherAutoRefresh(): void {
       }
     } catch (err) {
       logger.error('Weather auto-refresh failed:', err)
+    } finally {
+      fetching = false
     }
   }
 
@@ -142,7 +163,11 @@ export function registerWeatherIpc(): void {
       const lon = ip.lon as number | undefined
       const city = (ip.city as string) || (ip.regionName as string) || ''
       if (!lat || !lon) return {}
-      return await fetchWeatherData(lat, lon, city)
+      const data = await fetchWeatherData(lat, lon, city)
+      // 现场取到 IP 后补建自动刷新定时器（修复：冷启动时 ip 未就绪，
+      // startWeatherAutoRefresh 提前 return，定时器本会话永不建立）
+      startWeatherAutoRefresh()
+      return data
     }
   )
 }
