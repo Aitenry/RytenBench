@@ -21,7 +21,7 @@ const BreadcrumbBar: React.FC<BreadcrumbBarProps> = ({ items, actions }) => {
       style={{
         display: 'flex',
         alignItems: 'center',
-        height: 40,
+        height: 37,
         flexShrink: 0,
         padding: '0 12px',
         gap: 2,

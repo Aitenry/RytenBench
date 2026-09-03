@@ -389,7 +389,7 @@ const TitleBar: React.FC<TitleBarProps> = ({
   )
 
   return (
-    <div className="frame-titlebar" style={{ height: 36 }}>
+    <div className="frame-titlebar">
       <div className="frame-titlebar-left">
         <img src={logo} alt="RytenBench" className="frame-titlebar-icon" />
         <span className="frame-titlebar-title" style={{ color: colorTextSecondary }}>
@@ -401,7 +401,6 @@ const TitleBar: React.FC<TitleBarProps> = ({
           style={{
             width: 1,
             height: 14,
-            margin: '0 6px',
             background: colorTextSecondary,
             opacity: 0.15,
             flexShrink: 0
@@ -416,7 +415,7 @@ const TitleBar: React.FC<TitleBarProps> = ({
           open={workspaceOpen}
           onOpenChange={setWorkspaceOpen}
           placement="bottomLeft"
-          overlayStyle={{ width: 200 }}
+          overlayStyle={{ width: 224 }}
         >
           <Button
             type="text"
@@ -429,7 +428,7 @@ const TitleBar: React.FC<TitleBarProps> = ({
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
                 fontSize: 12,
-                padding: '0 2px',
+                padding: '0',
                 color: colorTextSecondary,
                 WebkitAppRegion: 'no-drag'
               } as React.CSSProperties

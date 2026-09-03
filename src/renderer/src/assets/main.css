@@ -18,24 +18,23 @@
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  box-shadow:
-    0 0 0 1px rgba(0, 0, 0, 0.06),
-    0 4px 24px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06),
+  0 4px 24px rgba(0, 0, 0, 0.1);
 }
 
 /* 暗色模式：外层更暗，边框用白色半透明 */
 .dark .custom-frame {
-  box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.08),
-    0 4px 24px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08),
+  0 4px 24px rgba(0, 0, 0, 0.25);
 }
 
 /* ======== 标题栏 ======== */
 .frame-titlebar {
+  height: 26px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 7px 0 9px;
+  padding: 0 3px;
   -webkit-app-region: drag;
   user-select: none;
   flex-shrink: 0;
@@ -44,18 +43,18 @@
 .frame-titlebar-left {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
   -webkit-app-region: drag;
 }
 
 .frame-titlebar-icon {
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
   -webkit-app-region: drag;
 }
 
 .frame-titlebar-title {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 500;
   -webkit-app-region: drag;
 }
@@ -63,7 +62,7 @@
 .frame-titlebar-controls {
   display: flex;
   align-items: center;
-  gap: 13px;
+  gap: 7px;
   -webkit-app-region: no-drag;
 }
 
@@ -71,8 +70,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  width: 20px;
+  height: 20px;
   border: none;
   background: transparent;
   border-radius: 6px;
@@ -116,8 +115,9 @@
 .frame-menu {
   display: flex;
   flex-direction: column;
-  gap: 13px;
-  padding: 6px;
+  gap: 7px;
+  width: 26px;
+  padding: 3px 0;
   height: 100%;
 }
 
@@ -125,15 +125,15 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 25px;
-  height: 25px;
+  width: 20px;
+  height: 20px;
   border: none;
+  margin: 0 auto;
   background: transparent;
   border-radius: 6px;
   cursor: pointer;
-  transition:
-    background 0.15s,
-    color 0.15s;
+  transition: background 0.15s,
+  color 0.15s;
 }
 
 .frame-menu-item:hover {
@@ -148,7 +148,7 @@
 /* ======== 底部信息栏 ======== */
 .frame-bottombar {
   flex-shrink: 0;
-  height: 36px;
+  height: 26px;
   display: flex;
   align-items: center;
   position: relative;
@@ -160,7 +160,7 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  padding-right: 12px;
+  padding-right: 6px;
   position: relative;
 }
 
@@ -209,9 +209,8 @@
   height: 5px;
   border-radius: 50%;
   background: rgba(128, 128, 128, 0.3);
-  transition:
-    background 0.3s,
-    width 0.3s;
+  transition: background 0.3s,
+  width 0.3s;
 }
 
 /* ======== 滚动条 ======== */
@@ -280,24 +279,30 @@
   width: 5px;
   height: 5px;
 }
+
 .model-picker-scroll::-webkit-scrollbar-track {
   background: transparent;
 }
+
 .model-picker-scroll::-webkit-scrollbar-thumb {
   background-color: rgba(128, 128, 128, 0.28);
   border-radius: 100px;
 }
+
 .model-picker-scroll:hover::-webkit-scrollbar-thumb {
   background-color: rgba(128, 128, 128, 0.5);
 }
+
 .model-picker-scroll::-webkit-scrollbar-button,
 .model-picker-scroll::-webkit-scrollbar-corner {
   display: none;
   background: transparent;
 }
+
 .dark .model-picker-scroll::-webkit-scrollbar-thumb {
   background-color: rgba(255, 255, 255, 0.22);
 }
+
 .dark .model-picker-scroll:hover::-webkit-scrollbar-thumb {
   background-color: rgba(255, 255, 255, 0.42);
 }

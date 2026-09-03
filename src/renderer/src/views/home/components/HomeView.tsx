@@ -577,9 +577,6 @@ const HomeView: React.FC = () => {
     )
   }
 
-  /* ── 无卡片外壳的视图：首页仪表盘与知识图谱，与左右侧栏融为一体（无边框、无圆角） ── */
-  const frameless = !selection || selection.kind === 'wiki-graph' || selection.kind === 'doc-graph'
-
   return (
     <div
       style={{
@@ -627,8 +624,6 @@ const HomeView: React.FC = () => {
           display: 'flex',
           flexDirection: 'column',
           background: token.colorBgContainer,
-          border: frameless ? 'none' : `1px solid ${token.colorBorderSecondary}`,
-          borderRadius: frameless ? 0 : 12,
           overflow: 'hidden'
         }}
       >

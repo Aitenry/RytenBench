@@ -1,7 +1,6 @@
 import React, { useState } from 'react'
-import { Badge, Popover } from 'antd'
+import { Popover } from 'antd'
 import { RiNotification3Line, RiSettings3Line } from '@remixicon/react'
-import { useNotification } from '@renderer/contexts/useNotification'
 import NotificationList from '../NotificationList'
 
 interface RightBarProps {
@@ -17,7 +16,6 @@ const RightBar: React.FC<RightBarProps> = ({
   colorText,
   colorTextSecondary
 }) => {
-  const { unreadCount, markAllRead } = useNotification()
   const [notifOpen, setNotifOpen] = useState(false)
 
   return (
@@ -36,15 +34,12 @@ const RightBar: React.FC<RightBarProps> = ({
           open={notifOpen}
           onOpenChange={(open) => {
             setNotifOpen(open)
-            if (!open) markAllRead()
           }}
           placement="leftTop"
         >
-          <Badge dot={unreadCount > 0} offset={[-4, 4]}>
-            <button className="frame-menu-item" title="消息" style={{ color: colorTextSecondary }}>
-              <RiNotification3Line size={16} />
-            </button>
-          </Badge>
+          <button className="frame-menu-item" title="消息" style={{ color: colorTextSecondary }}>
+            <RiNotification3Line size={16} />
+          </button>
         </Popover>
         <button
           className="frame-menu-item"

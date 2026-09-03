@@ -894,7 +894,7 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
       }}
     >
       {/* 搜索 */}
-      <div style={{ padding: '12px 12px 8px' }}>
+      <div style={{ padding: '6px 6px 8px' }}>
         <div
           style={{
             display: 'flex',
