@@ -15,6 +15,13 @@ import {
 const TOPICS_PAGE_SIZE = 20
 const MESSAGES_PAGE_SIZE = 20 // 10对消息
 
+// ── 流式 chunk 合批参数（渲染进程 OOM 修复）────────────────────────────
+// 见 startStreamListener：高频 chunk 先排队、按自适应间隔合并为一次 React commit；
+// 单条正文越长，每次 markdown 全量渲染越贵，间隔随文本长度线性放大，上限见 MAX。
+const CHUNK_FLUSH_BASE_INTERVAL_MS = 33 // 常规刷新间隔（≤~30 commit/s）
+const CHUNK_FLUSH_MAX_INTERVAL_MS = 300 // 超长文本自适应上限
+const CHUNK_FLUSH_INTERVAL_PER_CHAR_MS = 1 / 2000 // 每 2k 字符 +1ms 间隔
+
 const INPUT_HISTORY_STORAGE_KEY = 'rytenbench.chat.inputHistory'
 const INPUT_HISTORY_MAX = 100
 /** 全局输入历史缓存（localStorage 持久化，模块级单例，避免每次渲染解析存储） */
@@ -337,7 +344,34 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
             updatedToolCalls = [...updatedToolCalls, chunk.tool as ToolCall]
           }
         }
-        const updatedBlocks = [...msg.blocks]
+        let updatedBlocks = [...msg.blocks]
+
+        // 「正在重试」过渡块仅在请求未恢复时展示：一旦真实内容/工具/智能体/压缩结果到达，
+        // 说明重试已成功、模型开始正常输出，立即移除该过渡块
+        const retryFinished =
+          Boolean(chunk.content) ||
+          Boolean(chunk.reasoning_content) ||
+          Boolean(chunk.tool) ||
+          Boolean(chunk.subAgent) ||
+          Boolean(chunk.historyCompacted)
+        if (retryFinished) {
+          updatedBlocks = updatedBlocks.filter((b) => b.type !== 'retrying')
+        }
+        // 摘要压缩失败/放弃（全程没有 historyCompacted 结果）时，正文一旦开始就收起
+        // 残留的「正在压缩早期对话…」过渡卡（避免压缩卡与正文并行误导）
+        if (retryFinished && !updatedBlocks.some((b) => b.type === 'historyCompacted')) {
+          updatedBlocks = updatedBlocks.filter((b) => b.type !== 'historyCompacting')
+        }
+
+        // 模型单次请求失败后在原调用处自动重试（不整轮重跑）：插入「正在重试」过渡行，
+        // 只保留最新一次进度；已输出的历史内容与工具块原样保留（重试不会作废它们）
+        if (chunk.retrying) {
+          updatedBlocks = updatedBlocks.filter((b) => b.type !== 'retrying')
+          updatedBlocks.push({
+            type: 'retrying',
+            retrying: { attempt: chunk.retrying.attempt, retries: chunk.retrying.retries }
+          })
+        }
 
         // 本轮热记忆注入：置于消息块最顶部（首个 chunk 到达，仅插入一次）
         if (chunk.memoryInjected) {
@@ -523,9 +557,18 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
                 children: []
               })
             } else {
-              const existing = updatedBlocks[idx].subAgent!
-              existing.status = 'started'
-              existing.taskDescription = existing.taskDescription || sa.taskDescription
+              // 复制后更新：不改写与旧状态共享的 subAgent 对象（渲染/更新期就地改共享对象
+              // 是文本自复制的隐患，统一走不可变替换）
+              const existing = updatedBlocks[idx]
+              const prevSa = existing.subAgent!
+              updatedBlocks[idx] = {
+                ...existing,
+                subAgent: {
+                  ...prevSa,
+                  status: 'started',
+                  taskDescription: prevSa.taskDescription || sa.taskDescription
+                }
+              }
             }
             if (sa.causeId) {
               activeCauseIds.add(sa.causeId)
@@ -533,11 +576,18 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
           } else if (sa.status === 'completed' || sa.status === 'error') {
             const idx = findSaBlock()
             if (idx >= 0) {
-              const existing = updatedBlocks[idx].subAgent!
-              existing.status = sa.status
-              existing.output = sa.output
-              existing.error = sa.error
-              existing.taskDescription = existing.taskDescription || sa.taskDescription
+              const existing = updatedBlocks[idx]
+              const prevSa = existing.subAgent!
+              updatedBlocks[idx] = {
+                ...existing,
+                subAgent: {
+                  ...prevSa,
+                  status: sa.status,
+                  output: sa.output ?? prevSa.output,
+                  error: sa.error ?? prevSa.error,
+                  taskDescription: prevSa.taskDescription || sa.taskDescription
+                }
+              }
             }
             if (sa.causeId) {
               activeCauseIds.delete(sa.causeId)
@@ -546,7 +596,15 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
             const idx = findSaBlock()
             let block: MessageBlock
             if (idx >= 0) {
-              block = updatedBlocks[idx]
+              // 复制成新块后再就地更新：新块独占 subAgent 对象与 children 数组，
+              // 后续对 block.subAgent/block.children 的写入不会污染与旧状态共享的对象
+              const existing = updatedBlocks[idx]
+              block = {
+                ...existing,
+                subAgent: { ...existing.subAgent! },
+                children: existing.children ? [...existing.children] : []
+              }
+              updatedBlocks[idx] = block
             } else {
               block = {
                 type: 'subAgent',
@@ -709,37 +767,81 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
       doneCleanupsRef.current.get(topicId)?.()
       errorCleanupsRef.current.get(topicId)?.()
 
+      // ── 流式 chunk 合批（渲染进程 OOM 修复）──────────────────────────
+      // 此前每条 chunk IPC 到达都立即全量重渲染整条消息：ReactMarkdown 解析 + 语法高亮 +
+      // KaTeX 作用于全文，超长回复下累计 O(L²)，主线程被占满、GC 让位、IPC 事件积压，
+      // 内存峰值持续走高直至渲染进程被 OOM kill。合批把高频 chunk 排队，按间隔合并成
+      // 「一次会话更新 + 一次 React commit」——commit 数从「每条 chunk」降到 ~30/s 以内，
+      // 内容仍按到达顺序逐 chunk 追加（与既有增量/去重约定一致，不丢内容、不改语义）。
+      let pendingChunks: StreamChunk[] = []
+      let flushTimer: ReturnType<typeof setTimeout> | null = null
+      let flushIntervalMs = CHUNK_FLUSH_BASE_INTERVAL_MS
+
+      /** 排空积压 chunk：按顺序逐 chunk 应用，只做一次会话缓存写入 + 一次 React commit */
+      const applyPendingChunks = (): void => {
+        flushTimer = null
+        if (pendingChunks.length === 0) return
+        const session = sessionsRef.current.get(topicId)
+        if (!session) return
+        const batch = pendingChunks
+        pendingChunks = []
+        const startedAt = performance.now()
+        let updatedMessages = session.messages
+        for (const chunk of batch) {
+          updatedMessages = applyChunkToMessages(updatedMessages, aiMessageId, chunk, topicId)
+        }
+        sessionsRef.current.set(topicId, { ...session, messages: updatedMessages })
+        // 复用 session cache 的结果直接更新 React state
+        // （避免 setMessages(prev => ...) 中 updater 被 StrictMode 双重调用导致重复块）
+        if (currentTopicIdRef.current === topicId) {
+          setMessages(updatedMessages)
+        }
+        // 自适应间隔：正文越长单次全量渲染越贵，间隔随长度线性放大；本批处理耗时
+        // （工具/智能体密集批次）同样拉大间隔，给主线程与 GC 喘息
+        const aiMsg = updatedMessages.find((m) => m.id === aiMessageId)
+        const textLen = Math.max(aiMsg?.content?.length ?? 0, aiMsg?.reasoning_content?.length ?? 0)
+        const took = performance.now() - startedAt
+        flushIntervalMs = Math.min(
+          CHUNK_FLUSH_MAX_INTERVAL_MS,
+          Math.max(
+            CHUNK_FLUSH_BASE_INTERVAL_MS,
+            CHUNK_FLUSH_BASE_INTERVAL_MS + textLen * CHUNK_FLUSH_INTERVAL_PER_CHAR_MS,
+            took * 2
+          )
+        )
+        // 排空期间到达的新 chunk 已重新入队，立即续排
+        scheduleFlush()
+      }
+
+      /** 若当前没有待触发的排空定时器则安排一个 */
+      const scheduleFlush = (): void => {
+        if (flushTimer != null || pendingChunks.length === 0) return
+        flushTimer = setTimeout(applyPendingChunks, flushIntervalMs)
+      }
+
       const chunkCleanup = (window as unknown as Window).api.chat.onStreamChunk(
         (chunk: StreamChunk) => {
           // topicId 守卫：只处理属于本话题的 chunk（Set 分发机制会使所有 handler 收到所有 chunk）
           if (chunk.__topicId !== topicId) return
-          const session = sessionsRef.current.get(topicId)
-          if (session) {
-            const updatedMessages = applyChunkToMessages(
-              session.messages,
-              aiMessageId,
-              chunk,
-              topicId
-            )
-            sessionsRef.current.set(topicId, {
-              ...session,
-              messages: updatedMessages
-            })
-
-            // 复用 session cache 的结果直接更新 React state
-            // 避免 setMessages(prev => ...) 中 updater 被 StrictMode 双重调用导致重复块
-            if (currentTopicIdRef.current === topicId) {
-              setMessages(updatedMessages)
-            }
-          }
+          if (!sessionsRef.current.get(topicId)) return
+          pendingChunks.push(chunk)
+          scheduleFlush()
         }
       )
-      chunkCleanupsRef.current.set(topicId, chunkCleanup)
+      // 注销前先落完积压 chunk（done/error/删除话题等路径），避免最后一段内容丢失
+      chunkCleanupsRef.current.set(topicId, () => {
+        applyPendingChunks()
+        chunkCleanup()
+      })
 
       const doneCleanup = (window as unknown as Window).api.chat.onStreamDone(
         ({ topicId: doneTopicId }) => {
           // 守卫：只处理本 topic 的完成事件（Set 分发可能导致旧 handler 收到其他 topic 的事件）
           if (doneTopicId !== topicId) return
+
+          // 先落完积压 chunk：done 事件可能与最后一批 chunk 同 tick 到达，
+          // 若不先排空，末尾正文会丢在积压队列里（随后会话缓存被清理）
+          applyPendingChunks()
 
           // 清理对应 topic 的加载状态
           isLoadingMapRef.current.delete(doneTopicId)
@@ -765,7 +867,17 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
           if (currentTopicIdRef.current === doneTopicId) {
             setIsLoading(false)
             setMessages((prev) =>
-              prev.map((msg) => (msg.loading ? { ...msg, loading: false } : msg))
+              prev.map((msg) =>
+                msg.loading
+                  ? {
+                      ...msg,
+                      loading: false,
+                      // 结束兜底移除「正在重试」过渡块（成功路径在首个数据 chunk 时已移除；
+                      // 此处覆盖中止/重试耗尽等未产生数据的收尾）
+                      blocks: msg.blocks.filter((b) => b.type !== 'retrying')
+                    }
+                  : msg
+              )
             )
           }
         }
@@ -777,6 +889,9 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
         ({ error: errMsg, topicId: errorTopicId }) => {
           // 守卫：只处理本 topic 的错误
           if (errorTopicId !== topicId) return
+
+          // 先落完积压 chunk，再整体替换为错误信息，避免与最后一批正文竞态
+          applyPendingChunks()
 
           console.error(`[Stream] Error for topic ${topicId}: ${errMsg}`)
 

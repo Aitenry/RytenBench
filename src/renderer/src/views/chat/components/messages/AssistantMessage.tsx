@@ -40,7 +40,9 @@ const TOOL_IN_PROGRESS_ICONS: Record<
   ls: RiFolderOpenLine,
   glob: RiSearchLine,
   grep: RiSearchLine,
-  execute: RiTerminalBoxLine
+  execute: RiTerminalBoxLine,
+  write_todos: RiListCheck,
+  read_todos: RiListCheck
 }
 
 interface AssistantMessageProps {
@@ -150,16 +152,19 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
       }
     })
 
-    // 仅有「注入记忆」/「压缩中」块时仍渲染（卡片可见），其余空消息走 LoadingMessage
+    // 仅有「注入记忆」/「压缩中」块时仍渲染（卡片可见），其余空消息走 LoadingMessage；
+    // 「正在重试」块同理（展示重试进度行，避免被 LoadingMessage 整卡替换）
     const hasMemoryBlock = message.blocks.some((b) => b.type === 'memoryInjected')
     const hasCompactingBlock = message.blocks.some((b) => b.type === 'historyCompacting')
+    const hasRetryingBlock = message.blocks.some((b) => b.type === 'retrying')
     if (
       message.loading &&
       !message.content &&
       !message.reasoning_content &&
       (!message.toolCalls || message.toolCalls.length === 0) &&
       !hasMemoryBlock &&
-      !hasCompactingBlock
+      !hasCompactingBlock &&
+      !hasRetryingBlock
     ) {
       return <LoadingMessage colorTextSecondary={colorTextSecondary} />
     }
@@ -167,24 +172,31 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
     const codeBg = isDarkMode ? 'rgba(255,255,255,0.06)' : '#f3f4f6'
     const collapseBg = isDarkMode ? 'rgba(255,255,255,0.04)' : '#f9fafb'
 
-    /** 渲染 write_todos 工具为待办清单样式
+    /** 解析待办数组：write_todos 的 input（对象）或 read_todos 的 output（JSON 字符串）
      *  匹配 Claude Code / deepagents 的 TodoWrite 工具 schema：
      *    { todos: [{ content, status: "pending"|"in_progress"|"completed", activeForm }] }
      *  也兼容 { items: [...] } 格式 */
-    const renderWriteTodos = (
-      tool: ToolCall,
+    const extractTodos = (
+      source: Record<string, unknown> | string | null | undefined
+    ): Record<string, unknown>[] | null => {
+      if (source == null) return null
+      try {
+        const obj =
+          typeof source === 'string' ? (JSON.parse(source) as Record<string, unknown>) : source
+        if (Array.isArray(obj.todos)) return obj.todos as Record<string, unknown>[]
+        if (Array.isArray(obj.items)) return obj.items as Record<string, unknown>[]
+        return null
+      } catch {
+        return null
+      }
+    }
+
+    /** 待办清单卡片（write_todos / read_todos 共用，非折叠）：图标 + 统计头 + 清单行 */
+    const renderTodoCard = (
+      todos: Record<string, unknown>[],
       key: string | number,
-      isNested = false
+      isNested: boolean
     ): React.ReactNode => {
-      const input = (tool.input || {}) as Record<string, unknown>
-      const todos: Record<string, unknown>[] = Array.isArray(input.todos)
-        ? (input.todos as Record<string, unknown>[])
-        : Array.isArray(input.items)
-          ? (input.items as Record<string, unknown>[])
-          : []
-
-      if (todos.length === 0) return null
-
       const getStatus = (t: Record<string, unknown>): string => String(t.status ?? 'pending')
 
       const isCompleted = (t: Record<string, unknown>): boolean => getStatus(t) === 'completed'
@@ -210,17 +222,29 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
           <div className="flex items-center gap-2 mb-2">
             <RiListCheck
               size={isNested ? 14 : 16}
-              style={{ color: allCompleted ? '#52c41a' : colorTextSecondary }}
+              style={{ color: total > 0 && allCompleted ? '#52c41a' : colorTextSecondary }}
             />
-            <span
-              style={{
-                color: colorTextSecondary,
-                fontSize: isNested ? '12px' : '14px',
-                fontWeight: 500
-              }}
-            >
-              {completedCount}/{total} 已完成
-            </span>
+            {total === 0 ? (
+              <span
+                style={{
+                  color: colorTextSecondary,
+                  fontSize: isNested ? '12px' : '14px',
+                  fontWeight: 500
+                }}
+              >
+                待办清单
+              </span>
+            ) : (
+              <span
+                style={{
+                  color: colorTextSecondary,
+                  fontSize: isNested ? '12px' : '14px',
+                  fontWeight: 500
+                }}
+              >
+                {completedCount}/{total} 已完成
+              </span>
+            )}
             {inProgressCount > 0 && !allCompleted ? (
               <span
                 style={{
@@ -232,59 +256,89 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
               </span>
             ) : null}
           </div>
-          <div className="flex flex-col gap-1">
-            {todos.map((todo, i) => {
-              const status = getStatus(todo)
-              const done = status === 'completed'
-              const progressing = status === 'in_progress'
-              const title =
-                (progressing ? (todo.activeForm as string) : undefined) ||
-                (todo.content as string) ||
-                (todo.title as string) ||
-                (todo.text as string) ||
-                (todo.name as string) ||
-                `待办 ${i + 1}`
+          {total === 0 ? (
+            <div style={{ color: colorTextTertiary, fontSize: isNested ? '12px' : '13px' }}>
+              暂无待办，可先让模型用 write_todos 制定任务计划
+            </div>
+          ) : (
+            <div className="flex flex-col gap-1">
+              {todos.map((todo, i) => {
+                const status = getStatus(todo)
+                const done = status === 'completed'
+                const progressing = status === 'in_progress'
+                const title =
+                  (progressing ? (todo.activeForm as string) : undefined) ||
+                  (todo.content as string) ||
+                  (todo.title as string) ||
+                  (todo.text as string) ||
+                  (todo.name as string) ||
+                  `待办 ${i + 1}`
 
-              return (
-                <div key={i} className="flex items-start gap-2">
-                  {done ? (
-                    <RiCheckboxCircleLine
-                      size={isNested ? 14 : 16}
-                      style={{ color: '#52c41a', marginTop: '2px', flexShrink: 0 }}
-                    />
-                  ) : progressing ? (
-                    <div
+                return (
+                  <div key={i} className="flex items-start gap-2">
+                    {done ? (
+                      <RiCheckboxCircleLine
+                        size={isNested ? 14 : 16}
+                        style={{ color: '#52c41a', marginTop: '2px', flexShrink: 0 }}
+                      />
+                    ) : progressing ? (
+                      <div
+                        style={{
+                          width: isNested ? 14 : 16,
+                          height: isNested ? 14 : 16,
+                          marginTop: '2px',
+                          flexShrink: 0,
+                          borderRadius: '50%',
+                          border: `1.5px dashed ${colorTextTertiary}`
+                        }}
+                      />
+                    ) : (
+                      <RiCheckboxBlankCircleLine
+                        size={isNested ? 14 : 16}
+                        style={{ color: colorTextTertiary, marginTop: '2px', flexShrink: 0 }}
+                      />
+                    )}
+                    <span
                       style={{
-                        width: isNested ? 14 : 16,
-                        height: isNested ? 14 : 16,
-                        marginTop: '2px',
-                        flexShrink: 0,
-                        borderRadius: '50%',
-                        border: `1.5px dashed ${colorTextTertiary}`
+                        color: done ? colorTextTertiary : colorText,
+                        fontSize: isNested ? '12px' : '14px',
+                        textDecoration: done ? 'line-through' : 'none',
+                        wordBreak: 'break-word'
                       }}
-                    />
-                  ) : (
-                    <RiCheckboxBlankCircleLine
-                      size={isNested ? 14 : 16}
-                      style={{ color: colorTextTertiary, marginTop: '2px', flexShrink: 0 }}
-                    />
-                  )}
-                  <span
-                    style={{
-                      color: done ? colorTextTertiary : colorText,
-                      fontSize: isNested ? '12px' : '14px',
-                      textDecoration: done ? 'line-through' : 'none',
-                      wordBreak: 'break-word'
-                    }}
-                  >
-                    {title}
-                  </span>
-                </div>
-              )
-            })}
-          </div>
+                    >
+                      {title}
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </div>
       )
+    }
+
+    /** write_todos：从入参（模型提交的整份清单）渲染卡片；空清单不渲染 */
+    const renderWriteTodos = (
+      tool: ToolCall,
+      key: string | number,
+      isNested = false
+    ): React.ReactNode => {
+      const todos = extractTodos((tool.input || {}) as Record<string, unknown>)
+      if (!todos || todos.length === 0) return null
+      return renderTodoCard(todos, key, isNested)
+    }
+
+    /** read_todos：完成后从输出（{ todos: [...] } JSON）渲染同款待办清单卡片；
+     *  未完成或解析失败返回 null，由下方通用工具折叠兜底展示原始输入输出 */
+    const renderReadTodos = (
+      tool: ToolCall,
+      key: string | number,
+      isNested = false
+    ): React.ReactNode => {
+      if (tool.status !== 'completed') return null
+      const todos = extractTodos(tool.output)
+      if (!todos) return null
+      return renderTodoCard(todos, key, isNested)
     }
 
     /** 渲染 deepagent 内置工具为定制化卡片（非折叠）
@@ -817,12 +871,18 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
       }
 
       // 合并相邻的 reasoning 块：防止模型把思考过程拆成 token 级事件，导致满屏"思考过程"
+      // 必须「复制后合并」：此前直接改写原块对象（last.reasoning += ...），渲染期变异共享
+      // 状态对象，一旦出现相邻同型块，文本会随渲染轮次自复制增长且永不裁剪（渲染进程 OOM
+      // 隐患）；复制后合并对原状态零副作用
       const mergedBlocks: MessageBlock[] = []
       for (const block of message.blocks) {
         if (block.type === 'reasoning') {
           const last = mergedBlocks[mergedBlocks.length - 1]
           if (last && last.type === 'reasoning') {
-            last.reasoning = (last.reasoning || '') + (block.reasoning || '')
+            mergedBlocks[mergedBlocks.length - 1] = {
+              ...last,
+              reasoning: (last.reasoning || '') + (block.reasoning || '')
+            }
             continue
           }
         }
@@ -830,6 +890,35 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
       }
 
       return mergedBlocks.map((block, blockIndex) => {
+        // 模型请求失败后自动重试中（过渡行：重试成功恢复输出或轮次结束时由 useChatHandlers 移除；
+        // 仅消息进行中展示，避免历史消息出现残留）
+        if (block.type === 'retrying' && block.retrying) {
+          if (!message.loading) return null
+          const { attempt, retries } = block.retrying
+          return (
+            <div
+              key={blockIndex}
+              style={{
+                background: collapseBg,
+                border: 'var(--ant-line-width) var(--ant-line-type) var(--ant-color-border)',
+                marginBottom: '6px',
+                borderRadius: '8px',
+                padding: '9px 12px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px'
+              }}
+            >
+              <ShinyIcon icon={RiRefreshLine} size={16} baseColor={colorTextSecondary} />
+              <ShinyText baseColor={colorText}>
+                <TruncatedTooltipText
+                  text={`正在重试（第 ${attempt}/${retries} 次）…`}
+                  style={{ color: colorText, fontSize: '13px', flex: 1 }}
+                />
+              </ShinyText>
+            </div>
+          )
+        }
         // 摘要压缩进行中（过渡态：流式替换为 historyCompacted 结果块；失败则随消息结束隐藏）
         if (block.type === 'historyCompacting' && message.loading) {
           return (
@@ -1016,6 +1105,11 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
           if (block.tool.name === 'write_todos') {
             return renderWriteTodos(block.tool, blockIndex)
           }
+          // read_todos 专属卡片：完成后渲染；未完成/解析失败返回 null，落到下方通用折叠
+          if (block.tool.name === 'read_todos') {
+            const readTodosCard = renderReadTodos(block.tool, blockIndex)
+            if (readTodosCard) return readTodosCard
+          }
           // Mnemon 记忆工具定制卡片（仅在完成后展示内容）
           if (
             block.tool.name.startsWith('mnemon_') &&
@@ -1113,19 +1207,26 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
           const renderChildren = (children: MessageBlock[], depth = 0): React.ReactNode => {
             // 合并相邻的 reasoning 块：防止模型把 reasoning 拆成 token 级事件，导致满屏"思考过程"
             // 合并相邻的 text 块：避免流式输出把正文拆成 "Good" / "," / "found" 等碎片
+            // 必须「复制后合并」：渲染期不得改写原状态对象（否则文本随渲染轮次自复制增长）
             const mergedChildren: MessageBlock[] = []
             for (const child of children) {
               if (child.type === 'reasoning') {
                 const last = mergedChildren[mergedChildren.length - 1]
                 if (last && last.type === 'reasoning') {
-                  last.reasoning = (last.reasoning || '') + (child.reasoning || '')
+                  mergedChildren[mergedChildren.length - 1] = {
+                    ...last,
+                    reasoning: (last.reasoning || '') + (child.reasoning || '')
+                  }
                   continue
                 }
               }
               if (child.type === 'text') {
                 const last = mergedChildren[mergedChildren.length - 1]
                 if (last && last.type === 'text') {
-                  last.text = (last.text || '') + (child.text || '')
+                  mergedChildren[mergedChildren.length - 1] = {
+                    ...last,
+                    text: (last.text || '') + (child.text || '')
+                  }
                   continue
                 }
               }
@@ -1177,6 +1278,11 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
               if (child.type === 'tool' && child.tool) {
                 if (child.tool.name === 'write_todos') {
                   return renderWriteTodos(child.tool, ci, true)
+                }
+                // read_todos 专属卡片（嵌套）：完成后渲染；未完成/解析失败回退通用折叠
+                if (child.tool.name === 'read_todos') {
+                  const readTodosCard = renderReadTodos(child.tool, ci, true)
+                  if (readTodosCard) return readTodosCard
                 }
                 // Mnemon 记忆工具定制卡片（嵌套）
                 if (
@@ -1421,13 +1527,14 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
       <div className="flex mb-6">
         <div className="w-full">
           {renderBlocks()}
-          {/* 仅展示「注入记忆」卡片期间的生成中指示（压缩进行中不显示，避免与压缩卡重复） */}
+          {/* 仅展示「注入记忆」卡片期间的生成中指示（压缩/重试进行中不显示，避免与过渡行重复） */}
           {message.loading &&
           !message.content &&
           !message.reasoning_content &&
           (!message.toolCalls || message.toolCalls.length === 0) &&
           hasMemoryBlock &&
-          !hasCompactingBlock ? (
+          !hasCompactingBlock &&
+          !hasRetryingBlock ? (
             <div className="flex items-center gap-2 mt-1" style={{ color: colorTextSecondary }}>
               <ShinyIcon icon={RiSparkling2Line} size={14} baseColor={colorTextSecondary} />
               <ShinyText baseColor={colorTextSecondary}>
