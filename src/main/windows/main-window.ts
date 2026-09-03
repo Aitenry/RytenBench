@@ -144,10 +144,24 @@ export function createMainWindow(): void {
     ) {
       logger.warn('[Window] 渲染进程异常退出，300ms 后重建主窗口恢复可用...')
       setTimeout(() => {
+        // 应用正在退出时不再自愈（退出清理会关闭数据库，重建的窗口加载必失败）
+        if (isQuittingNow()) return
         if (getMainWindow() === win && !win.isDestroyed()) {
-          win.destroy()
-        }
-        if (!getMainWindow()) {
+          // 先建新窗口、再销毁已崩溃的旧窗口。
+          // 修复：此前先 win.destroy() 再 createMainWindow()——销毁最后一个窗口会触发
+          // window-all-closed → app.quit()（Windows），随后才创建的新窗口其 loadURL
+          // 会被退出清理掐断报 ERR_FAILED(-2)，一次渲染进程 OOM/崩溃就会带崩整个应用；
+          // 先建后毁使窗口数 1→2→1 永不归零，退出流程不会在自愈期间触发。
+          try {
+            createMainWindow()
+          } catch (err) {
+            logger.error('[Window] 自愈重建主窗口失败:', err)
+          }
+          if (getMainWindow() === win && !win.isDestroyed()) {
+            // 重建失败（构造抛错）时销毁旧窗口走正常退出收尾，避免留下不可用的死窗口
+            win.destroy()
+          }
+        } else if (!getMainWindow()) {
           createMainWindow()
         }
       }, 300)
