@@ -7,7 +7,7 @@ import * as path from 'path'
 import { ChatOptions, StructuredMessage, SubAgentConfig, HistoryCompaction } from '../types'
 import { Runtime } from '../runtime/runtime'
 import { getMnemonComponent } from '../mnemon-singleton'
-import { summarizeDialogues } from '../runtime/compaction'
+import { summarizeDialoguesWithRecovery } from '../runtime/compaction'
 import { getCompactionByTopic, upsertCompaction } from '../../database/mapper/compaction'
 import type { HistoryDialogue, LoadHistoryFn } from './history'
 import { extractStructuredMessages, convertDialoguesToMessages } from './history'
@@ -145,7 +145,9 @@ class ChatService {
     topicId: number,
     onCompactionStart?: () => void,
     contextBudget?: number,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    onCompactionRetry?: (attempt: number, retries: number) => void,
+    turnSource?: string
   ): Promise<{ messages: BaseMessage[]; compaction?: HistoryCompaction }> {
     if (!this.loadHistory) {
       logger.warn('[Chat] loadHistory callback not provided, skipping history')
@@ -170,11 +172,16 @@ class ChatService {
 
       const context = await convertDialoguesToMessages(historyDialogues, {
         // 摘要压缩：压力达标时把最老对话压缩为 checkpoint（持久化复用，增量合并），
-        // 失败回退字符截断。checkpoint 存于 topic_compactions 表：
-        // 压缩一次后后续轮次直接复用，仅边界推进（又超预算）时增量合并再落库。
+        // 压缩模型请求与正文同款恢复：自动重试（带进度）+ 换模型继续；
+        // 用户放弃/询问不可用才回退字符截断。checkpoint 存于 topic_compactions 表。
         maxChars: contextBudget,
         summarizer: (transcript, priorSummary) =>
-          summarizeDialogues(this.model, transcript, priorSummary, signal),
+          summarizeDialoguesWithRecovery(this.model, transcript, priorSummary, {
+            topicId,
+            turnSource,
+            signal,
+            onRetry: onCompactionRetry
+          }),
         topicId,
         getCheckpoint: async (tid) => {
           const row = await getCompactionByTopic(tid)
@@ -214,7 +221,9 @@ class ChatService {
             options.topicId,
             undefined,
             options?.contextBudget,
-            options?.signal
+            options?.signal,
+            undefined,
+            options?.turnMeta?.source
           )
         : { messages: [] as BaseMessage[] }
       logger.info(
@@ -261,8 +270,18 @@ class ChatService {
           topicId: number,
           onCompactionStart?: () => void,
           contextBudget?: number,
-          signal?: AbortSignal
-        ) => this.loadContextMessages(topicId, onCompactionStart, contextBudget, signal),
+          signal?: AbortSignal,
+          onCompactionRetry?: (attempt: number, retries: number) => void,
+          turnSource?: string
+        ) =>
+          this.loadContextMessages(
+            topicId,
+            onCompactionStart,
+            contextBudget,
+            signal,
+            onCompactionRetry,
+            turnSource
+          ),
         copyUploadedFiles: (docs) => this.copyUploadedFiles(docs)
       },
       message,

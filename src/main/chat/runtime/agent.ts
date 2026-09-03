@@ -14,6 +14,12 @@ import logger from 'electron-log'
 import type { RuntimeRecord, ToolCallRecord } from './types'
 import { formatOutput } from './fs-backend'
 import type { SpillStore } from './spill'
+import {
+  askUserToSwitchModel,
+  MODEL_RETRY_LIMIT,
+  MODEL_RETRY_DELAY_MS,
+  sleep
+} from './model-recovery'
 
 /**
  * LangGraph Agent 图 — 替代 deepagents createDeepAgent
@@ -363,18 +369,76 @@ export function buildAgentGraph(
   const subagentCtx = options.subagentCtx
   const spill = options.spill
 
-  const modelWithTools = bindToolsSafely(model, tools)
+  // 可变模型绑定：自动重试耗尽后用户可在提问弹窗里切换模型，切换后绑定同一批工具继续
+  let modelWithTools = bindToolsSafely(model, tools)
   const runTools = createToolRunner(tools, queue, subagentCtx, spill)
 
   async function callModel(
     state: { messages: BaseMessage[] },
     config: LangGraphRunnableConfig
   ): Promise<{ messages: BaseMessage[] }> {
-    const response = await modelWithTools.invoke(
-      [new SystemMessage(systemPrompt), ...state.messages],
-      config
-    )
-    return { messages: [response] }
+    const messages = [new SystemMessage(systemPrompt), ...state.messages]
+    const configurable = (config.configurable ?? {}) as Record<string, unknown>
+    const topicId = typeof configurable.topicId === 'number' ? configurable.topicId : 0
+    const turnSource =
+      typeof configurable.turnSource === 'string' ? configurable.turnSource : 'user'
+    // 单次 LLM 请求的原地自动重试：失败不整轮重跑——已执行的工具结果与消息历史都在
+    // 图状态里原样保留，这里只把失败的这一次请求重新发出（最多 MODEL_RETRY_LIMIT 次）。
+    // 子代理子图复用同一 callModel，同样原地重试，但不推送进度记录/不弹换模型提问。
+    let attempt = 0
+    let modelSwitchOffered = false
+    for (;;) {
+      try {
+        const response = await modelWithTools.invoke(messages, config)
+        return { messages: [response] }
+      } catch (err) {
+        const error = err instanceof Error ? err : new Error(String(err))
+        if (error.name === 'AbortError' || config.signal?.aborted) throw err
+        attempt++
+        if (attempt <= MODEL_RETRY_LIMIT) {
+          // 主代理图：把重试进度推入记录队列（前端展示「正在重试（第 N/2 次）」过渡行）
+          if (!subagentCtx && queue?.current) {
+            queue.current.push({
+              kind: 'retry_attempt',
+              attempt,
+              retries: MODEL_RETRY_LIMIT
+            })
+          }
+          logger.error(
+            `[Agent] 模型请求失败（第 ${attempt}/${MODEL_RETRY_LIMIT} 次重试，仅重试本次调用，不重跑工具）:`,
+            error
+          )
+          await sleep(MODEL_RETRY_DELAY_MS)
+          if (config.signal?.aborted) {
+            const abortErr = new Error('Model request aborted')
+            abortErr.name = 'AbortError'
+            throw abortErr
+          }
+          continue
+        }
+        // 自动重试耗尽：主代理 + 用户直接发起 + 话题有效时，询问用户是否换模型继续（仅一次）。
+        // 图在 model 节点挂起等待回答；选定后换新模型、重置重试计数，在原位置继续执行
+        if (!modelSwitchOffered && !subagentCtx && topicId > 0 && turnSource !== 'goal-round') {
+          modelSwitchOffered = true
+          const newModel = await askUserToSwitchModel(
+            { topicId, turnSource, signal: config?.signal },
+            error
+          )
+          if (newModel) {
+            modelWithTools = bindToolsSafely(newModel, tools)
+            attempt = 0
+            logger.info('[Agent] 已切换用户选择的新模型，重置重试计数，在原位置继续执行')
+            continue
+          }
+          logger.warn('[Agent] 用户放弃切换模型，按原错误结束本轮:', error.message)
+        }
+        logger.error(
+          `[Agent] 模型请求重试耗尽（重试 ${MODEL_RETRY_LIMIT} 次仍失败），向上抛错:`,
+          error
+        )
+        throw err
+      }
+    }
   }
 
   async function callTools(

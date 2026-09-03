@@ -23,6 +23,12 @@
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models'
 import { HumanMessage, SystemMessage } from '@langchain/core/messages'
 import logger from 'electron-log'
+import {
+  askUserToSwitchModel,
+  MODEL_RETRY_LIMIT,
+  MODEL_RETRY_DELAY_MS,
+  sleep
+} from './model-recovery'
 
 /** 历史回灌时单个工具结果的内联预算（字符） */
 export const TOOL_RESULT_PRUNE_CHARS = 4_000
@@ -156,6 +162,72 @@ export async function summarizeDialogues(
   const summary = text.trim()
   if (!summary) throw new Error('摘要输出为空')
   return summary
+}
+
+/** 摘要压缩模型调用的恢复环境（重试进度上报 + 换模型询问所需身份） */
+export interface SummarizeRecoveryEnv {
+  topicId: number
+  /** 调用来源：'goal-round' 的目标自动续跑轮不弹换模型询问 */
+  turnSource?: string
+  signal?: AbortSignal
+  /** 自动重试进度（第 attempt/retries 次）：由 IPC 层推送「正在重试」过渡 chunk */
+  onRetry?: (attempt: number, retries: number) => void
+}
+
+/**
+ * 带自动重试与「换模型继续」兜底的摘要调用（与正文 callModel 同款恢复语义）：
+ * - 摘要模型请求失败（504/网络等）原地自动重试 MODEL_RETRY_LIMIT 次，每次重试前
+ *   经 env.onRetry 上报进度（前端展示「正在重试（第 N/2 次）」并保持「正在压缩…」卡）；
+ * - 重试耗尽且允许询问（主话题、非目标自动轮）→ 挂起弹出换模型选择，用户选定后
+ *   用新模型在原位置重新压缩（不丢弃既有 checkpoint、不静默回退截断）；
+ * - 用户放弃/询问不可用 → 抛错，由调用方回退字符预算截断（旧 checkpoint 保留复用）。
+ */
+export async function summarizeDialoguesWithRecovery(
+  model: BaseChatModel,
+  transcript: string,
+  priorSummary?: string,
+  env?: SummarizeRecoveryEnv
+): Promise<string> {
+  let activeModel = model
+  let attempt = 0
+  let switchOffered = false
+  for (;;) {
+    try {
+      return await summarizeDialogues(activeModel, transcript, priorSummary, env?.signal)
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error(String(err))
+      if (error.name === 'AbortError' || env?.signal?.aborted) throw err
+      attempt++
+      if (attempt <= MODEL_RETRY_LIMIT) {
+        env?.onRetry?.(attempt, MODEL_RETRY_LIMIT)
+        logger.error(
+          `[Compaction] 摘要模型请求失败（第 ${attempt}/${MODEL_RETRY_LIMIT} 次重试，正在压缩早期对话…）:`,
+          error
+        )
+        await sleep(MODEL_RETRY_DELAY_MS)
+        continue
+      }
+      // 重试耗尽：主话题 + 用户轮时询问是否换模型继续压缩（仅一次）
+      if (!switchOffered && env && env.topicId > 0 && env.turnSource !== 'goal-round') {
+        switchOffered = true
+        const switched = await askUserToSwitchModel(
+          { topicId: env.topicId, turnSource: env.turnSource, signal: env.signal },
+          error
+        )
+        if (switched) {
+          activeModel = switched
+          attempt = 0
+          logger.info('[Compaction] 用户已切换模型，用新模型继续压缩早期对话')
+          continue
+        }
+        logger.warn(
+          '[Compaction] 用户放弃切换模型，摘要按失败处理（回退字符预算截断）:',
+          error.message
+        )
+      }
+      throw err
+    }
+  }
 }
 
 /** 组装 checkpoint 落地消息（置于消息头，模型视作既定背景） */

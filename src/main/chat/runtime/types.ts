@@ -6,12 +6,13 @@
  * 保持现有 stream-producers 的消费模型（消息/工具/子代理三路并发）。
  */
 
-/** 主代理消息流记录（文本 / 推理 / 工具块） */
+/** 主代理消息流记录（文本 / 推理 / 工具块 / 模型请求重试进度） */
 export type MessageRecord =
   | { kind: 'reasoning'; text: string }
   | { kind: 'text'; text: string }
   | { kind: 'tool_block_start'; index: number; name: string; id?: string }
   | { kind: 'tool_args'; index: number }
+  | { kind: 'retry_attempt'; attempt: number; retries: number }
 
 /** 工具调用记录（output 为 Promise，工具完成时解析为字符串） */
 export interface ToolCallRecord {

@@ -247,7 +247,10 @@ export class MnemonService {
       bodyId: string
     ): Promise<{ db: PGlite; release: () => Promise<void> }> => {
       const db = await this.openDb(bodyId)
-      return { db, release: async () => {} }
+      return {
+        db,
+        release: async () => {}
+      }
     }
     return await this.registry.merge(targetBodyId, sourceBodyIds, deactivateSources, provider)
   }

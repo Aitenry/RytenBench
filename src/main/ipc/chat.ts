@@ -103,16 +103,21 @@ async function runChatTurn(
     logger.error('Failed to save user message:', err)
   }
 
+  // 对话轮次失败统一收尾：通知前端错误并复位加载态（保证任何阶段失败前端都能停止反应）
+  const failTurn = (error: unknown): { topicId: number; cancelled: boolean } => {
+    const errMsg = error instanceof Error ? error.message : String(error)
+    logger.error('[Chat] 对话轮次失败:', error)
+    safeSend(event.sender, 'chat-stream-error', { error: errMsg, topicId })
+    safeSend(event.sender, 'chat-stream-done', { topicId })
+    return { topicId, cancelled: false }
+  }
+
   // 模型创建可能因供应商不存在、被禁用、模型名称为空等原因失败，需要捕获并通知前端
   let model: BaseChatModel
   try {
     model = await getProviderService().createModel(options?.providerId)
   } catch (modelErr) {
-    const errMsg = modelErr instanceof Error ? modelErr.message : String(modelErr)
-    logger.error('[Chat] Model creation failed:', errMsg)
-    safeSend(event.sender, 'chat-stream-error', { error: errMsg, topicId })
-    safeSend(event.sender, 'chat-stream-done', { topicId })
-    return { topicId, cancelled: false }
+    return failTurn(modelErr)
   }
 
   // 按模型上下文窗口换算历史上下文字符预算（默认 20,000 token；1 token ≈ 1 字符的保守换算）
@@ -166,17 +171,28 @@ async function runChatTurn(
   // 技能优先级：chatSettings.enabledSkills > mainAgent.skills
   const effectiveSkills = chatSettings?.enabledSkills ?? mainAgentDefaults?.skills
 
-  const chatService = new ChatService(
-    model,
-    tools,
-    await getSubAgentDefs(chatSettings?.activeWorkspaceId ?? 0),
-    getDialoguesByTopicId,
-    chatSettings?.skillsPath || undefined,
-    effectiveSkills,
-    chatSettings?.workspacePath || undefined,
-    chatSettings?.memoryPath || undefined,
-    chatSettings?.activeWorkspaceId ?? 0
-  )
+  let chatService: ChatService
+  try {
+    chatService = new ChatService(
+      model,
+      tools,
+      await getSubAgentDefs(chatSettings?.activeWorkspaceId ?? 0),
+      getDialoguesByTopicId,
+      chatSettings?.skillsPath || undefined,
+      effectiveSkills,
+      chatSettings?.workspacePath || undefined,
+      chatSettings?.memoryPath || undefined,
+      chatSettings?.activeWorkspaceId ?? 0
+    )
+  } catch (err) {
+    // ChatService 初始化（含子智能体定义加载）失败：清理本轮资源并通知前端，
+    // 避免前端停留在「正在生成…」无任何反应
+    logger.error('[Chat] ChatService 初始化失败:', err)
+    streamAbortControllers.delete(event.sender.id)
+    event.sender.removeListener('render-process-gone', onSenderGone)
+    event.sender.removeListener('destroyed', onSenderGone)
+    return failTurn(err)
+  }
   const stream = chatService.sendMessageStream(question, {
     ...options,
     topicId,
@@ -186,6 +202,14 @@ async function runChatTurn(
     // 渲染进程收到结果块后原地替换过渡块，形成「压缩中 → 压缩结果」的转变）
     onCompactionStart: () => {
       safeSend(event.sender, 'chat-stream-chunk', { historyCompacting: true, __topicId: topicId })
+    },
+    // 摘要压缩模型请求自动重试：推送「正在重试（第 N/2 次）」过渡 chunk（不落库），
+    // 压缩模型失败与正文模型同款恢复——重试耗尽后经 ModelRecoveryModal 换模型在原位置继续压缩
+    onCompactionRetry: (attempt, retries) => {
+      safeSend(event.sender, 'chat-stream-chunk', {
+        retrying: { attempt, retries },
+        __topicId: topicId
+      })
     }
   })
   const accumulatedBlocks: {

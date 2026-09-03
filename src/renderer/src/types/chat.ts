@@ -52,6 +52,14 @@ export interface HistoryCompactionBlock {
   boundaryId: number
 }
 
+/** 模型请求失败后自动重试进度（retrying 过渡块：仅当轮展示，不落库） */
+export interface RetryInfoBlock {
+  /** 当前第几次重试（从 1 开始，如 1/2、2/2） */
+  attempt: number
+  /** 本轮最多重试次数 */
+  retries: number
+}
+
 /** 消息块 */
 export interface MessageBlock {
   type:
@@ -65,6 +73,7 @@ export interface MessageBlock {
     | 'historyCompacting'
     | 'historyCompacted'
     | 'goalRound'
+    | 'retrying'
   text?: string
   tool?: ToolCall
   reasoning?: string
@@ -77,6 +86,8 @@ export interface MessageBlock {
   compaction?: HistoryCompactionBlock
   /** 目标自动续跑轮次号（goalRound 类型使用） */
   round?: number
+  /** 模型请求失败后自动重试进度（retrying 类型使用，过渡块不落库） */
+  retrying?: RetryInfoBlock
   /** 智能体嵌套的子块（仅 subAgent 类型使用，用于流式构建智能体的 text/tool/reasoning） */
   children?: MessageBlock[]
 }

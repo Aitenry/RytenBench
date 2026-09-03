@@ -1,5 +1,5 @@
-@import "tailwindcss";
-@import "animate.css";
+@import 'tailwindcss';
+@import 'animate.css';
 
 /* ======== 自定义窗口框架 ======== */
 
@@ -18,12 +18,16 @@
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06), 0 4px 24px rgba(0, 0, 0, 0.10);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.06),
+    0 4px 24px rgba(0, 0, 0, 0.1);
 }
 
 /* 暗色模式：外层更暗，边框用白色半透明 */
 .dark .custom-frame {
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 4px 24px rgba(0, 0, 0, 0.25);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.08),
+    0 4px 24px rgba(0, 0, 0, 0.25);
 }
 
 /* ======== 标题栏 ======== */
@@ -127,7 +131,9 @@
   background: transparent;
   border-radius: 6px;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s;
 }
 
 .frame-menu-item:hover {
@@ -203,7 +209,9 @@
   height: 5px;
   border-radius: 50%;
   background: rgba(128, 128, 128, 0.3);
-  transition: background 0.3s, width 0.3s;
+  transition:
+    background 0.3s,
+    width 0.3s;
 }
 
 /* ======== 滚动条 ======== */
@@ -264,6 +272,34 @@
 
 .custom-container-scrollbar::-webkit-scrollbar-corner {
   background: transparent;
+}
+
+/* 模型选择弹窗（ModelRecoveryModal）目录滚动区：
+   5px 超细 + 圆角滑块，轨道隐藏；悬停滑块加深（与项目其余细滚动条同一套中性色） */
+.model-picker-scroll::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+.model-picker-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.model-picker-scroll::-webkit-scrollbar-thumb {
+  background-color: rgba(128, 128, 128, 0.28);
+  border-radius: 100px;
+}
+.model-picker-scroll:hover::-webkit-scrollbar-thumb {
+  background-color: rgba(128, 128, 128, 0.5);
+}
+.model-picker-scroll::-webkit-scrollbar-button,
+.model-picker-scroll::-webkit-scrollbar-corner {
+  display: none;
+  background: transparent;
+}
+.dark .model-picker-scroll::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.22);
+}
+.dark .model-picker-scroll:hover::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.42);
 }
 
 /* ======== antd 弹层虚拟列表滚动条（Select 下拉等 portal 到 body） ======== */

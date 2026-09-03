@@ -11,6 +11,7 @@ import ChatInput from './components/ChatInput'
 import TaskProgressCard from './components/TaskProgressCard'
 import GoalBar from './components/GoalBar'
 import AskQuestionModal from './components/AskQuestionModal'
+import ModelRecoveryModal from './components/ModelRecoveryModal'
 import WorkspacePanel from './components/WorkspacePanel'
 
 const Index: React.FC = () => {
@@ -486,6 +487,8 @@ const Index: React.FC = () => {
 
       {/* 提问弹窗：ask_user_question 工具挂起时收集用户回答 */}
       <AskQuestionModal currentTopicId={currentTopicId} />
+      {/* 模型请求失败弹窗：自动重试耗尽后选择是否切换模型继续（原位继续，不重发问题） */}
+      <ModelRecoveryModal currentTopicId={currentTopicId} />
     </div>
   )
 }

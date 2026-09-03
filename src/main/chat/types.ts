@@ -9,6 +9,8 @@ export interface ChatOptions {
   turnMeta?: TurnMeta
   /** 摘要压缩开始回调：历史超长触发 LLM 压缩时立即调用（前端展示「压缩中」过渡卡） */
   onCompactionStart?: () => void
+  /** 摘要压缩模型请求自动重试回调（第 attempt/retries 次；IPC 层据此推送「正在重试」过渡 chunk） */
+  onCompactionRetry?: (attempt: number, retries: number) => void
   /** 历史上下文字符预算（由当前模型上下文窗口换算，最小 60,000；缺省用默认值） */
   contextBudget?: number
 }
@@ -72,6 +74,14 @@ export interface HistoryCompaction {
   boundaryId: number
 }
 
+/** 模型请求失败后的自动重试进度（过渡信号：前端展示「正在重试（第 N/M 次）」，不落库） */
+export interface RetryInfo {
+  /** 当前第几次重试（从 1 开始，如 1/2、2/2） */
+  attempt: number
+  /** 本轮最多重试次数 */
+  retries: number
+}
+
 export interface StructuredMessage {
   tool?: ToolCallDetail
   content?: string
@@ -84,6 +94,8 @@ export interface StructuredMessage {
   historyCompacted?: HistoryCompaction
   /** 摘要压缩已开始（过渡信号：前端先显示「压缩中」，随后 historyCompacted 携带结果） */
   historyCompacting?: boolean
+  /** 模型请求失败（尚无任何输出）后自动重试中（过渡信号：前端展示「正在重试」，不落库） */
+  retrying?: RetryInfo
   /** 流式执行失败（部分输出后图执行失败时下发；IPC 层据此跳过把残缺回复落库） */
   streamError?: { message: string }
 }

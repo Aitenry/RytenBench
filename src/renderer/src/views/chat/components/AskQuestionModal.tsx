@@ -32,6 +32,8 @@ const AskQuestionModal: React.FC<{ currentTopicId: number | null }> = ({ current
 
   useEffect(() => {
     const unsubscribe = (window as unknown as Window).api.chat.onQuestionAsked((p) => {
+      // 「换模型继续」由专用 ModelRecoveryModal 处理，通用提问弹窗忽略，避免重复弹窗
+      if (p.questions.some((q) => q.kind === 'model-recovery')) return
       if (p.topicId === currentTopicIdRef.current) {
         setPending(p)
         setDrafts({})
@@ -114,6 +116,7 @@ const AskQuestionModal: React.FC<{ currentTopicId: number | null }> = ({ current
       onOk={() => void handleSubmit()}
       width={520}
       styles={{ body: { maxHeight: 'calc(100vh - 260px)', overflowY: 'auto' } }}
+      classNames={{ body: 'custom-scrollbar' }}
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 18, paddingTop: 4 }}>
         {pending.questions.map((q, qi) => {

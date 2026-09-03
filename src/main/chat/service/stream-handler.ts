@@ -11,12 +11,14 @@ export interface StreamDeps {
   /** 创建运行时（LangChain/LangGraph） */
   createRuntime(): Runtime
 
-  /** 加载历史上下文（含本轮摘要压缩信息与压缩开始回调；signal 贯通到摘要压缩调用） */
+  /** 加载历史上下文（含本轮摘要压缩信息与压缩开始/重试回调；signal 贯通到摘要压缩调用） */
   loadContextMessages(
     topicId: number,
     onCompactionStart?: () => void,
     contextBudget?: number,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    onCompactionRetry?: (attempt: number, retries: number) => void,
+    turnSource?: string
   ): Promise<{ messages: BaseMessage[]; compaction?: HistoryCompaction }>
 
   /** 将上传文件复制到 agent 工作区，返回虚拟路径引用 */
@@ -60,7 +62,9 @@ export async function* runStream(
           options.topicId,
           options?.onCompactionStart,
           options?.contextBudget,
-          signal
+          signal,
+          options?.onCompactionRetry,
+          options?.turnMeta?.source
         )
       : undefined
     const contextMessages = context?.messages ?? []
@@ -74,6 +78,9 @@ export async function* runStream(
     if (context?.compaction) {
       yield { historyCompacted: context.compaction }
     }
+
+    // 图执行（模型请求的自动重试发生在图内 model 节点对单次 LLM 调用的原地重试上
+    // ——见 agent.ts callModel：失败只重试那一次请求，已执行工具与已流出内容全部保留，不会整轮重跑）
     const run = runtime.stream(
       [...contextMessages, userMessage],
       signal,
@@ -85,10 +92,12 @@ export async function* runStream(
     const queue: StructuredMessage[] = []
     let waiting: (() => void) | null = null
     let producersAlive = 3
+    // 仅统计真实输出（正文/推理/工具/子代理）；重试进度等过渡信号不计入，
+    // 使「重试耗尽且从未产出内容」仍走零输出失败文本路径
     let emittedCount = 0
 
     const enqueue = (item: StructuredMessage): void => {
-      emittedCount++
+      if (item.content || item.reasoning_content || item.tool || item.subAgent) emittedCount++
       queue.push(item)
       if (waiting) {
         waiting()
@@ -144,8 +153,7 @@ export async function* runStream(
     // 等待所有生产者完成（捕获潜在错误）
     await Promise.allSettled([msgProducer, toolProducer, subAgentProducer])
 
-    // 图执行失败透传（修复：此前只有「零输出」才透传，模型已流出部分内容后失败会被
-    // 静默吞掉，截断的不完整回复被当作完整消息落库）：
+    // 图执行失败透传（model 节点内部自动重试/换模型兜底均已失效时才走到这里）：
     // - 零输出：直接下发失败文本；
     // - 已有输出：下发 streamError 标记，由 IPC 层转发错误事件并跳过落库
     if (run.error && !signal?.aborted) {

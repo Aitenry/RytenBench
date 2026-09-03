@@ -50,6 +50,8 @@ export interface StructuredMessage {
   historyCompacted?: HistoryCompaction
   /** 摘要压缩已开始（过渡信号，随后 historyCompacted 携带结果） */
   historyCompacting?: boolean
+  /** 模型请求失败后自动重试进度（过渡信号，展示「正在重试」，不落库） */
+  retrying?: { attempt: number; retries: number }
   /** 流式执行失败（部分输出后图执行失败；IPC 层据此跳过落库） */
   streamError?: { message: string }
   /** 主进程注入的话题 ID（每次 chat-stream-chunk 均携带） */

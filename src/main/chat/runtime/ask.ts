@@ -20,6 +20,8 @@ import logger from 'electron-log'
 export interface AskOption {
   label: string
   description?: string
+  /** 分组键（如供应商类型 'openai'），前端用于树形目录分组展示 */
+  group?: string
 }
 
 /** 单个问题 */
@@ -29,6 +31,12 @@ export interface AskQuestion {
   header?: string
   options?: AskOption[]
   multi_select?: boolean
+  /** 题目种类（如 'model-recovery'=模型请求失败的「换模型继续」选择；普通提问无此字段） */
+  kind?: string
+  /** kind='model-recovery' 时的失败原因（展示用） */
+  error?: string
+  /** kind='model-recovery' 时「放弃继续」选项的文案（前端排到列表末尾并按放弃处理） */
+  abandonLabel?: string
 }
 
 /** 答案（单选取第一个；多选为数组；带 custom 为补充文本） */

@@ -165,6 +165,9 @@ export async function produceMessages(
           enqueue({ reasoning_content: delta })
         }
         lastSentReasoning = rec.text
+      } else if (rec.kind === 'retry_attempt') {
+        // 模型单次请求失败后在原调用处自动重试（不整轮重跑），转发进度给前端展示
+        enqueue({ retrying: { attempt: rec.attempt, retries: rec.retries } })
       } else if (rec.kind === 'text') {
         const delta = contentDelta(rec.text, lastSentContent)
         if (delta) {
