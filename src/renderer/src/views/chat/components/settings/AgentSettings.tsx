@@ -33,7 +33,7 @@ import {
   SettingsPageHeader,
   SettingsSection,
   SettingRow
-} from '../../../../components/system/settings/settings-ui'
+} from '@renderer/components/system/settings/SettingsUI'
 
 const { TextArea } = Input
 

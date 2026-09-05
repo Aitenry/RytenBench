@@ -5,7 +5,7 @@ import { Window } from '../../../../resource/types/window'
 import type { SystemSettings, GraphSettings as GraphSettingsType } from '@renderer/types/settings'
 import type { ProviderOption } from '@renderer/types/components'
 import { isEmbeddingProvider, getProviderDisplayName } from '@renderer/utils/providerMeta'
-import { SettingsPageHeader, SettingsSection, SettingRow } from './settings-ui'
+import { SettingsPageHeader, SettingsSection, SettingRow } from './SettingsUI'
 
 const GraphSettings: React.FC = () => {
   const { viewMessage } = useMessage()

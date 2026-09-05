@@ -8,7 +8,7 @@ import {
   SettingsPageHeader,
   SettingsSection,
   SettingRow
-} from '../../../../components/system/settings/settings-ui'
+} from '@renderer/components/system/settings/SettingsUI'
 
 interface SkillInfo {
   id: string

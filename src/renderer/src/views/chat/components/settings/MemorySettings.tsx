@@ -15,7 +15,7 @@ import {
   SettingsPageHeader,
   SettingsSection,
   SettingRow
-} from '../../../../components/system/settings/settings-ui'
+} from '@renderer/components/system/settings/SettingsUI'
 
 /**
  * Mnemon 记忆管理（三层记忆）

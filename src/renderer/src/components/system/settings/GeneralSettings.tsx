@@ -6,7 +6,7 @@ import { useMessage } from '@renderer/hooks/useMessage'
 import { useTheme } from '@renderer/contexts/useTheme'
 import { Window } from '../../../../resource/types/window'
 import type { SystemSettings, ThemeMode } from '@renderer/types/settings'
-import { SettingsPageHeader, SettingsSection, SettingRow } from './settings-ui'
+import { SettingsPageHeader, SettingsSection, SettingRow } from './SettingsUI'
 
 const GeneralSettings: React.FC = () => {
   const { viewMessage } = useMessage()

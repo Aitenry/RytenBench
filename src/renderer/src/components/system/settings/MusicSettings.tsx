@@ -4,7 +4,7 @@ import { FolderOutlined } from '@ant-design/icons'
 import { useMessage } from '@renderer/hooks/useMessage'
 import { Window } from '../../../../resource/types/window'
 import type { SystemSettings } from '@renderer/types/settings'
-import { SettingsPageHeader, SettingsSection } from './settings-ui'
+import { SettingsPageHeader, SettingsSection } from './SettingsUI'
 
 const MusicSettings: React.FC = () => {
   const { viewMessage } = useMessage()

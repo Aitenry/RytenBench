@@ -3,7 +3,7 @@ import { theme } from 'antd'
 import { useMessage } from '@renderer/hooks/useMessage'
 import { Window } from '../../../../resource/types/window'
 import type { SystemSettings } from '@renderer/types/settings'
-import { SettingsPageHeader, SettingsSection, SettingRow } from './settings-ui'
+import { SettingsPageHeader, SettingsSection, SettingRow } from './SettingsUI'
 
 const SystemInfo: React.FC = () => {
   const {
