@@ -20,7 +20,7 @@ const Toolbar: React.FC<Props> = ({ viewMode, onViewModeChange, onAddTask }) => 
 
   return (
     <div
-      className="flex items-center px-3 shrink-0"
+      className="flex items-center px-2 shrink-0"
       style={{
         height: 36,
         borderBottom: `1px solid ${token.colorBorderSecondary}`,

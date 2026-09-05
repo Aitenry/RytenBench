@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { theme } from 'antd'
-import { RiCalendar2Line, RiChatAiLine, RiDashboardLine, RiMusicLine } from '@remixicon/react'
+import { RiCalendar2Line, RiChatAiLine, RiDashboardLine, RiDiscLine } from '@remixicon/react'
 import { useTheme } from '@renderer/contexts/useTheme'
 import { Window } from '../../../resource/types/window'
 import MainRoutes from '@renderer/route/MainRoutes'
@@ -69,9 +69,9 @@ const CustomFrame: React.FC<CustomFrameProps> = ({ currentKey, setCurrentKey }) 
   const menuItems: MenuItem[] = useMemo(
     () => [
       { key: 'home', label: '首页', icon: <RiDashboardLine size={16} /> },
-      { key: 'chat', label: '助手', icon: <RiChatAiLine size={16} /> },
       { key: 'planner', label: '计划', icon: <RiCalendar2Line size={16} /> },
-      { key: 'music', label: '音乐', icon: <RiMusicLine size={16} /> }
+      { key: 'music', label: '音乐', icon: <RiDiscLine size={16} /> },
+      { key: 'chat', label: '助手', icon: <RiChatAiLine size={16} /> }
     ],
     []
   )

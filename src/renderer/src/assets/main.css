@@ -43,7 +43,7 @@
 .frame-titlebar-left {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 10px;
   -webkit-app-region: drag;
 }
 
@@ -63,7 +63,7 @@
 .frame-titlebar-controls {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 13px;
   -webkit-app-region: no-drag;
 }
 
@@ -116,9 +116,9 @@
 .frame-menu {
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 10px;
   width: 26px;
-  padding: 3px 0;
+  padding: 8px 0;
   height: 100%;
 }
 

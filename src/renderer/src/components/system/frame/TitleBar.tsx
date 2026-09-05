@@ -8,7 +8,6 @@ import {
   RiFolderOpenLine,
   RiMoreLine,
   RiShutDownLine,
-  RiSubtractLine,
   RiSearchLine,
   RiCloseLine
 } from '@remixicon/react'
@@ -441,7 +440,9 @@ const TitleBar: React.FC<TitleBarProps> = ({
 
       <div className="frame-titlebar-controls" style={{ color: colorText }}>
         <button className="frame-titlebar-btn" onClick={onMinimize} title="最小化">
-          <RiSubtractLine size={16} />
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 18 18">
+            <line x1="3" y1="9" x2="15" y2="9" stroke="currentColor" />
+          </svg>
         </button>
         <button
           className="frame-titlebar-btn"
