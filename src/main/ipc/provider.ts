@@ -195,6 +195,18 @@ export function registerProviderIpc(): void {
     }
   })
 
+  // 手动添加模型时按模型 ID 查询 models-profile 官方档案（未收录返回 null），
+  // 命中后由渲染端自动填充元数据，避免用户重复手填；查询失败返回 null 保持静默
+  ipcMain.handle('provider-lookup-profile', async (_event, modelId: string) => {
+    try {
+      if (!modelId || typeof modelId !== 'string') return null
+      return findModelProfile(modelId.trim())
+    } catch (error) {
+      logger.error('Error in provider-lookup-profile:', error)
+      return null
+    }
+  })
+
   // --- Agent (智能体) IPC handlers ---
 
   ipcMain.handle('agent-get-all', async (_event, workspaceId: number) => {
