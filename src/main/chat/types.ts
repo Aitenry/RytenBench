@@ -131,8 +131,8 @@ export interface SubAgentEvent {
   name: string
   /** 派遣此智能体的 task 工具调用唯一 ID（用于区分同名智能体的多次调用） */
   causeId?: string
-  /** 事件类型 */
-  status: 'started' | 'running' | 'completed' | 'error'
+  /** 事件类型；dispatched=后台任务已派发（轻量卡：仅名称+简述+会话 id，结果在顶部栏查看） */
+  status: 'started' | 'running' | 'dispatched' | 'completed' | 'error'
   /** 智能体的输出内容（completed 时） */
   output?: string
   /** 智能体执行过程中的消息 */
@@ -147,6 +147,8 @@ export interface SubAgentEvent {
   tool?: ToolCallDetail
   /** task 工具调用时携带的任务描述（frontend / persistence 从 task 工具输入转换） */
   taskDescription?: string
+  /** 后台派发（status='dispatched'）时的会话 ID（subagent-N），供对话轻量卡展示 */
+  subagentId?: string
 }
 
 /** Available tool definition for the frontend dropdown */

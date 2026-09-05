@@ -18,6 +18,7 @@ import { getSubAgentDefs } from '../chat/preload-cache'
 import { todoStore } from '../chat/runtime/todo'
 import { goalStore } from '../chat/runtime/goal'
 import { jobsRegistry } from '../chat/runtime/jobs'
+import { subagentSessions } from '../chat/runtime/subagent-sessions'
 import { questionService } from '../chat/runtime/ask'
 import { goalRoundDriver } from '../chat/goal-driver'
 import { ChatSettings } from '../types/settings'
@@ -384,6 +385,22 @@ async function runChatTurn(
                 break
               }
             }
+            // 防御：部分 provider 首个工具块不携带工具名（以占位名 'tool' 登记）——
+            // 未按名称匹配到 preparing 块时，并入最近的占位块并改名为真实工具名，
+            // 避免「tool · 生成中…」幽灵块与真实工具块并存（与渲染端 applyChunkToMessages 一致）
+            if (!merged) {
+              for (let i = accumulatedBlocks.length - 1; i >= 0; i--) {
+                const b = accumulatedBlocks[i]
+                if (b.type === 'tool' && b.tool?.status === 'preparing' && b.tool.name === 'tool') {
+                  b.tool.name = chunk.tool.name
+                  b.tool.input = chunk.tool.input
+                  b.tool.status = 'executing'
+                  b.tool.id = b.tool.id ?? chunk.tool.id
+                  merged = true
+                  break
+                }
+              }
+            }
             if (!merged) {
               accumulatedBlocks.push({
                 type: 'tool',
@@ -436,6 +453,12 @@ async function runChatTurn(
           saBlock.subAgent!.status = sa.status
           saBlock.subAgent!.taskDescription =
             saBlock.subAgent!.taskDescription || sa.taskDescription
+        } else if (sa.status === 'dispatched') {
+          // 后台派发轻量事件：块定格在「已派发」（名称+简述+会话 id），无子块/内容
+          saBlock.subAgent!.status = 'dispatched'
+          saBlock.subAgent!.taskDescription =
+            saBlock.subAgent!.taskDescription || sa.taskDescription
+          saBlock.subAgent!.subagentId = sa.subagentId ?? saBlock.subAgent!.subagentId
         } else if (sa.status === 'completed' || sa.status === 'error') {
           saBlock.subAgent!.status = sa.status
           saBlock.subAgent!.output = sa.output
@@ -519,6 +542,24 @@ async function runChatTurn(
                   c.tool.id = c.tool.id ?? sa.tool.id
                   merged = true
                   break
+                }
+              }
+              // 防御：占位名 'tool' 兜底（同上方主代理累积块逻辑）
+              if (!merged) {
+                for (let i = saBlock.children.length - 1; i >= 0; i--) {
+                  const c = saBlock.children[i]
+                  if (
+                    c.type === 'tool' &&
+                    c.tool?.status === 'preparing' &&
+                    c.tool.name === 'tool'
+                  ) {
+                    c.tool.name = sa.tool.name
+                    c.tool.input = sa.tool.input
+                    c.tool.status = 'executing'
+                    c.tool.id = c.tool.id ?? sa.tool.id
+                    merged = true
+                    break
+                  }
                 }
               }
               if (!merged) {
@@ -691,6 +732,64 @@ export function registerChatIpc(): void {
       if (!win.isDestroyed()) safeSend(win.webContents, 'chat-jobs-updated', { topicId, jobs })
     }
   }
+
+  // 后台子代理会话变更 → 广播（顶部栏代理列表实时刷新）
+  subagentSessions.onChange = (topicId, rows) => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) safeSend(win.webContents, 'chat-agents-updated', { topicId, rows })
+    }
+  }
+  ipcMain.handle('chat-agents-list', (_event, topicId: number) => subagentSessions.list(topicId))
+  ipcMain.handle('chat-agent-output', (_event, topicId: number, agentId: string) =>
+    subagentSessions.readOutput(agentId, topicId)
+  )
+
+  // 后台子代理输出推送（弹窗监听后端，替代手动刷新/轮询）：
+  // 仅在渲染端 watch 该 agent 时消费 onLiveOutput，并按 500ms 节流（防 token 级 IPC 风暴）
+  const agentWatchSet = new Set<string>() // `${topicId}:${agentId}`
+  const agentPushTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  const agentLastPush = new Map<string, number>()
+  const AGENT_OUTPUT_PUSH_MS = 500
+  const pushAgentOutput = (topicId: number, agentId: string): void => {
+    const output = subagentSessions.readOutput(agentId, topicId)
+    if (!output) return
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) {
+        safeSend(win.webContents, 'chat-agent-output-updated', { topicId, agentId, output })
+      }
+    }
+  }
+  subagentSessions.onLiveOutput = (topicId, agentId) => {
+    const key = `${topicId}:${agentId}`
+    if (!agentWatchSet.has(key)) return
+    const now = Date.now()
+    const last = agentLastPush.get(key) ?? 0
+    if (now - last >= AGENT_OUTPUT_PUSH_MS) {
+      agentLastPush.set(key, now)
+      pushAgentOutput(topicId, agentId)
+    } else if (!agentPushTimers.has(key)) {
+      agentPushTimers.set(
+        key,
+        setTimeout(() => {
+          agentPushTimers.delete(key)
+          agentLastPush.set(key, Date.now())
+          pushAgentOutput(topicId, agentId)
+        }, AGENT_OUTPUT_PUSH_MS)
+      )
+    }
+  }
+  ipcMain.on('chat-agent-watch', (_event, topicId: number, agentId: string, watch: boolean) => {
+    const key = `${topicId}:${agentId}`
+    if (watch) {
+      agentWatchSet.add(key)
+      pushAgentOutput(topicId, agentId) // 打开弹窗即推一次当前快照
+    } else {
+      agentWatchSet.delete(key)
+      const timer = agentPushTimers.get(key)
+      if (timer) clearTimeout(timer)
+      agentPushTimers.delete(key)
+    }
+  })
 
   // 提问系统：新提问 → 广播到所有窗口（前端弹窗）；回答/查询走 handle
   questionService.onAsk = (pending) => {

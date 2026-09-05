@@ -46,3 +46,51 @@ export const computeTextDelta = (incoming: string, previous: string): string => 
 export const pushBlock = (blocks: MessageBlock[], block: MessageBlock): void => {
   blocks.push(block)
 }
+
+/**
+ * 工具进行中/完成态标签（与 AssistantMessage 渲染共用，测试断言同源）：
+ * - preparing：模型已吐出工具名、正在生成参数（阶段二「参数构建中」）
+ * - executing：系统正在执行参数
+ * - 其余：静态工具名
+ */
+export const getToolStatusLabel = (
+  toolName: string,
+  phase: 'preparing' | 'executing' | undefined
+): string => {
+  if (phase === 'preparing') return `${toolName} · 参数构建中…`
+  if (phase === 'executing') return `${toolName} · 执行中…`
+  return toolName
+}
+
+/**
+ * 占位名兜底：部分 provider 首个工具块不携带工具名（以占位名 'tool' 登记）。
+ * executing 未按名称匹配到 preparing 块时，并入最近的占位块并改名为真实工具名，
+ * 避免「tool · 参数构建中…」幽灵块与真实工具块并存。返回下标，未找到返回 -1。
+ */
+export const findPlaceholderPreparingTool = (blocks: MessageBlock[]): number => {
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const b = blocks[i]
+    if (b.type === 'tool' && b.tool?.status === 'preparing' && b.tool.name === 'tool') return i
+  }
+  return -1
+}
+
+/**
+ * 流式静默窗口阈值：已有可见输出、loading 中、超过该时长无任何新 chunk 时，
+ * 视为「模型仍在生成但流内无事件」（推理型模型生成大参数期间 SSE 静默的典型表现），
+ * 由 UI 显示「正在生成…」光泽指示行（诚实不冒充工具名）。
+ */
+export const STREAM_SILENCE_MS = 2500
+
+/** 流式静默指示判定（纯逻辑，测试脚本与渲染同源） */
+export const shouldShowSilenceIndicator = (args: {
+  loading: boolean
+  /** 已有任何可见输出（正文/推理/工具块/子代理块等） */
+  hasStartedContent: boolean
+  now: number
+  /** 最后收到 chunk 的时间戳（缺省用消息创建时间） */
+  lastChunkAt: number
+}): boolean => {
+  if (!args.loading || !args.hasStartedContent) return false
+  return args.now - args.lastChunkAt >= STREAM_SILENCE_MS
+}

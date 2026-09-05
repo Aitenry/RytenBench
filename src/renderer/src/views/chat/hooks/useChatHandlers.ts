@@ -5,7 +5,12 @@ import { Window, ToolInfo } from '../../../../resource/types/window'
 import type { Message, Attachment, ToolCall, MessageBlock } from '@renderer/types/chat'
 import type { StreamChunk } from '../../../../../main/chat/types'
 import { useTypewriter, useCyclingTypewriter } from './useTypewriter'
-import { isSameToolCall, computeTextDelta, pushBlock } from '../utils/chatHelpers'
+import {
+  isSameToolCall,
+  computeTextDelta,
+  pushBlock,
+  findPlaceholderPreparingTool
+} from '../utils/chatHelpers'
 import {
   getProviderDisplayName,
   isEmbeddingProvider,
@@ -512,6 +517,28 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
                   break
                 }
               }
+              // 防御：部分 provider 首个工具块不携带工具名（以占位名 'tool' 登记）——
+              // 未按名称匹配到 preparing 块时，并入最近的占位块并改名为真实工具名，
+              // 避免「tool · 参数构建中…」幽灵块与真实工具块并存
+              if (!merged) {
+                const placeholderIdx = findPlaceholderPreparingTool(updatedBlocks)
+                if (placeholderIdx >= 0) {
+                  const b = updatedBlocks[placeholderIdx]
+                  if (b.type === 'tool' && b.tool) {
+                    updatedBlocks[placeholderIdx] = {
+                      type: 'tool',
+                      tool: {
+                        name: chunk.tool.name,
+                        input: chunk.tool.input,
+                        output: '',
+                        status: 'executing',
+                        id: b.tool.id ?? chunk.tool.id
+                      }
+                    }
+                    merged = true
+                  }
+                }
+              }
               if (!merged) {
                 const blockTool = {
                   name: chunk.tool.name,
@@ -572,6 +599,34 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
             }
             if (sa.causeId) {
               activeCauseIds.add(sa.causeId)
+            }
+          } else if (sa.status === 'dispatched') {
+            // 后台派发轻量卡：定格「已派发」，仅名称+简述+会话 id（结果在顶部栏查看）
+            const idx = findSaBlock()
+            if (idx < 0) {
+              pushBlock(updatedBlocks, {
+                type: 'subAgent',
+                subAgent: {
+                  name: sa.name,
+                  causeId: sa.causeId,
+                  status: 'dispatched',
+                  taskDescription: sa.taskDescription,
+                  subagentId: sa.subagentId
+                },
+                children: []
+              })
+            } else {
+              const existing = updatedBlocks[idx]
+              const prevSa = existing.subAgent!
+              updatedBlocks[idx] = {
+                ...existing,
+                subAgent: {
+                  ...prevSa,
+                  status: 'dispatched',
+                  taskDescription: prevSa.taskDescription || sa.taskDescription,
+                  subagentId: sa.subagentId ?? prevSa.subagentId
+                }
+              }
             }
           } else if (sa.status === 'completed' || sa.status === 'error') {
             const idx = findSaBlock()
@@ -728,6 +783,27 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
                       break
                     }
                   }
+                  // 防御：部分 provider 首个工具块不携带工具名（以占位名 'tool' 登记）——
+                  // 未按名称匹配到 preparing 块时，并入最近的占位块并改名为真实工具名
+                  if (!merged) {
+                    const placeholderIdx = findPlaceholderPreparingTool(block.children)
+                    if (placeholderIdx >= 0) {
+                      const c = block.children[placeholderIdx]
+                      if (c.type === 'tool' && c.tool) {
+                        block.children[placeholderIdx] = {
+                          type: 'tool',
+                          tool: {
+                            name: sa.tool.name,
+                            input: sa.tool.input,
+                            output: '',
+                            status: 'executing',
+                            id: c.tool.id ?? sa.tool.id
+                          }
+                        }
+                        merged = true
+                      }
+                    }
+                  }
                   if (!merged) {
                     pushBlock(block.children, {
                       type: 'tool',
@@ -751,7 +827,9 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
           content: updatedContent,
           blocks: updatedBlocks,
           toolCalls: updatedToolCalls.length > 0 ? updatedToolCalls : undefined,
-          reasoning_content: updatedReasoning
+          reasoning_content: updatedReasoning,
+          // 瞬时字段：记录最后 chunk 时间戳，供静默指示（正在生成…）判定
+          lastChunkAt: Date.now()
         }
       })
     },

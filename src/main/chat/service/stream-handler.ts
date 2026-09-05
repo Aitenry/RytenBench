@@ -127,11 +127,22 @@ export async function* runStream(
       }
     }
 
+    // 共享标志：工具开始执行（模型消息结束）后，消息生产者停止「参数构建中」保活，
+    // 防止已完成的工具卡被复活（用户报障：不要阻塞）；新一轮模型输出开始时重置
+    const toolsStarted = { value: false }
+
     // 启动三个生产者
-    const msgProducer = produceMessages(run, signal, enqueue, markDone).catch(() => {})
-    const toolProducer = produceToolCalls(run, signal, enqueue, markDone, safeGetOutput).catch(
+    const msgProducer = produceMessages(run, signal, enqueue, markDone, toolsStarted).catch(
       () => {}
     )
+    const toolProducer = produceToolCalls(
+      run,
+      signal,
+      enqueue,
+      markDone,
+      safeGetOutput,
+      toolsStarted
+    ).catch(() => {})
     const subAgentProducer = produceSubAgents(run, signal, enqueue, markDone, safeGetOutput).catch(
       () => {}
     )

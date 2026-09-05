@@ -9,7 +9,6 @@ import {
   RiListCheck,
   RiCheckboxCircleLine,
   RiCheckboxBlankCircleLine,
-  RiFileSearchLine,
   RiFileEditLine,
   RiPencilLine,
   RiFolderOpenLine,
@@ -17,12 +16,17 @@ import {
   RiTerminalBoxLine,
   RiBrain4Line,
   RiPictureInPicture2Line,
-  RiSparkling2Line
+  RiSparkling2Line,
+  RiEye2Line
 } from '@remixicon/react'
 import MarkdownLoad from '@renderer/components/markdown/MarkdownLoad'
 import { ShinyText, ShinyIcon } from '@renderer/components/effects/ShinyText'
 import LoadingMessage from './LoadingMessage'
 import type { Message, MessageBlock, ToolCall } from '@renderer/types/chat'
+import {
+  getToolStatusLabel,
+  shouldShowSilenceIndicator
+} from '@renderer/views/chat/utils/chatHelpers'
 
 /** 工具进行中折叠头展示的语义图标：与工具完成后的定制卡片图标保持一致 */
 const TOOL_IN_PROGRESS_ICONS: Record<
@@ -34,7 +38,7 @@ const TOOL_IN_PROGRESS_ICONS: Record<
     style?: React.CSSProperties
   }>
 > = {
-  read_file: RiFileSearchLine,
+  read_file: RiEye2Line,
   write_file: RiFileEditLine,
   edit_file: RiPencilLine,
   ls: RiFolderOpenLine,
@@ -44,6 +48,17 @@ const TOOL_IN_PROGRESS_ICONS: Record<
   write_todos: RiListCheck,
   read_todos: RiListCheck
 }
+
+/** 定制化卡片工具集：进行中/完成态共用同款卡片外形（光泽只在进行中扫过，完成后静止） */
+const CARD_TOOLS = new Set([
+  'read_file',
+  'write_file',
+  'edit_file',
+  'ls',
+  'glob',
+  'grep',
+  'execute'
+])
 
 interface AssistantMessageProps {
   message: Message
@@ -157,6 +172,53 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
     const hasMemoryBlock = message.blocks.some((b) => b.type === 'memoryInjected')
     const hasCompactingBlock = message.blocks.some((b) => b.type === 'historyCompacting')
     const hasRetryingBlock = message.blocks.some((b) => b.type === 'retrying')
+
+    // 流式静默指示：推理型模型生成大工具参数期间，流内可能长时间无任何事件（连工具名
+    // 都不发）——此时已输出的内容之后显示「正在生成…」光泽行，诚实反馈「仍在生成」，
+    // 工具调用一旦到达即切换为真实工具卡。每 500ms 刷新一次时钟。
+    const [, setSilenceTick] = useState(0)
+    // 子代理折叠手动展开记录（key = 会话 causeId 等稳定标识）：进行中强制展开、
+    // 完成后默认收起，仍可手动点开查看输出。defaultActiveKey 只在首次挂载生效，
+    // 状态翻转（running→completed）后不会自动收起，故改为受控 activeKey。
+    const [saOpenOverride, setSaOpenOverride] = useState<Record<string, boolean>>({})
+    useEffect(() => {
+      if (!message.loading) return
+      const id = setInterval(() => setSilenceTick((t) => t + 1), 500)
+      return () => clearInterval(id)
+    }, [message.loading])
+    const silenceNow = Date.now()
+    const hasVisibleToolBlock = message.blocks.some(
+      (b) =>
+        b.type === 'tool' &&
+        b.tool &&
+        (b.tool.status === 'preparing' ||
+          b.tool.status === 'executing' ||
+          b.tool.status === 'completed' ||
+          (!b.tool.status && !b.tool.output))
+    )
+    const isSilent = shouldShowSilenceIndicator({
+      loading: Boolean(message.loading),
+      hasStartedContent: Boolean(
+        message.content || message.reasoning_content || message.blocks.length > 0
+      ),
+      now: silenceNow,
+      lastChunkAt: message.lastChunkAt ?? message.timestamp
+    })
+    const showSilenceGenerating =
+      isSilent &&
+      !hasVisibleToolBlock &&
+      !hasMemoryBlock &&
+      !hasCompactingBlock &&
+      !hasRetryingBlock
+
+    /** 最后一个子块是否为进行中工具卡（是则不再显示静默指示，工具卡本身已有状态） */
+    const lastChildIsActiveTool = (children: MessageBlock[]): boolean => {
+      const last = children[children.length - 1]
+      if (!last || last.type !== 'tool' || !last.tool) return false
+      const st = last.tool.status
+      return st === 'preparing' || st === 'executing' || (!st && !last.tool.output)
+    }
+
     if (
       message.loading &&
       !message.content &&
@@ -341,24 +403,26 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
       return renderTodoCard(todos, key, isNested)
     }
 
-    /** 渲染 deepagent 内置工具为定制化卡片（非折叠）
-     *  扁平布局，border / 背景色与 Collapse 工具块一致 */
+    /** 渲染 deepagent 内置工具卡片（非折叠）
+     *  进行中（生成参数/执行）与完成态同款扁平外形：border / 背景 / 语义图标 / 参数摘要一致，
+     *  仅「参数构建中…/执行中…」状态文字与光泽扫过（ShinyText/ShinyIcon）；完成后恢复静态。
+     *  参数构建期间（input 为空）退化为工具名 + 状态，参数到达后显示路径/命令摘要 */
     const renderToolCard = (
       tool: ToolCall,
       key: string | number,
-      isNested = false
+      isNested = false,
+      progress?: 'preparing' | 'executing'
     ): React.ReactNode => {
       const card = tool.card
-      if (!card) return null
-
       const size = isNested ? 14 : 16
       const fontSize = isNested ? '12px' : '13px'
 
       const iconStyle = { color: colorTextSecondary, flexShrink: 0 }
+      const inProgress = progress === 'preparing' || progress === 'executing'
 
-      const renderPathRow = (
+      const renderRow = (
         icon: React.ReactNode,
-        label: string,
+        label: React.ReactNode,
         extra?: React.ReactNode
       ): React.ReactNode => (
         <div
@@ -375,14 +439,62 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
           }}
         >
           {icon}
-          <TruncatedTooltipText text={label} style={{ color: colorText, fontSize, flex: 1 }} />
+          {label}
           {extra}
         </div>
       )
 
+      /** 进行中态：语义图标 + 参数摘要（输入中能解析就显示，否则退化为工具名）+ 状态后缀，光泽扫过 */
+      if (inProgress) {
+        const input = (tool.input || {}) as Record<string, unknown>
+        let summary = ''
+        switch (tool.name) {
+          case 'read_file':
+          case 'write_file':
+          case 'edit_file':
+            summary = typeof input.file_path === 'string' ? input.file_path : ''
+            break
+          case 'ls':
+            summary = typeof input.path === 'string' ? input.path : ''
+            break
+          case 'glob':
+          case 'grep':
+            summary = typeof input.pattern === 'string' ? input.pattern : ''
+            break
+          case 'execute':
+            summary = typeof input.command === 'string' ? input.command : ''
+            break
+        }
+        const status = progress === 'preparing' ? ' · 参数构建中…' : ' · 执行中…'
+        const Icon = TOOL_IN_PROGRESS_ICONS[tool.name] || RiTerminalBoxLine
+        return renderRow(
+          <ShinyIcon icon={Icon} size={size} baseColor={colorTextSecondary} />,
+          <ShinyText baseColor={colorText} style={{ flex: 1, minWidth: 0 }}>
+            <TruncatedTooltipText
+              text={`${summary || tool.name || '工具调用'}${status}`}
+              style={{ color: colorText, fontSize, flex: 1 }}
+            />
+          </ShinyText>
+        )
+      }
+
+      // 完成态：无卡片数据视为无定制展示，返回 null 交由通用折叠兜底
+      if (!card) return null
+
+      const renderPathRow = (
+        icon: React.ReactNode,
+        label: string,
+        extra?: React.ReactNode
+      ): React.ReactNode =>
+        renderRow(
+          icon,
+          <TruncatedTooltipText text={label} style={{ color: colorText, fontSize, flex: 1 }} />,
+          extra
+        )
+
       switch (tool.name) {
         case 'read_file':
-          return renderPathRow(<RiFileSearchLine size={size} style={iconStyle} />, card.path || '')
+          return renderPathRow(<RiEye2Line size={size} style={iconStyle} />, card.path || '')
         case 'write_file':
           return renderPathRow(<RiFileEditLine size={size} style={iconStyle} />, card.path || '')
         case 'edit_file':
@@ -858,6 +970,45 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
       )
     }
 
+    /** mnemon 记忆工具进行中卡片：大脑图标 + 中文标题 + 状态后缀，光泽扫过（完成后仍是专属结果卡） */
+    const renderMemoryInProgressCard = (
+      tool: ToolCall,
+      key: string | number,
+      isNested = false,
+      progress: 'preparing' | 'executing'
+    ): React.ReactNode => {
+      const size = isNested ? 14 : 16
+      const fontSize = isNested ? '12px' : '13px'
+      const title =
+        MEMORY_TOOL_TITLES[tool.name] ??
+        (MEMORY_WRITE_TOOLS.includes(tool.name) ? '记忆写入' : '记忆工具')
+      const status = progress === 'preparing' ? ' · 参数构建中…' : ' · 执行中…'
+      return (
+        <div
+          key={key}
+          style={{
+            background: collapseBg,
+            border: 'var(--ant-line-width) var(--ant-line-type) var(--ant-color-border)',
+            marginBottom: isNested ? '4px' : '6px',
+            borderRadius: '8px',
+            padding: '8px 12px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px'
+          }}
+          className="rounded-lg"
+        >
+          <ShinyIcon icon={RiBrain4Line} size={size} baseColor={colorTextSecondary} />
+          <ShinyText baseColor={colorTextSecondary} style={{ flex: 1, minWidth: 0 }}>
+            <TruncatedTooltipText
+              text={`${title}${status}`}
+              style={{ color: colorTextSecondary, fontSize, flex: 1 }}
+            />
+          </ShinyText>
+        </div>
+      )
+    }
+
     const renderBlocks = (): React.ReactNode => {
       if (message.blocks.length === 0) {
         if (message.content) {
@@ -1000,7 +1151,8 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                     </span>
                   ),
                   children: (
-                    <div className="px-1.5 text-sm">
+                    // 固定展示高度 + 纵向滚动条（注入条目多/文本长时内容不撑爆整卡）
+                    <div className="max-h-64 overflow-y-auto chat-scrollbar px-1.5 text-sm">
                       {mem.user.length > 0 ? (
                         <>
                           <div style={{ color: colorTextSecondary }} className="font-medium mb-1">
@@ -1103,35 +1255,44 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
         }
         if (block.type === 'tool' && block.tool) {
           if (block.tool.name === 'write_todos') {
-            return renderWriteTodos(block.tool, blockIndex)
+            const todosCard = renderWriteTodos(block.tool, blockIndex)
+            if (todosCard) return todosCard
           }
           // read_todos 专属卡片：完成后渲染；未完成/解析失败返回 null，落到下方通用折叠
           if (block.tool.name === 'read_todos') {
             const readTodosCard = renderReadTodos(block.tool, blockIndex)
             if (readTodosCard) return readTodosCard
           }
-          // Mnemon 记忆工具定制卡片（仅在完成后展示内容）
-          if (
-            block.tool.name.startsWith('mnemon_') &&
-            (MEMORY_READ_TOOLS.includes(block.tool.name) ||
-              MEMORY_WRITE_TOOLS.includes(block.tool.name)) &&
-            block.tool.status === 'completed'
-          ) {
-            return renderMemoryToolCard(block.tool, blockIndex)
-          }
-          // 定制化卡片：deepagent 内置工具（ls / read_file / write_file / edit_file / glob / grep / execute）
-          if (block.tool.card && block.tool.status === 'completed') {
-            return renderToolCard(block.tool, blockIndex)
-          }
           const isPreparing = block.tool.status === 'preparing'
           const isExecuting =
             block.tool.status === 'executing' || (!block.tool.status && !block.tool.output)
           // 仅在消息进行中才视为进行中状态，避免中止/完成后转圈不消失
           const inProgress = Boolean(message.loading) && (isPreparing || isExecuting)
+          const phase: 'preparing' | 'executing' | undefined = inProgress
+            ? isPreparing
+              ? 'preparing'
+              : 'executing'
+            : undefined
           const toolName = block.tool.name || '工具调用'
-          const toolLabel = inProgress
-            ? `${toolName}${isPreparing ? ' · 生成中…' : ' · 执行中…'}`
-            : toolName
+          // Mnemon 记忆工具：进行中 = 同款光泽状态卡；完成后 = 专属结果卡
+          if (
+            toolName.startsWith('mnemon_') &&
+            (MEMORY_READ_TOOLS.includes(toolName) || MEMORY_WRITE_TOOLS.includes(toolName))
+          ) {
+            if (block.tool.status === 'completed') {
+              return renderMemoryToolCard(block.tool, blockIndex)
+            }
+            if (phase) return renderMemoryInProgressCard(block.tool, blockIndex, false, phase)
+          }
+          // 系统工具：进行中与完成态共用同款卡片（光泽只在进行中扫过，完成后静止）
+          if (CARD_TOOLS.has(toolName)) {
+            if (phase) return renderToolCard(block.tool, blockIndex, false, phase)
+            if (block.tool.card && block.tool.status === 'completed') {
+              return renderToolCard(block.tool, blockIndex)
+            }
+          }
+          // 其余工具（含无卡片数据的异常完成态）：通用折叠，进行中光泽头 + 输入/输出详情
+          const toolLabel = getToolStatusLabel(toolName, phase)
           // 进行中折叠头展示该工具完成后的定制卡片同款图标；mnemon 记忆工具用大脑图标；其余不显示
           const inProgressIcon =
             inProgress &&
@@ -1194,6 +1355,53 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
         }
         if (block.type === 'subAgent' && block.subAgent) {
           const sa = block.subAgent
+          // 后台派发轻量卡：仅名称 + 简述 + 会话 id（不含智能体内容/结果——结果在顶部栏查看）
+          if (sa.status === 'dispatched') {
+            return (
+              <div
+                key={blockIndex}
+                style={{
+                  background: collapseBg,
+                  border: 'var(--ant-line-width) var(--ant-line-type) var(--ant-color-border)',
+                  marginBottom: '6px',
+                  borderRadius: '8px',
+                  padding: '8px 12px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px'
+                }}
+              >
+                <RiAiAgentLine size={16} style={{ color: colorTextSecondary, flexShrink: 0 }} />
+                <span style={{ color: colorText, fontSize: 13, fontWeight: 500, flexShrink: 0 }}>
+                  {sa.name}
+                </span>
+                <span style={{ color: colorTextSecondary, fontSize: 13, flexShrink: 0 }}>
+                  已派发后台任务
+                </span>
+                {sa.taskDescription ? (
+                  <TruncatedTooltipText
+                    text={sa.taskDescription}
+                    style={{ color: colorTextTertiary, fontSize: 13, flex: 1 }}
+                  />
+                ) : (
+                  <span style={{ flex: 1 }} />
+                )}
+                {sa.subagentId ? (
+                  <span
+                    className="shrink-0 rounded px-1.5 py-0.5"
+                    style={{
+                      background: colorFillAlter,
+                      color: colorTextTertiary,
+                      fontSize: 11,
+                      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'
+                    }}
+                  >
+                    {sa.subagentId}
+                  </span>
+                ) : null}
+              </div>
+            )
+          }
           const isActive = sa.status === 'started' || sa.status === 'running'
           const isError = sa.status === 'error'
           const saLabel = isActive
@@ -1202,6 +1410,9 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
               ? `${sa.name} · 出错`
               : `${sa.name} · 已完成`
           const saIconColor = isError ? '#ef4444' : isActive ? '#1677ff' : '#52c41a'
+          // 折叠受控（key = causeId 唯一标识，缺省按位置回退）
+          const saPanelKey = sa.causeId ?? `sa-${blockIndex}`
+          const saOpen = isActive ? true : (saOpenOverride[saPanelKey] ?? false)
 
           // 递归渲染智能体的嵌套子块（text / tool / reasoning / subAgent）
           const renderChildren = (children: MessageBlock[], depth = 0): React.ReactNode => {
@@ -1277,34 +1488,43 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
               }
               if (child.type === 'tool' && child.tool) {
                 if (child.tool.name === 'write_todos') {
-                  return renderWriteTodos(child.tool, ci, true)
+                  const todosCard = renderWriteTodos(child.tool, ci, true)
+                  if (todosCard) return todosCard
                 }
                 // read_todos 专属卡片（嵌套）：完成后渲染；未完成/解析失败回退通用折叠
                 if (child.tool.name === 'read_todos') {
                   const readTodosCard = renderReadTodos(child.tool, ci, true)
                   if (readTodosCard) return readTodosCard
                 }
-                // Mnemon 记忆工具定制卡片（嵌套）
-                if (
-                  child.tool.name.startsWith('mnemon_') &&
-                  (MEMORY_READ_TOOLS.includes(child.tool.name) ||
-                    MEMORY_WRITE_TOOLS.includes(child.tool.name)) &&
-                  child.tool.status === 'completed'
-                ) {
-                  return renderMemoryToolCard(child.tool, ci, true)
-                }
-                // 定制化卡片：deepagent 内置工具
-                if (child.tool.card && child.tool.status === 'completed') {
-                  return renderToolCard(child.tool, ci, true)
-                }
                 const isPreparing = child.tool.status === 'preparing'
                 const isExecuting =
                   child.tool.status === 'executing' || (!child.tool.status && !child.tool.output)
                 const inProgress = Boolean(message.loading) && (isPreparing || isExecuting)
+                const phase: 'preparing' | 'executing' | undefined = inProgress
+                  ? isPreparing
+                    ? 'preparing'
+                    : 'executing'
+                  : undefined
                 const toolName = child.tool.name || '工具调用'
-                const toolLabel = inProgress
-                  ? `${toolName}${isPreparing ? ' · 生成中…' : ' · 执行中…'}`
-                  : toolName
+                // Mnemon 记忆工具（嵌套）：进行中 = 光泽状态卡；完成后 = 专属结果卡
+                if (
+                  toolName.startsWith('mnemon_') &&
+                  (MEMORY_READ_TOOLS.includes(toolName) || MEMORY_WRITE_TOOLS.includes(toolName))
+                ) {
+                  if (child.tool.status === 'completed') {
+                    return renderMemoryToolCard(child.tool, ci, true)
+                  }
+                  if (phase) return renderMemoryInProgressCard(child.tool, ci, true, phase)
+                }
+                // 系统工具（嵌套）：进行中与完成态共用同款卡片（光泽只在进行中扫过）
+                if (CARD_TOOLS.has(toolName)) {
+                  if (phase) return renderToolCard(child.tool, ci, true, phase)
+                  if (child.tool.card && child.tool.status === 'completed') {
+                    return renderToolCard(child.tool, ci, true)
+                  }
+                }
+                // 其余工具（含无卡片数据的异常完成态）：通用折叠，进行中光泽头 + 输入/输出详情
+                const toolLabel = getToolStatusLabel(toolName, phase)
                 // 进行中折叠头展示该工具完成后的定制卡片同款图标；mnemon 记忆工具用大脑图标；其余不显示
                 const inProgressIcon =
                   inProgress &&
@@ -1397,6 +1617,11 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                   : childIsActive
                     ? '#1677ff'
                     : '#52c41a'
+                // 嵌套折叠受控（key = 子会话 causeId 或 父级标识 + 位置回退）
+                const childSaPanelKey = childSa.causeId ?? `nsa:${sa.causeId ?? blockIndex}:c${ci}`
+                const childSaOpen = childIsActive
+                  ? true
+                  : (saOpenOverride[childSaPanelKey] ?? false)
                 return (
                   <Collapse
                     // key 用数组序号（修复：此前 `name-${isActive?'a':'d'}` 在状态翻转时强制换 key
@@ -1437,7 +1662,26 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                               </div>
                             ) : null}
                             {child.children && child.children.length > 0 ? (
-                              renderChildren(child.children, depth + 1)
+                              <>
+                                {renderChildren(child.children, depth + 1)}
+                                {childIsActive &&
+                                isSilent &&
+                                !lastChildIsActiveTool(child.children) ? (
+                                  <div
+                                    className="flex items-center gap-2 mt-1"
+                                    style={{ color: colorTextSecondary }}
+                                  >
+                                    <ShinyIcon
+                                      icon={RiSparkling2Line}
+                                      size={12}
+                                      baseColor={colorTextSecondary}
+                                    />
+                                    <ShinyText baseColor={colorTextSecondary}>
+                                      <span style={{ fontSize: 12 }}>正在生成…</span>
+                                    </ShinyText>
+                                  </div>
+                                ) : null}
+                              </>
                             ) : childSa.error ? (
                               <div style={{ color: '#ef4444' }} className="text-xs">
                                 {childSa.error}
@@ -1447,7 +1691,15 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                         )
                       }
                     ]}
-                    defaultActiveKey={childIsActive ? [ci] : []}
+                    activeKey={childSaOpen ? [ci] : []}
+                    onChange={(keys) => {
+                      if (!childIsActive) {
+                        setSaOpenOverride((m) => ({
+                          ...m,
+                          [childSaPanelKey]: keys.includes(String(ci))
+                        }))
+                      }
+                    }}
                     size="small"
                     style={{
                       marginBottom: '4px',
@@ -1498,7 +1750,26 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                         </div>
                       ) : null}
                       {block.children && block.children.length > 0 ? (
-                        renderChildren(block.children)
+                        <>
+                          {renderChildren(block.children)}
+                          {/* 子代理流静默：已输出内容但超阈值无新事件（模型在生成工具参数）
+                              且最后一个子块不是进行中工具卡时，显示「正在生成…」 */}
+                          {isActive && isSilent && !lastChildIsActiveTool(block.children) ? (
+                            <div
+                              className="flex items-center gap-2 mt-1"
+                              style={{ color: colorTextSecondary }}
+                            >
+                              <ShinyIcon
+                                icon={RiSparkling2Line}
+                                size={12}
+                                baseColor={colorTextSecondary}
+                              />
+                              <ShinyText baseColor={colorTextSecondary}>
+                                <span style={{ fontSize: 12 }}>正在生成…</span>
+                              </ShinyText>
+                            </div>
+                          ) : null}
+                        </>
                       ) : isActive ? (
                         <div style={{ color: colorTextTertiary }} className="text-sm italic">
                           智能体正在执行中…
@@ -1512,7 +1783,16 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                   )
                 }
               ]}
-              defaultActiveKey={isActive ? [blockIndex] : []}
+              activeKey={saOpen ? [blockIndex] : []}
+              onChange={(keys) => {
+                // 进行中折叠禁用（collapsible disabled），此处只处理完成/出错后的手动展开收起
+                if (!isActive) {
+                  setSaOpenOverride((m) => ({
+                    ...m,
+                    [saPanelKey]: keys.includes(String(blockIndex))
+                  }))
+                }
+              }}
               size="small"
               style={{ marginBottom: '6px', background: collapseBg }}
               className="rounded-lg border-0"
@@ -1527,6 +1807,15 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
       <div className="flex mb-6">
         <div className="w-full">
           {renderBlocks()}
+          {/* 流式静默指示：正文已出现但超过阈值无新 chunk（模型仍在生成大参数等） */}
+          {showSilenceGenerating ? (
+            <div className="flex items-center gap-2 mt-1" style={{ color: colorTextSecondary }}>
+              <ShinyIcon icon={RiSparkling2Line} size={14} baseColor={colorTextSecondary} />
+              <ShinyText baseColor={colorTextSecondary}>
+                <span style={{ fontSize: 13 }}>正在生成…</span>
+              </ShinyText>
+            </div>
+          ) : null}
           {/* 仅展示「注入记忆」卡片期间的生成中指示（压缩/重试进行中不显示，避免与过渡行重复） */}
           {message.loading &&
           !message.content &&
@@ -1544,7 +1833,7 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
           ) : null}
           {/* 内容输出中不展示操作按钮 */}
           {!message.loading && (
-            <div className="flex items-center gap-2 mt-3">
+            <div className="flex items-center justify-end gap-2 mt-3">
               <Tooltip title={isCopied ? '已复制' : '复制'}>
                 <button
                   onClick={() => onCopy(copyText, message.id)}
@@ -1563,22 +1852,6 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                   }}
                 >
                   {isCopied ? <RiCheckLine size={16} /> : <RiFileCopyLine size={16} />}
-                </button>
-              </Tooltip>
-              <Tooltip title="重新生成">
-                <button
-                  className="p-1.5 rounded-lg transition-colors"
-                  style={{ color: colorTextTertiary, background: 'transparent' }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.background = colorFillAlter
-                    e.currentTarget.style.color = colorTextSecondary
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.background = 'transparent'
-                    e.currentTarget.style.color = colorTextTertiary
-                  }}
-                >
-                  <RiRefreshLine size={16} />
                 </button>
               </Tooltip>
               <Tooltip title="删除此轮对话">

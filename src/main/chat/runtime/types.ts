@@ -30,6 +30,22 @@ export type SubAgentRecord =
   | { kind: 'sub_text'; name: string; causeId: string; text: string }
   | { kind: 'sub_tool_call'; name: string; causeId: string; tool: ToolCallRecord }
   | { kind: 'sub_end'; name: string; causeId: string; output: string }
+  | {
+      /** 阶段一：子代理模型吐出工具名（参数构建开始） */
+      kind: 'sub_tool_block_start'
+      name: string
+      causeId: string
+      index: number
+      toolName: string
+      id?: string
+    }
+  | {
+      /** 阶段二：子代理工具参数增量（节流保活用） */
+      kind: 'sub_tool_args'
+      name: string
+      causeId: string
+      index: number
+    }
 
 /** 统一运行时事件（单一队列元素） */
 export type RuntimeRecord = MessageRecord | ToolCallRecord | SubAgentRecord

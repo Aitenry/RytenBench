@@ -173,6 +173,10 @@ class ProviderService {
     const fields: Record<string, unknown> = {
       model: config.model,
       temperature: config.temperature,
+      // 统一开启流式：invoke() 内部走流式请求，逐 token（含工具参数增量）触发回调，
+      // 长参数构建期间前端才能收到 preparing →「生成中」；LangGraph messages 模式
+      // 自带聚合去重（emittedChatModelRunIds + dedupe），不会重复下发最终消息
+      streaming: true,
       ...extra
     }
     if (config.max_tokens) fields.maxTokens = config.max_tokens
@@ -185,6 +189,10 @@ class ProviderService {
     const fields: Record<string, unknown> = {
       model: config.model,
       temperature: config.temperature,
+      // 统一开启流式：invoke() 内部走流式请求，逐 token（含工具参数增量）触发回调，
+      // 长参数构建期间前端才能收到 preparing →「生成中」；LangGraph messages 模式
+      // 自带聚合去重（emittedChatModelRunIds + dedupe），不会重复下发最终消息
+      streaming: true,
       ...extra
     }
     if (config.max_tokens) fields.maxTokens = config.max_tokens
@@ -197,6 +205,10 @@ class ProviderService {
     const fields: Record<string, unknown> = {
       model: config.model,
       temperature: config.temperature,
+      // 统一开启流式：invoke() 内部走流式请求，逐 token（含工具参数增量）触发回调，
+      // 长参数构建期间前端才能收到 preparing →「生成中」；LangGraph messages 模式
+      // 自带聚合去重（emittedChatModelRunIds + dedupe），不会重复下发最终消息
+      streaming: true,
       ...extra
     }
     if (config.max_tokens) fields.maxTokens = config.max_tokens
@@ -211,6 +223,7 @@ class ProviderService {
   ): ChatGoogleGenerativeAI {
     const fields: Record<string, unknown> = {
       temperature: config.temperature,
+      streaming: true,
       ...extra
     }
     if (config.max_tokens) fields.maxOutputTokens = config.max_tokens
@@ -223,6 +236,10 @@ class ProviderService {
     const fields: Record<string, unknown> = {
       model: config.model,
       temperature: config.temperature,
+      // 统一开启流式：invoke() 内部走流式请求，逐 token（含工具参数增量）触发回调，
+      // 长参数构建期间前端才能收到 preparing →「生成中」；LangGraph messages 模式
+      // 自带聚合去重（emittedChatModelRunIds + dedupe），不会重复下发最终消息
+      streaming: true,
       ...extra
     }
     if (config.max_tokens) fields.maxOutputTokens = config.max_tokens
@@ -234,6 +251,10 @@ class ProviderService {
     const fields: Record<string, unknown> = {
       model: config.model,
       temperature: config.temperature,
+      // 统一开启流式：invoke() 内部走流式请求，逐 token（含工具参数增量）触发回调，
+      // 长参数构建期间前端才能收到 preparing →「生成中」；LangGraph messages 模式
+      // 自带聚合去重（emittedChatModelRunIds + dedupe），不会重复下发最终消息
+      streaming: true,
       ...extra
     }
     if (config.max_tokens) fields.maxTokens = config.max_tokens
@@ -246,6 +267,10 @@ class ProviderService {
     const fields: Record<string, unknown> = {
       model: config.model,
       temperature: config.temperature,
+      // 统一开启流式：invoke() 内部走流式请求，逐 token（含工具参数增量）触发回调，
+      // 长参数构建期间前端才能收到 preparing →「生成中」；LangGraph messages 模式
+      // 自带聚合去重（emittedChatModelRunIds + dedupe），不会重复下发最终消息
+      streaming: true,
       ...extra
     }
     if (config.max_tokens) fields.numPredict = config.max_tokens
@@ -261,6 +286,10 @@ class ProviderService {
     const fields: Record<string, unknown> = {
       model: config.model,
       temperature: config.temperature,
+      // 统一开启流式：invoke() 内部走流式请求，逐 token（含工具参数增量）触发回调，
+      // 长参数构建期间前端才能收到 preparing →「生成中」；LangGraph messages 模式
+      // 自带聚合去重（emittedChatModelRunIds + dedupe），不会重复下发最终消息
+      streaming: true,
       ...extra
     }
     if (config.max_tokens) fields.maxTokens = config.max_tokens
@@ -274,6 +303,10 @@ class ProviderService {
     const fields: Record<string, unknown> = {
       model: config.model,
       temperature: config.temperature,
+      // 统一开启流式：invoke() 内部走流式请求，逐 token（含工具参数增量）触发回调，
+      // 长参数构建期间前端才能收到 preparing →「生成中」；LangGraph messages 模式
+      // 自带聚合去重（emittedChatModelRunIds + dedupe），不会重复下发最终消息
+      streaming: true,
       ...extra
     }
     if (config.max_tokens) fields.maxTokens = config.max_tokens
@@ -289,6 +322,10 @@ class ProviderService {
     const fields: Record<string, unknown> = {
       model: config.model,
       temperature: config.temperature,
+      // 统一开启流式：invoke() 内部走流式请求，逐 token（含工具参数增量）触发回调，
+      // 长参数构建期间前端才能收到 preparing →「生成中」；LangGraph messages 模式
+      // 自带聚合去重（emittedChatModelRunIds + dedupe），不会重复下发最终消息
+      streaming: true,
       ...extra
     }
     if (config.max_tokens) fields.maxTokens = config.max_tokens
@@ -309,6 +346,7 @@ class ProviderService {
   ): ChatCloudflareWorkersAI {
     const fields: Record<string, unknown> = {
       model: config.model,
+      streaming: true,
       ...extra
     }
     if (config.api_key) fields.cloudflareApiToken = config.api_key

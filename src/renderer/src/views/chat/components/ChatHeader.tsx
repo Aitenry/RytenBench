@@ -7,6 +7,7 @@ import {
   RiLayoutRightLine,
   RiLayoutRightFill
 } from '@remixicon/react'
+import BackgroundAgentsButton from './BackgroundAgentsButton'
 
 interface ChatHeaderProps {
   sidebarOpen: boolean
@@ -15,6 +16,7 @@ interface ChatHeaderProps {
   onTogglePanel: () => void
   colorBorderSecondary: string
   onNewChat: () => void
+  currentTopicId: number | null
 }
 
 const ChatHeader: React.FC<ChatHeaderProps> = ({
@@ -23,7 +25,8 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
   panelOpen,
   onTogglePanel,
   colorBorderSecondary,
-  onNewChat
+  onNewChat,
+  currentTopicId
 }) => {
   return (
     <div
@@ -37,6 +40,7 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
           icon={sidebarOpen ? <RiSidebarFoldLine size={16} /> : <RiSidebarUnfoldLine size={16} />}
           onClick={onToggleSidebar}
         />
+        <BackgroundAgentsButton currentTopicId={currentTopicId} />
       </div>
       <div className="flex items-center gap-2.5">
         <Button type="text" size="small" icon={<RiApps2AddLine size={16} />} onClick={onNewChat} />

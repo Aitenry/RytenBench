@@ -20,6 +20,37 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+/** 流静默看门狗阈值：诊断「卡住」用——超过该时长无新记录即打一条日志 */
+const STREAM_SILENCE_LOG_MS = 6000
+
+/**
+ * 流静默看门狗：推理型模型生成长工具参数期间，流内可能长时间无任何事件；
+ * 每次收到新记录调用 reset()，超过阈值未 reset 即打一条「静默提醒」日志，
+ * 作为「模型仍在生成、只是流内无事件」的直接证据（复现一次即可定论）。
+ */
+function createSilenceWatchdog(tag: string): { reset: () => void; dispose: () => void } {
+  let timer: ReturnType<typeof setTimeout> | null = null
+  let lastResetAt = Date.now()
+  const arm = (): void => {
+    if (timer) clearTimeout(timer)
+    timer = setTimeout(() => {
+      logger.info(
+        `[Stream] 静默提醒（${tag}）：${((Date.now() - lastResetAt) / 1000).toFixed(0)}s 无新记录，模型仍在生成中（流内无事件）`
+      )
+    }, STREAM_SILENCE_LOG_MS)
+  }
+  return {
+    reset: () => {
+      lastResetAt = Date.now()
+      arm()
+    },
+    dispose: () => {
+      if (timer) clearTimeout(timer)
+      timer = null
+    }
+  }
+}
+
 // ============================================================================
 // 定制化工具卡片生成
 // ============================================================================
@@ -147,7 +178,11 @@ export async function produceMessages(
   run: RuntimeStream,
   signal: AbortSignal | undefined,
   enqueue: EnqueueFn,
-  markDone: MarkDoneFn
+  markDone: MarkDoneFn,
+  /** 与 produceToolCalls 共享的标志：首轮工具开始执行即为 true（模型消息已结束、
+   *  参数已生成完，preparing 保活必须停止，防止已完成工具卡被复活为「参数构建中…」）；
+   *  新一轮模型输出开始（新 tool_block_start）时重置为 false。 */
+  toolsStarted?: { value: boolean }
 ): Promise<void> {
   // lastSent 跨所有记录共享：某些 provider 会把整段文本拆成多条重复发送
   let lastSentReasoning = ''
@@ -156,9 +191,11 @@ export async function produceMessages(
   const contentDelta = makeDeltaComputer()
   const toolBlocks = new Map<number, { id?: string; name: string }>()
   let lastProgressAt = 0
+  const silenceWatchdog = createSilenceWatchdog('消息流')
   try {
     for await (const rec of run.messages as AsyncIterable<MessageRecord>) {
       if (signal?.aborted) break
+      silenceWatchdog.reset()
       if (rec.kind === 'reasoning') {
         const delta = reasoningDelta(rec.text, lastSentReasoning)
         if (delta) {
@@ -176,12 +213,17 @@ export async function produceMessages(
         lastSentContent = rec.text
       } else if (rec.kind === 'tool_block_start') {
         if (rec.name === 'task') continue
+        // 新一轮模型输出开始：工具尚未开始执行，恢复参数构建中保活
+        if (toolsStarted) toolsStarted.value = false
         toolBlocks.set(rec.index, { id: rec.id, name: rec.name })
         lastProgressAt = Date.now()
         enqueue({
           tool: { name: rec.name, input: {}, output: '', status: 'preparing', id: rec.id }
         })
       } else if (rec.kind === 'tool_args') {
+        // 系统已开始执行（模型消息已结束、参数已全部生成）：不再发「参数构建中」保活，
+        // 否则会把已完成的工具卡复活（幽灵「参数构建中…」，用户报障：不要阻塞）
+        if (toolsStarted?.value) continue
         // 工具参数增量：节流 500ms，只刷状态不刷内容
         const now = Date.now()
         if (now - lastProgressAt < 500) continue
@@ -204,6 +246,7 @@ export async function produceMessages(
       logger.error('Stream message error:', err)
     }
   } finally {
+    silenceWatchdog.dispose()
     markDone()
   }
 }
@@ -217,11 +260,16 @@ export async function produceToolCalls(
   signal: AbortSignal | undefined,
   enqueue: EnqueueFn,
   markDone: MarkDoneFn,
-  safeGetOutput: SafeGetOutputFn
+  safeGetOutput: SafeGetOutputFn,
+  /** 与 produceMessages 共享的标志：本工具开始执行即置 true（模型消息已结束，
+   *  参数已生成完，消息生产者据此停止「参数构建中」保活） */
+  toolsStarted?: { value: boolean }
 ): Promise<void> {
   try {
     for await (const call of run.toolCalls as AsyncIterable<ToolCallRecord>) {
       if (signal?.aborted) break
+      // 模型消息已结束、系统开始执行：停止消息流的参数构建中保活（防幽灵卡）
+      if (toolsStarted) toolsStarted.value = true
       const input = call.input as Record<string, unknown>
       // task 工具是智能体派遣器：转换为 subAgent 事件下发，前端只看到智能体块
       if (call.name === 'task') {
@@ -229,6 +277,23 @@ export async function produceToolCalls(
           (typeof input?.subagent_type === 'string' && input.subagent_type) || 'subAgent'
         const taskDesc = (typeof input?.description === 'string' && input.description) || ''
         const causeId = call.callId
+        // 后台模式（background=true）：不发 started/completed 活动块；启动成功后下发一条
+        // 轻量「已派发」事件（名称+简述+会话 id），agent 内容/结果收敛到顶部栏列表
+        if (input?.background === true) {
+          const raw = await safeGetOutput(call)
+          const output = typeof raw === 'string' ? raw : JSON.stringify(raw)
+          const idMatch = /subagent_id=([A-Za-z0-9-]+)/.exec(output)
+          enqueue({
+            subAgent: {
+              name: saName,
+              causeId,
+              status: 'dispatched',
+              taskDescription: taskDesc,
+              subagentId: idMatch?.[1]
+            }
+          })
+          continue
+        }
         // executing → 下发 started 智能体事件（携带任务描述）
         enqueue({
           subAgent: { name: saName, causeId, status: 'started', taskDescription: taskDesc }
@@ -295,6 +360,11 @@ interface SubAgentGroupState {
   lastSentContent: string
   reasoningDelta: (tokenText: string, lastSent: string) => string | undefined
   contentDelta: (tokenText: string, lastSent: string) => string | undefined
+  /** 子代理工具调用块登记（index → 工具名/id），供参数构建中保活 */
+  toolBlocks: Map<number, { id?: string; name: string }>
+  lastToolProgressAt: number
+  /** 本组已有工具开始执行：抑制迟到参数构建保活（防复活已完成卡），新一轮 block_start 重置 */
+  toolStarted: boolean
 }
 
 export async function produceSubAgents(
@@ -305,9 +375,11 @@ export async function produceSubAgents(
   safeGetOutput: SafeGetOutputFn
 ): Promise<void> {
   const groups = new Map<string, SubAgentGroupState>()
+  const silenceWatchdog = createSilenceWatchdog('子代理流')
   try {
     for await (const rec of run.subagents as AsyncIterable<SubAgentRecord>) {
       if (signal?.aborted) break
+      silenceWatchdog.reset()
       const key = `${rec.name}:${rec.causeId ?? ''}`
       let group = groups.get(key)
       if (!group) {
@@ -315,7 +387,10 @@ export async function produceSubAgents(
           lastSentReasoning: '',
           lastSentContent: '',
           reasoningDelta: makeDeltaComputer(),
-          contentDelta: makeDeltaComputer()
+          contentDelta: makeDeltaComputer(),
+          toolBlocks: new Map(),
+          lastToolProgressAt: 0,
+          toolStarted: false
         }
         groups.set(key, group)
       }
@@ -323,6 +398,37 @@ export async function produceSubAgents(
       if (rec.kind === 'sub_start') {
         // started 生命周期事件由 toolCalls 流的 task 记录发出，此处跳过
         continue
+      } else if (rec.kind === 'sub_tool_block_start') {
+        // 阶段一：子代理工具名已知 → 嵌套工具卡「参数构建中…」（主代理同款两阶段展示）
+        // 新一轮模型输出开始：重置「工具已开始执行」标志，恢复本轮参数构建保活
+        group.toolStarted = false
+        group.toolBlocks.set(rec.index, { id: rec.id, name: rec.toolName })
+        group.lastToolProgressAt = Date.now()
+        enqueue({
+          subAgent: {
+            name: rec.name,
+            causeId: rec.causeId,
+            status: 'running',
+            tool: { name: rec.toolName, input: {}, output: '', status: 'preparing', id: rec.id }
+          }
+        })
+      } else if (rec.kind === 'sub_tool_args') {
+        // 本组已有工具开始执行（模型消息已结束）：迟到保活一律抑制，防复活已完成卡
+        if (group.toolStarted) continue
+        // 阶段二：参数增量节流 500ms，只刷状态不刷内容
+        const now = Date.now()
+        if (now - group.lastToolProgressAt < 500) continue
+        group.lastToolProgressAt = now
+        const info = group.toolBlocks.get(rec.index)
+        if (!info) continue
+        enqueue({
+          subAgent: {
+            name: rec.name,
+            causeId: rec.causeId,
+            status: 'running',
+            tool: { name: info.name, input: {}, output: '', status: 'preparing', id: info.id }
+          }
+        })
       } else if (rec.kind === 'sub_reasoning') {
         const delta = group.reasoningDelta(rec.text, group.lastSentReasoning)
         if (delta) {
@@ -347,6 +453,8 @@ export async function produceSubAgents(
       } else if (rec.kind === 'sub_tool_call') {
         const call = rec.tool
         const input = call.input as Record<string, unknown>
+        // 系统开始执行子代理工具：停止该组的参数构建保活（防幽灵卡）
+        group.toolStarted = true
         enqueue({
           subAgent: {
             name: rec.name,
@@ -392,6 +500,7 @@ export async function produceSubAgents(
       logger.error('Stream subAgent error:', err)
     }
   } finally {
+    silenceWatchdog.dispose()
     markDone()
   }
 }

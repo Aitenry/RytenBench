@@ -46,6 +46,8 @@ export class RecordQueue {
       record.kind === 'sub_reasoning' ||
       record.kind === 'sub_text' ||
       record.kind === 'sub_tool_call' ||
+      record.kind === 'sub_tool_block_start' ||
+      record.kind === 'sub_tool_args' ||
       record.kind === 'sub_end'
     ) {
       if (this.closed.subagents) return

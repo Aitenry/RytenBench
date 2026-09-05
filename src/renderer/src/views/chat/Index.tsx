@@ -355,6 +355,7 @@ const Index: React.FC = () => {
             onTogglePanel={() => setPanelOpen(!panelOpen)}
             colorBorderSecondary={colorBorderSecondary}
             onNewChat={handleNewChat}
+            currentTopicId={currentTopicId}
           />
 
           {!hasModels ? (

@@ -10,6 +10,7 @@ import type { PaginatedResult as AgentPaginatedResult } from '../main/database/m
 import type { TodoItem } from '../main/chat/runtime/todo'
 import type { GoalView } from '../main/chat/runtime/goal'
 import type { JobSnapshot } from '../main/chat/runtime/jobs'
+import type { SubagentSessionRow } from '../main/chat/runtime/subagent-sessions'
 import type { PendingQuestionView, AskAnswer } from '../main/chat/runtime/ask'
 
 type AskAnswerItem = AskAnswer['answers'][number]
@@ -259,6 +260,59 @@ const api = {
         ipcRenderer.removeListener('chat-jobs-updated', listener)
       }
     },
+    // 后台子代理会话（顶部栏列表：进行中 > 已完成，点开查看结果）
+    listAgents: (topicId: number) => ipcRenderer.invoke('chat-agents-list', topicId),
+    agentOutput: (topicId: number, agentId: string) =>
+      ipcRenderer.invoke('chat-agent-output', topicId, agentId),
+    onAgentsUpdated: (
+      callback: (data: { topicId: number; rows: SubagentSessionRow[] }) => void
+    ) => {
+      const listener = (
+        _event: Electron.IpcRendererEvent,
+        data: { topicId: number; rows: SubagentSessionRow[] }
+      ): void => {
+        callback(data)
+      }
+      ipcRenderer.on('chat-agents-updated', listener)
+      return () => {
+        ipcRenderer.removeListener('chat-agents-updated', listener)
+      }
+    },
+    watchAgentOutput: (topicId: number, agentId: string, watch: boolean) => {
+      ipcRenderer.send('chat-agent-watch', topicId, agentId, watch)
+    },
+    onAgentOutputUpdated: (
+      callback: (data: {
+        topicId: number
+        agentId: string
+        output: {
+          text: string
+          status: 'running' | 'idle'
+          lastStatus?: 'completed' | 'failed' | 'killed'
+          prompt: string
+        }
+      }) => void
+    ) => {
+      const listener = (
+        _event: Electron.IpcRendererEvent,
+        data: {
+          topicId: number
+          agentId: string
+          output: {
+            text: string
+            status: 'running' | 'idle'
+            lastStatus?: 'completed' | 'failed' | 'killed'
+            prompt: string
+          }
+        }
+      ): void => {
+        callback(data)
+      }
+      ipcRenderer.on('chat-agent-output-updated', listener)
+      return () => {
+        ipcRenderer.removeListener('chat-agent-output-updated', listener)
+      }
+    },
     // 向用户提问（ask_user_question）
     onQuestionAsked: (callback: (pending: PendingQuestionView) => void) => {
       const listener = (_event: Electron.IpcRendererEvent, pending: PendingQuestionView): void => {
@@ -440,6 +494,11 @@ const api = {
     deleteBatch: (ids: number[]) =>
       ipcRenderer.invoke('provider-delete-batch', ids) as Promise<number>,
     setDefault: (id: number) => ipcRenderer.invoke('provider-set-default', id) as Promise<boolean>,
+    lookupProfile: (modelId: string) =>
+      ipcRenderer.invoke('provider-lookup-profile', modelId) as Promise<Record<
+        string,
+        unknown
+      > | null>,
     fetchModels: (
       providerType: string,
       baseUrl?: string,

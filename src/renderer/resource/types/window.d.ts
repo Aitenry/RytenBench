@@ -9,6 +9,7 @@ import { AgentConfigRow, AgentConfigInput } from '../../../main/database/mapper/
 import { TodoItem } from '../../../main/chat/runtime/todo'
 import { GoalView } from '../../../main/chat/runtime/goal'
 import { JobSnapshot } from '../../../main/chat/runtime/jobs'
+import { SubagentSessionRow } from '../../../main/chat/runtime/subagent-sessions'
 import { PendingQuestionView } from '../../../main/chat/runtime/ask'
 import { SystemSettings } from '@renderer/types/settings'
 
@@ -221,6 +222,38 @@ export interface Window {
       // 后台任务系统（jobs）
       onJobsUpdated: (
         callback: (data: { topicId: number; jobs: JobSnapshot[] }) => void
+      ) => () => void
+      // 后台子代理会话（顶部栏列表：进行中 > 已完成，点开查看结果）
+      listAgents: (topicId: number) => Promise<SubagentSessionRow[]>
+      agentOutput: (
+        topicId: number,
+        agentId: string
+      ) => Promise<
+        | {
+            text: string
+            status: 'running' | 'idle'
+            lastStatus?: SubagentSessionRow['lastStatus']
+            prompt: string
+          }
+        | undefined
+      >
+      onAgentsUpdated: (
+        callback: (data: { topicId: number; rows: SubagentSessionRow[] }) => void
+      ) => () => void
+      /** 监听/停止监听某 agent 的输出推送（打开弹窗 watch，关闭取消） */
+      watchAgentOutput: (topicId: number, agentId: string, watch: boolean) => void
+      /** 后端推送：agent 输出有更新（运行中增量 / 终态最终输出），弹窗据此自动刷新 */
+      onAgentOutputUpdated: (
+        callback: (data: {
+          topicId: number
+          agentId: string
+          output: {
+            text: string
+            status: 'running' | 'idle'
+            lastStatus?: SubagentSessionRow['lastStatus']
+            prompt: string
+          }
+        }) => void
       ) => () => void
       // 向用户提问（ask_user_question）
       onQuestionAsked: (callback: (pending: PendingQuestionView) => void) => () => void
@@ -451,6 +484,7 @@ export interface Window {
       delete: (id: number) => Promise<boolean>
       deleteBatch: (ids: number[]) => Promise<number>
       setDefault: (id: number) => Promise<boolean>
+      lookupProfile: (modelId: string) => Promise<Record<string, unknown> | null>
       fetchModels: (
         providerType: string,
         baseUrl?: string,

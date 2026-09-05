@@ -21,7 +21,8 @@ export interface SubAgentEvent {
   name: string
   /** 派遣此智能体的 task 工具调用唯一 ID */
   causeId?: string
-  status: 'started' | 'running' | 'completed' | 'error'
+  /** dispatched=后台任务已派发（轻量卡：仅名称+简述+会话 id，结果在顶部栏查看） */
+  status: 'started' | 'running' | 'dispatched' | 'completed' | 'error'
   output?: string
   message?: string
   error?: string
@@ -30,6 +31,8 @@ export interface SubAgentEvent {
   tool?: ToolCall
   /** task 工具调用时携带的任务描述（仅由前端从 task 工具输入转换而来） */
   taskDescription?: string
+  /** 后台派发（status='dispatched'）时的会话 ID（subagent-N） */
+  subagentId?: string
 }
 
 /** 记忆注入块数据（主进程 MemoryInjection 透传） */
@@ -102,6 +105,8 @@ export interface Message {
   toolCalls?: ToolCall[]
   loading?: boolean
   reasoning_content?: string
+  /** 最后收到流式 chunk 的时间戳（渲染端瞬时字段，不落库；供静默指示判定） */
+  lastChunkAt?: number
 }
 
 /** 附件 */

@@ -27,6 +27,27 @@ interface ChatOptions {
   documents?: { fileName: string; filePath: string }[]
 }
 
+/** 后台子代理会话行（顶部栏列表视图） */
+interface SubagentSessionRowView {
+  id: string
+  name: string
+  label: string
+  status: 'running' | 'idle'
+  queuedMessages: number
+  createdAt: number
+  lastRunAt?: number
+  lastStatus?: 'completed' | 'failed' | 'killed'
+}
+
+/** 后台子代理会话输出视图（点开查看结果） */
+interface SubagentSessionOutputView {
+  text: string
+  status: 'running' | 'idle'
+  lastStatus?: 'completed' | 'failed' | 'killed'
+  /** 启动时的原始任务指令（弹窗顶部展示） */
+  prompt: string
+}
+
 interface Api {
   todoItems: {
     getById: (id: number) => Promise<TodoItemRow[]>
@@ -147,6 +168,25 @@ interface Api {
     listSkills: () => Promise<{ id: string; name: string; description: string }[]>
     onStreamChunk: (callback: (chunk: StructuredMessage) => void) => () => void
     onStreamDone: (callback: (result: { topicId: number }) => void) => () => void
+    // 后台子代理会话（顶部栏列表）
+    listAgents: (topicId: number) => Promise<SubagentSessionRowView[]>
+    agentOutput: (
+      topicId: number,
+      agentId: string
+    ) => Promise<SubagentSessionOutputView | undefined>
+    onAgentsUpdated: (
+      callback: (data: { topicId: number; rows: SubagentSessionRowView[] }) => void
+    ) => () => void
+    /** 监听/停止监听某 agent 的输出推送（打开弹窗 watch，关闭取消） */
+    watchAgentOutput: (topicId: number, agentId: string, watch: boolean) => void
+    /** 后端推送：agent 输出有更新（运行中增量 / 终态最终输出），弹窗据此自动刷新 */
+    onAgentOutputUpdated: (
+      callback: (data: {
+        topicId: number
+        agentId: string
+        output: SubagentSessionOutputView
+      }) => void
+    ) => () => void
     // 话题管理
     getAllTopics: (workspaceId: number) => Promise<ChatTopicRow[]>
     getAllTopicsPaginated: (
@@ -184,6 +224,7 @@ interface Api {
     delete: (id: number) => Promise<boolean>
     deleteBatch: (ids: number[]) => Promise<number>
     setDefault: (id: number) => Promise<boolean>
+    lookupProfile: (modelId: string) => Promise<Record<string, unknown> | null>
   }
   systemSettings: {
     getAll: () => Promise<SystemSettings>

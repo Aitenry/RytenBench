@@ -35,6 +35,8 @@ export interface SubagentSessionRow {
   queuedMessages: number
   createdAt: number
   lastRunAt?: number
+  /** 最近一轮运行的终态（顶部栏「进行中 > 已完成/失败/已停止」） */
+  lastStatus?: 'completed' | 'failed' | 'killed'
 }
 
 interface SessionRecord {
@@ -42,6 +44,8 @@ interface SessionRecord {
   topicId: number
   config: SubAgentConfig
   label: string
+  /** 启动时的原始任务指令（弹窗顶部展示；send 后续轮次为追加对话） */
+  prompt: string
   /** 会话消息历史（systemPrompt 不入历史；入图时动态注入） */
   messages: BaseMessage[]
   /** 收件箱队列（运行中投递的消息排队） */
@@ -49,6 +53,12 @@ interface SessionRecord {
   status: 'running' | 'idle'
   createdAt: number
   lastRunAt?: number
+  /** 最近一轮运行的终态（顶部栏列表展示「进行中 > 已完成/失败/已停止」） */
+  lastStatus?: 'completed' | 'failed' | 'killed'
+  /** 最近一轮运行的最终输出（终态后查看结果） */
+  lastOutput: string
+  /** 当前运行中的增量输出（running 时实时查看） */
+  liveOutput: string
   /** 当前运行的取消控制器（interrupt 用） */
   currentAbort?: AbortController
   /** 话题删除后置位：禁止投递与收件箱续跑（防僵尸会话继续执行） */
@@ -56,6 +66,9 @@ interface SessionRecord {
 }
 
 export type SubagentSessionsListener = (topicId: number, rows: SubagentSessionRow[]) => void
+
+/** 会话输出更新回调（IPC 层节流后推送前端；输出以增量形式持续追加） */
+export type SubagentOutputListener = (topicId: number, agentId: string) => void
 
 /** 启动子代理会话所需的运行上下文（复用主运行时组件） */
 export interface SubagentSessionRuntime {
@@ -74,6 +87,8 @@ export class SubagentSessionRegistry {
   private counter = 0
 
   onChange?: SubagentSessionsListener
+  /** 输出增量更新（IPC 节流推送；仅在有前端关注该 agent 时消费） */
+  onLiveOutput?: SubagentOutputListener
 
   /** 启动新会话（spawn 语义：全新上下文），首条消息立即开始运行 */
   start(
@@ -90,10 +105,16 @@ export class SubagentSessionRegistry {
       topicId,
       config,
       label: `${displayName}：${firstMessage.slice(0, 40)}`,
+      prompt: firstMessage,
       messages: [],
       inbox: [],
-      status: 'running',
-      createdAt: Date.now()
+      // 初始 idle：run() 内有「running 则入队返回」的防御守卫，若此处直接置 running，
+      // 首条消息会被守卫吞回收件箱、任务永不注册（job_output 报「任务不存在」、
+      // list_agents 卡 running+queuedMessages=1 的根因）。由 run() 统一置 running。
+      status: 'idle',
+      createdAt: Date.now(),
+      lastOutput: '',
+      liveOutput: ''
     }
     this.sessions.set(id, record)
     void this.run(record, firstMessage, rt)
@@ -155,7 +176,30 @@ export class SubagentSessionRegistry {
       status: record.status,
       queuedMessages: record.inbox.length,
       createdAt: record.createdAt,
-      lastRunAt: record.lastRunAt
+      lastRunAt: record.lastRunAt,
+      lastStatus: record.lastStatus
+    }
+  }
+
+  /** 读取会话输出（弹窗查看）：running 时返回增量，终态后返回最终输出；含原始任务指令 */
+  readOutput(
+    id: string,
+    topicId: number
+  ):
+    | {
+        text: string
+        status: 'running' | 'idle'
+        lastStatus?: SubagentSessionRow['lastStatus']
+        prompt: string
+      }
+    | undefined {
+    const record = this.sessions.get(id)
+    if (!record || record.topicId !== topicId) return undefined
+    return {
+      text: record.status === 'running' ? record.liveOutput : record.lastOutput,
+      status: record.status,
+      lastStatus: record.lastStatus,
+      prompt: record.prompt
     }
   }
 
@@ -202,12 +246,20 @@ export class SubagentSessionRegistry {
       const tools = rt.buildTools(sa)
       const systemPrompt = rt.extendSystemPrompt(sa)
 
-      // 路由到任务帧（父模型经 job_output 观察）
+      // 路由到任务帧（父模型经 job_output 观察；顶部栏列表经 readOutput 实时/终态读取）
+      const notifyOutput = (): void => {
+        // IPC 层消费（节流推送前端弹窗），仅在有关注者时才有成本
+        this.onLiveOutput?.(record.topicId, record.id)
+      }
       const queueRef = {
         current: {
           push: (rec: RuntimeRecord): void => {
             if (rec.kind === 'text' || rec.kind === 'reasoning') {
-              if (rec.text) job.appendOutput(rec.text)
+              if (rec.text) {
+                job.appendOutput(rec.text)
+                record.liveOutput += rec.text
+                notifyOutput()
+              }
             } else if (rec.kind === 'tool_call') {
               const inputText = JSON.stringify(rec.input ?? {}).slice(0, 200)
               job.appendOutput(`[工具] ${rec.name}（参数：${inputText}）`)
@@ -246,16 +298,18 @@ export class SubagentSessionRegistry {
         const partial = fullText.trim()
         record.messages.push(new HumanMessage(message))
         if (partial) record.messages.push(new AIMessage({ content: partial }))
-        job.settle(
-          'killed',
-          partial ? `${partial}\n（本轮已被中断）` : '（本轮已被中断）',
-          'interrupted'
-        )
+        record.lastStatus = 'killed'
+        record.lastOutput = partial ? `${partial}\n（本轮已被中断）` : '（本轮已被中断）'
+        record.liveOutput = ''
+        job.settle('killed', record.lastOutput, 'interrupted')
         return
       }
       const output = fullText.trim() || '（子智能体无文本输出）'
       record.messages.push(new HumanMessage(message))
       record.messages.push(new AIMessage({ content: output }))
+      record.lastStatus = 'completed'
+      record.lastOutput = output
+      record.liveOutput = ''
       job.settle('completed', output)
     } catch (err) {
       // 中断（interrupt_agent/job_kill）在流式中途会以 AbortError 抛出——结算为 killed
@@ -264,11 +318,10 @@ export class SubagentSessionRegistry {
         const partial = fullText.trim()
         record.messages.push(new HumanMessage(message))
         if (partial) record.messages.push(new AIMessage({ content: partial }))
-        job.settle(
-          'killed',
-          partial ? `${partial}\n（本轮已被中断）` : '（本轮已被中断）',
-          'interrupted'
-        )
+        record.lastStatus = 'killed'
+        record.lastOutput = partial ? `${partial}\n（本轮已被中断）` : '（本轮已被中断）'
+        record.liveOutput = ''
+        job.settle('killed', record.lastOutput, 'interrupted')
         return
       }
       const isRecursion =
@@ -282,16 +335,19 @@ export class SubagentSessionRegistry {
       const partial = fullText.trim()
       record.messages.push(new HumanMessage(message))
       if (partial) record.messages.push(new AIMessage({ content: partial }))
-      job.settle(
-        'failed',
-        partial ? `${partial}\n（运行失败：${messageText}）` : `（运行失败：${messageText}）`,
-        messageText
-      )
+      record.lastStatus = 'failed'
+      record.lastOutput = partial
+        ? `${partial}\n（运行失败：${messageText}）`
+        : `（运行失败：${messageText}）`
+      record.liveOutput = ''
+      job.settle('failed', record.lastOutput, messageText)
     } finally {
       record.lastRunAt = Date.now()
       record.currentAbort = undefined
       record.status = 'idle'
       this.broadcast(record.topicId)
+      // 终态（含被中断/失败）也推送一次输出（status 已回 idle，readOutput 走 lastOutput）
+      this.onLiveOutput?.(record.topicId, record.id)
 
       // 话题已删除（clearTopic 置位 dead）：不再续跑收件箱（修复：此前僵尸会话闭包
       // 仍逐条跑完收件箱，并在已删除话题下注册不可管理的幽灵任务）
