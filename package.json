@@ -16,9 +16,9 @@
     "build": "npm run typecheck && electron-vite build",
     "postinstall": "node scripts/patch-langgraph-sdk.js && electron-builder install-app-deps",
     "build:unpack": "electron-vite build && electron-builder --dir",
-    "build:win": "electron-vite build && electron-builder --win",
-    "build:mac": "electron-vite build && electron-builder --mac",
-    "build:linux": "electron-vite build && electron-builder --linux"
+    "build:win": "electron-vite build && electron-builder --win --publish never",
+    "build:mac": "electron-vite build && electron-builder --mac --publish never",
+    "build:linux": "electron-vite build && electron-builder --linux --publish never"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.3",
