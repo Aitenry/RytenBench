@@ -1,0 +1,58 @@
+name: Build 0.1.0 Release
+
+on:
+  push:
+    branches:
+      - '0.1.0'
+
+concurrency:
+  group: release-0.1.0
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: '0.1.0'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Windows installer
+        shell: pwsh
+        run: pnpm build:win
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v0.1.0-${{ github.run_number }}
+          name: RytenBench 0.1.0 Build ${{ github.run_number }}
+          body: |
+            Auto-generated release from branch `0.1.0`.
+
+            Commit: `${{ github.sha }}`
+          files: |
+            dist/ryten-bench-0.1.0-setup.exe
+            dist/ryten-bench-0.1.0-setup.exe.blockmap
+            dist/latest.yml
