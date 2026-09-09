@@ -192,7 +192,13 @@ const TipTapMarkdownEditor: React.FC<TipTapMarkdownEditorProps> = ({
     editable: !readOnly,
     autofocus: autofocus === true ? true : autofocus === 'end' ? 'end' : false,
     editorProps: {
-      attributes: { class: 'tiptap-editor' },
+      attributes: {
+        class: 'tiptap-editor',
+        // 文档正文是纯文本编辑，关闭浏览器自带的拼写/语法校验波浪线
+        spellcheck: 'false',
+        autocorrect: 'off',
+        autocapitalize: 'off'
+      },
       handleKeyDown: (_view, event) => {
         // Ctrl/Cmd + K：打开链接浮层
         if (

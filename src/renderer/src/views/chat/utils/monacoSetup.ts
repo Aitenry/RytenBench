@@ -20,3 +20,23 @@ self.MonacoEnvironment = {
 
 // Use local Monaco Editor instead of CDN (required for offline Electron use)
 loader.config({ monaco })
+
+// File editing should stay quiet about syntax/semantic problems.
+monaco.typescript.typescriptDefaults.setDiagnosticsOptions({
+  noSemanticValidation: true,
+  noSyntaxValidation: true,
+  noSuggestionDiagnostics: true
+})
+monaco.typescript.javascriptDefaults.setDiagnosticsOptions({
+  noSemanticValidation: true,
+  noSyntaxValidation: true,
+  noSuggestionDiagnostics: true
+})
+monaco.json.jsonDefaults.setDiagnosticsOptions({ validate: false })
+monaco.css.cssDefaults.setOptions({ validate: false })
+monaco.css.scssDefaults.setOptions({ validate: false })
+monaco.css.lessDefaults.setOptions({ validate: false })
+monaco.html.htmlDefaults.setModeConfiguration({
+  ...monaco.html.htmlDefaults.modeConfiguration,
+  diagnostics: false
+})

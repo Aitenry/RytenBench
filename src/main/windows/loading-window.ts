@@ -3,9 +3,9 @@ import { join } from 'path'
 import { is } from '@electron-toolkit/utils'
 import icon from '../../../resources/logo.png?asset'
 import logger from 'electron-log'
-import { createDatabase, listSqlFiles } from '../database/loading'
+import { createDatabase, listSqlFiles, type Database } from '../database/loading'
 import { migrateWorkspaceData } from '../database/workspace-migration'
-import { getDatabaseRef, setDatabaseInstance, setInitializationPromise } from '../database/instance'
+import { setDatabaseInstance, setInitializationPromise } from '../database/instance'
 import { initKeystore } from '../crypto/provider-key'
 import { settingsStore } from '../context'
 import { safeSend } from '../safe-send'
@@ -97,6 +97,7 @@ async function performInitializationTasks(): Promise<void> {
   // 扁平化初始化步骤：配置 / 密钥库 / 连接数据库 / 逐表建表（每表一步）/ 工作区迁移。
   // 进度条按步骤均匀推进（每步约 3~4%），细粒度、逐步增长，避免整任务一步跳到 25%。
   const sqlFiles = await listSqlFiles()
+  let database: Database | null = null
   const steps: { name: string; execute: () => Promise<void> | void }[] = [
     { name: '加载配置', execute: async () => await loadConfig() },
     {
@@ -108,22 +109,20 @@ async function performInitializationTasks(): Promise<void> {
     {
       name: '连接数据库',
       execute: async () => {
-        setDatabaseInstance(await createDatabase())
+        database = await createDatabase()
       }
     },
     // 每个表一个步骤（按文件名排序，保证外键依赖顺序）
     ...sqlFiles.map((file) => ({
       name: `建表 ${file.tableName}`,
       execute: async () => {
-        await getDatabaseRef()!.executeTable(file)
+        await database!.executeTable(file)
       }
     })),
     {
       name: '初始化工作区',
       execute: async () => {
-        const db = getDatabaseRef()
-        if (!db) return
-        const result = await migrateWorkspaceData(db.getDatabase(), () => {
+        const result = await migrateWorkspaceData(database!.getDatabase(), () => {
           const chat = settingsStore.get('chat') as ChatSettings | undefined
           return chat?.activeWorkspaceId
         })
@@ -150,6 +149,10 @@ async function performInitializationTasks(): Promise<void> {
     sendInitProgress(steps[i].name, (i / steps.length) * 100, i + 1, steps.length)
     await steps[i].execute()
   }
+
+  // 建表与工作区迁移全部完成后再开放数据库访问：
+  // 主窗口预热期间渲染进程可能已发起查询，提前暴露会导致「relation ... does not exist」。
+  setDatabaseInstance(database)
 
   // 全部步骤完成
   sendInitProgress('初始化完成', 100, steps.length, steps.length)

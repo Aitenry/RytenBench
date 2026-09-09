@@ -93,6 +93,10 @@ const HomeView: React.FC = () => {
   /* ── 加载数据 ── */
   const loadAll = useCallback(async (): Promise<void> => {
     try {
+      // 主窗口预热时渲染进程可能早于数据库初始化完成：
+      // 先等设置就绪（活动工作区已迁移写回），再查询文档/知识库/待办。
+      await api.systemSettings.getAll()
+
       // 分页拉全量（修复：此前硬编码 300 条截断,超出部分在树/搜索/仪表盘不可达且无入口）
       const fetchAllDocs = async (excludeWikiId?: number): Promise<DocListItem[]> => {
         const items: DocListItem[] = []
