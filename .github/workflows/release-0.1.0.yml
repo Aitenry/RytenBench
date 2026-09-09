@@ -1,4 +1,4 @@
-name: Build 0.1.0 Release
+name: Build RytenBench 0.1.0
 
 on:
   push:
@@ -13,9 +13,30 @@ permissions:
   contents: write
 
 jobs:
-  release:
-    runs-on: windows-latest
+  build:
+    name: Build ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows
+            os: windows-latest
+            script: build:win
+            artifact_pattern: dist/*.exe
+          - platform: macos
+            os: macos-latest
+            script: build:mac
+            artifact_pattern: |
+              dist/*.dmg
+              dist/*.zip
+          - platform: linux
+            os: ubuntu-latest
+            script: build:linux
+            artifact_pattern: |
+              dist/*.AppImage
+              dist/*.deb
 
     steps:
       - name: Checkout
@@ -37,22 +58,56 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build Windows installer
-        shell: pwsh
-        run: pnpm build:win
+      - name: Build installer
+        run: pnpm ${{ matrix.script }}
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-${{ matrix.platform }}
+          path: ${{ matrix.artifact_pattern }}
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Download Windows installer
+        uses: actions/download-artifact@v4
+        with:
+          name: installer-windows
+          path: release/windows
+
+      - name: Download macOS installer
+        uses: actions/download-artifact@v4
+        with:
+          name: installer-macos
+          path: release/macos
+
+      - name: Download Linux installer
+        uses: actions/download-artifact@v4
+        with:
+          name: installer-linux
+          path: release/linux
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v0.1.0-${{ github.run_number }}
-          name: RytenBench 0.1.0 Build ${{ github.run_number }}
+          name: RytenBench 0.1.0
           body: |
-            Auto-generated release from branch `0.1.0`.
+            RytenBench 0.1.0 发布构建。
 
-            Commit: `${{ github.sha }}`
+            包含 Windows、macOS 和 Linux 安装包。
           files: |
-            dist/ryten-bench-0.1.0-setup.exe
-            dist/ryten-bench-0.1.0-setup.exe.blockmap
-            dist/latest.yml
+            release/windows/*.exe
+            release/macos/*.dmg
+            release/macos/*.zip
+            release/linux/*.AppImage
+            release/linux/*.deb
+          fail_on_unmatched_files: false
