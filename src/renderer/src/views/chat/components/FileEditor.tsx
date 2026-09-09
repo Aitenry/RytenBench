@@ -3,7 +3,9 @@ import { RiCloseLine, RiArrowDownSLine } from '@remixicon/react'
 import { Dropdown } from 'antd'
 import Editor, { type OnMount } from '@monaco-editor/react'
 import type { editor } from 'monaco-editor'
+import * as monaco from 'monaco-editor'
 import '../utils/monacoSetup'
+import { disableMonacoValidation } from '../utils/monacoSetup'
 import { getLanguageFromPath } from '../utils/fileLang'
 
 export interface OpenFile {
@@ -368,6 +370,7 @@ const FileEditor: React.FC<FileEditorProps> = ({
             language={language}
             value={activeFile.content}
             options={editorOptions}
+            beforeMount={() => disableMonacoValidation(monaco)}
             onMount={handleEditorMount}
             onChange={(value) => {
               if (value !== undefined && activeFilePath) {

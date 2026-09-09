@@ -1,4 +1,4 @@
-name: Build RytenBench 0.1.0
+name: Build RytenBench 0.151.0-alpha
 
 on:
   push:
@@ -11,6 +11,10 @@ concurrency:
 
 permissions:
   contents: write
+
+env:
+  RELEASE_PREFIX: 0.151.0-alpha
+  FALLBACK_TAG: v0.1.0
 
 jobs:
   build:
@@ -71,12 +75,60 @@ jobs:
           if-no-files-found: error
 
   release:
-    name: Publish release
+    name: Publish 0.151.0-alpha release
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: '0.1.0'
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Resolve next release version
+        id: version
+        uses: actions/github-script@v7
+        env:
+          RELEASE_PREFIX: ${{ env.RELEASE_PREFIX }}
+          FALLBACK_TAG: ${{ env.FALLBACK_TAG }}
+          RUN_NUMBER: ${{ github.run_number }}
+        with:
+          script: |
+            const prefix = process.env.RELEASE_PREFIX
+            const escapedPrefix = prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+            const pattern = new RegExp(`^${escapedPrefix}\\.(\\d+)\\.(\\d+)$`)
+            const releases = await github.paginate(github.rest.repos.listReleases, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 100
+            })
+
+            let previousTag = process.env.FALLBACK_TAG || ''
+            let best = null
+            for (const release of releases) {
+              const match = pattern.exec(release.tag_name)
+              if (!match) continue
+              const candidate = [Number(match[1]), Number(match[2])]
+              if (!best || candidate[0] > best[0] || (candidate[0] === best[0] && candidate[1] > best[1])) {
+                best = candidate
+                previousTag = release.tag_name
+              }
+            }
+
+            let nextVersion
+            if (best) {
+              nextVersion = `${prefix}.${best[0]}.${best[1] + 1}`
+            } else {
+              const runNumber = Math.max(1, Number(process.env.RUN_NUMBER || '0'))
+              nextVersion = `${prefix}.${runNumber}.1`
+            }
+
+            core.setOutput('version', nextVersion)
+            core.setOutput('previous_tag', previousTag)
+
       - name: Download Windows installer
         uses: actions/download-artifact@v4
         with:
@@ -95,15 +147,36 @@ jobs:
           name: installer-linux
           path: release/linux
 
+      - name: Compose release notes
+        id: notes
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          PREVIOUS_TAG: ${{ steps.version.outputs.previous_tag }}
+          SHA: ${{ github.sha }}
+        run: |
+          if [ -n "${PREVIOUS_TAG}" ]; then
+            git log --no-merges --pretty=format:'- %s' "${PREVIOUS_TAG}..HEAD" > changes.txt 2>/dev/null || true
+          fi
+          if [ ! -s changes.txt ]; then
+            printf '%s\n' '- 本次为当前分支的构建发布。' > changes.txt
+          fi
+          {
+            echo '## 更新内容'
+            cat changes.txt
+            echo
+            echo '## 构建信息'
+            echo "- 版本：${VERSION}"
+            echo "- 提交：${SHA}"
+            echo '- 平台：Windows (NSIS)、macOS (DMG/ZIP)、Linux (AppImage/DEB)'
+          } > release-body.md
+          echo "path=release-body.md" >> "$GITHUB_OUTPUT"
+
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v0.1.0-${{ github.run_number }}
-          name: RytenBench 0.1.0
-          body: |
-            RytenBench 0.1.0 发布构建。
-
-            包含 Windows、macOS 和 Linux 安装包。
+          tag_name: ${{ steps.version.outputs.version }}
+          name: ${{ steps.version.outputs.version }}
+          body_path: ${{ steps.notes.outputs.path }}
           files: |
             release/windows/*.exe
             release/macos/*.dmg
@@ -111,3 +184,4 @@ jobs:
             release/linux/*.AppImage
             release/linux/*.deb
           fail_on_unmatched_files: false
+          make_latest: true

@@ -21,22 +21,36 @@ self.MonacoEnvironment = {
 // Use local Monaco Editor instead of CDN (required for offline Electron use)
 loader.config({ monaco })
 
-// File editing should stay quiet about syntax/semantic problems.
-monaco.typescript.typescriptDefaults.setDiagnosticsOptions({
-  noSemanticValidation: true,
-  noSyntaxValidation: true,
-  noSuggestionDiagnostics: true
-})
-monaco.typescript.javascriptDefaults.setDiagnosticsOptions({
-  noSemanticValidation: true,
-  noSyntaxValidation: true,
-  noSuggestionDiagnostics: true
-})
-monaco.json.jsonDefaults.setDiagnosticsOptions({ validate: false })
-monaco.css.cssDefaults.setOptions({ validate: false })
-monaco.css.scssDefaults.setOptions({ validate: false })
-monaco.css.lessDefaults.setOptions({ validate: false })
-monaco.html.htmlDefaults.setModeConfiguration({
-  ...monaco.html.htmlDefaults.modeConfiguration,
-  diagnostics: false
-})
+export function disableMonacoValidation(api: typeof monaco): void {
+  // File editing should stay quiet about syntax/semantic problems.
+  // Language contributions can be missing during a hot module reload,
+  // so guard every namespace before touching its defaults.
+  if (api.typescript) {
+    api.typescript.typescriptDefaults.setDiagnosticsOptions({
+      noSemanticValidation: true,
+      noSyntaxValidation: true,
+      noSuggestionDiagnostics: true
+    })
+    api.typescript.javascriptDefaults.setDiagnosticsOptions({
+      noSemanticValidation: true,
+      noSyntaxValidation: true,
+      noSuggestionDiagnostics: true
+    })
+  }
+  if (api.json) {
+    api.json.jsonDefaults.setDiagnosticsOptions({ validate: false })
+  }
+  if (api.css) {
+    api.css.cssDefaults.setOptions({ validate: false })
+    api.css.scssDefaults.setOptions({ validate: false })
+    api.css.lessDefaults.setOptions({ validate: false })
+  }
+  if (api.html) {
+    api.html.htmlDefaults.setModeConfiguration({
+      ...api.html.htmlDefaults.modeConfiguration,
+      diagnostics: false
+    })
+  }
+}
+
+disableMonacoValidation(monaco)
