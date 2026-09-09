@@ -1,4 +1,4 @@
-name: Build RytenBench 0.151.0-alpha
+name: Build RytenBench 0.1.0-alpha
 
 on:
   push:
@@ -13,8 +13,8 @@ permissions:
   contents: write
 
 env:
-  RELEASE_PREFIX: 0.151.0-alpha
-  FALLBACK_TAG: v0.1.0
+  RELEASE_PREFIX: 0.1.0-alpha
+  STABLE_COMMIT: 9aec745a55638dcec38ce3c61c0d1ddaacca3640
 
 jobs:
   build:
@@ -75,7 +75,7 @@ jobs:
           if-no-files-found: error
 
   release:
-    name: Publish 0.151.0-alpha release
+    name: Publish 0.1.0-alpha release
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -88,13 +88,17 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
+      - name: Count commits since stable release
+        id: commits
+        run: echo "count=$(git rev-list --count ${{ env.STABLE_COMMIT }}..HEAD)" >> "$GITHUB_OUTPUT"
+
       - name: Resolve next release version
         id: version
         uses: actions/github-script@v7
         env:
           RELEASE_PREFIX: ${{ env.RELEASE_PREFIX }}
-          FALLBACK_TAG: ${{ env.FALLBACK_TAG }}
-          RUN_NUMBER: ${{ github.run_number }}
+          STABLE_COMMIT: ${{ env.STABLE_COMMIT }}
+          COMMIT_COUNT: ${{ steps.commits.outputs.count }}
         with:
           script: |
             const prefix = process.env.RELEASE_PREFIX
@@ -106,7 +110,7 @@ jobs:
               per_page: 100
             })
 
-            let previousTag = process.env.FALLBACK_TAG || ''
+            let previousTag = process.env.STABLE_COMMIT || ''
             let best = null
             for (const release of releases) {
               const match = pattern.exec(release.tag_name)
@@ -118,12 +122,12 @@ jobs:
               }
             }
 
+            const commitCount = Math.max(1, Number(process.env.COMMIT_COUNT || '0'))
             let nextVersion
-            if (best) {
-              nextVersion = `${prefix}.${best[0]}.${best[1] + 1}`
+            if (best && best[0] === commitCount) {
+              nextVersion = `${prefix}.${commitCount}.${best[1] + 1}`
             } else {
-              const runNumber = Math.max(1, Number(process.env.RUN_NUMBER || '0'))
-              nextVersion = `${prefix}.${runNumber}.1`
+              nextVersion = `${prefix}.${commitCount}.1`
             }
 
             core.setOutput('version', nextVersion)
@@ -158,16 +162,16 @@ jobs:
             git log --no-merges --pretty=format:'- %s' "${PREVIOUS_TAG}..HEAD" > changes.txt 2>/dev/null || true
           fi
           if [ ! -s changes.txt ]; then
-            printf '%s\n' '- 本次为当前分支的构建发布。' > changes.txt
+            printf '%s\n' '- Current branch build.' > changes.txt
           fi
           {
-            echo '## 更新内容'
+            echo '## Changes'
             cat changes.txt
             echo
-            echo '## 构建信息'
-            echo "- 版本：${VERSION}"
-            echo "- 提交：${SHA}"
-            echo '- 平台：Windows (NSIS)、macOS (DMG/ZIP)、Linux (AppImage/DEB)'
+            echo '## Build Info'
+            echo "- Version: ${VERSION}"
+            echo "- Commit: ${SHA}"
+            echo '- Platforms: Windows (NSIS), macOS (DMG/ZIP), Linux (AppImage/DEB)'
           } > release-body.md
           echo "path=release-body.md" >> "$GITHUB_OUTPUT"
 
