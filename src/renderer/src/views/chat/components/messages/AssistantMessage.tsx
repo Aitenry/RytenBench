@@ -74,11 +74,27 @@ interface AssistantMessageProps {
   onDelete: (index: number) => void
 }
 
-/** 工具卡片文本：单行显示 + 溢出省略，悬停展示完整内容（无箭头 Tooltip，仅在溢出时出现） */
+/** 工具卡片文本：单行显示 + 溢出省略，悬停展示完整内容（无箭头 Tooltip，仅在溢出时出现）
+ *
+ *  两个易踩的坑，都在这里一次性收口：
+ *  1. 省略号只对「块级（或块化）且宽度受约束」的盒子生效。此前这里是内联 span，
+ *     overflow/text-overflow 被完全忽略，且 clientWidth 恒为 0 → 长文本（execute 的整条命令）
+ *     直接顶破卡片、悬停提示还对短文本误触发。故此处显式 display:block，
+ *     并加 1px 容差避免子像素取整导致误判。
+ *  2. 光泽必须做在「承载文字的那一个元素」上：外层 ShinyText 包内层截断 span 时，
+ *     省略号失效；且外层基色若用 colorText，暗色主题下基色 rgba(255,255,255,0.85)
+ *     与高光 rgba(255,255,255,0.9) 几乎同色，看起来「只有图标在发光、文字没有光」。
+ *     这里用 shinyBaseColor=colorTextSecondary（与 ShinyIcon 同基色）+ 纯白高光，
+ *     明暗两种主题下光泽都清晰可见。
+ */
 const TruncatedTooltipText: React.FC<{
   text: string
   style?: React.CSSProperties
-}> = ({ text, style }) => {
+  /** 光泽基色（传入即启用光泽扫过；建议与同排 ShinyIcon 的 baseColor 一致） */
+  shinyBaseColor?: string
+  /** 光泽高光色，默认纯白（与 ShinyIcon 扫过色一致） */
+  shinyShineColor?: string
+}> = ({ text, style, shinyBaseColor, shinyShineColor = '#fff' }) => {
   const spanRef = useRef<HTMLSpanElement>(null)
   const [overflow, setOverflow] = useState(false)
 
@@ -86,7 +102,7 @@ const TruncatedTooltipText: React.FC<{
     const el = spanRef.current
     if (!el) return
     const check = (): void => {
-      setOverflow(el.scrollWidth > el.clientWidth)
+      setOverflow(el.scrollWidth > el.clientWidth + 1)
     }
     check()
     const observer = new ResizeObserver(check)
@@ -100,11 +116,20 @@ const TruncatedTooltipText: React.FC<{
     <Tooltip title={overflow ? text : ''} arrow={false} styles={{ root: { maxWidth: 560 } }}>
       <span
         ref={spanRef}
+        className={shinyBaseColor ? 'shiny-text' : undefined}
         style={{
+          // 覆盖 .shiny-text 的 display:inline-block —— 省略号必须是块级盒子
+          display: 'block',
           whiteSpace: 'nowrap',
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           minWidth: 0,
+          ...(shinyBaseColor
+            ? ({
+                '--shiny-base': shinyBaseColor,
+                '--shiny-shine': shinyShineColor
+              } as React.CSSProperties)
+            : null),
           ...style
         }}
       >
@@ -469,12 +494,11 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
         const Icon = TOOL_IN_PROGRESS_ICONS[tool.name] || RiTerminalBoxLine
         return renderRow(
           <ShinyIcon icon={Icon} size={size} baseColor={colorTextSecondary} />,
-          <ShinyText baseColor={colorText} style={{ flex: 1, minWidth: 0 }}>
-            <TruncatedTooltipText
-              text={`${summary || tool.name || '工具调用'}${status}`}
-              style={{ color: colorText, fontSize, flex: 1 }}
-            />
-          </ShinyText>
+          <TruncatedTooltipText
+            text={`${summary || tool.name || '工具调用'}${status}`}
+            shinyBaseColor={colorTextSecondary}
+            style={{ color: colorText, fontSize, flex: 1 }}
+          />
         )
       }
 
@@ -999,12 +1023,11 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
           className="rounded-lg"
         >
           <ShinyIcon icon={RiBrain4Line} size={size} baseColor={colorTextSecondary} />
-          <ShinyText baseColor={colorTextSecondary} style={{ flex: 1, minWidth: 0 }}>
-            <TruncatedTooltipText
-              text={`${title}${status}`}
-              style={{ color: colorTextSecondary, fontSize, flex: 1 }}
-            />
-          </ShinyText>
+          <TruncatedTooltipText
+            text={`${title}${status}`}
+            shinyBaseColor={colorTextSecondary}
+            style={{ color: colorTextSecondary, fontSize, flex: 1 }}
+          />
         </div>
       )
     }
@@ -1061,12 +1084,11 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
               }}
             >
               <ShinyIcon icon={RiRefreshLine} size={16} baseColor={colorTextSecondary} />
-              <ShinyText baseColor={colorText}>
-                <TruncatedTooltipText
-                  text={`正在重试（第 ${attempt}/${retries} 次）…`}
-                  style={{ color: colorText, fontSize: '13px', flex: 1 }}
-                />
-              </ShinyText>
+              <TruncatedTooltipText
+                text={`正在重试（第 ${attempt}/${retries} 次）…`}
+                shinyBaseColor={colorTextSecondary}
+                style={{ color: colorText, fontSize: '13px', flex: 1 }}
+              />
             </div>
           )
         }
@@ -1087,12 +1109,11 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
               }}
             >
               <ShinyIcon icon={RiPictureInPicture2Line} size={16} baseColor={colorTextSecondary} />
-              <ShinyText baseColor={colorText}>
-                <TruncatedTooltipText
-                  text="正在压缩早期对话…"
-                  style={{ color: colorText, fontSize: '13px', flex: 1 }}
-                />
-              </ShinyText>
+              <TruncatedTooltipText
+                text="正在压缩早期对话…"
+                shinyBaseColor={colorTextSecondary}
+                style={{ color: colorText, fontSize: '13px', flex: 1 }}
+              />
             </div>
           )
         }
