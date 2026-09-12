@@ -1,9 +1,11 @@
 name: Build RytenBench 0.1.0-alpha
 
+# 发布构建由 main 触发：日常在 0.1.0 上开发，合并进 main 后自动出包。
+# 注意 0.1.0 是非默认分支，直接推它只会触发 GitHub 的「recent pushes」横幅，不会出包。
 on:
   push:
     branches:
-      - '0.1.0'
+      - 'main'
 
 concurrency:
   group: release-0.1.0
@@ -46,7 +48,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: '0.1.0'
+          ref: 'main'
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -84,7 +86,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: '0.1.0'
+          ref: 'main'
           fetch-depth: 0
           fetch-tags: true
 
