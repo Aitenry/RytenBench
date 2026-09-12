@@ -58,18 +58,7 @@ async function createWorkspace(name: string, path: string): Promise<number> {
     const result = await db.query<{ id: number }>(sql, [name, path])
     const newId = result.rows[0].id
     logger.info(`Created workspace ID=${newId}, name="${name}", path="${path}"`)
-    // 首个工作区承接历史存量数据（workspace_id 为 NULL 的旧数据归入其中；计划与歌单为全局数据不参与）
-    const tables = ['documents', 'wiki', 'todo_items']
-    for (const table of tables) {
-      const backfill = await db.query(
-        `UPDATE ${table} SET workspace_id = $1 WHERE workspace_id IS NULL`,
-        [newId]
-      )
-      const count = backfill.affectedRows ?? 0
-      if (count > 0) {
-        logger.info(`Backfilled ${count} rows of ${table} to new workspace ${newId}`)
-      }
-    }
+    // 文档/知识库/待办为全局数据（不属于任一工作区），无需承接存量
     return newId
   } catch (error) {
     logger.error('Failed to create workspace:', error)
@@ -97,17 +86,10 @@ async function deleteWorkspace(id: number): Promise<boolean> {
   try {
     const db = (await getDatabaseInstance()).getDatabase()
     await db.transaction(async (tx) => {
-      // 保证至少保留一个工作区：只剩一个时禁止删除
-      const countResult = await tx.query<{ n: number }>('SELECT COUNT(*)::int AS n FROM workspace')
-      if (Number(countResult.rows[0]?.n) <= 1) {
-        throw new Error('至少需要保留一个工作区')
-      }
-      // 级联清理该工作区的内容（顺序满足外键依赖）：
-      // 文档（级联删除内容与目录关联）→ 知识库（级联删除目录、目录关联、图谱）→ 待办（级联删除依赖）
-      // 计划与歌单为全局数据，不属于任一工作区，不随工作区删除
-      await tx.query('DELETE FROM documents WHERE workspace_id = $1', [id])
-      await tx.query('DELETE FROM wiki WHERE workspace_id = $1', [id])
-      await tx.query('DELETE FROM todo_items WHERE workspace_id = $1', [id])
+      // 允许删除最后一个工作区：应用不再自动创建默认工作区，删空后回到「未配置」，
+      // 由对话页引导用户重新选择目录。
+      // 只清理工作区私有内容（聊天话题 / 子代理配置 / 记忆目录）
+      // 文档 / 知识库 / 待办 / 计划 / 歌单均为全局数据，不属于任一工作区，不随工作区删除
       // 修复：chat_goals 与 topic_compactions 表无外键级联（023/024 均无 REFERENCES），
       // 工作区删除后目标行与压缩 checkpoint 会成孤儿永久残留——先按话题枚举删除
       await tx.query(

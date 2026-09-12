@@ -1,7 +1,6 @@
--- 待办事项表
+-- 待办事项表（全局数据，不按工作区隔离）
 CREATE TABLE IF NOT EXISTS todo_items (
     id           SERIAL PRIMARY KEY,
-    workspace_id INTEGER,
     title        TEXT      NOT NULL,
     description  TEXT,
     due_date     DATE,
@@ -14,12 +13,8 @@ CREATE TABLE IF NOT EXISTS todo_items (
     completed_at TIMESTAMP
 );
 
--- 迁移：为已有数据库添加 workspace_id 列（必须先于依赖该列的 CREATE INDEX——
--- 修复：旧库升级时 CREATE TABLE 被跳过，先建索引会抛 column does not exist 并中断后续全部 SQL）
-ALTER TABLE todo_items ADD COLUMN IF NOT EXISTS workspace_id INTEGER;
-
--- 工作区隔离索引
-CREATE INDEX IF NOT EXISTS idx_todo_workspace ON todo_items (workspace_id);
+-- 迁移：移除旧版的工作区隔离列（待办已改为全局数据，所有工作区共享同一份）
+ALTER TABLE todo_items DROP COLUMN IF EXISTS workspace_id;
 
 -- 待办事项表索引
 CREATE INDEX IF NOT EXISTS idx_todo_priority   ON todo_items (priority);

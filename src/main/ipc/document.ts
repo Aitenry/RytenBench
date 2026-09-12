@@ -4,7 +4,6 @@ import mammoth from 'mammoth'
 import TurndownService from 'turndown'
 import { JSDOM } from 'jsdom'
 import { Readability } from '@mozilla/readability'
-import { getActiveWorkspaceId } from '../database/workspace-context'
 import { getDatabaseInstance } from '../database/instance'
 import { deleteNodePosition } from '../database/mapper/node_position'
 import {
@@ -39,7 +38,7 @@ export function registerDocumentIpc(): void {
     'doc-get-all',
     async (_event, page?: number, pageSize?: number, excludeWikiId?: number, search?: string) => {
       try {
-        return await getAllDocs(getActiveWorkspaceId(), page, pageSize, excludeWikiId, search)
+        return await getAllDocs(page, pageSize, excludeWikiId, search)
       } catch (error) {
         console.error('Error in doc-get-all:', error)
         throw error
@@ -51,7 +50,7 @@ export function registerDocumentIpc(): void {
     'doc-page-get',
     async (_event, query: string, page?: number, pageSize?: number) => {
       try {
-        return await getDocPage(getActiveWorkspaceId(), query, page, pageSize)
+        return await getDocPage(query, page, pageSize)
       } catch (error) {
         console.error('Error in doc-page-get:', error)
         throw error
@@ -69,7 +68,7 @@ export function registerDocumentIpc(): void {
       }
     ) => {
       try {
-        return await addDoc(getActiveWorkspaceId(), doc)
+        return await addDoc(doc)
       } catch (error) {
         console.error('Error in doc-add:', error)
         throw error
@@ -114,12 +113,12 @@ export function registerDocumentIpc(): void {
       // 先查询将要被删除的文档 ID，用于清理节点位置
       const db = (await getDatabaseInstance()).getDatabase()
       const idsResult = await db.query<{ id: number }>(
-        'SELECT id FROM documents WHERE workspace_id = $1 AND created_at >= $2 AND created_at <= $3',
-        [getActiveWorkspaceId(), startTime, endTime]
+        'SELECT id FROM documents WHERE created_at >= $1 AND created_at <= $2',
+        [startTime, endTime]
       )
       const deletedIds = idsResult.rows.map((r) => r.id)
 
-      const result = await deleteDocsByTimeRange(getActiveWorkspaceId(), startTime, endTime)
+      const result = await deleteDocsByTimeRange(startTime, endTime)
 
       // 清理对应的节点位置
       for (const id of deletedIds) {

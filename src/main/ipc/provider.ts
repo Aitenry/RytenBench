@@ -38,6 +38,7 @@ import {
   deleteAgent,
   AgentConfigInput
 } from '../database/mapper/agent'
+import { getAllWorkspaces } from '../database/mapper/chat'
 
 /** 通知所有窗口供应商列表已变更 */
 function broadcastProvidersChanged(): void {
@@ -241,6 +242,12 @@ export function registerProviderIpc(): void {
 
   ipcMain.handle('agent-create', async (_event, input: AgentConfigInput) => {
     try {
+      // agent_config.workspace_id 有外键约束：未配置工作区时给出可读提示，
+      // 而不是抛原始的 FK 违例（应用不再自动创建默认工作区）
+      const workspaces = await getAllWorkspaces()
+      if (!input.workspace_id || !workspaces.some((w) => w.id === input.workspace_id)) {
+        throw new Error('尚未配置工作区，请先在对话页选择工作区目录')
+      }
       const id = await createAgent(input)
       clearAgentCache()
       return id

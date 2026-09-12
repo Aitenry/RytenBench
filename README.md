@@ -30,7 +30,7 @@
 ### AI
 
 - **AI Chat Assistant** — Conversational AI powered by a LangGraph runtime with streaming responses, reasoning (deep thinking) display, tool-call cards, and sub-agent delegation. Chat history is persisted per workspace and topic.
-- **Workspaces** — Multiple workspaces, each bound to a real directory on disk. Browse, read, and edit workspace files inline (Monaco-based file editor) with file reference chips in chat input. Chat data, agents, and memory are all isolated per workspace.
+- **Workspaces** — Multiple workspaces, each bound to a real directory on disk. Browse, read, and edit workspace files inline (Monaco-based file editor) with file reference chips in chat input. Chat history, agents, and memory are isolated per workspace; documents, wikis and todos are global.
 - **Built-in Memory (Mnemon)** — A three-layer memory system in every workspace: runtime memory (user profile + project MEMORY, injected every turn), project documents (Markdown archives with cold/hot tiering + LRU), and long-term memory spaces (graph relations + deep recall, backed by PGlite). Exposed to the agent as 13 `mnemon_*` tools.
 - **Agent System** — Configure sub-agents per workspace with custom system prompts and tool selections; the main agent supports configurable tools and skills.
 - **Skill System** — Load custom skills from a local directory; enable/disable individual skills for chat sessions.
@@ -277,7 +277,7 @@ RytenBench/
 
 The application follows Electron's **multi-process architecture**:
 
-- **Main Process** (`src/main/`): Manages the application lifecycle, per-workspace PGLite databases, the LLM provider factory, the knowledge graph builder, and the LangGraph chat runtime with streaming & tool orchestration. All IPC communication with the renderer flows through typed handlers.
+- **Main Process** (`src/main/`): Manages the application lifecycle, the local PGLite database, the LLM provider factory, the knowledge graph builder, and the LangGraph chat runtime with streaming & tool orchestration. All IPC communication with the renderer flows through typed handlers.
 - **Preload** (`src/preload/`): Bridges the main and renderer processes through `contextBridge`, exposing a structured API (`api.docs`, `api.wikis`, `api.todoItems`, `api.planner`, `api.chat`, `api.graph`, `api.providers`, `api.agents`, `api.mainAgent`, `api.music`, `api.weather`, `api.workspace`, `api.file`, `api.systemSettings`, `api.mermaid`, `api.window`, ...) to the frontend.
 - **Renderer** (`src/renderer/`): React 19 SPA with React Router 7 hash routing, styled with Ant Design 6 and Tailwind CSS 4. Custom frameless window with sidebar navigation, bottom bar with mini player, and right bar panels.
 
@@ -289,7 +289,7 @@ flowchart LR
 
     subgraph Main["Main Process"]
         RT["LangGraph Chat Runtime"] --> LLM["LLM Provider Factory"]
-        RT --> DB[("PGLite · per workspace")]
+        RT --> DB[("PGLite · local database")]
         RT --> FS["Workspace FS · file tools"]
         RT --> MEM["Mnemon Memory · 13 tools"]
     end
@@ -299,7 +299,8 @@ flowchart LR
 
 ### Workspaces & Memory Isolation
 
-- Each **workspace** owns a real directory on disk, its own PGLite databases (chat, docs, todos, planner, music share per-workspace tables), sub-agent configurations, and a dedicated mnemon store under `workspace-<id>/mnemon/` — switching workspaces never leaks data or memory between them.
+- Each **workspace** owns a real directory on disk, its own chat topics and dialogues, its sub-agent configurations, and a dedicated mnemon store under `workspace-<id>/mnemon/` — switching workspaces never leaks chat history or memory between them.
+- **Documents, wikis (and their knowledge graphs), todos, planner tasks, the music library, LLM providers and skills are global** — they are shared by every workspace and are not affected by switching or deleting one.
 - The **Mnemon** memory layer (hot memory → project documents → long-term memory spaces) is modeled after the dsh-mnemon plugin architecture, implemented natively on LangGraph with a PGlite-backed long-term store.
 
 ---

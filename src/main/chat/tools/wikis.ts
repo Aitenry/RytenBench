@@ -1,7 +1,6 @@
 import { tool } from '@langchain/core/tools'
 import type { StructuredToolInterface } from '@langchain/core/tools'
 import * as z from 'zod/v4'
-import { getActiveWorkspaceId } from '../../database/workspace-context'
 
 // ============================================================================
 // Wiki Handlers — 渐进式披露：列表 → 目录 → 文档
@@ -12,7 +11,7 @@ import { getActiveWorkspaceId } from '../../database/workspace-context'
 
 async function listWikisHandler(): Promise<string> {
   const { getAllWikis } = await import('../../database/mapper/wiki')
-  const result = await getAllWikis(getActiveWorkspaceId())
+  const result = await getAllWikis()
   if (!result.items.length) return '还没有创建任何知识库。'
   const lines = [`**知识库列表**（共 ${result.items.length} 个）\n`]
   for (const wiki of result.items) {
@@ -130,7 +129,7 @@ async function createWikiHandler(params: {
   tags?: string
 }): Promise<string> {
   const { addWiki } = await import('../../database/mapper/wiki')
-  const id = await addWiki(getActiveWorkspaceId(), {
+  const id = await addWiki({
     title: params.title,
     summary: params.summary ?? null,
     tags: params.tags ?? null,

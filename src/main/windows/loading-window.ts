@@ -126,20 +126,27 @@ async function performInitializationTasks(): Promise<void> {
           const chat = settingsStore.get('chat') as ChatSettings | undefined
           return chat?.activeWorkspaceId
         })
-        // 把迁移确定的活动工作区写回设置（自动创建的默认工作区同时写入路径）
+        // 把迁移确定的活动工作区写回设置（id 与路径一起同步）
         const chat = settingsStore.get('chat') as ChatSettings | undefined
         const next: ChatSettings = { ...(chat ?? ({} as ChatSettings)) }
-        if (
+        if (result.activeWorkspaceId == null) {
+          // 没有任何工作区：清掉残留配置，回到「未配置」，由对话页引导用户选择目录
+          if (next.activeWorkspaceId != null || next.workspacePath) {
+            delete next.activeWorkspaceId
+            next.workspacePath = ''
+            settingsStore.set('chat', next)
+          }
+        } else if (
           next.activeWorkspaceId !== result.activeWorkspaceId ||
-          (result.defaultPath && !next.workspacePath)
+          next.workspacePath !== result.activeWorkspacePath
         ) {
           next.activeWorkspaceId = result.activeWorkspaceId
-          if (result.defaultPath && !next.workspacePath) {
-            next.workspacePath = result.defaultPath
-          }
+          next.workspacePath = result.activeWorkspacePath ?? ''
           settingsStore.set('chat', next)
         }
-        logger.info(`[Init] Workspace migration done, active workspace=${result.activeWorkspaceId}`)
+        logger.info(
+          `[Init] Workspace migration done, active workspace=${result.activeWorkspaceId ?? 'none'}`
+        )
       }
     }
   ]

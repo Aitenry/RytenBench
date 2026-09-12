@@ -1,6 +1,5 @@
 import { ipcMain } from 'electron'
 import logger from 'electron-log'
-import { getActiveWorkspaceId } from '../database/workspace-context'
 import { deleteNodePosition } from '../database/mapper/node_position'
 import {
   getTodoItemById,
@@ -36,7 +35,7 @@ export function registerTodoIpc(): void {
 
   ipcMain.handle('todo-items-get-by-title', async (_event, title: string) => {
     try {
-      return await getTodoItemByTitle(getActiveWorkspaceId(), title)
+      return await getTodoItemByTitle(title)
     } catch (error) {
       console.error('Error in todo-items-get-by-title:', error)
       throw error
@@ -45,7 +44,7 @@ export function registerTodoIpc(): void {
 
   ipcMain.handle('todo-items-get-by-priority', async (_event, priority: number) => {
     try {
-      return await getTodoItemsByPriority(getActiveWorkspaceId(), priority)
+      return await getTodoItemsByPriority(priority)
     } catch (error) {
       console.error('Error in todo-items-get-by-priority:', error)
       throw error
@@ -60,7 +59,7 @@ export function registerTodoIpc(): void {
       if (![0, 1, 2].includes(normalized)) {
         throw new Error('status 必须为 0（未开始）/ 1（进行中）/ 2（已完成）')
       }
-      return await getTodoItemsByStatus(getActiveWorkspaceId(), normalized)
+      return await getTodoItemsByStatus(normalized)
     } catch (error) {
       console.error('Error in todo-items-get-by-completed-status:', error)
       throw error
@@ -69,7 +68,7 @@ export function registerTodoIpc(): void {
 
   ipcMain.handle('todo-items-get-schedule', async () => {
     try {
-      return await getAllTodoItems(getActiveWorkspaceId())
+      return await getAllTodoItems()
     } catch (error) {
       console.error('Error in todo-items-get-schedule:', error)
       throw error
@@ -78,7 +77,7 @@ export function registerTodoIpc(): void {
 
   ipcMain.handle('todo-items-get-paginated', async (_event, page: number, pageSize: number) => {
     try {
-      return await getTodoItemsPaginated(getActiveWorkspaceId(), page, pageSize)
+      return await getTodoItemsPaginated(page, pageSize)
     } catch (error) {
       console.error('Error in todo-items-get-paginated:', error)
       throw error
@@ -87,7 +86,7 @@ export function registerTodoIpc(): void {
 
   ipcMain.handle('todo-items-get-by-due-date', async (_event, dueDate: string) => {
     try {
-      return await getTodoItemsByDueDate(getActiveWorkspaceId(), dueDate)
+      return await getTodoItemsByDueDate(dueDate)
     } catch (error) {
       console.error('Error in todo-items-get-by-due-date:', error)
       throw error
@@ -96,7 +95,7 @@ export function registerTodoIpc(): void {
 
   ipcMain.handle('todo-items-add', async (_event, todoItem: Omit<TodoItemRow, 'id'>) => {
     try {
-      return await addTodoItem(getActiveWorkspaceId(), todoItem)
+      return await addTodoItem(todoItem)
     } catch (error) {
       console.error('Error in todo-items-add:', error)
       throw error
@@ -157,7 +156,7 @@ export function registerTodoIpc(): void {
 
   ipcMain.handle('task-deps-get-all', async () => {
     try {
-      return await getAllDependencies(getActiveWorkspaceId())
+      return await getAllDependencies()
     } catch (error) {
       console.error('Error in task-deps-get-all:', error)
       throw error
@@ -166,7 +165,7 @@ export function registerTodoIpc(): void {
 
   ipcMain.handle('task-deps-get-with-tasks', async () => {
     try {
-      return await getAllTasksWithDependencies(getActiveWorkspaceId())
+      return await getAllTasksWithDependencies()
     } catch (error) {
       console.error('Error in task-deps-get-with-tasks:', error)
       throw error

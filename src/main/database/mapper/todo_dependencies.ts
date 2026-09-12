@@ -1,4 +1,4 @@
-﻿import { getDatabaseInstance } from '../instance'
+import { getDatabaseInstance } from '../instance'
 import logger from 'electron-log'
 import type { TodoItemRow } from './todo'
 
@@ -89,17 +89,17 @@ async function getDependents(taskId: number): Promise<TaskDependencyRow[]> {
   }
 }
 
-// --- 获取所有依赖关系（按工作区过滤） ---
-async function getAllDependencies(workspaceId: number): Promise<TaskDependencyRow[]> {
+// --- 获取所有依赖关系 ---
+async function getAllDependencies(): Promise<TaskDependencyRow[]> {
   try {
     const db = (await getDatabaseInstance()).getDatabase()
+    // INNER JOIN 仅用于滤掉任务已删除的悬空依赖（待办已改为全局数据，不再按工作区过滤）
     const sql = `
       SELECT d.* FROM task_dependencies d
       INNER JOIN todo_items t ON t.id = d.task_id
-      WHERE t.workspace_id = $1
       ORDER BY d.task_id
     `
-    const result = await db.query<TaskDependencyRow>(sql, [workspaceId])
+    const result = await db.query<TaskDependencyRow>(sql)
     return result.rows
   } catch (error) {
     logger.error('Failed to get all dependencies:', error)
@@ -107,22 +107,19 @@ async function getAllDependencies(workspaceId: number): Promise<TaskDependencyRo
   }
 }
 
-// --- 获取所有任务及其依赖关系（用于甘特图，按工作区过滤） ---
-async function getAllTasksWithDependencies(workspaceId: number): Promise<TaskWithDependencies[]> {
+// --- 获取所有任务及其依赖关系（用于甘特图） ---
+async function getAllTasksWithDependencies(): Promise<TaskWithDependencies[]> {
   try {
     const db = (await getDatabaseInstance()).getDatabase()
 
     const tasksResult = await db.query<TodoItemRow>(
-      'SELECT * FROM todo_items WHERE workspace_id = $1 ORDER BY priority ASC, due_date ASC',
-      [workspaceId]
+      'SELECT * FROM todo_items ORDER BY priority ASC, due_date ASC'
     )
     const tasks = tasksResult.rows
 
     const depsResult = await db.query<TaskDependencyRow>(
       `SELECT d.* FROM task_dependencies d
-       INNER JOIN todo_items t ON t.id = d.task_id
-       WHERE t.workspace_id = $1`,
-      [workspaceId]
+       INNER JOIN todo_items t ON t.id = d.task_id`
     )
     const allDeps = depsResult.rows
 

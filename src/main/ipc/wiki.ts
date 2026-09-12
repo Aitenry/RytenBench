@@ -1,5 +1,4 @@
 import { ipcMain } from 'electron'
-import { getActiveWorkspaceId } from '../database/workspace-context'
 import { deleteNodePosition } from '../database/mapper/node_position'
 import {
   getWikiById,
@@ -32,7 +31,7 @@ export function registerWikiIpc(): void {
 
   ipcMain.handle('wiki-get-all', async (_event, page?: number, pageSize?: number) => {
     try {
-      return await getAllWikis(getActiveWorkspaceId(), page, pageSize)
+      return await getAllWikis(page, pageSize)
     } catch (error) {
       console.error('Error in wiki-get-all:', error)
       throw error
@@ -43,7 +42,7 @@ export function registerWikiIpc(): void {
     'wiki-add',
     async (_event, wiki: Omit<WikiRow, 'id' | 'doc_count' | 'created_at' | 'updated_at'>) => {
       try {
-        return await addWiki(getActiveWorkspaceId(), wiki)
+        return await addWiki(wiki)
       } catch (error) {
         console.error('Error in wiki-add:', error)
         throw error

@@ -2,7 +2,6 @@ import { BrowserWindow } from 'electron'
 import { tool } from '@langchain/core/tools'
 import type { StructuredToolInterface } from '@langchain/core/tools'
 import * as z from 'zod/v4'
-import { getActiveWorkspaceId } from '../../database/workspace-context'
 import { safeSend } from '../../safe-send'
 
 /**
@@ -29,13 +28,7 @@ async function searchDocsHandler(params: {
   pageSize?: number
 }): Promise<string> {
   const { getAllDocs } = await import('../../database/mapper/document')
-  const result = await getAllDocs(
-    getActiveWorkspaceId(),
-    params.page ?? 1,
-    params.pageSize ?? 10,
-    undefined,
-    params.query
-  )
+  const result = await getAllDocs(params.page ?? 1, params.pageSize ?? 10, undefined, params.query)
   if (!result.items.length) return `没有找到匹配 "${params.query}" 的文档。`
   const lines = [`**搜索 "${params.query}"**（共 ${result.total} 条）\n`]
   for (const doc of result.items) {
@@ -163,7 +156,7 @@ async function createDocHandler(params: {
   content?: string
 }): Promise<string> {
   const { addDoc } = await import('../../database/mapper/document')
-  const id = await addDoc(getActiveWorkspaceId(), {
+  const id = await addDoc({
     title: params.title,
     summary: params.summary ?? null,
     tags: params.tags ?? null,

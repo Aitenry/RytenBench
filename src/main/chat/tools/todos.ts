@@ -1,7 +1,6 @@
 import { tool } from '@langchain/core/tools'
 import type { StructuredToolInterface } from '@langchain/core/tools'
 import * as z from 'zod/v4'
-import { getActiveWorkspaceId } from '../../database/workspace-context'
 
 // ============================================================================
 // Todo Handlers
@@ -30,16 +29,16 @@ async function listTodosHandler(params: {
     // 修复：此前「先分页后客户端过滤」只扫第一页,命中项在后续页即漏报；
     // 且分页 SQL 恒排除已完成(status!=2),查「已完成」永远为空。
     // 改为按状态全量查询后在内存分页（口径与不带过滤的 list 一致,含已完成）
-    const rows = await getTodoItemsByStatus(getActiveWorkspaceId(), status)
+    const rows = await getTodoItemsByStatus(status)
     items = rows.slice((safePage - 1) * safePageSize, safePage * safePageSize)
   } else if (priority !== undefined) {
-    const rows = await getTodoItemsByPriority(getActiveWorkspaceId(), priority)
+    const rows = await getTodoItemsByPriority(priority)
     items = rows.slice((safePage - 1) * safePageSize, safePage * safePageSize)
   } else if (safePage > 1) {
-    const result = await getTodoItemsPaginated(getActiveWorkspaceId(), safePage, safePageSize)
+    const result = await getTodoItemsPaginated(safePage, safePageSize)
     items = result.items
   } else {
-    items = await getAllTodoItems(getActiveWorkspaceId())
+    items = await getAllTodoItems()
   }
   if (!items.length) return '没有找到待办事项。'
   const statusLabels = ['待办', '进行中', '已完成']
@@ -66,7 +65,7 @@ async function addTodoHandler(params: {
   category?: string
 }): Promise<string> {
   const { addTodoItem, getTodoItemById } = await import('../../database/mapper/todo')
-  const newId = await addTodoItem(getActiveWorkspaceId(), {
+  const newId = await addTodoItem({
     title: params.title,
     description: params.description || '',
     due_date: params.due_date || null,

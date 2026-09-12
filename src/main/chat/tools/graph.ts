@@ -1,7 +1,6 @@
 import { tool } from '@langchain/core/tools'
 import type { StructuredToolInterface } from '@langchain/core/tools'
 import * as z from 'zod/v4'
-import { getActiveWorkspaceId } from '../../database/workspace-context'
 
 // ============================================================================
 // Graph Handler
@@ -10,9 +9,7 @@ import { getActiveWorkspaceId } from '../../database/workspace-context'
 async function searchGraphHandler(params: { wikiId?: number; query: string }): Promise<string> {
   const { getAllWikis } = await import('../../database/mapper/wiki')
   const { searchEntities } = await import('../../database/mapper/graph')
-  const wikis = params.wikiId
-    ? [{ id: params.wikiId }]
-    : (await getAllWikis(getActiveWorkspaceId())).items
+  const wikis = params.wikiId ? [{ id: params.wikiId }] : (await getAllWikis()).items
   const lines: string[] = [`**知识图谱搜索 "${params.query}"**\n`]
   let totalFound = 0
   for (const wiki of wikis) {
