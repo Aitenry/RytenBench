@@ -7,6 +7,7 @@ import { Window } from '../../../resource/types/window'
 import MainRoutes from '@renderer/route/MainRoutes'
 import { isLazyViewKey, preloadView, scheduleViewPreload } from '@renderer/route/viewPreload'
 import SettingsModal from './settings/SettingsModal'
+import type { SettingsScope } from './settings/SettingsModal'
 import TitleBar from './frame/TitleBar'
 import Sidebar from './frame/Sidebar'
 import RightBar from './frame/RightBar'
@@ -36,6 +37,8 @@ const CustomFrame: React.FC<CustomFrameProps> = ({ currentKey, setCurrentKey }) 
   const [isMaximized, setIsMaximized] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsTab, setSettingsTab] = useState<string | undefined>(undefined)
+  /** 弹窗展示范围：assistant = 只显示助手设置四页（侧边栏入口），full = 全部设置页 */
+  const [settingsScope, setSettingsScope] = useState<SettingsScope>('full')
 
   const api = (window as unknown as Window).api
 
@@ -58,8 +61,10 @@ const CustomFrame: React.FC<CustomFrameProps> = ({ currentKey, setCurrentKey }) 
   // 监听自定义事件以从其他页面打开系统设置
   useEffect(() => {
     const handler = (e: Event): void => {
-      const detail = (e as CustomEvent).detail as { tab?: string } | undefined
+      const detail = (e as CustomEvent).detail as { tab?: string; scope?: string } | undefined
       setSettingsTab(detail?.tab)
+      // scope: 'assistant' → 聚焦模式（只显示智能体 / 模型 / 技能 / 记忆）
+      setSettingsScope(detail?.scope === 'assistant' ? 'assistant' : 'full')
       setSettingsOpen(true)
     }
     window.addEventListener('open-system-settings', handler)
@@ -89,6 +94,7 @@ const CustomFrame: React.FC<CustomFrameProps> = ({ currentKey, setCurrentKey }) 
   const handleClose = useCallback(() => api.window.close(), [])
   const handleSettingsClick = useCallback(() => {
     setSettingsTab(undefined)
+    setSettingsScope('full')
     setSettingsOpen(true)
   }, [])
 
@@ -154,6 +160,7 @@ const CustomFrame: React.FC<CustomFrameProps> = ({ currentKey, setCurrentKey }) 
               | 'memory'
               | undefined
           }
+          scope={settingsScope}
         />
       </div>
     </div>

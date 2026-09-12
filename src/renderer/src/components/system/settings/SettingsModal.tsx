@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { Modal, theme } from 'antd'
 import {
   RiSettings3Line,
@@ -28,35 +28,66 @@ interface TabItem {
   icon: React.ReactNode
 }
 
-/** 分组导航：常规 + 助手（对话参数已由工程自动管理，无独立设置页） */
+/** 全部设置页元数据 */
+const TAB_META: Record<SettingsTab, TabItem> = {
+  general: { key: 'general', label: '通用', icon: <RiSettings3Line size={16} /> },
+  model: { key: 'model', label: '模型', icon: <RiBrainAi3Line size={16} /> },
+  music: { key: 'music', label: '音乐', icon: <RiMusicLine size={16} /> },
+  graph: { key: 'graph', label: '图谱', icon: <RiMindMap size={16} /> },
+  system: { key: 'system', label: '系统', icon: <RiComputerLine size={16} /> },
+  agents: { key: 'agents', label: '智能体', icon: <RiAiAgentLine size={16} /> },
+  skills: { key: 'skills', label: '技能', icon: <RiFileAi2Line size={16} /> },
+  memory: { key: 'memory', label: '记忆', icon: <RiBrain4Line size={16} /> }
+}
+
+/** 完整设置的分组导航：常规 + 助手 */
 const NAV_GROUPS: { label: string; items: TabItem[] }[] = [
   {
     label: '常规',
-    items: [
-      { key: 'general', label: '通用', icon: <RiSettings3Line size={16} /> },
-      { key: 'model', label: '模型', icon: <RiBrainAi3Line size={16} /> },
-      { key: 'music', label: '音乐', icon: <RiMusicLine size={16} /> },
-      { key: 'graph', label: '图谱', icon: <RiMindMap size={16} /> },
-      { key: 'system', label: '系统', icon: <RiComputerLine size={16} /> }
-    ]
+    items: ['general', 'model', 'music', 'graph', 'system'].map((k) => TAB_META[k as SettingsTab])
   },
   {
     label: '助手',
-    items: [
-      { key: 'agents', label: '智能体', icon: <RiAiAgentLine size={16} /> },
-      { key: 'skills', label: '技能', icon: <RiFileAi2Line size={16} /> },
-      { key: 'memory', label: '记忆', icon: <RiBrain4Line size={16} /> }
-    ]
+    items: ['agents', 'skills', 'memory'].map((k) => TAB_META[k as SettingsTab])
   }
 ]
+
+/**
+ * 助手设置（聚焦模式）页签：智能体 → 模型 → 技能 → 记忆。
+ *
+ * 侧边栏「助手设置」入口用这一组：只显示助手相关内容，通用 / 音乐 / 图谱 / 系统等
+ * 系统级页面不出现（模型页按用户要求排在技能之前）。
+ */
+const ASSISTANT_SETTINGS_TABS: SettingsTab[] = ['agents', 'model', 'skills', 'memory']
+
+/** 设置弹窗的展示范围：full = 全部设置页；assistant = 只显示助手相关的四页 */
+export type SettingsScope = 'full' | 'assistant'
+
+/** 从候选里挑一个可用页签：白名单内优先用传入值，否则退回白名单第一项 */
+function pickTab(
+  tab: SettingsTab | undefined,
+  only: SettingsTab[] | null | undefined
+): SettingsTab {
+  if (only && only.length > 0) {
+    return tab && only.includes(tab) ? tab : only[0]
+  }
+  return tab ?? 'general'
+}
 
 interface SettingsModalProps {
   open: boolean
   onClose: () => void
   initialTab?: SettingsTab
+  /** 展示范围：assistant = 聚焦模式（只显示助手设置四页）；默认 full = 全部设置页 */
+  scope?: SettingsScope
 }
 
-const SettingsModal: React.FC<SettingsModalProps> = ({ open, onClose, initialTab }) => {
+const SettingsModal: React.FC<SettingsModalProps> = ({
+  open,
+  onClose,
+  initialTab,
+  scope = 'full'
+}) => {
   const {
     token: {
       colorTextSecondary,
@@ -70,14 +101,23 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ open, onClose, initialTab
     }
   } = theme.useToken()
 
-  const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab ?? 'general')
+  /** 聚焦模式下生效的页签白名单（其余页面整组隐藏） */
+  const onlyTabs = scope === 'assistant' ? ASSISTANT_SETTINGS_TABS : null
 
-  // 每次打开弹窗时同步外部传入的 initialTab
+  const [activeTab, setActiveTab] = useState<SettingsTab>(() => pickTab(initialTab, onlyTabs))
+
+  // 每次打开弹窗时同步外部传入的 initialTab（聚焦模式下收敛到白名单内的页签）
   useEffect(() => {
-    if (open && initialTab) {
-      setActiveTab(initialTab)
+    if (open) {
+      setActiveTab(pickTab(initialTab, onlyTabs))
     }
-  }, [open, initialTab])
+  }, [open, initialTab, onlyTabs])
+
+  /** 聚焦模式只渲染白名单内的分组，其余系统级页面整组隐藏 */
+  const navGroups = useMemo(() => {
+    if (!onlyTabs || onlyTabs.length === 0) return NAV_GROUPS
+    return [{ label: '助手', items: onlyTabs.map((key) => TAB_META[key]) }]
+  }, [onlyTabs])
 
   const renderContent = (): React.ReactNode => {
     switch (activeTab) {
@@ -130,7 +170,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ open, onClose, initialTab
             background: colorFillAlter
           }}
         >
-          {NAV_GROUPS.map((group, gi) => (
+          {navGroups.map((group, gi) => (
             <div key={group.label} style={{ marginTop: gi === 0 ? 0 : 16 }}>
               <div
                 style={{
