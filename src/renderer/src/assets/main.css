@@ -18,14 +18,16 @@
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06),
-  0 4px 24px rgba(0, 0, 0, 0.1);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.06),
+    0 4px 24px rgba(0, 0, 0, 0.1);
 }
 
 /* 暗色模式：外层更暗，边框用白色半透明 */
 .dark .custom-frame {
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08),
-  0 4px 24px rgba(0, 0, 0, 0.25);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.08),
+    0 4px 24px rgba(0, 0, 0, 0.25);
 }
 
 /* ======== 标题栏 ======== */
@@ -47,10 +49,28 @@
   -webkit-app-region: drag;
 }
 
+/* 图标描边徽标：亮色黑描边 / 暗色白描边（描边色对比于框架底色，不用 antd token 以免过淡）
+   尺寸 = 16px 图标 + 1px 内边距 + 1px 描边 */
+.frame-titlebar-icon-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 1px;
+  border: 1px solid rgba(0, 0, 0, 0.14);
+  border-radius: 6px;
+  box-sizing: border-box;
+  -webkit-app-region: drag;
+}
+
+.dark .frame-titlebar-icon-badge {
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
 .frame-titlebar-icon {
   width: 16px;
   height: 16px;
-  margin-left: 2px;
   -webkit-app-region: drag;
 }
 
@@ -133,8 +153,9 @@
   background: transparent;
   border-radius: 6px;
   cursor: pointer;
-  transition: background 0.15s,
-  color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s;
 }
 
 .frame-menu-item:hover {
@@ -210,8 +231,9 @@
   height: 5px;
   border-radius: 50%;
   background: rgba(128, 128, 128, 0.3);
-  transition: background 0.3s,
-  width 0.3s;
+  transition:
+    background 0.3s,
+    width 0.3s;
 }
 
 /* ======== 滚动条 ======== */
