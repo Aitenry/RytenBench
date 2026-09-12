@@ -3,7 +3,6 @@ import { Button } from 'antd'
 import {
   RiSidebarFoldLine,
   RiSidebarUnfoldLine,
-  RiApps2AddLine,
   RiLayoutRightLine,
   RiLayoutRightFill
 } from '@remixicon/react'
@@ -15,17 +14,16 @@ interface ChatHeaderProps {
   panelOpen: boolean
   onTogglePanel: () => void
   colorBorderSecondary: string
-  onNewChat: () => void
   currentTopicId: number | null
 }
 
+/** 会话头部：侧边栏折叠 / 后台智能体 / 工作区面板开关（新建会话在侧边栏的工作区行上） */
 const ChatHeader: React.FC<ChatHeaderProps> = ({
   sidebarOpen,
   onToggleSidebar,
   panelOpen,
   onTogglePanel,
   colorBorderSecondary,
-  onNewChat,
   currentTopicId
 }) => {
   return (
@@ -43,7 +41,6 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
         <BackgroundAgentsButton currentTopicId={currentTopicId} />
       </div>
       <div className="flex items-center gap-2.5">
-        <Button type="text" size="small" icon={<RiApps2AddLine size={16} />} onClick={onNewChat} />
         <Button
           type="text"
           size="small"

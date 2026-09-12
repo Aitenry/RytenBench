@@ -4,6 +4,7 @@ import type { Message } from '@renderer/types/chat'
 import UserMessage from './messages/UserMessage'
 import AssistantMessage from './messages/AssistantMessage'
 import ScrollToBottomButton from './ScrollToBottomButton'
+import WelcomeIntro from './WelcomeIntro'
 
 interface ChatMessageAreaProps {
   messages: Message[]
@@ -17,10 +18,6 @@ interface ChatMessageAreaProps {
   colorTextTertiary: string
   colorFillAlter: string
   colorBorderSecondary: string
-  titleDisplayed: string
-  titleDone: boolean
-  subtitleDisplayed: string
-  subtitleDone: boolean
   copiedId: string | null
   /** 分页 */
   hasMoreMessages: boolean
@@ -46,10 +43,6 @@ const ChatMessageArea: React.FC<ChatMessageAreaProps> = ({
   colorTextTertiary,
   colorFillAlter,
   colorBorderSecondary,
-  titleDisplayed,
-  titleDone,
-  subtitleDisplayed,
-  subtitleDone,
   copiedId,
   hasMoreMessages,
   isLoadingMoreMessages,
@@ -168,16 +161,7 @@ const ChatMessageArea: React.FC<ChatMessageAreaProps> = ({
       >
         <div ref={contentRef} className={messages.length === 0 ? 'h-full' : 'max-w-4xl mx-auto'}>
           {messages.length === 0 ? (
-            <div className="h-full flex flex-col items-center justify-center">
-              <h1 className="text-2xl font-semibold mb-2 h-8" style={{ color: colorText }}>
-                {titleDisplayed}
-                {!titleDone && <span className="animate-pulse">|</span>}
-              </h1>
-              <p className="text-center max-w-md h-6" style={{ color: colorTextSecondary }}>
-                {subtitleDisplayed}
-                {titleDone && !subtitleDone && <span className="animate-pulse">|</span>}
-              </p>
-            </div>
+            <WelcomeIntro colorText={colorText} colorTextSecondary={colorTextSecondary} />
           ) : (
             <>
               {isLoadingMoreMessages && (

@@ -4,7 +4,6 @@ import { LlmProviderConfig } from '../../../../../main/database/mapper/provider'
 import { Window, ToolInfo } from '../../../../resource/types/window'
 import type { Message, Attachment, ToolCall, MessageBlock } from '@renderer/types/chat'
 import type { StreamChunk } from '../../../../../main/chat/types'
-import { useTypewriter, useCyclingTypewriter } from './useTypewriter'
 import {
   isSameToolCall,
   computeTextDelta,
@@ -61,6 +60,8 @@ export interface UseChatHandlersReturn {
   copiedId: string | null
   currentTopicId: number | null
   topics: ChatTopicRow[]
+  /** topics 所属工作区 id（null = 尚未加载过） */
+  topicsWorkspaceId: number | null
   sidebarOpen: boolean
   setSidebarOpen: React.Dispatch<React.SetStateAction<boolean>>
   providers: LlmProviderConfig[]
@@ -83,13 +84,11 @@ export interface UseChatHandlersReturn {
     label: string
     options: { value: number; label: string; providerType: string }[]
   }[]
-  titleDisplayed: string
-  titleDone: boolean
-  subtitleDisplayed: string
-  subtitleDone: boolean
   /** 话题分页 */
   topicsHasMore: boolean
   topicsLoading: boolean
+  /** 整表刷新中（非滚动分页） */
+  topicsRefreshing: boolean
   /** 消息分页（当前话题） */
   messagesHasMore: boolean
   messagesLoadingMore: boolean
@@ -137,6 +136,8 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
   /** messages React 状态实际属于哪个话题——用于检测 handleSelectTopic 异步间隙中的跨话题污染 */
   const messagesBelongToTopicRef = useRef<number | null>(null)
   const [topics, setTopics] = useState<ChatTopicRow[]>([])
+  /** topics 当前属于哪个工作区（切换工作区时用于避免把旧列表挂到新工作区下） */
+  const [topicsWorkspaceId, setTopicsWorkspaceId] = useState<number | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [providers, setProviders] = useState<LlmProviderConfig[]>([])
   const [selectedProviderId, setSelectedProviderId] = useState<number | null>(null)
@@ -148,6 +149,8 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
   const [topicsPage, setTopicsPage] = useState(0)
   const [topicsHasMore, setTopicsHasMore] = useState(true)
   const [topicsLoading, setTopicsLoading] = useState(false)
+  /** 「整表刷新」进行中（区别于滚动分页加载更多，避免切换工作区时底部闪现分页 spinner） */
+  const [topicsRefreshing, setTopicsRefreshing] = useState(false)
   const [messagesPage, setMessagesPage] = useState(0)
   const [messagesHasMore, setMessagesHasMore] = useState(true)
   const [messagesLoadingMore, setMessagesLoadingMore] = useState(false)
@@ -169,21 +172,8 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
     setLoadingTopicIds(new Set(isLoadingMapRef.current.keys()))
   }, [])
 
-  const titleText = '你好，我是 Rita～'
-  const subtitleTexts = [
-    '今天天气怎么样？要是还不错，我帮你把明天的日程也排了～',
-    '我可以帮你分析文档，提取关键信息，理清它们之间的关系。',
-    '有什么重要的事尽管说，我帮你记着，并形成代办事项。',
-    '我可以帮你整理零散的文档，构建相应的知识库。'
-  ]
-  const { displayedText: titleDisplayed, isDone: titleDone } = useTypewriter(titleText, 100)
-  const { displayedText: subtitleDisplayed, isDone: subtitleDone } = useCyclingTypewriter(
-    subtitleTexts,
-    60,
-    40,
-    2000,
-    titleText.length * 100
-  )
+  // 欢迎语打字机：见 components/WelcomeIntro.tsx（高频/无限循环动画不放在这里，
+  // 否则整个聊天视图会被每秒重渲染 ~25 次）
 
   const selectedProvider = useMemo(
     () => providers.find((p) => p.id === selectedProviderId) ?? null,
@@ -226,6 +216,7 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
 
   const refreshTopics = useCallback(async (): Promise<void> => {
     try {
+      setTopicsRefreshing(true)
       setTopicsLoading(true)
       setTopicsPage(0)
       const workspaceId = await getActiveWorkspaceId()
@@ -235,11 +226,14 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
         TOPICS_PAGE_SIZE
       )
       setTopics(result.items)
+      // 标记这批 topics 属于哪个工作区：切换工作区时旧列表不能挂到新工作区行下面
+      setTopicsWorkspaceId(workspaceId)
       setTopicsHasMore(result.hasMore)
     } catch (err) {
       console.error('Failed to load topics:', err)
     } finally {
       setTopicsLoading(false)
+      setTopicsRefreshing(false)
     }
   }, [getActiveWorkspaceId])
 
@@ -256,6 +250,7 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
       )
       setTopicsPage(nextPage)
       setTopics((prev) => [...prev, ...result.items])
+      setTopicsWorkspaceId(workspaceId)
       setTopicsHasMore(result.hasMore)
     } catch (err) {
       console.error('Failed to load more topics:', err)
@@ -1448,6 +1443,7 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
     copiedId,
     currentTopicId,
     topics,
+    topicsWorkspaceId,
     sidebarOpen,
     setSidebarOpen,
     providers,
@@ -1468,14 +1464,10 @@ export const useChatHandlers = (): UseChatHandlersReturn => {
     modelSupportsTools,
     modelSupportsVision,
     groupedProviderOptions,
-    // title
-    titleDisplayed,
-    titleDone,
-    subtitleDisplayed,
-    subtitleDone,
     // pagination
     topicsHasMore,
     topicsLoading,
+    topicsRefreshing,
     messagesHasMore,
     messagesLoadingMore,
     // handlers

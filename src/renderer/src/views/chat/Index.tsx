@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { theme, Button } from 'antd'
-import { RiChatAiLine, RiListSettingsLine } from '@remixicon/react'
+import { RiChatAiLine, RiFoldersLine, RiListSettingsLine } from '@remixicon/react'
 import { useTheme } from '@renderer/contexts/useTheme'
 import { useChat } from '@renderer/contexts/ChatContextCore'
 import type { Window } from '../../../resource/types/window'
@@ -40,6 +40,7 @@ const Index: React.FC = () => {
     copiedId,
     currentTopicId,
     topics,
+    topicsWorkspaceId,
     sidebarOpen,
     setSidebarOpen,
     selectedProviderId,
@@ -55,12 +56,9 @@ const Index: React.FC = () => {
     modelSupportsTools,
     modelSupportsVision,
     groupedProviderOptions,
-    titleDisplayed,
-    titleDone,
-    subtitleDisplayed,
-    subtitleDone,
     topicsHasMore,
     topicsLoading,
+    topicsRefreshing,
     messagesHasMore,
     messagesLoadingMore,
     handleSelectTopic,
@@ -79,6 +77,8 @@ const Index: React.FC = () => {
   // 模型就绪检查：应用即开即用，只有「助手」页依赖模型配置——未配置时在本页内引导
   const hasModels = providers.length > 0
   const [workspacePath, setWorkspacePath] = useState<string>('')
+  /** 是否已配置工作区：null = 检查中（此时不显示引导，避免闪现） */
+  const [hasWorkspace, setHasWorkspace] = useState<boolean | null>(null)
   const [panelOpen, setPanelOpen] = useState(false)
   const [panelHasEditor, setPanelHasEditor] = useState(false)
 
@@ -87,8 +87,11 @@ const Index: React.FC = () => {
       const settings = await (window as unknown as Window).api.systemSettings.getAll()
       const wsPath = settings.chat?.workspacePath || ''
       setWorkspacePath(wsPath)
-      return Boolean(settings.chat?.activeWorkspaceId)
+      const ok = Boolean(settings.chat?.activeWorkspaceId)
+      setHasWorkspace(ok)
+      return ok
     } catch {
+      setHasWorkspace(false)
       return false
     }
   }, [])
@@ -97,17 +100,46 @@ const Index: React.FC = () => {
     checkWorkspace().then()
   }, [checkWorkspace])
 
+  // 引导项：选择目录创建并激活工作区（与侧边栏「新建工作区」同一套流程）
+  const handleWorkspaceSetup = useCallback(async (): Promise<void> => {
+    try {
+      const win = window as unknown as Window
+      const dir = await win.api.chat.selectWorkspace()
+      if (!dir) return
+      const name =
+        dir
+          .replace(/[/\\]$/, '')
+          .split(/[/\\]/)
+          .pop() || '工作区'
+      const id = await win.api.chat.createWorkspace(name, dir)
+      await win.api.systemSettings.update({
+        chat: {
+          workspacePath: dir,
+          activeWorkspaceId: id
+        } as Parameters<typeof win.api.systemSettings.update>[0]['chat']
+      })
+      setWorkspacePath(dir)
+      setHasWorkspace(true)
+      window.dispatchEvent(new CustomEvent('workspace-changed', { detail: { workspaceId: id } }))
+      refreshTopics().then()
+    } catch (err) {
+      console.error('Failed to setup workspace:', err)
+    }
+  }, [refreshTopics])
+
   // 工作区切换后刷新工作区路径与话题列表
   const handleWorkspaceChange = useCallback(async () => {
     await checkWorkspace()
     refreshTopics().then()
   }, [checkWorkspace, refreshTopics])
 
-  // 全局工作区切换：清空当前会话回到空白欢迎态，再刷新话题列表
+  // 全局工作区切换：只刷新路径与话题列表。
+  // 不再顺带 handleNewChat()——「点开其他工作区下的会话」时那一步会把刚选中的会话清空再重设，
+  // 造成列表与选中高亮闪动；需要回到空白欢迎态的入口（新建会话/新建工作区/删除工作区）
+  // 由侧边栏显式调用 onNewChat()。
   const handleWorkspaceChangedRef = useRef<() => void>(() => {})
   useEffect(() => {
     handleWorkspaceChangedRef.current = () => {
-      handleNewChat()
       handleWorkspaceChange().then()
     }
   })
@@ -318,8 +350,8 @@ const Index: React.FC = () => {
             <div style={{ width: sidebarWidth, minWidth: 200, maxWidth: 239, flexShrink: 0 }}>
               <ChatSidebar
                 topics={topics}
+                topicsWorkspaceId={topicsWorkspaceId}
                 currentTopicId={currentTopicId}
-                isDarkMode={isDarkMode}
                 colorBgContainer={colorBgContainer}
                 borderRadiusLG={borderRadiusLG}
                 colorText={colorText}
@@ -329,9 +361,11 @@ const Index: React.FC = () => {
                 loadingTopicIds={loadingTopicIds}
                 hasMoreTopics={topicsHasMore}
                 isLoadingMoreTopics={topicsLoading}
+                isRefreshingTopics={topicsRefreshing}
                 onSelectTopic={handleSelectTopic}
                 onDeleteTopic={handleDeleteTopic}
                 onLoadMoreTopics={handleLoadMoreTopics}
+                onNewChat={handleNewChat}
               />
             </div>
             <div className="chat-resizer" onMouseDown={handleResizerMouseDown}>
@@ -354,11 +388,48 @@ const Index: React.FC = () => {
             panelOpen={panelOpen}
             onTogglePanel={() => setPanelOpen(!panelOpen)}
             colorBorderSecondary={colorBorderSecondary}
-            onNewChat={handleNewChat}
             currentTopicId={currentTopicId}
           />
 
-          {!hasModels ? (
+          {hasWorkspace === null ? null : hasWorkspace === false ? (
+            /* 未配置工作区：对话按工作区隔离，先引导选择目录（同「配置模型」的页内引导） */
+            <div
+              className="flex-1 flex items-center justify-center"
+              style={{ minHeight: 0, padding: 24 }}
+            >
+              <div style={{ maxWidth: 420, textAlign: 'center' }}>
+                <div
+                  style={{
+                    width: 56,
+                    height: 56,
+                    margin: '0 auto 14px',
+                    borderRadius: 16,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    background: colorPrimaryBg,
+                    color: colorPrimary,
+                    fontSize: 26
+                  }}
+                >
+                  <RiFoldersLine size={26} />
+                </div>
+                <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: colorText }}>
+                  配置工作区后开始对话
+                </h2>
+                <p style={{ margin: '8px 0 20px', fontSize: 13, color: colorTextSecondary }}>
+                  会话记录与记忆按工作区隔离。选择一个目录作为工作区后即可开始，其他功能不受影响。
+                </p>
+                <Button
+                  type="primary"
+                  icon={<RiFoldersLine size={15} />}
+                  onClick={handleWorkspaceSetup}
+                >
+                  选择工作区目录
+                </Button>
+              </div>
+            </div>
+          ) : !hasModels ? (
             /* 模型未配置：仅「助手」页内引导，不影响其他功能使用 */
             <div
               className="flex-1 flex items-center justify-center"
@@ -412,10 +483,6 @@ const Index: React.FC = () => {
                 colorTextTertiary={colorTextTertiary}
                 colorFillAlter={colorFillAlter}
                 colorBorderSecondary={colorBorderSecondary}
-                titleDisplayed={titleDisplayed}
-                titleDone={titleDone}
-                subtitleDisplayed={subtitleDisplayed}
-                subtitleDone={subtitleDone}
                 copiedId={copiedId}
                 hasMoreMessages={messagesHasMore}
                 isLoadingMoreMessages={messagesLoadingMore}

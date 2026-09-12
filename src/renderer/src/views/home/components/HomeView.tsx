@@ -155,17 +155,6 @@ const HomeView: React.FC = () => {
     return () => window.removeEventListener('open-wiki-graph', handleOpenGraph)
   }, [])
 
-  /* ── 工作区切换：清空选中、失效树缓存并重载数据 ── */
-  useEffect(() => {
-    const handleWorkspaceChanged = (): void => {
-      setSelection(null)
-      setTreeRefreshKey((k) => k + 1)
-      loadAll().then()
-    }
-    window.addEventListener('workspace-changed', handleWorkspaceChanged)
-    return () => window.removeEventListener('workspace-changed', handleWorkspaceChanged)
-  }, [loadAll])
-
   /* ── 新建文档：直接创建并打开编辑器（无弹窗，Notion 式交互） ── */
   const handleCreateDoc = useCallback(async (): Promise<void> => {
     const messageKey = 'home-new-doc'
