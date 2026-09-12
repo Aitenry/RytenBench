@@ -25,7 +25,7 @@ const BreadcrumbBar: React.FC<BreadcrumbBarProps> = ({ items, actions }) => {
         flexShrink: 0,
         padding: '0 12px',
         gap: 2,
-        /* 主区卡片顶部的分隔行，不再独立成卡（参考 Chat 头部行） */
+        /* 主区卡片顶部的分隔行，不再独立成卡（参考 Harness 头部行） */
         borderBottom: `1px solid ${token.colorBorderSecondary}`
       }}
     >

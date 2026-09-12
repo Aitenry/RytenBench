@@ -41,7 +41,7 @@ export function registerSettingsIpc(): void {
         ip: all.ip,
         lock: all.lock,
         graph: all.graph,
-        chat: all.chat,
+        harness: all.harness,
         defaultModelId: all.defaultModelId,
         defaultEmbeddingModelId: all.defaultEmbeddingModelId,
         musicDirectory: all.musicDirectory,
@@ -60,12 +60,12 @@ export function registerSettingsIpc(): void {
   ipcMain.handle('system-settings-update', async (_event, updates: Partial<SystemSettings>) => {
     try {
       // 键白名单（修复：此前任意顶层键/类型直接落盘——拼错键被永久持久化，
-      // 或把 lock/chat/graph 整键写成非对象,下游读取无兜底）
+      // 或把 lock/harness/graph 整键写成非对象,下游读取无兜底）
       const ALLOWED_KEYS: Array<keyof SystemSettings> = [
         'ip',
         'lock',
         'graph',
-        'chat',
+        'harness',
         'defaultModelId',
         'defaultEmbeddingModelId',
         'musicDirectory',
@@ -81,7 +81,7 @@ export function registerSettingsIpc(): void {
           logger.warn(`[Settings] 拒绝未知设置键: ${key}`)
           continue
         }
-        // 对于对象类型的设置（如 chat），与现有值合并而非替换
+        // 对于对象类型的设置（如 harness），与现有值合并而非替换
         if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
           const existing = settingsStore.get(key as keyof SystemSettings) as
             Record<string, unknown> | undefined

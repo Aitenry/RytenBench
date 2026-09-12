@@ -5,7 +5,7 @@ import {
   saveNodePosition,
   saveNodePositions,
   deleteNodePosition
-} from '../database/mapper/node_position'
+} from '../database/mapper/node-position'
 
 /** 图谱/看板节点位置 IPC */
 export function registerNodePositionIpc(): void {

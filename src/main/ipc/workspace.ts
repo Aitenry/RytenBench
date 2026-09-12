@@ -14,8 +14,8 @@ function assertInsideWorkspace(inputPath: string): string {
   if (typeof inputPath !== 'string' || !isAbsolute(inputPath)) {
     throw new Error('路径无效：必须传入 AI 工作区内的绝对路径')
   }
-  const chatSettings = settingsStore.get('chat') as { workspacePath?: string } | undefined
-  const root = chatSettings?.workspacePath
+  const harnessSettings = settingsStore.get('harness') as { workspacePath?: string } | undefined
+  const root = harnessSettings?.workspacePath
   if (!root) {
     throw new Error('未配置 AI 工作区目录，拒绝文件访问')
   }

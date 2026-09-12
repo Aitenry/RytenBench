@@ -15,6 +15,7 @@ import GraphCanvas from './GraphCanvas'
 import EntityDetail from './EntityDetail'
 import GraphToolbar from './GraphToolbar'
 import DocumentPreviewModal from '@renderer/components/document/DocumentPreviewModal'
+import type { DocWithContent } from '../../../../main/database/mapper/document'
 
 const GraphView: React.FC<GraphViewProps> = ({
   selectedWiki,
@@ -40,17 +41,8 @@ const GraphView: React.FC<GraphViewProps> = ({
   const [isGraphLoading, setIsGraphLoading] = useState(false)
   const [docFilter, setDocFilter] = useState<number[]>(initialDocFilter ?? [])
 
-  const [previewDoc, setPreviewDoc] = useState<{
-    id: number
-    title: string
-    image: string | null
-    summary: string | null
-    tags: string | null
-    created_at: string
-    updated_at: string
-    word_count: number
-    content?: string | null
-  } | null>(null)
+  // 直接复用主进程 mapper 的行类型，不再手抄一份
+  const [previewDoc, setPreviewDoc] = useState<DocWithContent | null>(null)
   const [isDocPreviewOpen, setIsDocPreviewOpen] = useState(false)
 
   const loadGraphData = useCallback(async (wikiId: number, docIds?: number[]) => {

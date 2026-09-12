@@ -13,7 +13,7 @@ interface TitleBarProps {
 
 /**
  * 无边框窗口标题栏：仅保留品牌标识与窗口控制按钮。
- * 工作区切换器已迁移到聊天侧边栏（ChatSidebar），此处不再承载工作区 UI。
+ * 工作区切换器已迁移到聊天侧边栏（HarnessSidebar），此处不再承载工作区 UI。
  */
 const TitleBar: React.FC<TitleBarProps> = ({
   isMaximized,

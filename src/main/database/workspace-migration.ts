@@ -1,7 +1,10 @@
 import { app } from 'electron'
 import { join } from 'path'
 import type { PGlite } from '@electric-sql/pglite'
+import { and, asc, eq, sql } from 'drizzle-orm'
 import logger from 'electron-log'
+import { ormForClient, type Orm } from './orm'
+import { agent_config, harness_topic, workspace } from './schema'
 
 export interface WorkspaceMigrationResult {
   /** 迁移后确定的活动工作区 id；null 表示当前没有任何工作区（等待用户在对话页配置） */
@@ -27,18 +30,19 @@ function legacyUserDataAutoPath(): string {
  * 需要清掉，让用户回到「未配置工作区」状态，由对话页引导配置。
  * 仅在该工作区**没有任何会话与智能体配置**时删除，避免误删用户真正在用的工作区。
  */
-async function revertAutoCreatedWorkspace(db: PGlite, path: string, label: string): Promise<void> {
-  const found = await db.query<{ id: number; topics: number; agents: number }>(
-    `SELECT w.id,
-       (SELECT COUNT(*)::int FROM chat_topic t WHERE t.workspace_id = w.id) AS topics,
-       (SELECT COUNT(*)::int FROM agent_config a WHERE a.workspace_id = w.id) AS agents
-     FROM workspace w
-     WHERE w.name = '默认工作区' AND w.path = $1
-     ORDER BY w.id ASC
-     LIMIT 1`,
-    [path]
-  )
-  const row = found.rows[0]
+async function revertAutoCreatedWorkspace(db: Orm, path: string, label: string): Promise<void> {
+  const found = await db
+    .select({
+      id: workspace.id,
+      topics: sql<number>`(SELECT COUNT(*)::int FROM ${harness_topic} t WHERE t.workspace_id = ${workspace.id})`,
+      agents: sql<number>`(SELECT COUNT(*)::int FROM ${agent_config} a WHERE a.workspace_id = ${workspace.id})`
+    })
+    .from(workspace)
+    .where(and(eq(workspace.name, '默认工作区'), eq(workspace.path, path)))
+    .orderBy(asc(workspace.id))
+    .limit(1)
+
+  const row = found[0]
   if (!row) return
   if (row.topics > 0 || row.agents > 0) {
     logger.info(
@@ -46,7 +50,7 @@ async function revertAutoCreatedWorkspace(db: PGlite, path: string, label: strin
     )
     return
   }
-  await db.query('DELETE FROM workspace WHERE id = $1', [row.id])
+  await db.delete(workspace).where(eq(workspace.id, row.id))
   logger.info(`[WorkspaceMigration] Reverted ${label} auto-created default workspace id=${row.id}`)
 }
 
@@ -60,17 +64,20 @@ async function revertAutoCreatedWorkspace(db: PGlite, path: string, label: strin
  * 注意：文档 / 知识库 / 待办已是全局数据（无 workspace_id 列），不参与任何回填或归属处理。
  */
 export async function migrateWorkspaceData(
-  db: PGlite,
+  client: PGlite,
   getActiveWorkspaceId: () => number | undefined
 ): Promise<WorkspaceMigrationResult> {
+  const db = ormForClient(client)
+
   await revertAutoCreatedWorkspace(db, legacyAutoPath(), 'legacy-documents')
   await revertAutoCreatedWorkspace(db, legacyUserDataAutoPath(), 'legacy-userData')
 
   // 确定活动工作区（不创建）
-  const listResult = await db.query<{ id: number; path: string }>(
-    'SELECT id, path FROM workspace ORDER BY created_at ASC, id ASC'
-  )
-  const workspaces = listResult.rows
+  const workspaces = await db
+    .select({ id: workspace.id, path: workspace.path })
+    .from(workspace)
+    .orderBy(asc(workspace.created_at), asc(workspace.id))
+
   if (workspaces.length === 0) {
     logger.info('[WorkspaceMigration] No workspace configured — waiting for user setup')
     return { activeWorkspaceId: null, activeWorkspacePath: null }

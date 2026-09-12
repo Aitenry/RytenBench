@@ -1,51 +1,19 @@
 import React from 'react'
+import type {
+  GraphEntity as GraphEntityFromDb,
+  GraphRelation as GraphRelationFromDb,
+  GraphData as GraphDataFromDb,
+  GraphBuildJob as BuildJobFromDb
+} from '../../../main/database/mapper/graph'
 
-export interface GraphEntity {
-  id: number
-  wiki_id: number
-  name: string
-  type: string
-  description: string | null
-  aliases: string | null
-  properties: string | null
-  confidence: number
-  source_note_ids: string | null
-  created_at: string
-  updated_at: string
-}
+// 图谱相关行类型一律复用主进程 mapper（由 drizzle schema 推导），避免渲染层手抄导致漂移
+export type GraphEntity = GraphEntityFromDb
 
-export interface GraphRelation {
-  id: number
-  wiki_id: number
-  source_id: number
-  target_id: number
-  relation_type: string
-  description: string | null
-  properties: string | null
-  confidence: number
-  source_note_ids: string | null
-  created_at: string
-}
+export type GraphRelation = GraphRelationFromDb
 
-export interface GraphData {
-  entities: GraphEntity[]
-  relations: GraphRelation[]
-}
+export type GraphData = GraphDataFromDb
 
-export interface BuildJob {
-  id: number
-  wiki_id: number
-  status: 'pending' | 'running' | 'completed' | 'failed'
-  total_notes: number
-  processed_notes: number
-  entity_count: number
-  relation_count: number
-  error_message: string | null
-  config: string | null
-  started_at: string | null
-  completed_at: string | null
-  created_at: string
-}
+export type BuildJob = BuildJobFromDb
 
 export interface GraphChartNode {
   id: string

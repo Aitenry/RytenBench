@@ -10,7 +10,7 @@ export interface GraphSettings {
   maxChunkSize: number
 }
 
-export interface ChatSettings {
+export interface HarnessSettings {
   /** 技能（Skills）存储目录，空/未设置表示不启用；目录下每个含 SKILL.md 的子目录即一个技能 */
   skillsPath?: string
   /** 启用的技能 ID 列表，undefined 表示全部启用，[] 表示全部禁用 */
@@ -35,7 +35,7 @@ export interface SystemSettings {
   ip?: Record<string, unknown>
   lock: Lock
   graph: GraphSettings
-  chat: ChatSettings
+  harness: HarnessSettings
   defaultModelId?: number
   defaultEmbeddingModelId?: number
   musicDirectory?: string

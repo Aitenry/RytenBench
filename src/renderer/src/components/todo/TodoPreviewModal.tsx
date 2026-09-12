@@ -37,8 +37,8 @@ const TodoPreviewModal: React.FC<TodoPreviewModalProps> = ({ open, todo, onClose
 
   if (!todo) return null
 
-  const status = STATUS_MAP[todo.status] ?? { label: '未知', color: token.colorTextTertiary }
-  const priorityColor = PRIORITY_COLORS[todo.priority] ?? token.colorTextTertiary
+  const status = STATUS_MAP[todo.status ?? 0] ?? { label: '未知', color: token.colorTextTertiary }
+  const priorityColor = PRIORITY_COLORS[todo.priority ?? 0] ?? token.colorTextTertiary
 
   const dot = (color: string): React.ReactNode => (
     <span
@@ -54,8 +54,8 @@ const TodoPreviewModal: React.FC<TodoPreviewModalProps> = ({ open, todo, onClose
 
   return (
     <Modal title={todo.title} open={open} onCancel={onClose} width={520} centered footer={null}>
-      {/* Description */}
-      {todo.description && (
+      {/* 正文内容（Markdown 源文本预览） */}
+      {todo.content && (
         <div
           style={{
             fontSize: 14,
@@ -65,7 +65,7 @@ const TodoPreviewModal: React.FC<TodoPreviewModalProps> = ({ open, todo, onClose
             marginBottom: 16
           }}
         >
-          {todo.description}
+          {todo.content}
         </div>
       )}
 
@@ -75,7 +75,7 @@ const TodoPreviewModal: React.FC<TodoPreviewModalProps> = ({ open, todo, onClose
           display: 'flex',
           alignItems: 'center',
           gap: 20,
-          marginBottom: todo.description ? 0 : 0,
+          marginBottom: 0,
           fontSize: 13,
           color: token.colorTextSecondary
         }}

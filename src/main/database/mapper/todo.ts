@@ -1,19 +1,11 @@
-import { getDatabaseInstance } from '../instance'
+import { asc, count, desc, eq, ne, sql } from 'drizzle-orm'
+import type { PgUpdateSetSource } from 'drizzle-orm/pg-core'
 import logger from 'electron-log'
+import { withOrm } from '../orm'
+import { todo_items } from '../schema'
 
-export interface TodoItemRow {
-  id: number
-  title: string
-  description: string
-  due_date: string | null
-  priority: number
-  status: number
-  category: string | null
-  created_at: string
-  updated_at: string
-  completed_at: string | null
-  started_at: string | null
-}
+/** 待办事项行（字段由 schema 推导） */
+export type TodoItemRow = typeof todo_items.$inferSelect
 
 export interface PaginatedResult<T> {
   items: T[]
@@ -23,72 +15,58 @@ export interface PaginatedResult<T> {
 
 // --- 根据 id 查询 ---
 async function getTodoItemById(id: number): Promise<TodoItemRow[]> {
-  try {
-    const db = (await getDatabaseInstance()).getDatabase()
-    const sql = 'SELECT * FROM todo_items WHERE id = $1'
-    const result = await db.query<TodoItemRow>(sql, [id])
-    logger.info(`Query by id=${id} returned ${result.rows.length} rows.`)
-    return result.rows
-  } catch (error) {
-    logger.error('Failed to get todo item by id:', error)
-    throw error
-  }
+  return withOrm('getTodoItemById', async (db) => {
+    const rows = await db.select().from(todo_items).where(eq(todo_items.id, id))
+    logger.info(`Query by id=${id} returned ${rows.length} rows.`)
+    return rows
+  })
 }
 
 // --- 根据 title 查询 ---
 async function getTodoItemByTitle(title: string): Promise<TodoItemRow[]> {
-  try {
-    const db = (await getDatabaseInstance()).getDatabase()
-    const sql = 'SELECT * FROM todo_items WHERE title = $1'
-    const result = await db.query<TodoItemRow>(sql, [title])
-    logger.info(`Query by title="${title}" returned ${result.rows.length} rows.`)
-    return result.rows
-  } catch (error) {
-    logger.error('Failed to get todo item by title:', error)
-    throw error
-  }
+  return withOrm('getTodoItemByTitle', async (db) => {
+    const rows = await db.select().from(todo_items).where(eq(todo_items.title, title))
+    logger.info(`Query by title="${title}" returned ${rows.length} rows.`)
+    return rows
+  })
 }
 
 // --- 根据 priority 查询 ---
 async function getTodoItemsByPriority(priority: number): Promise<TodoItemRow[]> {
-  try {
-    const db = (await getDatabaseInstance()).getDatabase()
-    const sql = 'SELECT * FROM todo_items WHERE priority = $1 ORDER BY due_date ASC'
-    const result = await db.query<TodoItemRow>(sql, [priority])
-    logger.info(`Query by priority=${priority} returned ${result.rows.length} rows.`)
-    return result.rows
-  } catch (error) {
-    logger.error('Failed to get todo items by priority:', error)
-    throw error
-  }
+  return withOrm('getTodoItemsByPriority', async (db) => {
+    const rows = await db
+      .select()
+      .from(todo_items)
+      .where(eq(todo_items.priority, priority))
+      .orderBy(asc(todo_items.due_date))
+    logger.info(`Query by priority=${priority} returned ${rows.length} rows.`)
+    return rows
+  })
 }
 
 // --- 根据 status 查询 ---
 async function getTodoItemsByStatus(status: number): Promise<TodoItemRow[]> {
-  try {
-    const db = (await getDatabaseInstance()).getDatabase()
-    const sql = 'SELECT * FROM todo_items WHERE status = $1 ORDER BY priority ASC, due_date ASC'
-    const result = await db.query<TodoItemRow>(sql, [status])
-    logger.info(`Query by status=${status} returned ${result.rows.length} rows.`)
-    return result.rows
-  } catch (error) {
-    logger.error('Failed to get todo items by status:', error)
-    throw error
-  }
+  return withOrm('getTodoItemsByStatus', async (db) => {
+    const rows = await db
+      .select()
+      .from(todo_items)
+      .where(eq(todo_items.status, status))
+      .orderBy(asc(todo_items.priority), asc(todo_items.due_date))
+    logger.info(`Query by status=${status} returned ${rows.length} rows.`)
+    return rows
+  })
 }
 
 // --- 获取所有待办事项 ---
 async function getAllTodoItems(): Promise<TodoItemRow[]> {
-  try {
-    const db = (await getDatabaseInstance()).getDatabase()
-    const sql = 'SELECT * FROM todo_items ORDER BY priority ASC, due_date ASC'
-    const result = await db.query<TodoItemRow>(sql)
-    logger.info(`Query for all todo items returned ${result.rows.length} rows.`)
-    return result.rows
-  } catch (error) {
-    logger.error('Failed to get all todo items:', error)
-    throw error
-  }
+  return withOrm('getAllTodoItems', async (db) => {
+    const rows = await db
+      .select()
+      .from(todo_items)
+      .orderBy(asc(todo_items.priority), asc(todo_items.due_date))
+    logger.info(`Query for all todo items returned ${rows.length} rows.`)
+    return rows
+  })
 }
 
 // --- 分页获取待办事项（按 updated_at 降序） ---
@@ -96,90 +74,74 @@ async function getTodoItemsPaginated(
   page: number = 1,
   pageSize: number = 10
 ): Promise<PaginatedResult<TodoItemRow>> {
-  try {
-    const db = (await getDatabaseInstance()).getDatabase()
+  return withOrm('getTodoItemsPaginated', async (db) => {
     // 页码/页大小钳制（修复：pageSize 传 0/负数 → LIMIT 0 空页且 hasMore 恒真）
     const safePage = Math.max(1, Number.isFinite(page) ? Math.floor(page) : 1)
     const safePageSize = Math.max(1, Number.isFinite(pageSize) ? Math.floor(pageSize) : 10)
     const offset = (safePage - 1) * safePageSize
 
-    const countResult = await db.query<{ total: number }>(
-      'SELECT COUNT(*) as total FROM todo_items WHERE status != 2'
-    )
-    const total = Number(countResult.rows[0]?.total) || 0
+    const countRows = await db
+      .select({ total: count() })
+      .from(todo_items)
+      .where(ne(todo_items.status, 2))
+    const total = Number(countRows[0]?.total) || 0
 
-    const dataSql = `
-      SELECT * FROM todo_items
-      WHERE status != 2
-      ORDER BY updated_at DESC
-      LIMIT $1 OFFSET $2
-    `
-    const result = await db.query<TodoItemRow>(dataSql, [safePageSize, offset])
-    const hasMore = offset + result.rows.length < total
+    const rows = await db
+      .select()
+      .from(todo_items)
+      .where(ne(todo_items.status, 2))
+      .orderBy(desc(todo_items.updated_at))
+      .limit(safePageSize)
+      .offset(offset)
+
+    const hasMore = offset + rows.length < total
     logger.info(
-      `Paginated todo items page=${page} pageSize=${pageSize}: ${result.rows.length} rows, total=${total}, hasMore=${hasMore}`
+      `Paginated todo items page=${page} pageSize=${pageSize}: ${rows.length} rows, total=${total}, hasMore=${hasMore}`
     )
-    return { items: result.rows, hasMore, total }
-  } catch (error) {
-    logger.error('Failed to get paginated todo items:', error)
-    throw error
-  }
+    return { items: rows, hasMore, total }
+  })
 }
 
 // --- 根据 due_date 查询 ---
 async function getTodoItemsByDueDate(dueDate: string): Promise<TodoItemRow[]> {
-  try {
-    const db = (await getDatabaseInstance()).getDatabase()
-    const sql = 'SELECT * FROM todo_items WHERE due_date = $1 ORDER BY priority ASC'
-    const result = await db.query<TodoItemRow>(sql, [dueDate])
-    logger.info(`Query by due_date="${dueDate}" returned ${result.rows.length} rows.`)
-    return result.rows
-  } catch (error) {
-    logger.error('Failed to get todo items by due date:', error)
-    throw error
-  }
+  return withOrm('getTodoItemsByDueDate', async (db) => {
+    const rows = await db
+      .select()
+      .from(todo_items)
+      .where(eq(todo_items.due_date, dueDate))
+      .orderBy(asc(todo_items.priority))
+    logger.info(`Query by due_date="${dueDate}" returned ${rows.length} rows.`)
+    return rows
+  })
 }
 
 // --- 根据 category 查询 ---
 async function getTodoItemsByCategory(category: string): Promise<TodoItemRow[]> {
-  try {
-    const db = (await getDatabaseInstance()).getDatabase()
-    const sql = 'SELECT * FROM todo_items WHERE category = $1 ORDER BY priority ASC, due_date ASC'
-    const result = await db.query<TodoItemRow>(sql, [category])
-    logger.info(`Query by category="${category}" returned ${result.rows.length} rows.`)
-    return result.rows
-  } catch (error) {
-    logger.error('Failed to get todo items by category:', error)
-    throw error
-  }
+  return withOrm('getTodoItemsByCategory', async (db) => {
+    const rows = await db
+      .select()
+      .from(todo_items)
+      .where(eq(todo_items.category, category))
+      .orderBy(asc(todo_items.priority), asc(todo_items.due_date))
+    logger.info(`Query by category="${category}" returned ${rows.length} rows.`)
+    return rows
+  })
 }
 
 // --- 添加待办事项 ---
 async function addTodoItem(
   todoItem: Omit<TodoItemRow, 'id' | 'created_at' | 'updated_at'>
 ): Promise<number> {
-  try {
-    const db = (await getDatabaseInstance()).getDatabase()
-    const { title, description, due_date, priority, status, category, started_at } = todoItem
-    const sql =
-      'INSERT INTO todo_items (title, description, due_date, priority, status, category, started_at) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id'
-
-    const result = await db.query<{ id: number }>(sql, [
-      title,
-      description,
-      due_date,
-      priority,
-      status,
-      category,
-      started_at
-    ])
-    const newId = result.rows[0].id
+  return withOrm('addTodoItem', async (db) => {
+    const { title, content, due_date, priority, status, category, started_at } = todoItem
+    const rows = await db
+      .insert(todo_items)
+      .values({ title, content, due_date, priority, status, category, started_at })
+      .returning({ id: todo_items.id })
+    const newId = rows[0].id
     logger.info(`Inserted new todo item with ID: ${newId}`)
     return newId
-  } catch (error) {
-    logger.error('Failed to insert todo item:', error)
-    throw error
-  }
+  })
 }
 
 // --- 修改待办事项 ---
@@ -187,101 +149,63 @@ async function updateTodoItem(
   id: number,
   updates: Partial<Omit<TodoItemRow, 'id' | 'created_at'>>
 ): Promise<boolean> {
-  try {
-    const db = (await getDatabaseInstance()).getDatabase()
+  return withOrm('updateTodoItem', async (db) => {
+    // PgUpdateSetSource 允许每个字段取字面值或 SQL 表达式（now() 等）
+    const patch: PgUpdateSetSource<typeof todo_items> = {}
 
-    const updateFields: string[] = []
-    const updateValues: (string | number | null)[] = []
-    let paramIndex = 1
-
-    if (updates.title !== undefined) {
-      updateFields.push(`title = $${paramIndex++}`)
-      updateValues.push(updates.title)
-    }
-    if (updates.description !== undefined) {
-      updateFields.push(`description = $${paramIndex++}`)
-      updateValues.push(updates.description)
-    }
-    if (updates.due_date !== undefined) {
-      updateFields.push(`due_date = $${paramIndex++}`)
-      updateValues.push(updates.due_date)
-    }
-    if (updates.priority !== undefined) {
-      updateFields.push(`priority = $${paramIndex++}`)
-      updateValues.push(updates.priority)
-    }
+    if (updates.title !== undefined) patch.title = updates.title
+    if (updates.content !== undefined) patch.content = updates.content
+    if (updates.due_date !== undefined) patch.due_date = updates.due_date
+    if (updates.priority !== undefined) patch.priority = updates.priority
     if (updates.status !== undefined) {
-      updateFields.push(`status = $${paramIndex++}`)
-      updateValues.push(updates.status)
+      patch.status = updates.status
       // 时间戳随状态推进/回退（修复：①status=1 时调用方若同传 started_at 会 SET 同列两次
       // 导致整条 UPDATE 失败；②状态回退时时间戳残留，前端按时间戳判状态会错）
       if (updates.status === 2) {
-        updateFields.push('completed_at = NOW()')
+        patch.completed_at = sql`now()`
       } else if (updates.completed_at === undefined) {
-        updateFields.push('completed_at = NULL')
+        patch.completed_at = null
       }
       if (updates.status === 1) {
-        if (updates.started_at === undefined) updateFields.push('started_at = NOW()')
+        if (updates.started_at === undefined) patch.started_at = sql`now()`
       } else if (updates.started_at === undefined) {
-        updateFields.push('started_at = NULL')
+        patch.started_at = null
       }
     }
-    if (updates.category !== undefined) {
-      updateFields.push(`category = $${paramIndex++}`)
-      updateValues.push(updates.category)
-    }
-    if (updates.started_at !== undefined) {
-      updateFields.push(`started_at = $${paramIndex++}`)
-      updateValues.push(updates.started_at)
-    }
-    if (updates.updated_at !== undefined) {
-      updateFields.push(`updated_at = $${paramIndex++}`)
-      updateValues.push(updates.updated_at)
-    } else {
-      updateFields.push('updated_at = NOW()')
-    }
+    if (updates.category !== undefined) patch.category = updates.category
+    if (updates.started_at !== undefined) patch.started_at = updates.started_at
+    // 与原实现一致：updated_at 未显式给出时一律刷新（原实现的「无字段可更新」早退分支因此不可达）
+    patch.updated_at = updates.updated_at !== undefined ? updates.updated_at : sql`now()`
 
-    if (updateFields.length === 0) {
-      logger.warn('No fields to update for todo item with id:', id)
-      return false
-    }
+    const updated = await db
+      .update(todo_items)
+      .set(patch)
+      .where(eq(todo_items.id, id))
+      .returning({ id: todo_items.id })
 
-    const sql = `UPDATE todo_items SET ${updateFields.join(', ')} WHERE id = $${paramIndex++}`
-    updateValues.push(id)
-
-    const result = await db.query(sql, updateValues)
-    const changes = result.affectedRows ?? 0
-    if (changes > 0) {
-      logger.info(`Updated todo item with ID: ${id}, ${changes} row(s) affected.`)
+    if (updated.length > 0) {
+      logger.info(`Updated todo item with ID: ${id}, ${updated.length} row(s) affected.`)
       return true
-    } else {
-      logger.warn(`No rows updated for todo item with ID: ${id}`)
-      return false
     }
-  } catch (error) {
-    logger.error('Failed to update todo item:', error)
-    throw error
-  }
+    logger.warn(`No rows updated for todo item with ID: ${id}`)
+    return false
+  })
 }
 
 // --- 删除待办事项 ---
 async function deleteTodoItem(id: number): Promise<boolean> {
-  try {
-    const db = (await getDatabaseInstance()).getDatabase()
-    const sql = 'DELETE FROM todo_items WHERE id = $1'
-    const result = await db.query(sql, [id])
-    const changes = result.affectedRows ?? 0
-    if (changes > 0) {
-      logger.info(`Deleted todo item with ID: ${id}, ${changes} row(s) affected.`)
+  return withOrm('deleteTodoItem', async (db) => {
+    const deleted = await db
+      .delete(todo_items)
+      .where(eq(todo_items.id, id))
+      .returning({ id: todo_items.id })
+    if (deleted.length > 0) {
+      logger.info(`Deleted todo item with ID: ${id}, ${deleted.length} row(s) affected.`)
       return true
-    } else {
-      logger.warn(`No rows deleted for todo item with ID: ${id}`)
-      return false
     }
-  } catch (error) {
-    logger.error('Failed to delete todo item:', error)
-    throw error
-  }
+    logger.warn(`No rows deleted for todo item with ID: ${id}`)
+    return false
+  })
 }
 
 export {

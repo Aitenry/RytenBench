@@ -16,12 +16,12 @@ import {
   PaginatedResult
 } from '../main/database/mapper/document'
 import { WikiRow, WikiDirectoryRow } from '../main/database/mapper/wiki'
-import { ChatTopicRow, ChatDialogueRow } from '../main/database/mapper/chat'
+import { HarnessTopicRow, HarnessDialogueRow } from '../main/database/mapper/harness'
 import type { LlmProviderInput, LlmProviderConfig } from '../main/database/mapper/provider'
 import type { SystemSettings } from '../main/types/settings'
 import type { StructuredMessage, ToolInfo } from '../renderer/resource/types/window'
 
-interface ChatOptions {
+interface HarnessOptions {
   tools?: string[]
   images?: string[]
   documents?: { fileName: string; filePath: string }[]
@@ -154,20 +154,26 @@ interface Api {
     getLockScreenCode: () => Promise<{ code: string; view: boolean }>
     setLockScreenView: (open: boolean) => Promise<void>
   }
-  chat: {
+  harness: {
     sendMessage: (
       message: string,
-      options?: ChatOptions & { providerId?: number }
+      options?: HarnessOptions & { providerId?: number }
     ) => Promise<StructuredMessage[]>
     startMessageStream: (
       message: string,
-      options?: ChatOptions & { topicId?: number; providerId?: number }
+      options?: HarnessOptions & { topicId?: number; providerId?: number }
     ) => void
     getTools: () => Promise<ToolInfo[]>
     selectSkillsDirectory: () => Promise<string | null>
     listSkills: () => Promise<{ id: string; name: string; description: string }[]>
     onStreamChunk: (callback: (chunk: StructuredMessage) => void) => () => void
-    onStreamDone: (callback: (result: { topicId: number }) => void) => () => void
+    onStreamDone: (
+      callback: (result: {
+        topicId: number
+        userDialogueId?: number
+        assistantDialogueId?: number
+      }) => void
+    ) => () => void
     // 后台子代理会话（顶部栏列表）
     listAgents: (topicId: number) => Promise<SubagentSessionRowView[]>
     agentOutput: (
@@ -188,26 +194,26 @@ interface Api {
       }) => void
     ) => () => void
     // 话题管理
-    getAllTopics: (workspaceId: number) => Promise<ChatTopicRow[]>
+    getAllTopics: (workspaceId: number) => Promise<HarnessTopicRow[]>
     getAllTopicsPaginated: (
       page: number,
       pageSize: number
-    ) => Promise<PaginatedResult<ChatTopicRow>>
-    getTopicById: (id: number) => Promise<ChatTopicRow[]>
+    ) => Promise<PaginatedResult<HarnessTopicRow>>
+    getTopicById: (id: number) => Promise<HarnessTopicRow[]>
     createTopic: (title: string, model?: string, selectedTools?: string) => Promise<number>
     updateTopic: (
       id: number,
-      updates: Partial<Pick<ChatTopicRow, 'title' | 'model' | 'selected_tools'>>
+      updates: Partial<Pick<HarnessTopicRow, 'title' | 'model' | 'selected_tools'>>
     ) => Promise<boolean>
     deleteTopic: (id: number) => Promise<boolean>
     // 消息管理
-    getDialoguesByTopic: (topicId: number) => Promise<ChatDialogueRow[]>
+    getDialoguesByTopic: (topicId: number) => Promise<HarnessDialogueRow[]>
     getDialoguesByTopicPaginated: (
       topicId: number,
       page: number,
       pageSize: number
-    ) => Promise<PaginatedResult<ChatDialogueRow>>
-    addDialogue: (dialogue: Omit<ChatDialogueRow, 'id' | 'created_at'>) => Promise<number>
+    ) => Promise<PaginatedResult<HarnessDialogueRow>>
+    addDialogue: (dialogue: Omit<HarnessDialogueRow, 'id' | 'created_at'>) => Promise<number>
     deleteDialoguesByTopic: (topicId: number) => Promise<boolean>
   }
   providers: {

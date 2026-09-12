@@ -119,13 +119,14 @@ const DocEditorPane: React.FC<DocEditorPaneProps> = ({
         setTags(getTagsArray(doc.tags))
         setSummary(doc.summary)
         setImage(doc.image)
-        setCreatedAt(doc.created_at)
+        // created_at / updated_at 库列为可空（DEFAULT NOW()），缺失时按 undefined 处理
+        setCreatedAt(doc.created_at ?? undefined)
         lastSavedRef.current = { title: doc.title ?? '', content: doc.content ?? '' }
         metaRef.current = {
           tags: getTagsArray(doc.tags),
           wordCount: doc.word_count ?? 0,
-          createdAt: doc.created_at,
-          updatedAt: doc.updated_at
+          createdAt: doc.created_at ?? undefined,
+          updatedAt: doc.updated_at ?? undefined
         }
         onMetaChangeRef.current(metaRef.current)
       } catch (error) {
@@ -163,7 +164,7 @@ const DocEditorPane: React.FC<DocEditorPaneProps> = ({
 
   /* ── 外部修改同步（修复：此前对工具写入完全无感知,继续编辑会把工具刚写入的内容整体覆盖）── */
   useEffect(() => {
-    const unsubscribe = api.chat.onDocChanged((data) => {
+    const unsubscribe = api.harness.onDocChanged((data) => {
       if (data.docId !== docIdRef.current) return
       if (data.action === 'deleted') {
         setNotFound(true)
@@ -396,7 +397,7 @@ const DocEditorPane: React.FC<DocEditorPaneProps> = ({
         }}
       >
         {/* 标题 + 元信息（不随正文滚动） */}
-        <div style={{ padding: '18px 48px 0', flexShrink: 0 }}>
+        <div style={{ padding: '17px 17px 0', flexShrink: 0 }}>
           <Input
             ref={titleInputRef}
             variant="borderless"

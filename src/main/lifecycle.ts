@@ -1,6 +1,6 @@
 import { app } from 'electron'
 import logger from 'electron-log'
-import { activeChatStreams, streamAbortControllers } from './context'
+import { activeHarnessStreams, streamAbortControllers } from './context'
 import { getDatabaseRef } from './database/instance'
 
 let isQuitting = false
@@ -36,12 +36,12 @@ export function registerLifecycleHooks(): void {
     void (async () => {
       try {
         // 有活跃流时先中止并等待落库（最长 5s）
-        if (activeChatStreams.size > 0) {
+        if (activeHarnessStreams.size > 0) {
           for (const controller of streamAbortControllers.values()) {
             controller.abort()
           }
           await Promise.race([
-            Promise.allSettled([...activeChatStreams]),
+            Promise.allSettled([...activeHarnessStreams]),
             new Promise((resolve) => setTimeout(resolve, 5000))
           ])
         }
@@ -55,7 +55,7 @@ export function registerLifecycleHooks(): void {
           }
         } finally {
           try {
-            const { closeAllMnemon } = await import('./chat/mnemon-singleton')
+            const { closeAllMnemon } = await import('./harness/mnemon-singleton')
             await closeAllMnemon()
           } catch (err) {
             logger.warn('[Mnemon] 退出清理失败:', err)

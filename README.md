@@ -29,11 +29,11 @@
 
 ### AI
 
-- **AI Chat Assistant** — Conversational AI powered by a LangGraph runtime with streaming responses, reasoning (deep thinking) display, tool-call cards, and sub-agent delegation. Chat history is persisted per workspace and topic.
-- **Workspaces** — Multiple workspaces, each bound to a real directory on disk. Browse, read, and edit workspace files inline (Monaco-based file editor) with file reference chips in chat input. Chat history, agents, and memory are isolated per workspace; documents, wikis and todos are global.
+- **AI Harness Assistant** — Conversational AI powered by a LangGraph runtime with streaming responses, reasoning (deep thinking) display, tool-call cards, and sub-agent delegation. Harness history is persisted per workspace and topic.
+- **Workspaces** — Multiple workspaces, each bound to a real directory on disk. Browse, read, and edit workspace files inline (Monaco-based file editor) with file reference chips in harness input. Harness history, agents, and memory are isolated per workspace; documents, wikis and todos are global.
 - **Built-in Memory (Mnemon)** — A three-layer memory system in every workspace: runtime memory (user profile + project MEMORY, injected every turn), project documents (Markdown archives with cold/hot tiering + LRU), and long-term memory spaces (graph relations + deep recall, backed by PGlite). Exposed to the agent as 13 `mnemon_*` tools.
 - **Agent System** — Configure sub-agents per workspace with custom system prompts and tool selections; the main agent supports configurable tools and skills.
-- **Skill System** — Load custom skills from a local directory; enable/disable individual skills for chat sessions.
+- **Skill System** — Load custom skills from a local directory; enable/disable individual skills for harness sessions.
 - **Knowledge Graph** — Automatically build knowledge graphs from wiki documents using LLM-powered entity/relation extraction, cross-chunk entity merging, gleaning (second-pass scan), and incremental appends. Visualized with ECharts 6.
 - **Multi-Provider LLM Support** — Configure and manage multiple LLM providers with AES-256-GCM encrypted API keys. Supports OpenAI, Anthropic, DeepSeek, Google Gemini, Google Vertex AI, Mistral, Ollama, OpenRouter, xAI, AWS Bedrock, Cloudflare Workers AI, and any OpenAI-compatible endpoint.
 
@@ -158,12 +158,12 @@ RytenBench/
 ├── src/
 │   ├── main/                        # Electron main process
 │   │   ├── address/                 # IP address utilities
-│   │   ├── chat/                    # AI chat service (LangChain + LangGraph)
-│   │   │   ├── index.ts             # Chat module entry & stream entry points
-│   │   │   ├── types.ts             # Chat message, tool call & sub-agent types
-│   │   │   ├── service/             # Chat service internals
-│   │   │   │   ├── chat.ts          # ChatService: streaming & tool orchestration
-│   │   │   │   ├── history.ts       # Chat history loading & management
+│   │   ├── harness/                 # AI harness service (LangChain + LangGraph)
+│   │   │   ├── index.ts             # Harness module entry & stream entry points
+│   │   │   ├── types.ts             # Harness message, tool call & sub-agent types
+│   │   │   ├── service/             # Harness service internals
+│   │   │   │   ├── harness.ts       # HarnessService: streaming & tool orchestration
+│   │   │   │   ├── history.ts       # Harness history loading & management
 │   │   │   │   ├── message-builder.ts
 │   │   │   │   ├── stream-handler.ts
 │   │   │   │   └── stream-producers.ts
@@ -216,7 +216,7 @@ RytenBench/
 │   │   ├── shared/  types/          # Shared utilities & type definitions
 │   │   └── index.ts                 # Main process entry & IPC handlers
 │   ├── preload/                     # Preload scripts (context bridge)
-│   │   ├── index.ts                 # Typed API surface (api.docs, api.chat, ...)
+│   │   ├── index.ts                 # Typed API surface (api.docs, api.harness, ...)
 │   │   └── index.d.ts
 │   └── renderer/                    # Renderer process (React UI)
 │       ├── resource/                # Static HTML, CSS, images, loading screen
@@ -241,7 +241,7 @@ RytenBench/
 │           │   │   ├── MusicMiniPlayer.tsx
 │           │   │   └── SettingsPanel.tsx
 │           │   ├── todo/  wiki/     # Todo & wiki management modals
-│           ├── contexts/            # Audio, Chat, Message, Notification, Theme
+│           ├── contexts/            # Audio, Harness, Message, Notification, Theme
 │           ├── hooks/  providers/   # Custom hooks & context providers
 │           ├── route/               # Route configuration (React Router 7)
 │           ├── types/  utils/       # Frontend types & utilities
@@ -251,12 +251,12 @@ RytenBench/
 │               │   │                # BreadcrumbBar, OutlinePanel, TodoPane,
 │               │   │                # DocPropertiesModal, ArchiveDocModal, ...
 │               │   └── Index.tsx
-│               ├── chat/            # AI chat with streaming, tools & files
-│               │   ├── components/  # ChatInput (file chips), ChatSidebar,
-│               │   │                # ChatMessageArea, TaskProgressCard,
+│               ├── harness/         # AI harness with streaming, tools & files
+│               │   ├── components/  # HarnessInput (file chips), HarnessSidebar,
+│               │   │                # HarnessMessageArea, TaskProgressCard,
 │               │   │                # WorkspacePanel, FileExplorer, FileEditor,
 │               │   │                # FileRefNode, settings/ (Agent/Skills/Memory)
-│               │   ├── hooks/       # useChatHandlers, useTypewriter
+│               │   ├── hooks/       # useHarnessHandlers, useTypewriter
 │               │   └── Index.tsx
 │               ├── planner/         # Planner with Gantt chart & task tree
 │               └── music/           # Music player page
@@ -277,18 +277,18 @@ RytenBench/
 
 The application follows Electron's **multi-process architecture**:
 
-- **Main Process** (`src/main/`): Manages the application lifecycle, the local PGLite database, the LLM provider factory, the knowledge graph builder, and the LangGraph chat runtime with streaming & tool orchestration. All IPC communication with the renderer flows through typed handlers.
-- **Preload** (`src/preload/`): Bridges the main and renderer processes through `contextBridge`, exposing a structured API (`api.docs`, `api.wikis`, `api.todoItems`, `api.planner`, `api.chat`, `api.graph`, `api.providers`, `api.agents`, `api.mainAgent`, `api.music`, `api.weather`, `api.workspace`, `api.file`, `api.systemSettings`, `api.mermaid`, `api.window`, ...) to the frontend.
+- **Main Process** (`src/main/`): Manages the application lifecycle, the local PGLite database, the LLM provider factory, the knowledge graph builder, and the LangGraph harness runtime with streaming & tool orchestration. All IPC communication with the renderer flows through typed handlers.
+- **Preload** (`src/preload/`): Bridges the main and renderer processes through `contextBridge`, exposing a structured API (`api.docs`, `api.wikis`, `api.todoItems`, `api.planner`, `api.harness`, `api.graph`, `api.providers`, `api.agents`, `api.mainAgent`, `api.music`, `api.weather`, `api.workspace`, `api.file`, `api.systemSettings`, `api.mermaid`, `api.window`, ...) to the frontend.
 - **Renderer** (`src/renderer/`): React 19 SPA with React Router 7 hash routing, styled with Ant Design 6 and Tailwind CSS 4. Custom frameless window with sidebar navigation, bottom bar with mini player, and right bar panels.
 
-### Chat Data Flow
+### Harness Data Flow
 
 ```mermaid
 flowchart LR
     R["Renderer · React UI"] -->|ipcRenderer| P["Preload · contextBridge"]
 
     subgraph Main["Main Process"]
-        RT["LangGraph Chat Runtime"] --> LLM["LLM Provider Factory"]
+        RT["LangGraph Harness Runtime"] --> LLM["LLM Provider Factory"]
         RT --> DB[("PGLite · local database")]
         RT --> FS["Workspace FS · file tools"]
         RT --> MEM["Mnemon Memory · 13 tools"]
@@ -299,7 +299,7 @@ flowchart LR
 
 ### Workspaces & Memory Isolation
 
-- Each **workspace** owns a real directory on disk, its own chat topics and dialogues, its sub-agent configurations, and a dedicated mnemon store under `workspace-<id>/mnemon/` — switching workspaces never leaks chat history or memory between them.
+- Each **workspace** owns a real directory on disk, its own harness topics and dialogues, its sub-agent configurations, and a dedicated mnemon store under `workspace-<id>/mnemon/` — switching workspaces never leaks harness history or memory between them.
 - **Documents, wikis (and their knowledge graphs), todos, planner tasks, the music library, LLM providers and skills are global** — they are shared by every workspace and are not affected by switching or deleting one.
 - The **Mnemon** memory layer (hot memory → project documents → long-term memory spaces) is modeled after the dsh-mnemon plugin architecture, implemented natively on LangGraph with a PGlite-backed long-term store.
 

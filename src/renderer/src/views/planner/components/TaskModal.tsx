@@ -49,7 +49,8 @@ function findNode(tree: PlannerTreeNode[], id: number): PlannerTreeNode | null {
 function sumDescendantWorkHours(node: PlannerTreeNode): number {
   let sum = 0
   for (const child of node.children) {
-    sum += child.work_hours
+    // work_hours 库列为可空（DEFAULT 0），null 按 0 处理
+    sum += child.work_hours ?? 0
     sum += sumDescendantWorkHours(child)
   }
   return sum
@@ -121,8 +122,8 @@ const AddTaskModal: React.FC<Props> = ({ open, parentId, editTask, tree, onOk, o
       if (editTask) {
         setTitle(editTask.title)
         setType(editTask.type)
-        setProgress(editTask.progress)
-        setWorkHours(editTask.work_hours)
+        setProgress(editTask.progress ?? 0)
+        setWorkHours(editTask.work_hours ?? 0)
         setPriority(editTask.priority ?? 4)
         setDateRange(
           editTask.start_date && editTask.end_date
@@ -181,7 +182,7 @@ const AddTaskModal: React.FC<Props> = ({ open, parentId, editTask, tree, onOk, o
       // 编辑项目：其下所有阶段工时之和不得超过项目总工时
       if (editTask.type === 'project') {
         const childPhaseSum = editTask.children.reduce(
-          (sum, c) => sum + (c.type === 'phase' ? c.work_hours : 0),
+          (sum, c) => sum + (c.type === 'phase' ? (c.work_hours ?? 0) : 0),
           0
         )
         if (workHours < childPhaseSum) {
@@ -192,19 +193,21 @@ const AddTaskModal: React.FC<Props> = ({ open, parentId, editTask, tree, onOk, o
 
     // 4. 添加子任务时，不能超过父级工时上限
     if (!isEdit && parentNode) {
+      // work_hours 库列为可空（DEFAULT 0），null 按 0 处理
+      const parentHours = parentNode.work_hours ?? 0
       if (parentNode.type === 'phase') {
         const existedSum = sumDescendantWorkHours(parentNode)
-        if (existedSum + workHours > parentNode.work_hours) {
-          return `该阶段下所有任务工时之和（${existedSum + workHours}h）将超过阶段总工时（${parentNode.work_hours}h）`
+        if (existedSum + workHours > parentHours) {
+          return `该阶段下所有任务工时之和（${existedSum + workHours}h）将超过阶段总工时（${parentHours}h）`
         }
       }
       if (parentNode.type === 'project' && type === 'phase') {
         const existedPhaseSum = parentNode.children.reduce(
-          (sum, c) => sum + (c.type === 'phase' ? c.work_hours : 0),
+          (sum, c) => sum + (c.type === 'phase' ? (c.work_hours ?? 0) : 0),
           0
         )
-        if (existedPhaseSum + workHours > parentNode.work_hours) {
-          return `该项目下所有阶段工时之和（${existedPhaseSum + workHours}h）将超过项目总工时（${parentNode.work_hours}h）`
+        if (existedPhaseSum + workHours > parentHours) {
+          return `该项目下所有阶段工时之和（${existedPhaseSum + workHours}h）将超过项目总工时（${parentHours}h）`
         }
       }
     }

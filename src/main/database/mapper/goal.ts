@@ -1,33 +1,22 @@
-import { getDatabaseInstance } from '../instance'
-import logger from 'electron-log'
+import { eq, sql } from 'drizzle-orm'
+import { withOrm } from '../orm'
+import { harness_goals } from '../schema'
 
 // --- 类型定义 ---
 
-export interface GoalRow {
-  topic_id: number
-  goal_id: string
-  revision: number
-  objective: string
-  phase: 'active' | 'paused' | 'blocked' | 'complete'
-  rounds_started: number
-  max_goal_rounds: number
-  blocked_reason: string | null
-  created_at: string
-  updated_at: string
-}
+/** 会话目标行（phase 的联合类型由 schema 的 $type 提供） */
+export type GoalRow = typeof harness_goals.$inferSelect
 
 /** 按话题读取当前目标（无则 null） */
 export async function getGoalByTopic(topicId: number): Promise<GoalRow | null> {
-  try {
-    const db = (await getDatabaseInstance()).getDatabase()
-    const result = await db.query<GoalRow>('SELECT * FROM chat_goals WHERE topic_id = $1', [
-      topicId
-    ])
-    return result.rows[0] ?? null
-  } catch (error) {
-    logger.error('Failed to get goal by topic:', error)
-    throw error
-  }
+  return withOrm('getGoalByTopic', async (db) => {
+    const rows = await db
+      .select()
+      .from(harness_goals)
+      .where(eq(harness_goals.topic_id, topicId))
+      .limit(1)
+    return rows[0] ?? null
+  })
 }
 
 /**
@@ -37,47 +26,31 @@ export async function getGoalByTopic(topicId: number): Promise<GoalRow | null> {
 export async function upsertGoal(
   row: Omit<GoalRow, 'created_at' | 'updated_at'>
 ): Promise<GoalRow> {
-  try {
-    const db = (await getDatabaseInstance()).getDatabase()
-    const result = await db.query<GoalRow>(
-      `INSERT INTO chat_goals
-         (topic_id, goal_id, revision, objective, phase, rounds_started, max_goal_rounds, blocked_reason)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-       ON CONFLICT (topic_id) DO UPDATE SET
-         goal_id = EXCLUDED.goal_id,
-         revision = EXCLUDED.revision,
-         objective = EXCLUDED.objective,
-         phase = EXCLUDED.phase,
-         rounds_started = EXCLUDED.rounds_started,
-         max_goal_rounds = EXCLUDED.max_goal_rounds,
-         blocked_reason = EXCLUDED.blocked_reason,
-         updated_at = now()
-       RETURNING *`,
-      [
-        row.topic_id,
-        row.goal_id,
-        row.revision,
-        row.objective,
-        row.phase,
-        row.rounds_started,
-        row.max_goal_rounds,
-        row.blocked_reason
-      ]
-    )
-    return result.rows[0]
-  } catch (error) {
-    logger.error('Failed to upsert goal:', error)
-    throw error
-  }
+  return withOrm('upsertGoal', async (db) => {
+    const rows = await db
+      .insert(harness_goals)
+      .values(row)
+      .onConflictDoUpdate({
+        target: harness_goals.topic_id,
+        set: {
+          goal_id: row.goal_id,
+          revision: row.revision,
+          objective: row.objective,
+          phase: row.phase,
+          rounds_started: row.rounds_started,
+          max_goal_rounds: row.max_goal_rounds,
+          blocked_reason: row.blocked_reason,
+          updated_at: sql`now()`
+        }
+      })
+      .returning()
+    return rows[0]
+  })
 }
 
 /** 删除话题的目标（话题删除时级联清理） */
 export async function deleteGoalByTopic(topicId: number): Promise<void> {
-  try {
-    const db = (await getDatabaseInstance()).getDatabase()
-    await db.query('DELETE FROM chat_goals WHERE topic_id = $1', [topicId])
-  } catch (error) {
-    logger.error('Failed to delete goal by topic:', error)
-    throw error
-  }
+  await withOrm('deleteGoalByTopic', async (db) => {
+    await db.delete(harness_goals).where(eq(harness_goals.topic_id, topicId))
+  })
 }

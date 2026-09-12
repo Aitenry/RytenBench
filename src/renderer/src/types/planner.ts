@@ -1,30 +1,15 @@
-export interface PlannerTaskRow {
-  id: number
-  parent_id: number | null
-  title: string
-  type: string
-  progress: number
-  work_hours: number
-  priority: number
-  start_date: string | null
-  end_date: string | null
-  sort_order: number
-  created_at: string
-  updated_at: string
-}
+import type {
+  PlannerTaskRow as PlannerTaskRowFromDb,
+  PlannerDependencyRow as PlannerDependencyRowFromDb,
+  PlannerTreeNode as PlannerTreeNodeFromDb
+} from '../../../main/database/mapper/planner'
 
-export interface PlannerTreeNode extends PlannerTaskRow {
-  children: PlannerTreeNode[]
-  dependencies: number[]
-  depth: number
-}
+/** 计划任务行（复用主进程 mapper 推导出的行类型，避免两处手工维护） */
+export type PlannerTaskRow = PlannerTaskRowFromDb
 
-export interface PlannerDependencyRow {
-  id: number
-  task_id: number
-  depends_on_task_id: number
-  created_at: string
-}
+export type PlannerTreeNode = PlannerTreeNodeFromDb
+
+export type PlannerDependencyRow = PlannerDependencyRowFromDb
 
 export const PRIORITY_MAP: Record<number, { label: string; hex: string; rgba: string }> = {
   0: { label: 'P0', hex: '#D32F2F', rgba: 'rgba(211,47,47,0.3)' },

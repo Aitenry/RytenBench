@@ -1,0 +1,338 @@
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { theme } from 'antd'
+import type { Message } from '@renderer/types/harness'
+
+interface MessageLocatorProps {
+  messages: Message[]
+  /** 消息滚动容器（量高度、监听滚动） */
+  scrollRef: React.RefObject<HTMLDivElement | null>
+  /** 滚动容器里的内容容器（量每轮提问在内容中的位置） */
+  contentRef: React.RefObject<HTMLDivElement | null>
+  /** 点击刻度：跳转到该条消息（是否恢复贴底跟随由父级决定） */
+  onJumpTo: (index: number) => void
+}
+
+/* ──────────── 视觉规格 ──────────── */
+
+/** 相邻刻度的自然间距（参考实现里 --turn-natural-position 每档 10px） */
+const PITCH = 10
+/** 刻度宽（普通 / 当前）与高 */
+const TICK_W = 8
+const TICK_W_ACTIVE = 14
+const TICK_H = 2
+/** 距容器右边缘：让开 6px 滚动条 + 4px 外边距 */
+const RAIL_INSET = 20
+/** 轨道上下留白（用于判断可容纳多少刻度） */
+const PAD_Y = 8
+/** 判定「当前轮次」时向下的容差（px） */
+const PROBE_OFFSET = 24
+/** 悬停卡：宽度、回答区最多显示的行数与行高 */
+const CARD_W = 300
+const ANSWER_LINES = 3
+const ANSWER_LINE_H = 20
+/** 命中区高度（2px 的线太细，指不准） */
+const HIT_H = TICK_H + 6
+
+interface Turn {
+  /** 该轮提问在 messages 里的下标 */
+  index: number
+  /** 提问文本（标题） */
+  question: string
+  /** 该轮助手的最终回答（内容） */
+  answer: string
+}
+
+/** Markdown 摘成一行纯文本：预览卡里不需要语法符号 */
+function plainText(raw: string | null | undefined): string {
+  return (raw ?? '')
+    .replace(/```[\s\S]*?```/g, ' [代码] ')
+    .replace(/`([^`]*)`/g, '$1')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' [图片] ')
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/^\s{0,3}#{1,6}\s+/gm, '')
+    .replace(/\*\*|__/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/**
+ * 轮次导航（对话消息定位）。
+ *
+ * - 一个刻度 = 一轮提问（**只标用户消息**），等距聚合成一条短列表，整体在消息区里垂直居中；
+ * - 刻度多了就地压缩间距，永远不超出可视高度；
+ * - 「当前轮次」= 视口顶部往上最近的那条提问，刻度变白加长（滚动时只比偏移，不重量 DOM）；
+ * - 悬停出卡片：标题是这一轮的提问，内容是该轮助手的最终回答（3 行，超出可滚动）；
+ * - 点击平滑滚到该轮提问处。
+ */
+const MessageLocator: React.FC<MessageLocatorProps> = ({
+  messages,
+  scrollRef,
+  contentRef,
+  onJumpTo
+}) => {
+  const { token } = theme.useToken()
+  const [railHeight, setRailHeight] = useState(0)
+  const [activeIndex, setActiveIndex] = useState(-1)
+  const [hovered, setHovered] = useState<number | null>(null)
+  /** 每轮提问在内容里的绝对偏移，滚动时只做比较 */
+  const offsetsRef = useRef<{ index: number; offset: number }[]>([])
+  const frameRef = useRef<number | null>(null)
+  const clearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  /** 一轮 = 一条用户消息 + 紧随其后、直到下一个提问之前的最后一条助手消息 */
+  const turns = useMemo<Turn[]>(() => {
+    const list: Turn[] = []
+    messages.forEach((message, index) => {
+      if (message.role !== 'user') return
+      let answer = ''
+      for (let i = index + 1; i < messages.length; i++) {
+        const next = messages[i]
+        if (next.role === 'user') break
+        if (next.role === 'assistant' && (next.content ?? '').trim()) answer = next.content ?? ''
+      }
+      list.push({ index, question: plainText(message.content), answer: plainText(answer) })
+    })
+    return list
+  }, [messages])
+
+  /** 按滚动位置刷新「当前轮次」 */
+  const syncActive = useCallback((): void => {
+    const el = scrollRef.current
+    if (!el) return
+    const probe = el.scrollTop + PROBE_OFFSET
+    const list = offsetsRef.current
+    if (list.length === 0) return
+    let index = list[0].index
+    list.forEach((item) => {
+      if (item.offset <= probe) index = item.index
+    })
+    setActiveIndex((prev) => (prev === index ? prev : index))
+  }, [scrollRef])
+
+  /** 量一轮提问的位置（rAF 合并，流式期间每帧最多一次） */
+  const measure = useCallback((): void => {
+    const el = scrollRef.current
+    const inner = contentRef.current
+    if (!el || !inner) return
+    setRailHeight(Math.max(0, el.clientHeight - PAD_Y * 2))
+    const innerTop = inner.getBoundingClientRect().top
+    const offsets: { index: number; offset: number }[] = []
+    turns.forEach((turn) => {
+      const node = inner.querySelector<HTMLElement>(`[data-msg-i="${turn.index}"]`)
+      if (!node) return
+      offsets.push({ index: turn.index, offset: node.getBoundingClientRect().top - innerTop })
+    })
+    offsetsRef.current = offsets
+    syncActive()
+  }, [contentRef, scrollRef, turns, syncActive])
+
+  const scheduleMeasure = useCallback((): void => {
+    if (frameRef.current !== null) return
+    frameRef.current = requestAnimationFrame(() => {
+      frameRef.current = null
+      measure()
+    })
+  }, [measure])
+
+  /* 轮次变化 / 容器或内容尺寸变化（流式长高）→ 重量 */
+  useEffect(() => {
+    scheduleMeasure()
+    const el = scrollRef.current
+    const inner = contentRef.current
+    const ro = new ResizeObserver(() => scheduleMeasure())
+    if (el) ro.observe(el)
+    if (inner) ro.observe(inner)
+    return () => {
+      ro.disconnect()
+      if (frameRef.current !== null) {
+        cancelAnimationFrame(frameRef.current)
+        frameRef.current = null
+      }
+    }
+  }, [scheduleMeasure, scrollRef, contentRef])
+
+  /* 滚动 → 更新当前刻度 */
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const onScroll = (): void => syncActive()
+    el.addEventListener('scroll', onScroll, { passive: true })
+    syncActive()
+    return () => el.removeEventListener('scroll', onScroll)
+  }, [scrollRef, syncActive])
+
+  /* 悬停卡的延迟关闭：鼠标从刻度移到卡片上时不能立刻消失（卡片里要能滚动回答） */
+  const cancelClear = useCallback((): void => {
+    if (clearTimerRef.current) {
+      clearTimeout(clearTimerRef.current)
+      clearTimerRef.current = null
+    }
+  }, [])
+  const scheduleClear = useCallback((): void => {
+    cancelClear()
+    clearTimerRef.current = setTimeout(() => setHovered(null), 140)
+  }, [cancelClear])
+  useEffect(() => () => cancelClear(), [cancelClear])
+
+  /* 悬停卡高度实测：卡片的纵向中心要对准被悬停的那条刻度 */
+  const cardRef = useRef<HTMLDivElement | null>(null)
+  const [cardHeight, setCardHeight] = useState(0)
+  useLayoutEffect(() => {
+    if (hovered === null) return
+    const el = cardRef.current
+    if (el) setCardHeight(el.offsetHeight)
+  }, [hovered, turns.length])
+
+  /* 轮次数量变化时清掉悬停态，避免指向错位的那一轮 */
+  useEffect(() => {
+    setHovered(null)
+  }, [turns.length])
+
+  if (turns.length < 2) return null
+
+  /* 等距堆叠：刻度多到放不下时压缩间距，始终不超出可视高度 */
+  const gap =
+    turns.length > 1
+      ? Math.max(
+          2,
+          Math.min(PITCH - TICK_H, (railHeight - turns.length * TICK_H) / (turns.length - 1))
+        )
+      : 0
+
+  const hoveredTurn = hovered === null ? null : (turns[hovered] ?? null)
+  const hoveredTop = hovered === null ? 0 : hovered * (HIT_H + gap)
+  /* 卡片纵向中心对准刻度（高度实测，未量到之前按 120 估） */
+  const cardH = cardHeight || 120
+  const cardTop = Math.max(
+    0,
+    Math.min(hoveredTop + HIT_H / 2 - cardH / 2, Math.max(0, railHeight - cardH))
+  )
+
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        /* 让开滚动条与容器圆角 */
+        right: RAIL_INSET,
+        top: '50%',
+        transform: 'translateY(-50%)',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'flex-end',
+        gap,
+        zIndex: 12,
+        pointerEvents: 'none'
+      }}
+    >
+      {turns.map((turn, i) => {
+        const isActive = turn.index === activeIndex
+        const isHovered = i === hovered
+        return (
+          <button
+            key={turn.index}
+            type="button"
+            aria-label={`跳转到第 ${i + 1} 轮`}
+            aria-current={isActive ? 'true' : undefined}
+            onMouseEnter={() => {
+              cancelClear()
+              setHovered(i)
+            }}
+            onMouseLeave={scheduleClear}
+            onClick={() => onJumpTo(turn.index)}
+            style={{
+              width: TICK_W_ACTIVE + 4,
+              height: HIT_H,
+              padding: 0,
+              border: 'none',
+              background: 'transparent',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'flex-end',
+              cursor: 'pointer',
+              pointerEvents: 'auto'
+            }}
+          >
+            <span
+              style={{
+                height: TICK_H,
+                borderRadius: 1,
+                transition: 'width 0.12s, background 0.12s',
+                width: isActive ? TICK_W_ACTIVE : isHovered ? TICK_W + 2 : TICK_W,
+                background: isActive
+                  ? token.colorText
+                  : isHovered
+                    ? token.colorTextSecondary
+                    : token.colorTextQuaternary
+              }}
+            />
+          </button>
+        )
+      })}
+
+      {/* 悬停卡：标题=这一轮的提问，内容=该轮助手的最终回答（3 行，超出滚动） */}
+      {hoveredTurn && (
+        <div
+          ref={cardRef}
+          onMouseEnter={cancelClear}
+          onMouseLeave={scheduleClear}
+          style={{
+            position: 'absolute',
+            right: TICK_W_ACTIVE + 14,
+            top: cardTop,
+            width: CARD_W,
+            background: token.colorBgElevated,
+            border: `1px solid ${token.colorBorderSecondary}`,
+            borderRadius: 10,
+            padding: '10px 12px',
+            boxShadow: token.boxShadowSecondary,
+            pointerEvents: 'auto'
+          }}
+        >
+          <div
+            style={{
+              fontSize: 13,
+              lineHeight: 1.5,
+              color: token.colorText,
+              display: '-webkit-box',
+              WebkitLineClamp: 2,
+              WebkitBoxOrient: 'vertical',
+              overflow: 'hidden'
+            }}
+          >
+            {hoveredTurn.question || '（空消息）'}
+          </div>
+          <div style={{ height: 1, background: token.colorBorderSecondary, margin: '8px 0' }} />
+          {/* 回答区：固定 3 行高，超出滚动；底部留一层渐隐提示「下面还有」 */}
+          <div style={{ position: 'relative' }}>
+            <div
+              className="custom-scrollbar"
+              style={{
+                maxHeight: ANSWER_LINES * ANSWER_LINE_H,
+                overflowY: 'auto',
+                fontSize: 12.5,
+                lineHeight: `${ANSWER_LINE_H}px`,
+                color: token.colorTextSecondary,
+                whiteSpace: 'pre-wrap'
+              }}
+            >
+              {hoveredTurn.answer || '（暂无回答）'}
+            </div>
+            <div
+              style={{
+                position: 'absolute',
+                left: 0,
+                right: 6,
+                bottom: 0,
+                height: 14,
+                background: `linear-gradient(to bottom, transparent, ${token.colorBgElevated})`,
+                pointerEvents: 'none'
+              }}
+            />
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+export default MessageLocator

@@ -1,0 +1,896 @@
+import React, { useMemo, useState, useCallback, useEffect, useRef } from 'react'
+import { App, Button, Tooltip, Select } from 'antd'
+import { RiArrowUpLine, RiAttachment2, RiCloseLine, RiStopFill } from '@remixicon/react'
+import {
+  OpenAIFilled,
+  DeepSeekFilled,
+  OllamaFilled,
+  MistralFilled,
+  AnthropicFilled,
+  GeminiFilled
+} from '@ant-design/icons'
+import { useEditor, EditorContent, type Editor } from '@tiptap/react'
+import { Extension } from '@tiptap/core'
+import Document from '@tiptap/extension-document'
+import Paragraph from '@tiptap/extension-paragraph'
+import Text from '@tiptap/extension-text'
+import HardBreak from '@tiptap/extension-hard-break'
+import History from '@tiptap/extension-history'
+import Placeholder from '@tiptap/extension-placeholder'
+import { baseKeymap } from '@tiptap/pm/commands'
+import { keymap } from '@tiptap/pm/keymap'
+import { TextSelection } from '@tiptap/pm/state'
+import type { EditorView } from '@tiptap/pm/view'
+import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
+import FileRef from './FileRefNode'
+import type { Attachment } from '@renderer/types/harness'
+import { getProviderColor } from '@renderer/utils/providerMeta'
+import ProviderMark from '@renderer/components/provider/provider-mark'
+import { Window } from '../../../../resource/types/window'
+
+// TipTap 默认不加载标准键位绑定（退格/删除/回车等），必须显式加载 prosemirror-commands 的 baseKeymap
+const BaseKeymap = Extension.create({
+  name: 'baseKeymap',
+  addProseMirrorPlugins() {
+    return [keymap(baseKeymap)]
+  }
+})
+
+const providerIconMap: Record<string, React.ComponentType<{ style?: React.CSSProperties }> | null> =
+  {
+    openai: OpenAIFilled,
+    deepseek: DeepSeekFilled,
+    ollama: OllamaFilled,
+    mistral: MistralFilled,
+    anthropic: AnthropicFilled,
+    'google-genai': GeminiFilled,
+    'google-vertexai': GeminiFilled
+  }
+
+// 自定义光标高度（px）：ProseMirror 的原生光标高度跟随行高（19px），
+// 与普通输入框（≈字号高度）不一致，故隐藏原生光标、绘制固定高度光标。
+// 与正文/占位符字号一致（14px），保证空内容时与提示文字同高同位。
+// 如需微调高度改这里即可。
+const CARET_HEIGHT = 14
+
+// 读取粘贴 File 内容为 dataUrl（图片附件走此路径）
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result as string)
+    reader.onerror = () => reject(reader.error)
+    reader.readAsDataURL(file)
+  })
+}
+
+interface HarnessInputProps {
+  inputValue: string
+  onInputChange: (value: string) => void
+  textareaRef: React.RefObject<HTMLDivElement | null>
+  /** 全局输入历史（↑/↓ 键切换浏览，handleSend 记录，localStorage 持久化） */
+  inputHistoryRef: { current: string[] }
+  attachments: Attachment[]
+  onAttachmentsChange: (attachments: Attachment[]) => void
+  isLoading: boolean
+  selectedProviderId: number | null
+  onSelectProvider: (value: number) => void
+  groupedProviderOptions: {
+    label: string
+    options: { value: number; label: string; providerType: string }[]
+  }[]
+  modelSupportsTools: boolean
+  modelSupportsVision: boolean
+  isDarkMode: boolean
+  colorBgLayout: string
+  colorBorder: string
+  colorText: string
+  colorBorderSecondary: string
+  onSend: () => void
+  onStop: () => void
+  onKeyDown: (e: React.KeyboardEvent<HTMLDivElement>) => void
+}
+
+const HarnessInput: React.FC<HarnessInputProps> = ({
+  inputValue,
+  onInputChange,
+  textareaRef,
+  inputHistoryRef,
+  attachments,
+  onAttachmentsChange,
+  isLoading,
+  selectedProviderId,
+  onSelectProvider,
+  groupedProviderOptions,
+  modelSupportsVision,
+  isDarkMode,
+  colorBgLayout,
+  colorBorder,
+  colorText,
+  colorBorderSecondary,
+  onSend,
+  onStop,
+  onKeyDown
+}) => {
+  const [isDragOver, setIsDragOver] = useState(false)
+  // 自定义光标元素（原生光标已隐藏，见 updateCaret）
+  const caretRef = useRef<HTMLSpanElement | null>(null)
+  const { message } = App.useApp()
+
+  const selectedProviderType = useMemo(() => {
+    if (selectedProviderId == null) return ''
+    for (const group of groupedProviderOptions) {
+      for (const opt of group.options) {
+        if (opt.value === selectedProviderId) return opt.providerType
+      }
+    }
+    return ''
+  }, [selectedProviderId, groupedProviderOptions])
+
+  const SelectedIcon = providerIconMap[selectedProviderType]
+  const selectedColor = getProviderColor(selectedProviderType, isDarkMode)
+
+  // 外部回调走 ref：editor 只创建一次，避免 props 变化导致重建
+  const onInputChangeRef = useRef(onInputChange)
+  onInputChangeRef.current = onInputChange
+  const onKeyDownRef = useRef(onKeyDown)
+  onKeyDownRef.current = onKeyDown
+
+  const editorRef = useRef<Editor | null>(null)
+
+  // ── 输入历史（↑/↓ 切换）：全局共享、localStorage 持久化，由 handleSend 记录到 inputHistoryRef ──
+  // historyIndexRef：-1 = 未浏览，0..n-1 = 指向历史条目；
+  // 触发条件：仅当输入内容为空（ed.isEmpty）时才接管 ↑/↓，用户输入内容后保留默认光标移动
+  const historyIndexRef = useRef(-1)
+  // 浏览切换后刷新自定义光标（updateCaret 定义在下方，经 ref 调用避免声明顺序问题）
+  const updateCaretRef = useRef<() => void>(() => {})
+
+  /** 与 onUpdate 一致的文本序列化：hardBreak→换行、fileRef→路径 */
+  const getEditorText = useCallback((ed: Editor): string => {
+    return ed
+      .getText({
+        blockSeparator: '\n',
+        textSerializers: {
+          hardBreak: () => '\n',
+          fileRef: ({ node }) => node.attrs.path ?? ''
+        }
+      })
+      .replace(/\n+$/, '')
+  }, [])
+
+  /** textarea 风格逐行移动光标。
+   * 输入框全部换行都是 hardBreak，整篇只是一个 textblock，ProseMirror 默认 ↑/↓
+   * 是 block 级移动（直接跳段落开头/结尾），这里按屏幕坐标逐行定位光标。 */
+  const moveCursorByLine = useCallback((view: EditorView, dir: -1 | 1): boolean => {
+    const { state } = view
+    if (!state.selection.empty) return false
+    const lineHeight = parseFloat(getComputedStyle(view.dom).lineHeight) || 19
+    const coords = view.coordsAtPos(state.selection.$head.pos)
+    const hit = view.posAtCoords({ left: coords.left, top: coords.top + dir * lineHeight })
+    if (!hit) return true // 首行 ↑ / 末行 ↓ 越界：接管但不动，避免跳到段落开头/结尾
+    // 目标与当前行高度差小于半行 → 仍是同一行（坐标被 clamp）→ 不移动
+    const hitCoords = view.coordsAtPos(hit.pos)
+    if (Math.abs(hitCoords.top - coords.top) < lineHeight * 0.5) return true
+    const bias = dir > 0 ? 1 : -1 // ↓ 到行首、↑ 到行尾（textarea 惯例）
+    view.dispatch(
+      state.tr.setSelection(TextSelection.near(state.doc.resolve(hit.pos), bias)).scrollIntoView()
+    )
+    return true
+  }, [])
+
+  /** ↑/↓ 切换输入历史（调用方已确保输入内容为空）；返回是否已接管按键 */
+  const navigateHistory = useCallback(
+    (dir: -1 | 1): boolean => {
+      const ed = editorRef.current
+      if (!ed) return false
+      const history = inputHistoryRef.current
+      if (history.length === 0) return false
+
+      let next = historyIndexRef.current
+      if (dir === -1) {
+        // ↑：空输入时逐条回退（最近一条 → 更早）；
+        // 最旧一条再按 ↑ 循环回空草稿（与 ↓ 越过最新一条回到空草稿对称）
+        if (next === -1) {
+          next = history.length - 1
+        } else {
+          next -= 1
+          if (next < 0) next = -1
+        }
+        if (next === historyIndexRef.current) return false
+      } else {
+        // ↓：回到更新的历史；越过最新一条后回到空草稿
+        if (next === -1) return false
+        next += 1
+        if (next >= history.length) next = -1
+      }
+
+      historyIndexRef.current = next
+      const text = next === -1 ? '' : history[next]
+      // 恢复为纯文本：按行重建（硬换行用 hardBreak），fileRef 以路径文本还原
+      const lines = text.replace(/\r\n?/g, '\n').split('\n')
+      const nodes: ProseMirrorNode[] = []
+      lines.forEach((line, i) => {
+        if (i > 0) nodes.push(ed.schema.nodes.hardBreak.create())
+        if (line) nodes.push(ed.schema.text(line))
+      })
+      // emitUpdate:false：避免 onUpdate 把它当成用户编辑而重置浏览态
+      ed.commands.setContent(
+        {
+          type: 'doc',
+          content: [{ type: 'paragraph', content: nodes.map((n) => n.toJSON()) }]
+        },
+        { emitUpdate: false }
+      )
+      ed.commands.focus('end')
+      // setContent 不触发 onUpdate，手动同步父组件 inputValue
+      onInputChangeRef.current(getEditorText(ed))
+      requestAnimationFrame(() => updateCaretRef.current())
+      return true
+    },
+    [inputHistoryRef, getEditorText]
+  )
+
+  // ── 粘贴附件：剪贴板中的文件/图片转为附件（上传按钮同一套 Attachment 结构）──
+  // 图片：读内容为 dataUrl（与 select-image-file 的图片分支一致）
+  // 非图片：取真实磁盘路径（与 select-image-file 的非图片分支一致：dataUrl 即路径），
+  //         取不到路径（如其他应用复制的无磁盘来源文件）时提示改用拖拽/上传
+  const handlePasteFiles = useCallback(
+    async (files: File[]) => {
+      const added: Attachment[] = []
+      for (const file of files) {
+        const isImage =
+          file.type.startsWith('image/') || /\.(png|jpe?g|gif|bmp|webp|svg|ico)$/i.test(file.name)
+        if (isImage) {
+          // 与上传按钮一致：非视觉模型禁止粘贴图片附件
+          if (!modelSupportsVision) {
+            message.warning('当前模型不支持视觉识别，无法粘贴图片附件')
+            continue
+          }
+          try {
+            const dataUrl = await readFileAsDataUrl(file)
+            added.push({ dataUrl, fileName: file.name || 'paste-image.png', isImage: true })
+          } catch {
+            message.error(`读取图片附件失败：${file.name}`)
+          }
+        } else {
+          const realPath = (window as unknown as Window).api.file.getPathForFile(file)
+          if (realPath) {
+            added.push({ dataUrl: realPath, fileName: file.name, isImage: false })
+          } else {
+            message.warning(`无法获取「${file.name}」的本地路径，请通过拖拽或上传按钮添加`)
+          }
+        }
+      }
+      if (added.length > 0) onAttachmentsChange([...attachments, ...added])
+    },
+    [attachments, onAttachmentsChange, modelSupportsVision, message]
+  )
+  // 同上：editor 只创建一次，handlePaste 经 ref 取最新实现
+  const handlePasteFilesRef = useRef(handlePasteFiles)
+  handlePasteFilesRef.current = handlePasteFiles
+
+  const editor = useEditor(
+    {
+      extensions: [
+        Document,
+        Paragraph,
+        Text,
+        HardBreak,
+        History,
+        Placeholder.configure({ placeholder: '给 Rita 发送消息' }),
+        BaseKeymap,
+        FileRef
+      ],
+      content: '',
+      editorProps: {
+        // Enter 发送（Shift+Enter 由 HardBreak 处理换行）；输入法组合期间不拦截
+        handleKeyDown: (view, event) => {
+          if (event.isComposing || event.keyCode === 229) return false
+          if (event.key === 'Enter' && !event.shiftKey) {
+            event.preventDefault()
+            onKeyDownRef.current(event as unknown as React.KeyboardEvent<HTMLDivElement>)
+            return true
+          }
+          // ↑/↓ 切换历史输入：空输入可进入浏览（加载最近一条），
+          // 浏览态（内容非空但非用户输入）可继续 ↑/↓ 逐条切换；
+          // 用户手动编辑后退出浏览态；内容非空且不在浏览态时，
+          // 改走 textarea 风格逐行移动光标（避免 PM 单 textblock 直接跳段落开头/结尾）
+          if (
+            !event.shiftKey &&
+            !event.altKey &&
+            (event.key === 'ArrowUp' || event.key === 'ArrowDown')
+          ) {
+            const ed = editorRef.current
+            if (!ed) return false
+            const dir = event.key === 'ArrowUp' ? -1 : 1
+            const browsing = historyIndexRef.current !== -1
+            const takeHistory = (dir === -1 && (ed.isEmpty || browsing)) || (dir === 1 && browsing)
+            if (takeHistory && navigateHistory(dir)) {
+              event.preventDefault()
+              return true
+            }
+            // 非浏览态（用户输入内容后）：逐行移动光标，不再触发任何历史切换
+            // 视图不可用（编辑器销毁竞态）时放弃接管，退回默认行为
+            if (ed.isDestroyed) return false
+            try {
+              if (moveCursorByLine(ed.view, dir)) {
+                event.preventDefault()
+                return true
+              }
+            } catch {
+              return false
+            }
+          }
+          // 光标紧贴文件引用 chip 时，退格/删除一次删掉（ProseMirror 默认是先选中再删）
+          if ((event.key === 'Backspace' || event.key === 'Delete') && view.state.selection.empty) {
+            const { $from } = view.state.selection
+            const node = event.key === 'Backspace' ? $from.nodeBefore : $from.nodeAfter
+            if (node && node.isAtom && node.type.name === 'fileRef') {
+              event.preventDefault()
+              const from = event.key === 'Backspace' ? $from.pos - node.nodeSize : $from.pos
+              view.dispatch(view.state.tr.deleteRange(from, from + node.nodeSize))
+              return true
+            }
+          }
+          // 左右方向键直接跨过 chip（ProseMirror 对 selectable atom 默认是先选中再跳，
+          // 需要按两下；这里在光标紧贴 chip 时一次跨过；Shift+方向键保留默认的选区扩展）
+          if (
+            !event.shiftKey &&
+            (event.key === 'ArrowRight' || event.key === 'ArrowLeft') &&
+            view.state.selection.empty
+          ) {
+            const { $from } = view.state.selection
+            const node = event.key === 'ArrowRight' ? $from.nodeAfter : $from.nodeBefore
+            if (node && node.isAtom && node.type.name === 'fileRef') {
+              event.preventDefault()
+              const delta = event.key === 'ArrowRight' ? node.nodeSize : -node.nodeSize
+              view.dispatch(
+                view.state.tr.setSelection(
+                  TextSelection.near(view.state.doc.resolve($from.pos + delta))
+                )
+              )
+              return true
+            }
+          }
+          return false
+        },
+        // 完全接管 drop：拖入的文件引用统一由容器 onDrop 插入 chip，
+        // 避免 ProseMirror 默认把 text/plain 当文本插入造成双重插入
+        handleDrop: () => true,
+        // 剪切板含文件/图片时优先转附件（Ctrl+V 粘贴上传），无文件才走纯文本粘贴
+        // 粘贴纯文本：按 \n 拆行插入（换行用 hardBreak，保持 DOM 扁平）
+        // 注意：不能使用 insertContent(数组)（会丢弃 hardBreak），必须走原生 tr.insert
+        handlePaste: (_view, event) => {
+          const pastedFiles = Array.from(event.clipboardData?.files ?? [])
+          if (pastedFiles.length > 0) {
+            event.preventDefault()
+            void handlePasteFilesRef.current(pastedFiles)
+            return true
+          }
+          const text = event.clipboardData?.getData('text/plain')
+          if (text === undefined) return false
+          event.preventDefault()
+          const ed = editorRef.current
+          if (!ed || !text) return true
+          const lines = text.replace(/\r\n?/g, '\n').split('\n')
+          const content: ProseMirrorNode[] = []
+          lines.forEach((line, i) => {
+            if (i > 0) content.push(ed.schema.nodes.hardBreak.create())
+            if (line) content.push(ed.schema.text(line))
+          })
+          let tr = ed.state.tr
+          if (!ed.state.selection.empty) tr = tr.deleteSelection()
+          tr = tr.insert(tr.selection.from, content)
+          // 用事件自带的 view（真实视图）分发，避免绕经可能在销毁竞态中的 editor.view 代理
+          _view.dispatch(tr)
+          return true
+        }
+      },
+      onUpdate: ({ editor }) => {
+        // textSerializers：hardBreak 输出换行、fileRef 输出路径，保证发送文本与所见一致
+        // 注意：v3 的 serializer 参数是 { node } 对象，不是节点本身
+        const text = getEditorText(editor)
+        // 浏览历史时手动编辑：退出浏览态（编辑后内容非空且不在浏览态，↑/↓ 不再触发）。
+        // 程序化切换走 setContent(emitUpdate:false)，不会进入这里
+        if (historyIndexRef.current !== -1) {
+          historyIndexRef.current = -1
+        }
+        onInputChangeRef.current(text)
+      }
+      // deps=[]：编辑器只创建一次。@tiptap/react v3 的 useEditor 每次渲染都会重新挂起
+      // 一个 1ms 延迟销毁定时器（scheduleDestroy），若两次渲染间隔超过 1ms（如切页时
+      // monaco chunk 求值等重活占用主线程），定时器会先于下一次渲染触发把编辑器销毁，
+      // 之后任何 view 访问都会抛「The editor view is not available」→ React 整树卸载崩溃。
+      // 显式传空依赖数组让该定时器只在真正卸载时挂起，从源头消除竞态。
+    },
+    []
+  )
+  editorRef.current = editor ?? null
+
+  /**
+   * 安全读取编辑器视图 DOM。
+   * TipTap v3.30 的 view 在视图未挂载/编辑器已销毁时返回一个仅含少量桩字段的 Proxy，
+   * 访问 dom 等属性会直接抛错（而非返回 null）；这里统一收敛成「拿不到就返回 null」。
+   */
+  const getViewDom = useCallback((ed: Editor): HTMLElement | null => {
+    if (ed.isDestroyed) return null
+    try {
+      return ed.view.dom as HTMLElement
+    } catch {
+      return null
+    }
+  }, [])
+
+  // ── 自定义光标：跟随 collapsed selection 的位置，固定 CARET_HEIGHT 高度 ──
+  // 原生 contentEditable 光标高度 = 行高（19px），普通输入框光标 ≈ 字号（14px），
+  // 用 caret-color: transparent 隐藏原生光标后，在此绘制固定高度光标。
+  const updateCaret = useCallback(() => {
+    const ed = editorRef.current
+    const caret = caretRef.current
+    if (!ed || !caret) return
+    const el = getViewDom(ed)
+    if (!el) return
+
+    const sel = window.getSelection()
+    const show =
+      document.activeElement === el &&
+      !!sel &&
+      sel.rangeCount > 0 &&
+      sel.isCollapsed &&
+      el.contains(sel.getRangeAt(0).commonAncestorContainer)
+    if (!show) {
+      caret.style.display = 'none'
+      return
+    }
+
+    const range = sel.getRangeAt(0)
+    const wrap = caret.parentElement
+    if (!wrap) return
+    const wrapRect = wrap.getBoundingClientRect()
+    const elRect = el.getBoundingClientRect()
+    const lineHeight = parseFloat(getComputedStyle(el).lineHeight) || 19
+    // 空内容时定位到内容区左上角（首行行首），与占位符文字（同字号、垂直居中于行）对齐
+    const caretAtContentStart = (): { top: number; left: number } => ({
+      top: elRect.top - wrapRect.top + (lineHeight - CARET_HEIGHT) / 2,
+      left: elRect.left - wrapRect.left
+    })
+
+    // 真正的"空文档"以 editor.isEmpty 为准
+    const isEmpty = ed.isEmpty
+
+    // 紧贴 inline atom（chip）后的 collapsed range，Chromium 会返回 0 高 rect，
+    // 此时用 selection 前一个可测量元素（chip）的右缘定位光标
+    const measurePrev = (r: Range): { right: number; top: number; height: number } | null => {
+      const node = r.startContainer
+      const offset = r.startOffset
+      if (node.nodeType !== Node.ELEMENT_NODE) return null
+      const children = node.childNodes
+      for (let i = offset - 1; i >= 0; i--) {
+        const c = children[i]
+        if (c.nodeType === Node.TEXT_NODE) {
+          if (c.textContent && c.textContent.length > 0) {
+            const tr = document.createRange()
+            tr.setStart(c, c.textContent.length)
+            tr.collapse(true)
+            const cr = tr.getBoundingClientRect()
+            if (cr.height > 0) return { right: cr.left, top: cr.top, height: cr.height }
+          }
+        } else if (c instanceof HTMLElement) {
+          const cr = c.getBoundingClientRect()
+          if (cr.width > 0 || cr.height > 0) {
+            return { right: cr.right, top: cr.top, height: cr.height }
+          }
+        }
+      }
+      return null
+    }
+
+    let top: number
+    let left: number
+    const rect = range.getBoundingClientRect()
+    if (isEmpty) {
+      const p = caretAtContentStart()
+      top = p.top
+      left = p.left
+    } else if (rect.height > 0) {
+      // 正常路径：用 selection rect，短光标垂直居中于行内
+      top = rect.top - wrapRect.top
+      if (rect.height > CARET_HEIGHT) {
+        top += (rect.height - CARET_HEIGHT) / 2
+      }
+      left = rect.left - wrapRect.left
+    } else {
+      // rect 失效（紧贴 atom）：用前一个可测量元素（chip）的右缘
+      const prev = measurePrev(range)
+      if (prev) {
+        top = prev.top - wrapRect.top + (prev.height - CARET_HEIGHT) / 2
+        left = prev.right - wrapRect.left
+      } else {
+        const p = caretAtContentStart()
+        top = p.top
+        left = p.left
+      }
+    }
+    caret.style.display = 'block'
+    caret.style.top = `${Math.round(top)}px`
+    caret.style.left = `${Math.round(left)}px`
+  }, [getViewDom])
+  updateCaretRef.current = updateCaret
+
+  /** 把纯文本恢复到编辑器（行→hardBreak，与 navigateHistory 的恢复方式同构） */
+  const restorePlainText = useCallback((ed: Editor, text: string): void => {
+    const lines = text.replace(/\r\n?/g, '\n').split('\n')
+    const nodes: ProseMirrorNode[] = []
+    lines.forEach((line, i) => {
+      if (i > 0) nodes.push(ed.schema.nodes.hardBreak.create())
+      if (line) nodes.push(ed.schema.text(line))
+    })
+    ed.commands.setContent(
+      {
+        type: 'doc',
+        content: [{ type: 'paragraph', content: nodes.map((n) => n.toJSON()) }]
+      },
+      { emitUpdate: false }
+    )
+  }, [])
+
+  // 父组件 inputValue 变化时同步编辑器（修复：此前只做「变空清空编辑器」单方向，
+  // 恢复会话缓存的非空草稿时编辑器仍显示上一话题内容/空白——隐藏草稿不可见且可被盲发）：
+  // - 变空（发送后/切话题清空）：清空编辑器；
+  // - 变非空且与编辑器内容不同（恢复缓存草稿）：恢复编辑器内容
+  useEffect(() => {
+    const ed = editorRef.current
+    if (!ed || ed.isDestroyed) return
+    if (inputValue === '') {
+      if (!ed.isEmpty) {
+        ed.commands.clearContent()
+        ed.commands.focus()
+        // 外部清空输入（发送/新对话/切话题）时重置历史浏览位置
+        historyIndexRef.current = -1
+      }
+    } else if (getEditorText(ed) !== inputValue) {
+      restorePlainText(ed, inputValue)
+      historyIndexRef.current = -1
+    }
+    updateCaret()
+  }, [inputValue, updateCaret, getEditorText, restorePlainText])
+
+  // 光标位置随选区/窗口尺寸变化而更新
+  useEffect(() => {
+    const onSelectionChange = (): void => updateCaret()
+    const onResize = (): void => updateCaret()
+    document.addEventListener('selectionchange', onSelectionChange)
+    window.addEventListener('resize', onResize)
+    updateCaret()
+    return () => {
+      document.removeEventListener('selectionchange', onSelectionChange)
+      window.removeEventListener('resize', onResize)
+    }
+  }, [updateCaret])
+
+  // 编辑器内部滚动时更新光标位置
+  useEffect(() => {
+    const ed = editor
+    if (!ed) return
+    const dom = getViewDom(ed)
+    if (!dom) return
+    dom.addEventListener('scroll', updateCaret)
+    return () => dom.removeEventListener('scroll', updateCaret)
+  }, [editor, updateCaret, getViewDom])
+
+  // ── 在光标位置插入文件引用 chip ──
+  const insertFileRef = useCallback(
+    (path: string) => {
+      const ed = editorRef.current
+      if (!ed) return
+      ed.commands.focus()
+      const cleanPath = path.replace(/\/+$/, '')
+      const label = cleanPath.split('/').filter(Boolean).pop() || path
+      const pos = ed.state.selection.from
+      ed.commands.insertContent({ type: 'fileRef', attrs: { path, label } })
+      // 显式把光标放到 chip 之后（inline atom 的 nodeSize 为 1）
+      ed.commands.setTextSelection(pos + 1)
+      // 刷新自定义光标：chip 是 React NodeView 异步渲染的，插入后立即读 rect
+      // 会拿到占位宽度（0）导致光标位置偏前，必须等渲染完成（双 rAF）再刷新
+      updateCaret()
+      requestAnimationFrame(() => {
+        updateCaret()
+        requestAnimationFrame(updateCaret)
+      })
+    },
+    [updateCaret]
+  )
+
+  // ── 拖拽处理 ──
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'copy'
+    setIsDragOver(true)
+  }, [])
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragOver(false)
+  }, [])
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault()
+      setIsDragOver(false)
+      const path = e.dataTransfer.getData('text/plain')
+      if (!path) return
+      insertFileRef(path)
+    },
+    [insertFileRef]
+  )
+
+  // ── 点击输入区空白处聚焦并移光标到末尾（与普通输入框一致）──
+  const handleContainerClick = useCallback(
+    (e: React.MouseEvent) => {
+      const ed = editorRef.current
+      if (!ed) return
+      const dom = getViewDom(ed)
+      if (!dom) return
+      if (dom.contains(e.target as Node)) return
+      ed.commands.focus('end')
+    },
+    [getViewDom]
+  )
+
+  const hasContent = inputValue.trim().length > 0
+
+  // chip 主题色经 CSS 变量注入 FileRef NodeView
+  const chipCssVars = useMemo(
+    () =>
+      ({
+        '--file-chip-bg': isDarkMode ? '#1a2744' : '#eff6ff',
+        '--file-chip-color': isDarkMode ? '#93c5fd' : '#1d4ed8',
+        '--file-chip-border': isDarkMode ? '#1e3a5f' : '#bfdbfe'
+      }) as React.CSSProperties,
+    [isDarkMode]
+  )
+
+  return (
+    <div
+      className="rounded-2xl input-scrollbar"
+      style={{
+        background: colorBgLayout,
+        border: `1px solid ${isDragOver ? '#4d6bfe' : colorBorder}`,
+        transition: 'border-color 0.2s',
+        ...chipCssVars
+      }}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
+      {/* overflow hidden：光标滚出编辑区可视范围时被裁切 */}
+      <div
+        className="p-4 relative overflow-hidden"
+        onClick={handleContainerClick}
+        ref={textareaRef}
+      >
+        <EditorContent editor={editor} className="harness-input-editor" />
+        {/* 自定义光标：固定高度、随光标位置移动、闪烁动画 */}
+        <span
+          ref={caretRef}
+          className="harness-input-caret"
+          style={{
+            position: 'absolute',
+            width: 2,
+            height: CARET_HEIGHT,
+            borderRadius: 1,
+            background: colorText,
+            pointerEvents: 'none',
+            display: 'none',
+            zIndex: 1
+          }}
+        />
+        <style>{`
+          .harness-input-editor .ProseMirror {
+            outline: none;
+            white-space: pre-wrap;
+            word-break: break-word;
+            min-height: 24px;
+            max-height: 200px;
+            overflow-y: auto;
+            font-size: 14px;
+            line-height: 19px;
+            caret-color: transparent;
+          }
+          .harness-input-editor .ProseMirror p { margin: 0; }
+          .harness-input-editor .ProseMirror p.is-editor-empty:first-child::before {
+            content: attr(data-placeholder);
+            color: #bfbfbf;
+            pointer-events: none;
+            float: left;
+            height: 0;
+          }
+          .harness-input-editor .ProseMirror::-webkit-scrollbar { width: 4px; }
+          .harness-input-editor .ProseMirror::-webkit-scrollbar-track { background: transparent; }
+          .harness-input-editor .ProseMirror::-webkit-scrollbar-thumb {
+            background: rgba(128, 128, 128, 0.4);
+            border-radius: 2px;
+          }
+          .file-ref-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 2px;
+            font-size: 13px;
+            line-height: 1;
+            padding: 2px 4px;
+            border-radius: 3px;
+            vertical-align: -1px;
+            margin: 0 1px;
+            white-space: nowrap;
+            cursor: default;
+            user-select: none;
+            background: var(--file-chip-bg);
+            color: var(--file-chip-color);
+            border: 1px solid var(--file-chip-border);
+          }
+          .file-ref-chip .file-ref-icon {
+            display: inline-flex;
+            align-items: center;
+            flex-shrink: 0;
+            line-height: 0;
+          }
+          .file-ref-chip .file-ref-label {
+            max-width: 160px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+          }
+          .file-ref-chip .file-ref-close {
+            display: inline-flex;
+            align-items: center;
+            cursor: pointer;
+            margin-left: 1px;
+            line-height: 0;
+            opacity: 0.7;
+          }
+          .file-ref-chip.ProseMirror-selectednode {
+            box-shadow: 0 0 0 1px var(--file-chip-border);
+          }
+          .harness-input-caret {
+            animation: harness-input-caret-blink 1.06s steps(1) infinite;
+          }
+          @keyframes harness-input-caret-blink {
+            0%, 45% { opacity: 1; }
+            50%, 95% { opacity: 0; }
+          }
+        `}</style>
+      </div>
+      {attachments.length > 0 && (
+        <div className="flex gap-2 px-4 pb-3 flex-wrap">
+          {attachments.map((att, idx) =>
+            att.isImage ? (
+              <div key={idx} className="relative group">
+                <img
+                  src={att.dataUrl}
+                  alt={`upload-${idx}`}
+                  className="w-16 h-16 object-cover rounded-lg"
+                  style={{ border: `1px solid ${colorBorderSecondary}` }}
+                />
+                <button
+                  onClick={() => onAttachmentsChange(attachments.filter((_, i) => i !== idx))}
+                  className="absolute -top-2 -right-2 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                >
+                  <RiCloseLine size={12} />
+                </button>
+              </div>
+            ) : (
+              <div
+                key={idx}
+                className="relative group flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg"
+                style={{
+                  background: isDarkMode ? '#1a2744' : '#eff6ff',
+                  color: isDarkMode ? '#93c5fd' : '#1d4ed8',
+                  border: isDarkMode ? '1px solid #1e3a5f' : '1px solid #bfdbfe'
+                }}
+              >
+                <span className="max-w-[120px] truncate">{att.fileName}</span>
+                <button
+                  onClick={() => onAttachmentsChange(attachments.filter((_, i) => i !== idx))}
+                  className="ml-1 hover:text-red-500"
+                  style={{ color: isDarkMode ? '#60a5fa' : '#60a5fa' }}
+                >
+                  <RiCloseLine size={14} />
+                </button>
+              </div>
+            )
+          )}
+        </div>
+      )}
+      <div className="flex items-center justify-between px-4 pb-4">
+        <div className="flex min-w-0 items-center gap-2">
+          <Tooltip title={'上传附件'}>
+            <Button
+              type="dashed"
+              shape="circle"
+              icon={<RiAttachment2 size={16} />}
+              onClick={async () => {
+                const result = await (window as unknown as Window).api.file.selectImageFile(
+                  modelSupportsVision
+                )
+                if (result) {
+                  onAttachmentsChange([
+                    ...attachments,
+                    {
+                      dataUrl: result.dataUrl,
+                      fileName: result.fileName,
+                      isImage: result.isImage
+                    }
+                  ])
+                }
+              }}
+            />
+          </Tooltip>
+          <Select
+            size="small"
+            value={selectedProviderId}
+            onChange={(value) => onSelectProvider(value)}
+            style={{ minWidth: 140, maxWidth: '100%', padding: '5px', borderRadius: '10px' }}
+            placeholder="选择模型"
+            showSearch={{
+              filterOption: (input, option) =>
+                (option?.label as string)?.toLowerCase().includes(input.toLowerCase()) ?? false
+            }}
+            popupMatchSelectWidth={false}
+            popupStyle={{ minWidth: 260 }}
+            labelRender={(props) => (
+              <span className="flex min-w-0 items-center gap-1.5 overflow-hidden">
+                {SelectedIcon ? (
+                  <SelectedIcon style={{ fontSize: 14, color: selectedColor }} />
+                ) : selectedProviderType ? (
+                  <ProviderMark
+                    providerType={selectedProviderType}
+                    size={14}
+                    color={selectedColor}
+                  />
+                ) : null}
+                <span className="truncate">{props.label}</span>
+              </span>
+            )}
+            optionRender={(option) => {
+              const providerType = (option.data as { providerType?: string })?.providerType ?? ''
+              const Icon = providerIconMap[providerType]
+              const color = getProviderColor(providerType, isDarkMode) ?? '#888888'
+              return (
+                <div className="flex items-center gap-2">
+                  {Icon ? (
+                    <Icon style={{ fontSize: 18, color }} />
+                  ) : (
+                    <ProviderMark providerType={providerType} size={18} color={color} />
+                  )}
+                  <span>{option.label as string}</span>
+                </div>
+              )
+            }}
+            options={groupedProviderOptions}
+          />
+        </div>
+        <div className="flex items-center gap-2">
+          {isLoading ? (
+            <Tooltip title="停止生成">
+              <Button
+                type="primary"
+                danger
+                shape="circle"
+                icon={<RiStopFill size={16} />}
+                onClick={onStop}
+              />
+            </Tooltip>
+          ) : (
+            <Button
+              type="primary"
+              shape="circle"
+              icon={<RiArrowUpLine size={16} />}
+              onClick={onSend}
+              disabled={!hasContent}
+            />
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+export default HarnessInput

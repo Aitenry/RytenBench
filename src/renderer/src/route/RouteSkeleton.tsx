@@ -2,7 +2,7 @@ import React from 'react'
 import { theme } from 'antd'
 import { useTheme } from '@renderer/contexts/useTheme'
 
-export type RouteSkeletonVariant = 'chat' | 'planner' | 'music'
+export type RouteSkeletonVariant = 'harness' | 'planner' | 'music'
 
 const MONO_FONT = "'JetBrains Mono', 'Cascadia Code', Consolas, 'Courier New', monospace"
 
@@ -74,7 +74,7 @@ const RouteSkeleton: React.FC<{ variant: RouteSkeletonVariant }> = ({ variant })
   )
 
   let content: React.ReactNode
-  if (variant === 'chat') {
+  if (variant === 'harness') {
     content = (
       <div className="flex h-full w-full min-h-0" style={{ background: colorBgContainer }}>
         {/* 话题侧栏 */}

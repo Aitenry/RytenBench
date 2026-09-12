@@ -343,7 +343,8 @@ export async function appendDocs(
     type: e.type,
     description: e.description || '',
     aliases: e.aliases ? JSON.parse(e.aliases) : [],
-    confidence: e.confidence,
+    // confidence 库列为可空（DEFAULT 1），null 按默认置信度处理
+    confidence: e.confidence ?? 1,
     source_doc_ids: e.source_note_ids ? JSON.parse(e.source_note_ids) : []
   }))
 

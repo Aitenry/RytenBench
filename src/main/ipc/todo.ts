@@ -1,6 +1,6 @@
 import { ipcMain } from 'electron'
 import logger from 'electron-log'
-import { deleteNodePosition } from '../database/mapper/node_position'
+import { deleteNodePosition } from '../database/mapper/node-position'
 import {
   getTodoItemById,
   getTodoItemByTitle,
@@ -20,7 +20,7 @@ import {
   deleteAllDependenciesForTask,
   getAllDependencies,
   getAllTasksWithDependencies
-} from '../database/mapper/todo_dependencies'
+} from '../database/mapper/todo-dependencies'
 
 /** 待办事项 + 任务依赖关系 IPC */
 export function registerTodoIpc(): void {
@@ -106,8 +106,8 @@ export function registerTodoIpc(): void {
     'todo-items-update',
     async (_event, id: number, updates: Partial<Omit<TodoItemRow, 'id'>>) => {
       try {
-        // 状态枚举校验（修复：此前可写任意整数,前端只认 0/1/2）
-        if (updates.status !== undefined && ![0, 1, 2].includes(updates.status)) {
+        // 状态枚举校验（修复：此前可写任意整数,前端只认 0/1/2；null 同样拒绝）
+        if (updates.status !== undefined && ![0, 1, 2].includes(updates.status ?? -1)) {
           throw new Error('status 必须为 0（未开始）/ 1（进行中）/ 2（已完成）')
         }
         return await updateTodoItem(id, updates)

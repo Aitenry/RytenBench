@@ -21,7 +21,6 @@ const getStatusOptions = (currentStatus: number): { value: number; label: string
 
 export interface TodoFormValues {
   title: string
-  description: string
   due_date: string | null
   priority: number
   status: number
@@ -58,7 +57,6 @@ const TodoEditModal: React.FC<TodoEditModalProps> = ({
     if (editModalOpen && currentTodo) {
       editForm.setFieldsValue({
         title: currentTodo.title,
-        description: currentTodo.description,
         due_date: currentTodo.due_date ? dayjs(currentTodo.due_date) : null,
         priority: currentTodo.priority,
         status: currentTodo.status,
@@ -72,7 +70,6 @@ const TodoEditModal: React.FC<TodoEditModalProps> = ({
       const values = await editForm.validateFields()
       await onEditSave({
         title: values.title,
-        description: values.description,
         due_date: values.due_date
           ? dayjs(values.due_date as unknown as string).format('YYYY-MM-DD')
           : null,
@@ -90,14 +87,13 @@ const TodoEditModal: React.FC<TodoEditModalProps> = ({
       const values = await addForm.validateFields()
       await onAddSave({
         title: values.title,
-        description: values.description,
         due_date: values.due_date
           ? dayjs(values.due_date as unknown as string).format('YYYY-MM-DD')
           : null,
         priority: values.priority,
         category: values.category || null
       })
-      // 修复：成功后表单不重置,下次新建预填上次内容（旧 description/priority/category 一并写入新待办）
+      // 修复：成功后表单不重置,下次新建预填上次内容（旧 priority/category 一并写入新待办）
       addForm.resetFields()
     } catch {
       // Validation failed
@@ -134,7 +130,6 @@ const TodoEditModal: React.FC<TodoEditModalProps> = ({
             currentTodo
               ? {
                   title: currentTodo.title,
-                  description: currentTodo.description,
                   due_date: currentTodo.due_date ? dayjs(currentTodo.due_date) : null,
                   priority: currentTodo.priority,
                   status: currentTodo.status,
@@ -151,10 +146,6 @@ const TodoEditModal: React.FC<TodoEditModalProps> = ({
                 rules={[{ required: true, message: '请输入标题' }]}
               >
                 <Input placeholder="请输入待办事项标题" />
-              </Form.Item>
-
-              <Form.Item name="description" label="描述">
-                <Input.TextArea rows={4} placeholder="请输入待办事项描述" />
               </Form.Item>
 
               <Form.Item name="due_date" label="截止日期">
@@ -178,7 +169,7 @@ const TodoEditModal: React.FC<TodoEditModalProps> = ({
 
                 <Form.Item name="status" label="状态" className="mb-0">
                   <Select placeholder="请选择状态">
-                    {getStatusOptions(currentTodo.status).map((option) => (
+                    {getStatusOptions(currentTodo.status ?? 0).map((option) => (
                       <Select.Option key={option.value} value={option.value}>
                         {option.label}
                       </Select.Option>
@@ -208,10 +199,6 @@ const TodoEditModal: React.FC<TodoEditModalProps> = ({
         <Form form={addForm} layout="vertical">
           <Form.Item name="title" label="标题" rules={[{ required: true, message: '请输入标题' }]}>
             <Input placeholder="请输入待办事项标题" />
-          </Form.Item>
-
-          <Form.Item name="description" label="描述">
-            <Input.TextArea rows={4} placeholder="请输入待办事项描述" />
           </Form.Item>
 
           <Form.Item name="due_date" label="截止日期">

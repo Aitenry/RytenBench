@@ -72,7 +72,7 @@ const AppContent: React.FC = () => {
   // #/planner 等非菜单路径进入的视图时,侧栏仍高亮 home/旧项）
   useEffect(() => {
     const key = location.pathname.replace(/^\/+/, '').split('/')[0]
-    if (key && ['home', 'chat', 'planner', 'music'].includes(key)) {
+    if (key && ['home', 'harness', 'planner', 'music'].includes(key)) {
       setCurrent(key)
     }
   }, [location.pathname])

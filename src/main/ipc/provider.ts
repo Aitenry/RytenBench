@@ -6,7 +6,7 @@ import { safeSend } from '../safe-send'
 import { settingsStore } from '../context'
 import { getProviderService } from '../provider/service'
 import { type FetchedModelInfo, findModelProfile, geminiModelId } from '../provider/model-tags'
-import { ChatSettings } from '../types/settings'
+import { HarnessSettings } from '../types/settings'
 import {
   clearProviderCache,
   clearAgentCache,
@@ -14,7 +14,7 @@ import {
   setCachedEnabledProviders,
   getCachedDefaultProvider,
   setCachedDefaultProvider
-} from '../chat/preload-cache'
+} from '../harness/preload-cache'
 import {
   getAllProviderList,
   getProviderById,
@@ -38,7 +38,7 @@ import {
   deleteAgent,
   AgentConfigInput
 } from '../database/mapper/agent'
-import { getAllWorkspaces } from '../database/mapper/chat'
+import { getAllWorkspaces } from '../database/mapper/harness'
 
 /** 通知所有窗口供应商列表已变更 */
 function broadcastProvidersChanged(): void {
@@ -280,7 +280,7 @@ export function registerProviderIpc(): void {
       // 自动删除子Agent记忆目录
       if (agent) {
         const settings = settingsStore.store
-        const memoryPath = (settings.chat as ChatSettings)?.memoryPath
+        const memoryPath = (settings.harness as HarnessSettings)?.memoryPath
         if (memoryPath) {
           try {
             const agentDir = join(memoryPath, `workspace-${workspaceId}`, 'sub-agents', agent.name)

@@ -5,7 +5,7 @@ import { Window } from '../../../../resource/types/window'
 import { useMessage } from '@renderer/hooks/useMessage'
 import type { DocListItem, TodoItem as TodoItemRow, WikiRow } from '@renderer/types/models'
 import WikiEditModal from '@renderer/components/wiki/WikiEditModal'
-import TodoEditModal from '@renderer/components/todo/TodoEditModal'
+import TodoEditModal, { type TodoFormValues } from '@renderer/components/todo/TodoEditModal'
 import DocTreePanel from './DocTreePanel'
 import BreadcrumbBar, { type BreadcrumbItem } from './BreadcrumbBar'
 import DocEditorPane, { type DocMeta } from './DocEditorPane'
@@ -35,6 +35,10 @@ const HomeView: React.FC = () => {
 
   /* ── 选中状态 ── */
   const [selection, setSelection] = useState<Selection>(null)
+
+  /* ── 待办：树行「⋯」菜单驱动的编辑/状态流转，以及页面数据刷新令牌 ── */
+  const [editTodo, setEditTodo] = useState<TodoItemRow | null>(null)
+  const [todoRefreshKey, setTodoRefreshKey] = useState(0)
 
   /* ── 右侧面板联动 ── */
   const [docEditor, setDocEditor] = useState<Editor | null>(null)
@@ -258,7 +262,6 @@ const HomeView: React.FC = () => {
   const handleNewTodoSave = useCallback(
     async (values: {
       title: string
-      description: string
       due_date: string | null
       priority: number
       category: string | null
@@ -268,6 +271,8 @@ const HomeView: React.FC = () => {
         viewMessage(messageKey, 'loading', '正在添加待办事项...')
         const todoId = await api.todoItems.add({
           ...values,
+          /* 正文内容与文档同源，创建时留空，进页面后在内联编辑器里写 */
+          content: '',
           status: 0,
           due_date: values.due_date ?? null
         })
@@ -281,6 +286,86 @@ const HomeView: React.FC = () => {
       }
     },
     [api, viewMessage, loadAll]
+  )
+
+  /* ── 待办操作（都从树行「⋯」菜单发起；待办页内只留内容编辑） ── */
+  const handleSetTodoStatus = useCallback(
+    async (todo: TodoItemRow, status: number): Promise<void> => {
+      const messageKey = 'home-todo-status'
+      try {
+        viewMessage(messageKey, 'loading', '正在更新状态...')
+        await api.todoItems.update(todo.id, { status })
+        viewMessage(
+          messageKey,
+          'success',
+          status === 2 ? '已完成' : status === 1 ? '已标记为进行中' : '已重新激活',
+          2
+        )
+        await loadAll()
+        // 让正在打开的待办页重新读库（正文编辑不受影响：页面会先冲刷未保存内容）
+        setTodoRefreshKey((key) => key + 1)
+      } catch (error) {
+        console.error('Failed to update todo status:', error)
+        viewMessage(messageKey, 'error', '更新状态失败')
+      }
+    },
+    [api, viewMessage, loadAll]
+  )
+
+  const handleEditTodoSave = useCallback(
+    async (values: TodoFormValues): Promise<void> => {
+      if (!editTodo) return
+      const messageKey = 'home-edit-todo'
+      try {
+        viewMessage(messageKey, 'loading', '正在保存待办...')
+        await api.todoItems.update(editTodo.id, {
+          title: values.title,
+          due_date: values.due_date,
+          priority: values.priority,
+          status: values.status,
+          category: values.category
+        })
+        viewMessage(messageKey, 'success', '待办已更新', 2)
+        setEditTodo(null)
+        await loadAll()
+        setTodoRefreshKey((key) => key + 1)
+      } catch (error) {
+        console.error('Failed to update todo:', error)
+        viewMessage(messageKey, 'error', '保存待办失败')
+      }
+    },
+    [api, editTodo, viewMessage, loadAll]
+  )
+
+  /* 待办页里改标题：就地更新列表（树行 + 面包屑），不再为一次标题输入跑全量刷新 */
+  const handleTodoTitleSaved = useCallback((todoId: number, title: string): void => {
+    setTodos((prev) => prev.map((t) => (t.id === todoId ? { ...t, title } : t)))
+  }, [])
+
+  const handleDeleteTodo = useCallback(
+    (todo: TodoItemRow): void => {
+      modal.confirm({
+        title: '确定要删除这条待办吗？',
+        content: '删除后无法恢复。',
+        okText: '删除',
+        okButtonProps: { danger: true },
+        cancelText: '取消',
+        onOk: async () => {
+          const messageKey = 'home-delete-todo'
+          try {
+            viewMessage(messageKey, 'loading', '正在删除...')
+            await api.todoItems.delete(todo.id)
+            viewMessage(messageKey, 'success', '已删除', 2)
+            if (selection?.kind === 'todo' && selection.todoId === todo.id) setSelection(null)
+            await loadAll()
+          } catch (error) {
+            console.error('Failed to delete todo:', error)
+            viewMessage(messageKey, 'error', '删除失败')
+          }
+        }
+      })
+    },
+    [api, viewMessage, loadAll, modal, selection]
   )
 
   /* ── 新建 / 编辑知识库 ── */
@@ -422,15 +507,6 @@ const HomeView: React.FC = () => {
     loadAll().then()
   }, [loadAll])
 
-  /* ── 待办变更 ── */
-  const handleTodoChanged = useCallback(
-    (todo: TodoItemRow | null): void => {
-      loadAll().then()
-      if (!todo) setSelection(null)
-    },
-    [loadAll]
-  )
-
   /* ── 面包屑（仅展示路径，点击首页可回到仪表盘） ── */
   const breadcrumbItems = useMemo((): BreadcrumbItem[] => {
     const items: BreadcrumbItem[] = [{ label: '首页', onClick: () => setSelection(null) }]
@@ -566,7 +642,14 @@ const HomeView: React.FC = () => {
       )
     }
     return (
-      <TodoPane key={selection.todoId} todoId={selection.todoId} onChanged={handleTodoChanged} />
+      <TodoPane
+        key={selection.todoId}
+        todoId={selection.todoId}
+        reloadToken={todoRefreshKey}
+        onSetStatus={handleSetTodoStatus}
+        onOpenProperties={setEditTodo}
+        onTitleSaved={handleTodoTitleSaved}
+      />
     )
   }
 
@@ -598,6 +681,9 @@ const HomeView: React.FC = () => {
         onOpenGraph={(wiki) => setSelection({ kind: 'wiki-graph', wikiId: wiki.id })}
         onOpenDocGraph={(wikiId, docId) => setSelection({ kind: 'doc-graph', wikiId, docId })}
         onDeleteDoc={handleDeleteDoc}
+        onEditTodo={setEditTodo}
+        onDeleteTodo={handleDeleteTodo}
+        onSetTodoStatus={handleSetTodoStatus}
         onArchiveDoc={setArchiveDoc}
         onCreateDocInDirectory={handleCreateDocInDirectory}
         onImportDocToDirectory={handleImportDocToDirectory}
@@ -606,7 +692,7 @@ const HomeView: React.FC = () => {
       />
       <div className="home-col-resizer" onMouseDown={handleDragStart('tree')} />
 
-      {/* 中间主区：整体一张卡片（面包屑 + 内容），参考 Chat 主区结构。
+      {/* 中间主区：整体一张卡片（面包屑 + 内容），参考 Harness 主区结构。
           首页仪表盘与知识图谱视图无卡片外壳（无边框、无圆角），与左右侧栏融为一体；
           文档/待办等具体内容才是独立卡片（有边框、有圆角） */}
       <div
@@ -658,10 +744,10 @@ const HomeView: React.FC = () => {
       />
 
       <TodoEditModal
-        editModalOpen={false}
-        currentTodo={null}
-        onEditClose={() => {}}
-        onEditSave={async () => {}}
+        editModalOpen={editTodo !== null}
+        currentTodo={editTodo}
+        onEditClose={() => setEditTodo(null)}
+        onEditSave={handleEditTodoSave}
         addModalOpen={newTodoOpen}
         onAddClose={() => setNewTodoOpen(false)}
         onAddSave={handleNewTodoSave}

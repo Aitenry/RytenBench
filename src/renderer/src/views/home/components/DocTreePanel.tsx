@@ -13,6 +13,9 @@ import {
   RiTodoLine,
   RiPlayCircleLine,
   RiCheckboxBlankCircleLine,
+  RiPlayLine,
+  RiCheckLine,
+  RiRefreshLine,
   RiMore2Line,
   RiDeleteBinLine,
   RiEditLine,
@@ -48,6 +51,13 @@ const TODO_STATUS_META: Record<number, { label: string; color: string }> = {
   2: { label: '已完成', color: '#52c41a' }
 }
 
+/* ──────────── 缩进网格 ──────────── */
+
+/** 每级缩进（px） */
+const INDENT_STEP = 16
+/** 行首箭头列宽 18 + 行内间距 6：有箭头（或箭头占位）的行，图标都落在「行左内边距 + 24」这一列 */
+const LEAD_SLOT = 24
+
 /* ──────────── Props ──────────── */
 
 export interface DocTreePanelProps {
@@ -72,6 +82,12 @@ export interface DocTreePanelProps {
   onOpenDocGraph: (wikiId: number, docId: number) => void
   /** 删除文档（⋯ 菜单） */
   onDeleteDoc: (doc: DocListItem) => void
+  /** 编辑待办元信息（待办行 ⋯ 菜单 → 弹窗） */
+  onEditTodo: (todo: TodoItemRow) => void
+  /** 删除待办（待办行 ⋯ 菜单） */
+  onDeleteTodo: (todo: TodoItemRow) => void
+  /** 待办状态流转（待办行 ⋯ 菜单：开始 / 完成 / 重新激活） */
+  onSetTodoStatus: (todo: TodoItemRow, status: number) => void
   /** 归档文档（⋯ 菜单） */
   onArchiveDoc: (doc: DocListItem) => void
   /** 在目录中新建文档（⋯ 菜单） */
@@ -109,6 +125,9 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
   onOpenGraph,
   onOpenDocGraph,
   onDeleteDoc,
+  onEditTodo,
+  onDeleteTodo,
+  onSetTodoStatus,
   onArchiveDoc,
   onCreateDocInDirectory,
   onImportDocToDirectory,
@@ -287,7 +306,8 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
           parent_id: dirTarget.parent?.id ?? null,
           name: dirName,
           sort_order: 0,
-          level: dirTarget.parent ? dirTarget.parent.level + 1 : 0
+          // level 库列为可空（DEFAULT 0），null 按 0 处理
+          level: dirTarget.parent ? (dirTarget.parent.level ?? 0) + 1 : 0
         })
         viewMessage(messageKey, 'success', '目录创建成功！', 2)
         await loadWikiTree(dirTarget.wikiId, true)
@@ -383,10 +403,11 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
     alignItems: 'center',
     gap: isDoc ? 6.5 : 6,
     height: 28,
-    padding: `0 7px 0 ${8 + indent * 16}px`,
+    padding: `0 7px 0 ${8 + indent * INDENT_STEP}px`,
     borderRadius: 6,
     cursor: 'pointer',
-    fontSize: 13,
+    /* 面板统一字号：分区标题 / 分组标题 / 树行同为 12.5，层级靠字重与颜色拉开 */
+    fontSize: 12.5,
     whiteSpace: 'nowrap',
     overflow: 'hidden',
     color: selected ? token.colorPrimary : token.colorText,
@@ -443,6 +464,99 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
 
   /** 占位（文档行无箭头，保持图标对齐） */
   const arrowPlaceholder = <span style={{ width: 18, height: 18, flexShrink: 0 }} aria-hidden />
+
+  /** 待办行：待办分区里没有箭头列，用内边距把状态图标直接落在次级图标列
+   *  （8 + 16 缩进 + 24 箭头列 = 48px）。此前靠 18px 空占位 span 撑位，
+   *  等于多出一个死节点，行首还会和分组标签的左边界错开 */
+  const todoRowStyle = (selected: boolean): React.CSSProperties => ({
+    ...rowStyle(selected, 1),
+    padding: `0 7px 0 ${8 + INDENT_STEP + LEAD_SLOT}px`
+  })
+
+  /** 该待办是否正是当前选中项（树内高亮 + 左侧强调条，与文档行一致） */
+  const isTodoSelected = (todoId: number): boolean =>
+    selection?.kind === 'todo' && selection.todoId === todoId
+
+  /* ── 分组标题 ──
+   *  横向网格与分区标题共用：左侧 14px 起放 6px 状态圆点（圆心 17px = 折叠箭头列中心），
+   *  圆点后接状态图标 + 组名（图标列 32px / 文字列 50px，与分区标题的图标、文字同列）；
+   *  右侧发丝线把整组横向划开，计数以浅底小胶囊靠右收口 */
+  const renderGroupHeader = (
+    color: string,
+    icon: React.ReactNode,
+    label: string,
+    count: number
+  ): React.ReactNode => (
+    <div
+      style={{
+        padding: '0 8px 0 14px',
+        userSelect: 'none',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 12,
+        height: 22
+      }}
+    >
+      <span
+        style={{ width: 6, height: 6, borderRadius: '50%', flexShrink: 0, background: color }}
+      />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12.5 }}>
+        {icon}
+        <span style={{ letterSpacing: '0.04em', color: token.colorTextTertiary }}>{label}</span>
+      </div>
+      <span style={{ flex: 1, height: 1, background: token.colorBorderSecondary }} />
+      <span
+        style={{
+          fontSize: 10,
+          lineHeight: '14px',
+          padding: '0 5px',
+          borderRadius: 4,
+          color: token.colorTextTertiary,
+          background: token.colorFillTertiary
+        }}
+      >
+        {count}
+      </span>
+    </div>
+  )
+
+  /* ── 待办行尾「⋯」：待办的全部操作都收在这里，
+   *   页面里只保留内容编辑，不再摆一排按钮 ── */
+  const todoMenu = (todo: TodoItemRow): React.ReactNode => {
+    const status = todo.status ?? 0
+    /** 状态动作一步一格，同一时刻只出现一个：
+     *  待办 —开始任务→ 进行中 —标记完成→ 已完成 —重新激活→ 待办 */
+    const step =
+      status === 0
+        ? { key: 'start', label: '开始任务', icon: <RiPlayLine size={14} />, next: 1 }
+        : status === 1
+          ? { key: 'done', label: '标记完成', icon: <RiCheckLine size={14} />, next: 2 }
+          : { key: 'reactivate', label: '重新激活', icon: <RiRefreshLine size={14} />, next: 0 }
+
+    const items: MenuProps['items'] = [
+      {
+        key: step.key,
+        label: step.label,
+        icon: step.icon,
+        onClick: () => onSetTodoStatus(todo, step.next)
+      },
+      { type: 'divider' },
+      {
+        key: 'edit',
+        label: '编辑',
+        icon: <RiEditLine size={14} />,
+        onClick: () => onEditTodo(todo)
+      },
+      {
+        key: 'delete',
+        label: '删除',
+        icon: <RiDeleteBinLine size={14} />,
+        danger: true,
+        onClick: () => onDeleteTodo(todo)
+      }
+    ]
+    return rowMenu(items)
+  }
 
   /* ── 行尾「⋯」操作菜单 ── */
   const rowMenu = (items: MenuProps['items']): React.ReactNode => (
@@ -568,7 +682,10 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
       dirsByParent.set(d.parent_id, list)
     })
     const renderDirs = (parentId: number | null, depth: number): React.ReactNode[] => {
-      const dirs = (dirsByParent.get(parentId) ?? []).sort((a, b) => a.sort_order - b.sort_order)
+      // sort_order 库列为可空（DEFAULT 0），null 按默认值参与排序
+      const dirs = (dirsByParent.get(parentId) ?? []).sort(
+        (a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)
+      )
       return dirs.flatMap((dir) => {
         const dirOpen = expandedDirs.has(dir.id)
         const noteIds = tree.notesByDir.get(dir.id) ?? []
@@ -761,7 +878,12 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
       <>
         {matchedDocs.length > 0 && (
           <>
-            <div style={searchGroupStyle(token)}>文档 · {matchedDocs.length}</div>
+            {renderGroupHeader(
+              token.colorTextQuaternary,
+              <RiFileTextLine size={13} />,
+              '文档',
+              matchedDocs.length
+            )}
             {matchedDocs.map((d) => {
               const isSel = selection?.kind === 'doc' && selection.docId === d.id
               return (
@@ -813,7 +935,12 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
         )}
         {matchedTodos.length > 0 && (
           <>
-            <div style={searchGroupStyle(token)}>待办 · {matchedTodos.length}</div>
+            {renderGroupHeader(
+              token.colorTextQuaternary,
+              <RiTodoLine size={13} />,
+              '待办',
+              matchedTodos.length
+            )}
             {matchedTodos.map((t) => (
               <div
                 key={`todo-${t.id}`}
@@ -823,20 +950,26 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
                 {arrowPlaceholder}
                 <RiTodoLine
                   size={13}
-                  style={{ color: TODO_STATUS_META[t.status]?.color, flexShrink: 0 }}
+                  style={{ color: TODO_STATUS_META[t.status ?? 0]?.color, flexShrink: 0 }}
                 />
                 <span
                   style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}
                 >
                   {t.title}
                 </span>
+                {todoMenu(t)}
               </div>
             ))}
           </>
         )}
         {matchedWikis.length > 0 && (
           <>
-            <div style={searchGroupStyle(token)}>知识库 · {matchedWikis.length}</div>
+            {renderGroupHeader(
+              token.colorTextQuaternary,
+              <RiBook2Line size={13} />,
+              '知识库',
+              matchedWikis.length
+            )}
             {matchedWikis.map((w) => {
               // 修复：搜索视图不渲染知识库子树,点行/箭头只有状态翻转与网络请求而无任何
               // 可见反馈——改为退出搜索并展开该知识库（正常树中可见）
@@ -888,7 +1021,7 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
         flexDirection: 'column',
         minHeight: 0,
         background: token.colorBgContainer,
-        /* 贴边面板：左上/左下直角，右缘保留圆角与中间主区呼应（参考 Chat 侧边栏） */
+        /* 贴边面板：左上/左下直角，右缘保留圆角与中间主区呼应（参考 Harness 侧边栏） */
         borderRadius: '12px 0 0 12px',
         overflow: 'hidden'
       }}
@@ -1040,50 +1173,65 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
                       key: 'pending',
                       label: '待办',
                       items: todoGroups.pending,
-                      icon: RiCheckboxBlankCircleLine
+                      icon: RiCheckboxBlankCircleLine,
+                      color: TODO_STATUS_META[0].color
                     },
                     {
                       key: 'doing',
                       label: '进行中',
                       items: todoGroups.doing,
-                      icon: RiPlayCircleLine
+                      icon: RiPlayCircleLine,
+                      color: TODO_STATUS_META[1].color
                     },
                     {
                       key: 'done',
                       label: '已完成',
                       items: todoGroups.done,
-                      icon: RiCheckboxCircleLine
+                      icon: RiCheckboxCircleLine,
+                      color: TODO_STATUS_META[2].color
                     }
                   ] as const
                 ).map((group) =>
                   group.items.length === 0 ? null : (
                     <div key={group.key}>
-                      <div style={searchGroupStyle(token)}>
-                        {group.label} · {group.items.length}
-                      </div>
+                      {renderGroupHeader(
+                        group.color,
+                        <group.icon size={13} />,
+                        group.label,
+                        group.items.length
+                      )}
                       {group.items.map((t) => (
                         <div
                           key={`todo-${t.id}`}
-                          style={rowStyle(false, 1)}
+                          style={todoRowStyle(isTodoSelected(t.id))}
                           onClick={() => onSelect({ kind: 'todo', todoId: t.id })}
                           onMouseEnter={(e) => {
-                            e.currentTarget.style.background = token.colorFillQuaternary
+                            if (!isTodoSelected(t.id)) {
+                              e.currentTarget.style.background = token.colorFillQuaternary
+                            }
                           }}
                           onMouseLeave={(e) => {
-                            e.currentTarget.style.background = 'transparent'
+                            if (!isTodoSelected(t.id)) {
+                              e.currentTarget.style.background = 'transparent'
+                            }
                           }}
                         >
-                          {arrowPlaceholder}
+                          {accentBar(isTodoSelected(t.id))}
                           <group.icon
                             size={13}
-                            style={{ color: TODO_STATUS_META[t.status]?.color, flexShrink: 0 }}
+                            style={{ color: TODO_STATUS_META[t.status ?? 0]?.color, flexShrink: 0 }}
                           />
                           <span
                             style={{
                               flex: 1,
                               minWidth: 0,
                               overflow: 'hidden',
-                              textOverflow: 'ellipsis'
+                              textOverflow: 'ellipsis',
+                              /* 已完成置灰：状态已由分组说明，行内不再加删除线，只降一档亮度 */
+                              color:
+                                t.status === 2 && !isTodoSelected(t.id)
+                                  ? token.colorTextTertiary
+                                  : undefined
                             }}
                           >
                             {t.title}
@@ -1103,6 +1251,7 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
                               {String(t.due_date).slice(5)}
                             </span>
                           ) : null}
+                          {todoMenu(t)}
                         </div>
                       ))}
                     </div>
@@ -1218,14 +1367,5 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
     </aside>
   )
 }
-
-const searchGroupStyle = (
-  token: ReturnType<typeof theme.useToken>['token']
-): React.CSSProperties => ({
-  fontSize: 11,
-  color: token.colorTextTertiary,
-  padding: '4px 8px 2px 16px',
-  userSelect: 'none'
-})
 
 export default React.memo(DocTreePanel)

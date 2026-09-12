@@ -4,7 +4,7 @@ import { MessageContext } from '@renderer/contexts/MessageContext'
 import { AudioProvider } from '@renderer/contexts/AudioContext'
 import { BuildProgressProvider } from '@renderer/providers/BuildProgressProvider'
 import { NotificationProvider } from '@renderer/contexts/NotificationContext'
-import { ChatProvider } from '@renderer/contexts/ChatContext'
+import { HarnessProvider } from '@renderer/contexts/HarnessContext'
 import { composeProviders } from '@renderer/utils/composeProviders'
 import AppContent from '@renderer/components/system/AppContent'
 import AppErrorBoundary from '@renderer/components/system/AppErrorBoundary'
@@ -20,7 +20,7 @@ const AppProviders = composeProviders(
   ],
   [AudioProvider],
   [NotificationProvider],
-  [ChatProvider],
+  [HarnessProvider],
   [BuildProgressProvider]
 )
 

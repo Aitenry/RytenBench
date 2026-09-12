@@ -1,27 +1,14 @@
-import { getDatabaseInstance } from '../instance'
+import { and, asc, eq, sql } from 'drizzle-orm'
+import type { PgUpdateSetSource } from 'drizzle-orm/pg-core'
 import logger from 'electron-log'
+import { withOrm } from '../orm'
+import { planner_dependencies, planner_tasks } from '../schema'
 
-export interface PlannerTaskRow {
-  id: number
-  parent_id: number | null
-  title: string
-  type: string // 'project' | 'phase' | 'task'
-  progress: number // 0-100
-  work_hours: number
-  priority: number // P0-P7, 0=highest
-  start_date: string | null
-  end_date: string | null
-  sort_order: number
-  created_at: string
-  updated_at: string
-}
+/** 计划任务行（字段由 schema 推导） */
+export type PlannerTaskRow = typeof planner_tasks.$inferSelect
 
-export interface PlannerDependencyRow {
-  id: number
-  task_id: number
-  depends_on_task_id: number
-  created_at: string
-}
+/** 计划任务依赖行 */
+export type PlannerDependencyRow = typeof planner_dependencies.$inferSelect
 
 /** 树节点，含子节点和依赖信息 */
 export interface PlannerTreeNode extends PlannerTaskRow {
@@ -30,45 +17,46 @@ export interface PlannerTreeNode extends PlannerTaskRow {
   depth: number
 }
 
+/** 可由更新语句写入的列（与原实现的 allowedFields 一致） */
+const UPDATABLE_FIELDS = [
+  'parent_id',
+  'title',
+  'type',
+  'progress',
+  'work_hours',
+  'priority',
+  'start_date',
+  'end_date',
+  'sort_order'
+] as const
+
 // --- 查询所有任务 ---
 async function getAllTasks(): Promise<PlannerTaskRow[]> {
-  try {
-    const db = (await getDatabaseInstance()).getDatabase()
-    const sql = 'SELECT * FROM planner_tasks ORDER BY sort_order ASC'
-    const result = await db.query<PlannerTaskRow>(sql)
-    logger.info(`planner: loaded ${result.rows.length} tasks`)
-    return result.rows
-  } catch (error) {
-    logger.error('Failed to get all planner tasks:', error)
-    throw error
-  }
+  return withOrm('getAllTasks', async (db) => {
+    const rows = await db.select().from(planner_tasks).orderBy(asc(planner_tasks.sort_order))
+    logger.info(`planner: loaded ${rows.length} tasks`)
+    return rows
+  })
 }
 
 // --- 根据 ID 查询 ---
 async function getTaskById(id: number): Promise<PlannerTaskRow | null> {
-  try {
-    const db = (await getDatabaseInstance()).getDatabase()
-    const sql = 'SELECT * FROM planner_tasks WHERE id = $1'
-    const result = await db.query<PlannerTaskRow>(sql, [id])
-    return result.rows[0] ?? null
-  } catch (error) {
-    logger.error('Failed to get planner task by id:', error)
-    throw error
-  }
+  return withOrm('getTaskById', async (db) => {
+    const rows = await db.select().from(planner_tasks).where(eq(planner_tasks.id, id)).limit(1)
+    return rows[0] ?? null
+  })
 }
 
 // --- 获取树形结构（含依赖） ---
 async function getTaskTree(): Promise<PlannerTreeNode[]> {
-  try {
-    const db = (await getDatabaseInstance()).getDatabase()
+  return withOrm('getTaskTree', async (db) => {
+    const tasks = await db
+      .select()
+      .from(planner_tasks)
+      // PostgreSQL 的 ASC 默认即 NULLS LAST，与原实现的 `start_date ASC NULLS LAST` 一致
+      .orderBy(asc(planner_tasks.start_date), asc(planner_tasks.sort_order))
 
-    const tasksResult = await db.query<PlannerTaskRow>(
-      'SELECT * FROM planner_tasks ORDER BY start_date ASC NULLS LAST, sort_order ASC'
-    )
-    const tasks = tasksResult.rows
-
-    const depsResult = await db.query<PlannerDependencyRow>('SELECT * FROM planner_dependencies')
-    const allDeps = depsResult.rows
+    const allDeps = await db.select().from(planner_dependencies)
 
     // 构建 taskId -> dependencies[] 映射
     const depMap = new Map<number, number[]>()
@@ -120,7 +108,8 @@ async function getTaskTree(): Promise<PlannerTreeNode[]> {
         const aDate = typeof a.start_date === 'string' ? a.start_date : ''
         const bDate = typeof b.start_date === 'string' ? b.start_date : ''
         if (aDate !== bDate) return aDate.localeCompare(bDate)
-        return a.sort_order - b.sort_order
+        // sort_order 库列为可空（DEFAULT 0），null 按默认值参与排序
+        return (a.sort_order ?? 0) - (b.sort_order ?? 0)
       })
       for (const node of nodes) {
         sortChildren(node.children)
@@ -131,49 +120,31 @@ async function getTaskTree(): Promise<PlannerTreeNode[]> {
 
     logger.info(`planner: built tree with ${tasks.length} nodes, ${roots.length} roots`)
     return roots
-  } catch (error) {
-    logger.error('Failed to get planner task tree:', error)
-    throw error
-  }
+  })
 }
 
 // --- 添加任务 ---
 async function addTask(
   task: Omit<PlannerTaskRow, 'id' | 'created_at' | 'updated_at'>
 ): Promise<number> {
-  try {
-    const db = (await getDatabaseInstance()).getDatabase()
-    const fields = [
-      'parent_id',
-      'title',
-      'type',
-      'progress',
-      'work_hours',
-      'priority',
-      'start_date',
-      'end_date',
-      'sort_order'
-    ]
-    const placeholders = fields.map((_, i) => `$${i + 1}`)
-    const sql = `INSERT INTO planner_tasks (${fields.join(', ')}) VALUES (${placeholders.join(', ')}) RETURNING id`
-    const values = [
-      task.parent_id,
-      task.title,
-      task.type,
-      task.progress,
-      task.work_hours,
-      task.priority,
-      task.start_date,
-      task.end_date,
-      task.sort_order
-    ]
-    const result = await db.query<{ id: number }>(sql, values)
-    logger.info(`planner: inserted task id=${result.rows[0].id}`)
-    return result.rows[0].id
-  } catch (error) {
-    logger.error('Failed to add planner task:', error)
-    throw error
-  }
+  return withOrm('addTask', async (db) => {
+    const rows = await db
+      .insert(planner_tasks)
+      .values({
+        parent_id: task.parent_id,
+        title: task.title,
+        type: task.type,
+        progress: task.progress,
+        work_hours: task.work_hours,
+        priority: task.priority,
+        start_date: task.start_date,
+        end_date: task.end_date,
+        sort_order: task.sort_order
+      })
+      .returning({ id: planner_tasks.id })
+    logger.info(`planner: inserted task id=${rows[0].id}`)
+    return rows[0].id
+  })
 }
 
 // --- 更新任务 ---
@@ -181,130 +152,97 @@ async function updateTask(
   id: number,
   updates: Partial<Omit<PlannerTaskRow, 'id' | 'created_at'>>
 ): Promise<boolean> {
-  try {
-    const db = (await getDatabaseInstance()).getDatabase()
-    const allowedFields = [
-      'parent_id',
-      'title',
-      'type',
-      'progress',
-      'work_hours',
-      'priority',
-      'start_date',
-      'end_date',
-      'sort_order'
-    ]
+  return withOrm('updateTask', async (db) => {
+    const patch: PgUpdateSetSource<typeof planner_tasks> = {}
 
-    const updateFields: string[] = []
-    const updateValues: unknown[] = []
-    let paramIdx = 1
-
-    for (const field of allowedFields) {
+    for (const field of UPDATABLE_FIELDS) {
       const value = (updates as Record<string, unknown>)[field]
       // !== undefined（修复：此前 `field in updates` 会把显式 undefined 键拼进 SET）
       if (value !== undefined) {
-        updateFields.push(`${field} = $${paramIdx++}`)
-        updateValues.push(value)
+        patch[field] = value as never
       }
     }
 
-    updateFields.push(`updated_at = NOW()`)
-
-    if (updateFields.length === 1) {
+    if (Object.keys(patch).length === 0) {
       logger.warn('planner: no fields to update')
       return false
     }
 
-    const sql = `UPDATE planner_tasks SET ${updateFields.join(', ')} WHERE id = $${paramIdx++}`
-    updateValues.push(id)
+    patch.updated_at = sql`now()`
+    const updated = await db
+      .update(planner_tasks)
+      .set(patch)
+      .where(eq(planner_tasks.id, id))
+      .returning({ id: planner_tasks.id })
 
-    const result = await db.query(sql, updateValues)
-    const changes = result.affectedRows ?? 0
-    logger.info(`planner: updated task id=${id}, ${changes} row(s) affected`)
-    return changes > 0
-  } catch (error) {
-    logger.error('Failed to update planner task:', error)
-    throw error
-  }
+    logger.info(`planner: updated task id=${id}, ${updated.length} row(s) affected`)
+    return updated.length > 0
+  })
 }
 
 // --- 删除任务（级联删除子任务） ---
 async function deleteTask(id: number): Promise<boolean> {
-  try {
-    const db = (await getDatabaseInstance()).getDatabase()
-    const sql = 'DELETE FROM planner_tasks WHERE id = $1'
-    const result = await db.query(sql, [id])
-    const changes = result.affectedRows ?? 0
-    logger.info(`planner: deleted task id=${id}, ${changes} row(s)`)
-    return changes > 0
-  } catch (error) {
-    logger.error('Failed to delete planner task:', error)
-    throw error
-  }
+  return withOrm('deleteTask', async (db) => {
+    const deleted = await db
+      .delete(planner_tasks)
+      .where(eq(planner_tasks.id, id))
+      .returning({ id: planner_tasks.id })
+    logger.info(`planner: deleted task id=${id}, ${deleted.length} row(s)`)
+    return deleted.length > 0
+  })
 }
 
 // --- 批量调整排序 ---
 async function reorderTasks(
   orderList: { id: number; sort_order: number; parent_id: number | null }[]
 ): Promise<boolean> {
-  try {
-    const db = (await getDatabaseInstance()).getDatabase()
+  return withOrm('reorderTasks', async (db) => {
     // 单事务批量更新（修复：逐条 UPDATE 无事务,中断即半重排）
     await db.transaction(async (tx) => {
       for (const item of orderList) {
-        await tx.query('UPDATE planner_tasks SET sort_order = $1, parent_id = $2 WHERE id = $3', [
-          item.sort_order,
-          item.parent_id,
-          item.id
-        ])
+        await tx
+          .update(planner_tasks)
+          .set({ sort_order: item.sort_order, parent_id: item.parent_id })
+          .where(eq(planner_tasks.id, item.id))
       }
     })
     return true
-  } catch (error) {
-    logger.error('Failed to reorder planner tasks:', error)
-    throw error
-  }
+  })
 }
 
 // --- 添加依赖 ---
 async function addDependency(taskId: number, dependsOnTaskId: number): Promise<number> {
-  try {
-    const db = (await getDatabaseInstance()).getDatabase()
-    const sql =
-      'INSERT INTO planner_dependencies (task_id, depends_on_task_id) VALUES ($1, $2) RETURNING id'
-    const result = await db.query<{ id: number }>(sql, [taskId, dependsOnTaskId])
+  return withOrm('addDependency', async (db) => {
+    const rows = await db
+      .insert(planner_dependencies)
+      .values({ task_id: taskId, depends_on_task_id: dependsOnTaskId })
+      .returning({ id: planner_dependencies.id })
     logger.info(`planner: added dep ${taskId} -> ${dependsOnTaskId}`)
-    return result.rows[0].id
-  } catch (error) {
-    logger.error('Failed to add planner dependency:', error)
-    throw error
-  }
+    return rows[0].id
+  })
 }
 
 // --- 删除依赖 ---
 async function deleteDependency(taskId: number, dependsOnTaskId: number): Promise<boolean> {
-  try {
-    const db = (await getDatabaseInstance()).getDatabase()
-    const sql = 'DELETE FROM planner_dependencies WHERE task_id = $1 AND depends_on_task_id = $2'
-    const result = await db.query(sql, [taskId, dependsOnTaskId])
-    return (result.affectedRows ?? 0) > 0
-  } catch (error) {
-    logger.error('Failed to delete planner dependency:', error)
-    throw error
-  }
+  return withOrm('deleteDependency', async (db) => {
+    const deleted = await db
+      .delete(planner_dependencies)
+      .where(
+        and(
+          eq(planner_dependencies.task_id, taskId),
+          eq(planner_dependencies.depends_on_task_id, dependsOnTaskId)
+        )
+      )
+      .returning({ id: planner_dependencies.id })
+    return deleted.length > 0
+  })
 }
 
 // --- 获取所有依赖 ---
 async function getAllDependencies(): Promise<PlannerDependencyRow[]> {
-  try {
-    const db = (await getDatabaseInstance()).getDatabase()
-    const sql = 'SELECT * FROM planner_dependencies ORDER BY task_id'
-    const result = await db.query<PlannerDependencyRow>(sql)
-    return result.rows
-  } catch (error) {
-    logger.error('Failed to get all planner dependencies:', error)
-    throw error
-  }
+  return withOrm('getAllDependencies', async (db) => {
+    return db.select().from(planner_dependencies).orderBy(asc(planner_dependencies.task_id))
+  })
 }
 
 export {

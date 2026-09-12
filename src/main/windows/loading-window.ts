@@ -3,16 +3,17 @@ import { join } from 'path'
 import { is } from '@electron-toolkit/utils'
 import icon from '../../../resources/logo.png?asset'
 import logger from 'electron-log'
-import { createDatabase, listSqlFiles, type Database } from '../database/loading'
+import { createDatabase, type Database } from '../database/loading'
+import { runMigrations } from '../database/orm'
 import { migrateWorkspaceData } from '../database/workspace-migration'
 import { setDatabaseInstance, setInitializationPromise } from '../database/instance'
 import { initKeystore } from '../crypto/provider-key'
 import { settingsStore } from '../context'
 import { safeSend } from '../safe-send'
-import { GraphSettings, ChatSettings, TraySettings } from '../types/settings'
+import { GraphSettings, HarnessSettings, TraySettings } from '../types/settings'
 import { getIp } from '../address'
 import { startWeatherAutoRefresh } from '../weather'
-import { preloadChatData } from '../chat/preload-cache'
+import { preloadHarnessData } from '../harness/preload-cache'
 import { getLoadingWindow, markInitComplete, setLoadingWindow } from './window-manager'
 
 /** 加载窗口初始化进度（步骤名 + 细粒度百分比，逐步推进） */
@@ -32,11 +33,29 @@ function sendInitProgress(
   })
 }
 
+/**
+ * 旧版本把 AI 助手这段配置存在 `chat` 键下，模块改名后统一用 `harness`。
+ * 一次性搬迁：新键已存在就只删旧键，绝不会出现两份配置并存后互相覆盖。
+ *
+ * 注意：下面这个 'chat' 是**历史键名**，不能跟着模块一起改名——
+ * 改了就再也读不到老用户已经存好的技能目录 / 工作区路径 / 记忆目录。
+ */
+function migrateHarnessSettingsKey(): void {
+  const legacy = settingsStore.get('chat') as HarnessSettings | undefined
+  if (legacy === undefined) return
+  if (settingsStore.get('harness') === undefined) {
+    settingsStore.set('harness', legacy)
+  }
+  settingsStore.delete('chat')
+  logger.info('[Init] Migrated legacy "chat" settings key to "harness"')
+}
+
 async function loadConfig(): Promise<void> {
+  migrateHarnessSettingsKey()
   const ipConfig = settingsStore.get('ip')
   const lockPermission = settingsStore.get('lock')
   const graphConfig = settingsStore.get('graph')
-  const chatConfig = settingsStore.get('chat')
+  const harnessConfig = settingsStore.get('harness')
   const configPromises: Promise<void>[] = []
 
   if (!ipConfig) {
@@ -71,10 +90,10 @@ async function loadConfig(): Promise<void> {
       })
     )
   }
-  if (!chatConfig) {
+  if (!harnessConfig) {
     configPromises.push(
       Promise.resolve().then(() => {
-        settingsStore.set('chat', {} as ChatSettings)
+        settingsStore.set('harness', {} as HarnessSettings)
       })
     )
   }
@@ -94,9 +113,8 @@ async function loadConfig(): Promise<void> {
 }
 
 async function performInitializationTasks(): Promise<void> {
-  // 扁平化初始化步骤：配置 / 密钥库 / 连接数据库 / 逐表建表（每表一步）/ 工作区迁移。
-  // 进度条按步骤均匀推进（每步约 3~4%），细粒度、逐步增长，避免整任务一步跳到 25%。
-  const sqlFiles = await listSqlFiles()
+  // 扁平化初始化步骤：配置 / 密钥库 / 连接数据库 / 执行数据库迁移 / 工作区迁移。
+  // 进度条按步骤均匀推进，逐步增长，避免整任务一步跳到 25%。
   let database: Database | null = null
   const steps: { name: string; execute: () => Promise<void> | void }[] = [
     { name: '加载配置', execute: async () => await loadConfig() },
@@ -112,29 +130,28 @@ async function performInitializationTasks(): Promise<void> {
         database = await createDatabase()
       }
     },
-    // 每个表一个步骤（按文件名排序，保证外键依赖顺序）
-    ...sqlFiles.map((file) => ({
-      name: `建表 ${file.tableName}`,
+    {
+      name: '执行数据库迁移',
       execute: async () => {
-        await database!.executeTable(file)
+        await runMigrations(database!.getDatabase())
       }
-    })),
+    },
     {
       name: '初始化工作区',
       execute: async () => {
         const result = await migrateWorkspaceData(database!.getDatabase(), () => {
-          const chat = settingsStore.get('chat') as ChatSettings | undefined
-          return chat?.activeWorkspaceId
+          const harness = settingsStore.get('harness') as HarnessSettings | undefined
+          return harness?.activeWorkspaceId
         })
         // 把迁移确定的活动工作区写回设置（id 与路径一起同步）
-        const chat = settingsStore.get('chat') as ChatSettings | undefined
-        const next: ChatSettings = { ...(chat ?? ({} as ChatSettings)) }
+        const harness = settingsStore.get('harness') as HarnessSettings | undefined
+        const next: HarnessSettings = { ...(harness ?? ({} as HarnessSettings)) }
         if (result.activeWorkspaceId == null) {
           // 没有任何工作区：清掉残留配置，回到「未配置」，由对话页引导用户选择目录
           if (next.activeWorkspaceId != null || next.workspacePath) {
             delete next.activeWorkspaceId
             next.workspacePath = ''
-            settingsStore.set('chat', next)
+            settingsStore.set('harness', next)
           }
         } else if (
           next.activeWorkspaceId !== result.activeWorkspaceId ||
@@ -142,7 +159,7 @@ async function performInitializationTasks(): Promise<void> {
         ) {
           next.activeWorkspaceId = result.activeWorkspaceId
           next.workspacePath = result.activeWorkspacePath ?? ''
-          settingsStore.set('chat', next)
+          settingsStore.set('harness', next)
         }
         logger.info(
           `[Init] Workspace migration done, active workspace=${result.activeWorkspaceId ?? 'none'}`
@@ -203,8 +220,8 @@ export async function createLoadingWindow(): Promise<void> {
   const initPromise = performInitializationTasks()
     .then(async () => {
       logger.info('All initialization tasks completed.')
-      // 预加载 ChatProvider 所需数据，不阻塞交接
-      preloadChatData()
+      // 预加载 HarnessProvider 所需数据，不阻塞交接
+      preloadHarnessData()
       // 通知加载页显示完成状态（纯 UI 提示；不依赖其回发驱动交接——
       // 加载页定时器可能被后台节流延迟数秒，交接由主进程直接控制）
       const win = getLoadingWindow()

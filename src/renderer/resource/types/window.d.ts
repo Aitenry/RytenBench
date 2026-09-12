@@ -1,16 +1,21 @@
 import { TodoItemRow } from '../../../main/database/mapper/todo'
 import { DocRow, DocListItem, DocWithContent } from '../../../main/database/mapper/document'
 import { WikiRow, WikiDirectoryRow } from '../../../main/database/mapper/wiki'
-import { ChatTopicRow, ChatDialogueRow, WorkspaceRow } from '../../../main/database/mapper/chat'
+import {
+  HarnessTopicRow,
+  HarnessDialogueRow,
+  HarnessDialogueUsageRow,
+  WorkspaceRow
+} from '../../../main/database/mapper/harness'
 import { GraphEntity, GraphBuildJob, GraphData } from '../../../main/database/mapper/graph'
 import { Lock } from '@renderer/types/settings'
 import { LlmProviderInput, LlmProviderConfig } from '../../../main/database/mapper/provider'
 import { AgentConfigRow, AgentConfigInput } from '../../../main/database/mapper/agent'
-import { TodoItem } from '../../../main/chat/runtime/todo'
-import { GoalView } from '../../../main/chat/runtime/goal'
-import { JobSnapshot } from '../../../main/chat/runtime/jobs'
-import { SubagentSessionRow } from '../../../main/chat/runtime/subagent-sessions'
-import { PendingQuestionView } from '../../../main/chat/runtime/ask'
+import { TodoItem } from '../../../main/harness/runtime/todo'
+import { GoalView } from '../../../main/harness/runtime/goal'
+import { JobSnapshot } from '../../../main/harness/runtime/jobs'
+import { SubagentSessionRow } from '../../../main/harness/runtime/subagent-sessions'
+import { PendingQuestionView } from '../../../main/harness/runtime/ask'
 import { SystemSettings } from '@renderer/types/settings'
 
 export interface PaginatedResult<T> {
@@ -55,7 +60,7 @@ export interface StructuredMessage {
   retrying?: { attempt: number; retries: number }
   /** 流式执行失败（部分输出后图执行失败；IPC 层据此跳过落库） */
   streamError?: { message: string }
-  /** 主进程注入的话题 ID（每次 chat-stream-chunk 均携带） */
+  /** 主进程注入的话题 ID（每次 harness-stream-chunk 均携带） */
   __topicId?: number
   /** 目标自动续跑轮的起始标记（流首 chunk） */
   goalRound?: { round: number; objective: string }
@@ -196,7 +201,7 @@ export interface Window {
       getLockScreenCode: () => Promise<Lock>
       setLockScreenView: (open: boolean) => void
     }
-    chat: {
+    harness: {
       sendMessage: (
         message: string,
         options?: {
@@ -206,12 +211,22 @@ export interface Window {
         }
       ) => Promise<StructuredMessage[]>
       onStreamChunk: (callback: (chunk: StructuredMessage) => void) => () => void
-      onStreamDone: (callback: (result: { topicId: number }) => void) => () => void
+      onStreamDone: (
+        callback: (result: {
+          topicId: number
+          /** 本轮用户消息的库内行 id（流式前落库） */
+          userDialogueId?: number
+          /** 本轮助手消息的库内行 id（流式后落库） */
+          assistantDialogueId?: number
+        }) => void
+      ) => () => void
       onStreamError: (callback: (error: { error: string; topicId?: number }) => void) => () => void
       onDocChanged: (
         callback: (data: { docId: number; action: 'updated' | 'deleted' }) => void
       ) => () => void
-      onChatTodosUpdated: (
+      /** 读取当前话题的计划清单（卡片重新挂载时主动拉，不能只靠广播） */
+      getHarnessTodos: (topicId: number) => Promise<TodoItem[]>
+      onHarnessTodosUpdated: (
         callback: (data: { topicId: number; todos: TodoItem[] }) => void
       ) => () => void
       // 目标系统（goal）
@@ -403,13 +418,13 @@ export interface Window {
       createWorkspace: (name: string, path: string) => Promise<number>
       updateWorkspace: (id: number, updates: { name: string }) => Promise<boolean>
       deleteWorkspace: (id: number) => Promise<boolean>
-      getAllTopics: (workspaceId: number) => Promise<ChatTopicRow[]>
+      getAllTopics: (workspaceId: number) => Promise<HarnessTopicRow[]>
       getAllTopicsPaginated: (
         workspaceId: number,
         page: number,
         pageSize: number
-      ) => Promise<PaginatedResult<ChatTopicRow>>
-      getTopicById: (id: number) => Promise<ChatTopicRow[]>
+      ) => Promise<PaginatedResult<HarnessTopicRow>>
+      getTopicById: (id: number) => Promise<HarnessTopicRow[]>
       createTopic: (
         workspaceId: number,
         title: string,
@@ -418,18 +433,20 @@ export interface Window {
       ) => Promise<number>
       updateTopic: (
         id: number,
-        updates: Partial<Pick<ChatTopicRow, 'title' | 'model' | 'selected_tools'>>
+        updates: Partial<Pick<HarnessTopicRow, 'title' | 'model' | 'selected_tools'>>
       ) => Promise<boolean>
       deleteTopic: (id: number) => Promise<boolean>
-      getDialoguesByTopic: (topicId: number) => Promise<ChatDialogueRow[]>
+      getDialoguesByTopic: (topicId: number) => Promise<HarnessDialogueRow[]>
       getDialoguesByTopicPaginated: (
         topicId: number,
         page: number,
         pageSize: number
-      ) => Promise<PaginatedResult<ChatDialogueRow>>
-      addDialogue: (dialogue: Omit<ChatDialogueRow, 'id' | 'created_at'>) => Promise<number>
+      ) => Promise<PaginatedResult<HarnessDialogueRow>>
+      addDialogue: (dialogue: Omit<HarnessDialogueRow, 'id' | 'created_at'>) => Promise<number>
       deleteDialoguesByTopic: (topicId: number) => Promise<boolean>
       deleteDialogue: (id: number) => Promise<boolean>
+      /** 对话真实用量（harness_dialogue_usage 行，按话题取） */
+      getUsageByTopic: (topicId: number) => Promise<HarnessDialogueUsageRow[]>
     }
     graph: {
       getData: (wikiId: number, typeFilter?: string, docIds?: number[]) => Promise<GraphData>

@@ -1,23 +1,14 @@
-﻿import { getDatabaseInstance } from '../instance'
-import type { SubAgentConfig } from '../../chat/types'
+import { and, asc, count, eq, sql } from 'drizzle-orm'
+import type { PgUpdateSetSource } from 'drizzle-orm/pg-core'
 import logger from 'electron-log'
+import type { SubAgentConfig } from '../../harness/types'
+import { withOrm } from '../orm'
+import { agent_config } from '../schema'
 
 // --- 类型定义 ---
 
-export interface AgentConfigRow {
-  id: number
-  workspace_id: number
-  name: string
-  rename: string | null
-  prompt: string | null
-  description: string | null
-  skills: string | null
-  model: string | null
-  tools: string | null
-  enable: boolean
-  created_at: string
-  updated_at: string
-}
+/** 子代理配置行（字段由 schema 推导） */
+export type AgentConfigRow = typeof agent_config.$inferSelect
 
 export interface PaginatedResult<T> {
   items: T[]
@@ -51,22 +42,24 @@ function rowToSubAgentConfig(row: AgentConfigRow): SubAgentConfig {
   }
 }
 
+/** skills / tools 以 JSON 字符串存 TEXT 列；空数组按 null 存（与原实现一致） */
+function toJsonColumn(value: string[] | null | undefined): string | null {
+  return value && value.length > 0 ? JSON.stringify(value) : null
+}
+
 // --- CRUD ---
 
 /** 获取指定工作区下所有代理配置 */
 async function getAllAgents(workspaceId: number): Promise<AgentConfigRow[]> {
-  try {
-    const db = (await getDatabaseInstance()).getDatabase()
-    const sql = 'SELECT * FROM agent_config WHERE workspace_id = $1 ORDER BY id ASC'
-    const result = await db.query<AgentConfigRow>(sql, [workspaceId])
-    logger.info(
-      `Query for all agents (workspace=${workspaceId}) returned ${result.rows.length} rows.`
-    )
-    return result.rows
-  } catch (error) {
-    logger.error('Failed to get all agents:', error)
-    throw error
-  }
+  return withOrm('getAllAgents', async (db) => {
+    const rows = await db
+      .select()
+      .from(agent_config)
+      .where(eq(agent_config.workspace_id, workspaceId))
+      .orderBy(asc(agent_config.id))
+    logger.info(`Query for all agents (workspace=${workspaceId}) returned ${rows.length} rows.`)
+    return rows
+  })
 }
 
 /** 分页获取指定工作区下代理配置 */
@@ -75,93 +68,80 @@ async function getAgentsPaginated(
   page: number,
   pageSize: number
 ): Promise<PaginatedResult<AgentConfigRow>> {
-  try {
-    const db = (await getDatabaseInstance()).getDatabase()
-    const countResult = await db.query<{ total: number }>(
-      'SELECT COUNT(*)::int as total FROM agent_config WHERE workspace_id = $1',
-      [workspaceId]
-    )
-    const total = countResult.rows[0]?.total ?? 0
-    const sql =
-      'SELECT * FROM agent_config WHERE workspace_id = $1 ORDER BY id ASC LIMIT $2 OFFSET $3'
+  return withOrm('getAgentsPaginated', async (db) => {
+    const countRows = await db
+      .select({ total: count() })
+      .from(agent_config)
+      .where(eq(agent_config.workspace_id, workspaceId))
+    const total = Number(countRows[0]?.total) || 0
+
     const offset = page * pageSize
-    const result = await db.query<AgentConfigRow>(sql, [workspaceId, pageSize, offset])
+    const rows = await db
+      .select()
+      .from(agent_config)
+      .where(eq(agent_config.workspace_id, workspaceId))
+      .orderBy(asc(agent_config.id))
+      .limit(pageSize)
+      .offset(offset)
+
     logger.info(
-      `Paginated agents: workspace=${workspaceId}, page=${page}, size=${pageSize}, got=${result.rows.length}, total=${total}`
+      `Paginated agents: workspace=${workspaceId}, page=${page}, size=${pageSize}, got=${rows.length}, total=${total}`
     )
     return {
-      items: result.rows,
+      items: rows,
       hasMore: (page + 1) * pageSize < total,
       total
     }
-  } catch (error) {
-    logger.error('Failed to get paginated agents:', error)
-    throw error
-  }
+  })
 }
 
-/** 获取指定工作区下所有已启用的代理（转换为 SubAgentConfig 供 ChatService 使用） */
+/** 获取指定工作区下所有已启用的代理（转换为 SubAgentConfig 供 HarnessService 使用） */
 async function getEnabledSubAgentConfigs(workspaceId: number): Promise<SubAgentConfig[]> {
-  try {
-    const db = (await getDatabaseInstance()).getDatabase()
-    const sql =
-      'SELECT * FROM agent_config WHERE workspace_id = $1 AND enable = TRUE ORDER BY id ASC'
-    const result = await db.query<AgentConfigRow>(sql, [workspaceId])
-    logger.info(
-      `Query for enabled agents (workspace=${workspaceId}) returned ${result.rows.length} rows.`
-    )
-    return result.rows.map(rowToSubAgentConfig)
-  } catch (error) {
-    logger.error('Failed to get enabled sub-agent configs:', error)
-    throw error
-  }
+  return withOrm('getEnabledSubAgentConfigs', async (db) => {
+    const rows = await db
+      .select()
+      .from(agent_config)
+      .where(and(eq(agent_config.workspace_id, workspaceId), eq(agent_config.enable, true)))
+      .orderBy(asc(agent_config.id))
+    logger.info(`Query for enabled agents (workspace=${workspaceId}) returned ${rows.length} rows.`)
+    return rows.map(rowToSubAgentConfig)
+  })
 }
 
 /** 根据 ID 获取代理（同时校验 workspace_id） */
 async function getAgentById(workspaceId: number, id: number): Promise<AgentConfigRow | null> {
-  try {
-    const db = (await getDatabaseInstance()).getDatabase()
-    const sql = 'SELECT * FROM agent_config WHERE workspace_id = $1 AND id = $2'
-    const result = await db.query<AgentConfigRow>(sql, [workspaceId, id])
-    if (result.rows.length === 0) return null
-    return result.rows[0]
-  } catch (error) {
-    logger.error('Failed to get agent by id:', error)
-    throw error
-  }
+  return withOrm('getAgentById', async (db) => {
+    const rows = await db
+      .select()
+      .from(agent_config)
+      .where(and(eq(agent_config.workspace_id, workspaceId), eq(agent_config.id, id)))
+      .limit(1)
+    return rows[0] ?? null
+  })
 }
 
 /** 创建代理 */
 async function createAgent(input: AgentConfigInput): Promise<number> {
-  try {
-    const db = (await getDatabaseInstance()).getDatabase()
-    const tools = input.tools && input.tools.length > 0 ? JSON.stringify(input.tools) : null
-    const skills = input.skills && input.skills.length > 0 ? JSON.stringify(input.skills) : null
+  return withOrm('createAgent', async (db) => {
+    const rows = await db
+      .insert(agent_config)
+      .values({
+        workspace_id: input.workspace_id,
+        name: input.name,
+        rename: input.rename || null,
+        prompt: input.prompt || null,
+        description: input.description || null,
+        skills: toJsonColumn(input.skills),
+        model: input.model || null,
+        tools: toJsonColumn(input.tools),
+        enable: input.enable ?? true
+      })
+      .returning({ id: agent_config.id })
 
-    const sql = `
-      INSERT INTO agent_config (workspace_id, name, rename, prompt, description, skills, model, tools, enable)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-      RETURNING id
-    `
-    const result = await db.query<{ id: number }>(sql, [
-      input.workspace_id,
-      input.name,
-      input.rename || null,
-      input.prompt || null,
-      input.description || null,
-      skills,
-      input.model || null,
-      tools,
-      input.enable ?? true
-    ])
-
-    const newId = result.rows[0].id
+    const newId = rows[0].id
     logger.info(`Created agent "${input.name}" (workspace=${input.workspace_id}) with ID: ${newId}`)
     return newId
-  } catch (error) {
-    logger.error('Failed to create agent:', error)
-    throw error
-  }
+  })
 }
 
 /** 更新代理（同时校验 workspace_id） */
@@ -170,81 +150,50 @@ async function updateAgent(
   id: number,
   updates: Partial<AgentConfigInput>
 ): Promise<boolean> {
-  try {
-    const db = (await getDatabaseInstance()).getDatabase()
+  return withOrm('updateAgent', async (db) => {
+    const patch: PgUpdateSetSource<typeof agent_config> = {}
 
-    const updateFields: string[] = []
-    const updateValues: (string | number | boolean | null)[] = []
-    let paramIndex = 1
+    if (updates.name !== undefined) patch.name = updates.name
+    if (updates.rename !== undefined) patch.rename = updates.rename
+    if (updates.prompt !== undefined) patch.prompt = updates.prompt
+    if (updates.description !== undefined) patch.description = updates.description
+    if (updates.skills !== undefined) patch.skills = toJsonColumn(updates.skills)
+    if (updates.model !== undefined) patch.model = updates.model
+    if (updates.tools !== undefined) patch.tools = toJsonColumn(updates.tools)
+    if (updates.enable !== undefined) patch.enable = updates.enable
 
-    if (updates.name !== undefined) {
-      updateFields.push(`name = $${paramIndex++}`)
-      updateValues.push(updates.name)
-    }
-    if (updates.rename !== undefined) {
-      updateFields.push(`rename = $${paramIndex++}`)
-      updateValues.push(updates.rename)
-    }
-    if (updates.prompt !== undefined) {
-      updateFields.push(`prompt = $${paramIndex++}`)
-      updateValues.push(updates.prompt)
-    }
-    if (updates.description !== undefined) {
-      updateFields.push(`description = $${paramIndex++}`)
-      updateValues.push(updates.description)
-    }
-    if (updates.skills !== undefined) {
-      const skills =
-        updates.skills && updates.skills.length > 0 ? JSON.stringify(updates.skills) : null
-      updateFields.push(`skills = $${paramIndex++}`)
-      updateValues.push(skills)
-    }
-    if (updates.model !== undefined) {
-      updateFields.push(`model = $${paramIndex++}`)
-      updateValues.push(updates.model)
-    }
-    if (updates.tools !== undefined) {
-      const tools = updates.tools && updates.tools.length > 0 ? JSON.stringify(updates.tools) : null
-      updateFields.push(`tools = $${paramIndex++}`)
-      updateValues.push(tools)
-    }
-    if (updates.enable !== undefined) {
-      updateFields.push(`enable = $${paramIndex++}`)
-      updateValues.push(updates.enable)
-    }
-
-    if (updateFields.length === 0) {
+    if (Object.keys(patch).length === 0) {
       logger.warn('No fields to update for agent:', id)
       return false
     }
 
-    updateFields.push('updated_at = NOW()')
-    const sql = `UPDATE agent_config SET ${updateFields.join(', ')} WHERE workspace_id = $${paramIndex++} AND id = $${paramIndex++}`
-    updateValues.push(workspaceId, id)
+    // updated_at 走数据库时钟，与原实现的 NOW() 一致
+    patch.updated_at = sql`now()`
+    const updated = await db
+      .update(agent_config)
+      .set(patch)
+      .where(and(eq(agent_config.workspace_id, workspaceId), eq(agent_config.id, id)))
+      .returning({ id: agent_config.id })
 
-    const result = await db.query(sql, updateValues)
-    const changes = result.affectedRows ?? 0
-    logger.info(`Updated agent workspace=${workspaceId} id=${id}, ${changes} row(s) affected.`)
-    return changes > 0
-  } catch (error) {
-    logger.error('Failed to update agent:', error)
-    throw error
-  }
+    logger.info(
+      `Updated agent workspace=${workspaceId} id=${id}, ${updated.length} row(s) affected.`
+    )
+    return updated.length > 0
+  })
 }
 
 /** 删除代理（同时校验 workspace_id） */
 async function deleteAgent(workspaceId: number, id: number): Promise<boolean> {
-  try {
-    const db = (await getDatabaseInstance()).getDatabase()
-    const sql = 'DELETE FROM agent_config WHERE workspace_id = $1 AND id = $2'
-    const result = await db.query(sql, [workspaceId, id])
-    const changes = result.affectedRows ?? 0
-    logger.info(`Deleted agent workspace=${workspaceId} id=${id}, ${changes} row(s) affected.`)
-    return changes > 0
-  } catch (error) {
-    logger.error('Failed to delete agent:', error)
-    throw error
-  }
+  return withOrm('deleteAgent', async (db) => {
+    const deleted = await db
+      .delete(agent_config)
+      .where(and(eq(agent_config.workspace_id, workspaceId), eq(agent_config.id, id)))
+      .returning({ id: agent_config.id })
+    logger.info(
+      `Deleted agent workspace=${workspaceId} id=${id}, ${deleted.length} row(s) affected.`
+    )
+    return deleted.length > 0
+  })
 }
 
 export type { SubAgentConfig }

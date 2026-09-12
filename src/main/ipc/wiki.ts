@@ -1,5 +1,5 @@
 import { ipcMain } from 'electron'
-import { deleteNodePosition } from '../database/mapper/node_position'
+import { deleteNodePosition } from '../database/mapper/node-position'
 import {
   getWikiById,
   getAllWikis,

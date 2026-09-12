@@ -2,6 +2,6 @@ export type {
   Lock,
   SystemSettings,
   GraphSettings,
-  ChatSettings,
+  HarnessSettings,
   ThemeMode
 } from '../../../main/types/settings'

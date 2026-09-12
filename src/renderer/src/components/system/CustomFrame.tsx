@@ -47,7 +47,7 @@ const CustomFrame: React.FC<CustomFrameProps> = ({ currentKey, setCurrentKey }) 
     return api.window.onMaximized(setIsMaximized)
   }, [])
 
-  // 启动后的空闲时段提前加载懒加载页面 chunk（chat → planner → music），
+  // 启动后的空闲时段提前加载懒加载页面 chunk（harness → planner → music），
   // 首次切换菜单时模块已就绪，实现直接切换不卡顿
   useEffect(() => {
     scheduleViewPreload()
@@ -76,7 +76,7 @@ const CustomFrame: React.FC<CustomFrameProps> = ({ currentKey, setCurrentKey }) 
       { key: 'home', label: '首页', icon: <RiDashboardLine size={16} /> },
       { key: 'planner', label: '计划', icon: <RiCalendar2Line size={16} /> },
       { key: 'music', label: '音乐', icon: <RiDiscLine size={16} /> },
-      { key: 'chat', label: '助手', icon: <RiChatAiLine size={16} /> }
+      { key: 'harness', label: '助手', icon: <RiChatAiLine size={16} /> }
     ],
     []
   )

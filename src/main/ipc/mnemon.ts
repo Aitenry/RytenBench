@@ -1,18 +1,18 @@
 import { ipcMain } from 'electron'
 import { settingsStore } from '../context'
 import { getActiveWorkspaceId } from '../database/workspace-context'
-import { ChatSettings } from '../types/settings'
-import type { MnemonComponent } from '../chat/runtime/mnemon'
+import { HarnessSettings } from '../types/settings'
+import type { MnemonComponent } from '../harness/runtime/mnemon'
 
 // 当前记忆目录（从设置读取）
 function currentMemoryPath(): string | undefined {
-  const chatSettings = settingsStore.get('chat') as ChatSettings | undefined
-  return chatSettings?.memoryPath || undefined
+  const harnessSettings = settingsStore.get('harness') as HarnessSettings | undefined
+  return harnessSettings?.memoryPath || undefined
 }
 
 // 当前工作区 Mnemon 组件（记忆按工作区目录隔离：<memoryPath>/workspace-<id>/mnemon）
 async function currentMnemonComponent(): Promise<MnemonComponent | undefined> {
-  const { getMnemonComponent } = await import('../chat/mnemon-singleton')
+  const { getMnemonComponent } = await import('../harness/mnemon-singleton')
   return getMnemonComponent(currentMemoryPath(), getActiveWorkspaceId())
 }
 

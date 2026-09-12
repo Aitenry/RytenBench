@@ -68,7 +68,8 @@ const TaskListView: React.FC<Props> = ({
     const hasChildren = node.children.length > 0
     const isSelected = selectedId === node.id
     const isHovered = hoveredId === node.id
-    const p = PRIORITY_MAP[node.priority] ?? PRIORITY_MAP[4]
+    // priority / progress 库列为可空（DEFAULT 0），null 按默认值处理
+    const p = PRIORITY_MAP[node.priority ?? 0] ?? PRIORITY_MAP[4]
     const typeMeta = TYPE_LABELS[node.type] ?? {
       label: node.type,
       color: token.colorTextSecondary,
@@ -164,7 +165,7 @@ const TaskListView: React.FC<Props> = ({
               style={{
                 display: 'block',
                 height: '100%',
-                width: `${Math.min(100, Math.max(0, node.progress))}%`,
+                width: `${Math.min(100, Math.max(0, node.progress ?? 0))}%`,
                 background: token.colorPrimary,
                 borderRadius: 2
               }}

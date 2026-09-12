@@ -1,12 +1,12 @@
 import { ipcMain } from 'electron'
 import logger from 'electron-log'
-import { availableTools } from '../chat'
+import { availableTools } from '../harness'
 
 /** 杂项 IPC：心跳、工具列表、初始化进度日志 */
 export function registerMiscIpc(): void {
   ipcMain.on('ping', () => logger.info('pong'))
 
-  ipcMain.handle('chat-get-tools', async () => {
+  ipcMain.handle('harness-get-tools', async () => {
     return availableTools
   })
 

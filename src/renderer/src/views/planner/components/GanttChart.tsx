@@ -68,20 +68,22 @@ function computeDateRange(flatRows: FlatRow[]): { start: Date; end: Date } {
 
 /** 递归计算节点（含子节点）的聚合完成进度（按工时加权平均） */
 function computeAggregateProgress(node: PlannerTreeNode): number {
-  if (node.children.length === 0) return node.progress
+  // progress / work_hours 库列为可空（DEFAULT 0），null 按 0 处理
+  if (node.children.length === 0) return node.progress ?? 0
 
   let totalWeight = 0
   let weightedProgress = 0
 
   for (const child of node.children) {
     const childProgress = computeAggregateProgress(child)
-    if (child.work_hours > 0) {
-      weightedProgress += child.work_hours * childProgress
-      totalWeight += child.work_hours
+    const childHours = child.work_hours ?? 0
+    if (childHours > 0) {
+      weightedProgress += childHours * childProgress
+      totalWeight += childHours
     }
   }
 
-  if (totalWeight === 0) return node.progress
+  if (totalWeight === 0) return node.progress ?? 0
   return Math.round(weightedProgress / totalWeight)
 }
 

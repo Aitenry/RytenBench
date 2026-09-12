@@ -6,8 +6,8 @@ import { registerNodePositionIpc } from './node-position'
 import { registerMusicIpc } from './music'
 import { registerDocumentIpc } from './document'
 import { registerWikiIpc } from './wiki'
-import { registerChatIpc } from './chat'
-import { registerChatTopicIpc } from './chat-topic'
+import { registerHarnessIpc } from './harness'
+import { registerHarnessTopicIpc } from './harness-topic'
 import { registerMnemonIpc } from './mnemon'
 import { registerWorkspaceIpc } from './workspace'
 import { registerGraphIpc } from './graph'
@@ -24,8 +24,8 @@ export function registerAllIpc(): void {
   registerMusicIpc()
   registerDocumentIpc()
   registerWikiIpc()
-  registerChatIpc()
-  registerChatTopicIpc()
+  registerHarnessIpc()
+  registerHarnessTopicIpc()
   registerMnemonIpc()
   registerWorkspaceIpc()
   registerGraphIpc()

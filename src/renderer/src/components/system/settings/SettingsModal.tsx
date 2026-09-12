@@ -15,9 +15,9 @@ import MusicSettings from './MusicSettings'
 import GraphSettings from './GraphSettings'
 import SystemInfo from './SystemInfo'
 import ModelSettings from './ModelSettings'
-import AgentSettings from '@renderer/views/chat/components/settings/AgentSettings'
-import SkillsSettings from '@renderer/views/chat/components/settings/SkillsSettings'
-import MemorySettings from '@renderer/views/chat/components/settings/MemorySettings'
+import AgentSettings from '@renderer/views/harness/components/settings/AgentSettings'
+import SkillsSettings from '@renderer/views/harness/components/settings/SkillsSettings'
+import MemorySettings from '@renderer/views/harness/components/settings/MemorySettings'
 
 export type SettingsTab =
   'general' | 'model' | 'music' | 'graph' | 'system' | 'agents' | 'skills' | 'memory'

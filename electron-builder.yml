@@ -5,15 +5,18 @@ directories:
 files:
   - '!**/.vscode/*'
   - '!src/**'
+  - '!drizzle/**'
   - '!electron.vite.config.{js,ts,mjs,cjs}'
+  - '!drizzle.config.ts'
   - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}'
   - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
   - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
 asarUnpack:
   - resources/**
 extraResources:
-  - from: src/main/database/sql
-    to: database/sql
+  # drizzle 迁移文件（由 pnpm drizzle-kit generate 生成），启动时由 src/main/database/orm.ts 按序应用
+  - from: drizzle
+    to: database/drizzle
   - from: resources/models-profile.json
     to: models-profile.json
 win:

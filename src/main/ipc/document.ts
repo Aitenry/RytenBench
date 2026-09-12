@@ -4,8 +4,7 @@ import mammoth from 'mammoth'
 import TurndownService from 'turndown'
 import { JSDOM } from 'jsdom'
 import { Readability } from '@mozilla/readability'
-import { getDatabaseInstance } from '../database/instance'
-import { deleteNodePosition } from '../database/mapper/node_position'
+import { deleteNodePosition } from '../database/mapper/node-position'
 import {
   getDocById,
   getAllDocs,
@@ -13,6 +12,7 @@ import {
   addDoc,
   updateDoc,
   deleteDoc,
+  getDocIdsByTimeRange,
   deleteDocsByTimeRange,
   DocRow
 } from '../database/mapper/document'
@@ -111,12 +111,7 @@ export function registerDocumentIpc(): void {
   ipcMain.handle('doc-delete-by-time-range', async (_event, startTime: string, endTime: string) => {
     try {
       // 先查询将要被删除的文档 ID，用于清理节点位置
-      const db = (await getDatabaseInstance()).getDatabase()
-      const idsResult = await db.query<{ id: number }>(
-        'SELECT id FROM documents WHERE created_at >= $1 AND created_at <= $2',
-        [startTime, endTime]
-      )
-      const deletedIds = idsResult.rows.map((r) => r.id)
+      const deletedIds = await getDocIdsByTimeRange(startTime, endTime)
 
       const result = await deleteDocsByTimeRange(startTime, endTime)
 

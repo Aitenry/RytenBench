@@ -3,15 +3,15 @@ import { electronAPI } from '@electron-toolkit/preload'
 import { TodoItemRow } from '../main/database/mapper/todo'
 import { DocRow } from '../main/database/mapper/document'
 import { WikiRow, WikiDirectoryRow } from '../main/database/mapper/wiki'
-import { ChatTopicRow, ChatDialogueRow, WorkspaceRow } from '../main/database/mapper/chat'
+import { HarnessTopicRow, HarnessDialogueRow, WorkspaceRow } from '../main/database/mapper/harness'
 import type { LlmProviderInput, LlmProviderConfig } from '../main/database/mapper/provider'
 import type { AgentConfigRow, AgentConfigInput } from '../main/database/mapper/agent'
 import type { PaginatedResult as AgentPaginatedResult } from '../main/database/mapper/agent'
-import type { TodoItem } from '../main/chat/runtime/todo'
-import type { GoalView } from '../main/chat/runtime/goal'
-import type { JobSnapshot } from '../main/chat/runtime/jobs'
-import type { SubagentSessionRow } from '../main/chat/runtime/subagent-sessions'
-import type { PendingQuestionView, AskAnswer } from '../main/chat/runtime/ask'
+import type { TodoItem } from '../main/harness/runtime/todo'
+import type { GoalView } from '../main/harness/runtime/goal'
+import type { JobSnapshot } from '../main/harness/runtime/jobs'
+import type { SubagentSessionRow } from '../main/harness/runtime/subagent-sessions'
+import type { PendingQuestionView, AskAnswer } from '../main/harness/runtime/ask'
 
 type AskAnswerItem = AskAnswer['answers'][number]
 import type { SystemSettings } from '../main/types/settings'
@@ -41,19 +41,19 @@ const streamDoneHandlers = new Set<(result: { topicId: number }) => void>()
 const streamErrorHandlers = new Set<(error: { error: string; topicId?: number }) => void>()
 
 // 注册全局 IPC 监听器，分发到所有注册的回调
-ipcRenderer.on('chat-stream-chunk', (_event, chunk) => {
+ipcRenderer.on('harness-stream-chunk', (_event, chunk) => {
   for (const handler of streamChunkHandlers) {
     handler(chunk)
   }
 })
 
-ipcRenderer.on('chat-stream-done', (_event, result) => {
+ipcRenderer.on('harness-stream-done', (_event, result) => {
   for (const handler of streamDoneHandlers) {
     handler(result)
   }
 })
 
-ipcRenderer.on('chat-stream-error', (_event, error) => {
+ipcRenderer.on('harness-stream-error', (_event, error) => {
   for (const handler of streamErrorHandlers) {
     handler(error)
   }
@@ -173,13 +173,13 @@ const api = {
     getLockScreenCode: () => ipcRenderer.invoke('lock-screen-code'),
     setLockScreenView: (open: boolean) => ipcRenderer.invoke('lock-screen-view', open)
   },
-  chat: {
+  harness: {
     sendMessage: (
       message: string,
       options?: {
         providerId?: number
       }
-    ) => ipcRenderer.invoke('chat-send-message', message, options),
+    ) => ipcRenderer.invoke('harness-send-message', message, options),
     startMessageStream: (
       message: string,
       options?: {
@@ -187,16 +187,22 @@ const api = {
         providerId?: number
       }
     ) => {
-      ipcRenderer.send('chat-start-stream', message, options)
+      ipcRenderer.send('harness-start-stream', message, options)
     },
-    getTools: () => ipcRenderer.invoke('chat-get-tools'),
+    getTools: () => ipcRenderer.invoke('harness-get-tools'),
     onStreamChunk: (callback: (chunk: Record<string, unknown>) => void) => {
       streamChunkHandlers.add(callback)
       return () => {
         streamChunkHandlers.delete(callback)
       }
     },
-    onStreamDone: (callback: (result: { topicId: number }) => void) => {
+    onStreamDone: (
+      callback: (result: {
+        topicId: number
+        userDialogueId?: number
+        assistantDialogueId?: number
+      }) => void
+    ) => {
       streamDoneHandlers.add(callback)
       return () => {
         streamDoneHandlers.delete(callback)
@@ -216,25 +222,26 @@ const api = {
       ): void => {
         callback(data)
       }
-      ipcRenderer.on('chat-doc-changed', listener)
+      ipcRenderer.on('harness-doc-changed', listener)
       return () => {
-        ipcRenderer.removeListener('chat-doc-changed', listener)
+        ipcRenderer.removeListener('harness-doc-changed', listener)
       }
     },
-    onChatTodosUpdated: (callback: (data: { topicId: number; todos: TodoItem[] }) => void) => {
+    getHarnessTodos: (topicId: number) => ipcRenderer.invoke('harness-todos-get', topicId),
+    onHarnessTodosUpdated: (callback: (data: { topicId: number; todos: TodoItem[] }) => void) => {
       const listener = (
         _event: Electron.IpcRendererEvent,
         data: { topicId: number; todos: TodoItem[] }
       ): void => {
         callback(data)
       }
-      ipcRenderer.on('chat-todos-updated', listener)
+      ipcRenderer.on('harness-todos-updated', listener)
       return () => {
-        ipcRenderer.removeListener('chat-todos-updated', listener)
+        ipcRenderer.removeListener('harness-todos-updated', listener)
       }
     },
     // 目标系统（goal）
-    getGoal: (topicId: number) => ipcRenderer.invoke('chat-goal-get', topicId),
+    getGoal: (topicId: number) => ipcRenderer.invoke('harness-goal-get', topicId),
     onGoalUpdated: (callback: (data: { topicId: number; goal: GoalView | null }) => void) => {
       const listener = (
         _event: Electron.IpcRendererEvent,
@@ -242,9 +249,9 @@ const api = {
       ): void => {
         callback(data)
       }
-      ipcRenderer.on('chat-goal-updated', listener)
+      ipcRenderer.on('harness-goal-updated', listener)
       return () => {
-        ipcRenderer.removeListener('chat-goal-updated', listener)
+        ipcRenderer.removeListener('harness-goal-updated', listener)
       }
     },
     // 后台任务系统（jobs）
@@ -255,15 +262,15 @@ const api = {
       ): void => {
         callback(data)
       }
-      ipcRenderer.on('chat-jobs-updated', listener)
+      ipcRenderer.on('harness-jobs-updated', listener)
       return () => {
-        ipcRenderer.removeListener('chat-jobs-updated', listener)
+        ipcRenderer.removeListener('harness-jobs-updated', listener)
       }
     },
     // 后台子代理会话（顶部栏列表：进行中 > 已完成，点开查看结果）
-    listAgents: (topicId: number) => ipcRenderer.invoke('chat-agents-list', topicId),
+    listAgents: (topicId: number) => ipcRenderer.invoke('harness-agents-list', topicId),
     agentOutput: (topicId: number, agentId: string) =>
-      ipcRenderer.invoke('chat-agent-output', topicId, agentId),
+      ipcRenderer.invoke('harness-agent-output', topicId, agentId),
     onAgentsUpdated: (
       callback: (data: { topicId: number; rows: SubagentSessionRow[] }) => void
     ) => {
@@ -273,13 +280,13 @@ const api = {
       ): void => {
         callback(data)
       }
-      ipcRenderer.on('chat-agents-updated', listener)
+      ipcRenderer.on('harness-agents-updated', listener)
       return () => {
-        ipcRenderer.removeListener('chat-agents-updated', listener)
+        ipcRenderer.removeListener('harness-agents-updated', listener)
       }
     },
     watchAgentOutput: (topicId: number, agentId: string, watch: boolean) => {
-      ipcRenderer.send('chat-agent-watch', topicId, agentId, watch)
+      ipcRenderer.send('harness-agent-watch', topicId, agentId, watch)
     },
     onAgentOutputUpdated: (
       callback: (data: {
@@ -308,9 +315,9 @@ const api = {
       ): void => {
         callback(data)
       }
-      ipcRenderer.on('chat-agent-output-updated', listener)
+      ipcRenderer.on('harness-agent-output-updated', listener)
       return () => {
-        ipcRenderer.removeListener('chat-agent-output-updated', listener)
+        ipcRenderer.removeListener('harness-agent-output-updated', listener)
       }
     },
     // 向用户提问（ask_user_question）
@@ -318,22 +325,22 @@ const api = {
       const listener = (_event: Electron.IpcRendererEvent, pending: PendingQuestionView): void => {
         callback(pending)
       }
-      ipcRenderer.on('chat-question-asked', listener)
+      ipcRenderer.on('harness-question-asked', listener)
       return () => {
-        ipcRenderer.removeListener('chat-question-asked', listener)
+        ipcRenderer.removeListener('harness-question-asked', listener)
       }
     },
     answerQuestion: (requestId: string, answers: AskAnswerItem[]) =>
-      ipcRenderer.invoke('chat-question-answer', requestId, answers),
-    getQuestion: (topicId: number) => ipcRenderer.invoke('chat-question-get', topicId),
+      ipcRenderer.invoke('harness-question-answer', requestId, answers),
+    getQuestion: (topicId: number) => ipcRenderer.invoke('harness-question-get', topicId),
     cancelStream: () => {
-      ipcRenderer.send('chat-cancel-stream')
+      ipcRenderer.send('harness-cancel-stream')
     },
-    selectSkillsDirectory: () => ipcRenderer.invoke('chat-select-skills-directory'),
-    selectWorkspace: () => ipcRenderer.invoke('chat-select-workspace') as Promise<string | null>,
-    listSkills: () => ipcRenderer.invoke('chat-list-skills'),
+    selectSkillsDirectory: () => ipcRenderer.invoke('harness-select-skills-directory'),
+    selectWorkspace: () => ipcRenderer.invoke('harness-select-workspace') as Promise<string | null>,
+    listSkills: () => ipcRenderer.invoke('harness-list-skills'),
     // 记忆管理（Mnemon 三层记忆）
-    selectMemoryDirectory: () => ipcRenderer.invoke('chat-select-memory-directory'),
+    selectMemoryDirectory: () => ipcRenderer.invoke('harness-select-memory-directory'),
     // Mnemon 记忆系统
     mnemonSnapshot: () => ipcRenderer.invoke('mnemon-snapshot'),
     mnemonRuntimeMutate: (request: {
@@ -361,27 +368,29 @@ const api = {
       ipcRenderer.invoke('workspace-update', id, updates) as Promise<boolean>,
     deleteWorkspace: (id: number) => ipcRenderer.invoke('workspace-delete', id) as Promise<boolean>,
     // 话题管理
-    getAllTopics: (workspaceId: number) => ipcRenderer.invoke('chat-topic-get-all', workspaceId),
+    getAllTopics: (workspaceId: number) => ipcRenderer.invoke('harness-topic-get-all', workspaceId),
     getAllTopicsPaginated: (workspaceId: number, page: number, pageSize: number) =>
-      ipcRenderer.invoke('chat-topic-get-paginated', workspaceId, page, pageSize),
-    getTopicById: (id: number) => ipcRenderer.invoke('chat-topic-get-by-id', id),
+      ipcRenderer.invoke('harness-topic-get-paginated', workspaceId, page, pageSize),
+    getTopicById: (id: number) => ipcRenderer.invoke('harness-topic-get-by-id', id),
     createTopic: (workspaceId: number, title: string, model?: string, selectedTools?: string) =>
-      ipcRenderer.invoke('chat-topic-create', workspaceId, title, model, selectedTools),
+      ipcRenderer.invoke('harness-topic-create', workspaceId, title, model, selectedTools),
     updateTopic: (
       id: number,
-      updates: Partial<Pick<ChatTopicRow, 'title' | 'model' | 'selected_tools'>>
-    ) => ipcRenderer.invoke('chat-topic-update', id, updates),
-    deleteTopic: (id: number) => ipcRenderer.invoke('chat-topic-delete', id),
+      updates: Partial<Pick<HarnessTopicRow, 'title' | 'model' | 'selected_tools'>>
+    ) => ipcRenderer.invoke('harness-topic-update', id, updates),
+    deleteTopic: (id: number) => ipcRenderer.invoke('harness-topic-delete', id),
     // 消息管理
     getDialoguesByTopic: (topicId: number) =>
-      ipcRenderer.invoke('chat-dialogue-get-by-topic', topicId),
+      ipcRenderer.invoke('harness-dialogue-get-by-topic', topicId),
     getDialoguesByTopicPaginated: (topicId: number, page: number, pageSize: number) =>
-      ipcRenderer.invoke('chat-dialogue-get-by-topic-paginated', topicId, page, pageSize),
-    addDialogue: (dialogue: Omit<ChatDialogueRow, 'id' | 'created_at'>) =>
-      ipcRenderer.invoke('chat-dialogue-add', dialogue),
+      ipcRenderer.invoke('harness-dialogue-get-by-topic-paginated', topicId, page, pageSize),
+    addDialogue: (dialogue: Omit<HarnessDialogueRow, 'id' | 'created_at'>) =>
+      ipcRenderer.invoke('harness-dialogue-add', dialogue),
     deleteDialoguesByTopic: (topicId: number) =>
-      ipcRenderer.invoke('chat-dialogue-delete-by-topic', topicId),
-    deleteDialogue: (id: number) => ipcRenderer.invoke('chat-dialogue-delete', id)
+      ipcRenderer.invoke('harness-dialogue-delete-by-topic', topicId),
+    deleteDialogue: (id: number) => ipcRenderer.invoke('harness-dialogue-delete', id),
+    // 对话真实用量（一条助手回复一行）
+    getUsageByTopic: (topicId: number) => ipcRenderer.invoke('harness-usage-get-by-topic', topicId)
   },
   graph: {
     getData: (wikiId: number, typeFilter?: string, docIds?: number[]) =>

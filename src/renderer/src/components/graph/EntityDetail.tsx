@@ -204,7 +204,10 @@ const EntityDetail: React.FC<EntityDetailProps> = ({
           <Tag color={ENTITY_TYPE_COLORS[entity.type]}>
             {ENTITY_TYPE_LABELS[entity.type] || entity.type}
           </Tag>
-          {entity.confidence < 1 && <Tag>置信度: {(entity.confidence * 100).toFixed(0)}%</Tag>}
+          {/* confidence 库列为可空（DEFAULT 1），null 按默认置信度 1 处理 */}
+          {(entity.confidence ?? 1) < 1 && (
+            <Tag>置信度: {((entity.confidence ?? 1) * 100).toFixed(0)}%</Tag>
+          )}
         </div>
       </div>
 
@@ -305,10 +308,10 @@ const EntityDetail: React.FC<EntityDetailProps> = ({
       {/* Metadata */}
       <Descriptions size="small" column={1} style={{ marginTop: 8 }}>
         <Descriptions.Item label="创建时间">
-          {new Date(entity.created_at).toLocaleString('zh-CN')}
+          {entity.created_at ? new Date(entity.created_at).toLocaleString('zh-CN') : '—'}
         </Descriptions.Item>
         <Descriptions.Item label="更新时间">
-          {new Date(entity.updated_at).toLocaleString('zh-CN')}
+          {entity.updated_at ? new Date(entity.updated_at).toLocaleString('zh-CN') : '—'}
         </Descriptions.Item>
       </Descriptions>
     </div>

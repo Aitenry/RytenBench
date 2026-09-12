@@ -1,35 +1,30 @@
-﻿import { getDatabaseInstance } from '../instance'
-import logger from 'electron-log'
 import * as crypto from 'crypto'
+import { eq } from 'drizzle-orm'
+import { withOrm } from '../orm'
+import { images } from '../schema'
 
 async function saveImage(dataUrl: string | null): Promise<string | null> {
   if (!dataUrl) return null
 
-  try {
-    const db = (await getDatabaseInstance()).getDatabase()
+  return withOrm('saveImage', async (db) => {
     const id = crypto.createHash('md5').update(dataUrl).digest('hex')
 
-    await db.query('INSERT INTO images (id, data) VALUES ($1, $2) ON CONFLICT DO NOTHING', [
-      id,
-      dataUrl
-    ])
+    // 同图去重：主键冲突直接忽略（等价于原来的 ON CONFLICT DO NOTHING）
+    await db.insert(images).values({ id, data: dataUrl }).onConflictDoNothing()
 
     return id
-  } catch (error) {
-    logger.error('Failed to save image:', error)
-    throw error
-  }
+  })
 }
 
 async function getImageData(id: string): Promise<string | null> {
-  try {
-    const db = (await getDatabaseInstance()).getDatabase()
-    const result = await db.query<{ data: string }>('SELECT data FROM images WHERE id = $1', [id])
-    return result.rows[0]?.data ?? null
-  } catch (error) {
-    logger.error('Failed to get image data:', error)
-    throw error
-  }
+  return withOrm('getImageData', async (db) => {
+    const rows = await db
+      .select({ data: images.data })
+      .from(images)
+      .where(eq(images.id, id))
+      .limit(1)
+    return rows[0]?.data ?? null
+  })
 }
 
 export { saveImage, getImageData }

@@ -1,0 +1,1592 @@
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react'
+import type { HarnessTopicRow } from '../../../../../main/database/mapper/harness'
+import { LlmProviderConfig } from '../../../../../main/database/mapper/provider'
+import { Window, ToolInfo } from '../../../../resource/types/window'
+import type { Message, Attachment, ToolCall, MessageBlock } from '@renderer/types/harness'
+import type { StreamChunk } from '../../../../../main/harness/types'
+import { useMessage } from '@renderer/hooks/useMessage'
+import {
+  isSameToolCall,
+  computeTextDelta,
+  pushBlock,
+  findPlaceholderPreparingTool
+} from '../utils/harnessHelpers'
+import {
+  getProviderDisplayName,
+  isEmbeddingProvider,
+  supportsCapability
+} from '@renderer/utils/providerMeta'
+
+const TOPICS_PAGE_SIZE = 20
+const MESSAGES_PAGE_SIZE = 20 // 10对消息
+
+// ── 流式 chunk 合批参数（渲染进程 OOM 修复）────────────────────────────
+// 见 startStreamListener：高频 chunk 先排队、按自适应间隔合并为一次 React commit；
+// 单条正文越长，每次 markdown 全量渲染越贵，间隔随文本长度线性放大，上限见 MAX。
+const CHUNK_FLUSH_BASE_INTERVAL_MS = 33 // 常规刷新间隔（≤~30 commit/s）
+const CHUNK_FLUSH_MAX_INTERVAL_MS = 300 // 超长文本自适应上限
+const CHUNK_FLUSH_INTERVAL_PER_CHAR_MS = 1 / 2000 // 每 2k 字符 +1ms 间隔
+
+const INPUT_HISTORY_STORAGE_KEY = 'rytenbench.harness.inputHistory'
+const INPUT_HISTORY_MAX = 100
+/** 全局输入历史缓存（localStorage 持久化，模块级单例，避免每次渲染解析存储） */
+let inputHistoryCache: string[] | null = null
+const loadInputHistory = (): string[] => {
+  if (inputHistoryCache) return inputHistoryCache
+  try {
+    const raw = localStorage.getItem(INPUT_HISTORY_STORAGE_KEY)
+    const parsed: unknown = raw ? JSON.parse(raw) : []
+    inputHistoryCache = Array.isArray(parsed)
+      ? parsed.filter((x): x is string => typeof x === 'string').slice(-INPUT_HISTORY_MAX)
+      : []
+  } catch {
+    inputHistoryCache = []
+  }
+  return inputHistoryCache
+}
+
+/** 每个话题的会话缓存状态 */
+interface SessionState {
+  messages: Message[]
+  inputValue: string
+  attachments: Attachment[]
+  sessionId: string | null
+}
+
+export interface UseHarnessHandlersReturn {
+  messages: Message[]
+  inputValue: string
+  setInputValue: React.Dispatch<React.SetStateAction<string>>
+  availableTools: ToolInfo[]
+  copiedId: string | null
+  currentTopicId: number | null
+  topics: HarnessTopicRow[]
+  /** topics 所属工作区 id（null = 尚未加载过） */
+  topicsWorkspaceId: number | null
+  sidebarOpen: boolean
+  setSidebarOpen: React.Dispatch<React.SetStateAction<boolean>>
+  providers: LlmProviderConfig[]
+  selectedProviderId: number | null
+  setSelectedProviderId: React.Dispatch<React.SetStateAction<number | null>>
+  attachments: Attachment[]
+  setAttachments: React.Dispatch<React.SetStateAction<Attachment[]>>
+  isLoading: boolean
+  messagesEndRef: React.RefObject<HTMLDivElement | null>
+  textareaRef: React.RefObject<HTMLDivElement | null>
+  /** 全局输入历史（↑/↓ 键切换浏览，handleSend 记录，localStorage 持久化，上限 100 条） */
+  inputHistoryRef: { current: string[] }
+  currentSessionIdRef: React.RefObject<string | null>
+  currentTopicIdRef: React.RefObject<number | null>
+  loadingTopicIds: Set<number>
+  selectedProvider: LlmProviderConfig | null
+  modelSupportsTools: boolean
+  modelSupportsVision: boolean
+  groupedProviderOptions: {
+    label: string
+    options: { value: number; label: string; providerType: string }[]
+  }[]
+  /** 话题分页 */
+  topicsHasMore: boolean
+  topicsLoading: boolean
+  /** 整表刷新中（非滚动分页） */
+  topicsRefreshing: boolean
+  /** 消息分页（当前话题） */
+  messagesHasMore: boolean
+  messagesLoadingMore: boolean
+  handleSelectTopic: (topic: HarnessTopicRow) => Promise<void>
+  handleDeleteTopic: (topicId: number, e?: React.MouseEvent) => Promise<void>
+  handleCopy: (text: string, id: string) => Promise<void>
+  handleSend: () => Promise<void>
+  handleNewHarness: () => void
+  handleDeleteMessagePair: (msgIndex: number) => Promise<void>
+  /** 分支：把当前话题里到 upToIndex 为止的消息复制到新话题，并把列表与视图都切过去 */
+  handleBranchConversation: (upToIndex: number) => Promise<void>
+  handleKeyDown: (e: React.KeyboardEvent<HTMLDivElement>) => void
+  handleStop: () => void
+  handleLoadMoreTopics: () => Promise<void>
+  handleLoadMoreMessages: () => Promise<void>
+  refreshTopics: () => Promise<void>
+}
+
+/**
+ * 取消息在库里的对话行 id。
+ *
+ * 流式期间的消息用的是临时 id（用户消息 `Date.now().toString()`、助手消息 `时间戳_话题_随机`），
+ * 它们**不是** harness_dialogue 的行 id——拿去删除/关联用量都会命中不存在的行。
+ * 所以：优先用主进程回传的 dialogueId；否则只接受「自增小整数」形态的 id
+ *（时间戳约 1.7e12，一律视为临时 id）。
+ */
+function resolveDialogueId(message: Message | undefined): number | null {
+  if (!message) return null
+  if (typeof message.dialogueId === 'number') return message.dialogueId
+  const numeric = Number(message.id)
+  return Number.isInteger(numeric) && numeric > 0 && numeric < 1e10 ? numeric : null
+}
+
+export const useHarnessHandlers = (): UseHarnessHandlersReturn => {
+  const { viewMessage } = useMessage()
+  const [messages, setMessages] = useState<Message[]>([])
+  const [inputValue, setInputValue] = useState('')
+  const [availableTools, setAvailableTools] = useState<ToolInfo[]>([])
+  const [copiedId, setCopiedId] = useState<string | null>(null)
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+  const textareaRef = useRef<HTMLDivElement>(null)
+  /** 全局输入历史（↑/↓ 键切换浏览，handleSend 记录，localStorage 持久化，上限 100 条） */
+  const inputHistoryRef = useRef<string[]>(loadInputHistory())
+  const currentSessionIdRef = useRef<string | null>(null)
+
+  /** 当前活跃的工作区 ID */
+  const activeWorkspaceIdRef = useRef<number>(0)
+  const getActiveWorkspaceId = useCallback(async (): Promise<number> => {
+    try {
+      const settings = await (window as unknown as Window).api.systemSettings.getAll()
+      const id = settings.harness.activeWorkspaceId ?? 0
+      activeWorkspaceIdRef.current = id
+      return id
+    } catch {
+      return activeWorkspaceIdRef.current
+    }
+  }, [])
+
+  /** 当前活跃的智能体 causeId 集合：用于把智能体事件路由到正确块 */
+  const activeSubAgentCauseIdsRef = useRef<Map<number, Set<string>>>(new Map())
+  const [currentTopicId, setCurrentTopicId] = useState<number | null>(null)
+  const currentTopicIdRef = useRef<number | null>(null)
+  /** messages React 状态实际属于哪个话题——用于检测 handleSelectTopic 异步间隙中的跨话题污染 */
+  const messagesBelongToTopicRef = useRef<number | null>(null)
+  const [topics, setTopics] = useState<HarnessTopicRow[]>([])
+  /** topics 当前属于哪个工作区（切换工作区时用于避免把旧列表挂到新工作区下） */
+  const [topicsWorkspaceId, setTopicsWorkspaceId] = useState<number | null>(null)
+  const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [providers, setProviders] = useState<LlmProviderConfig[]>([])
+  const [selectedProviderId, setSelectedProviderId] = useState<number | null>(null)
+  const [attachments, setAttachments] = useState<Attachment[]>([])
+  const [isLoading, setIsLoading] = useState(false)
+  const [loadingTopicIds, setLoadingTopicIds] = useState<Set<number>>(new Set())
+
+  // ── 分页状态 ──
+  const [topicsPage, setTopicsPage] = useState(0)
+  const [topicsHasMore, setTopicsHasMore] = useState(true)
+  const [topicsLoading, setTopicsLoading] = useState(false)
+  /** 「整表刷新」进行中（区别于滚动分页加载更多，避免切换工作区时底部闪现分页 spinner） */
+  const [topicsRefreshing, setTopicsRefreshing] = useState(false)
+  const [messagesPage, setMessagesPage] = useState(0)
+  const [messagesHasMore, setMessagesHasMore] = useState(true)
+  const [messagesLoadingMore, setMessagesLoadingMore] = useState(false)
+
+  // ── 多会话支持 ──
+  /** 每个 topicId 的会话缓存（进行中的对话） */
+  const sessionsRef = useRef<Map<number, SessionState>>(new Map())
+  /** 每个 topicId 的加载状态 */
+  const isLoadingMapRef = useRef<Map<number, boolean>>(new Map())
+  /** 每个 topicId 的 stream chunk 清理函数 */
+  const chunkCleanupsRef = useRef<Map<number, () => void>>(new Map())
+  /** 每个 topicId 的 stream done 清理函数 */
+  const doneCleanupsRef = useRef<Map<number, () => void>>(new Map())
+  /** 每个 topicId 的 stream error 清理函数 */
+  const errorCleanupsRef = useRef<Map<number, () => void>>(new Map())
+
+  /** 同步 isLoadingMapRef 到 loadingTopicIds 状态 */
+  const syncLoadingTopics = useCallback((): void => {
+    setLoadingTopicIds(new Set(isLoadingMapRef.current.keys()))
+  }, [])
+
+  // 欢迎语打字机：见 components/WelcomeIntro.tsx（高频/无限循环动画不放在这里，
+  // 否则整个聊天视图会被每秒重渲染 ~25 次）
+
+  const selectedProvider = useMemo(
+    () => providers.find((p) => p.id === selectedProviderId) ?? null,
+    [providers, selectedProviderId]
+  )
+  const modelSupportsTools = supportsCapability(
+    selectedProvider?.metadata,
+    'supports_function_calling'
+  )
+  const modelSupportsVision = supportsCapability(selectedProvider?.metadata, 'supports_image_input')
+
+  useEffect(() => {
+    ;(window as unknown as Window).api.harness
+      .getTools()
+      .then(setAvailableTools)
+      .catch(console.error)
+  }, [])
+
+  useEffect(() => {
+    const loadProviders = async (): Promise<void> => {
+      try {
+        const list = await (window as unknown as Window).api.providers.getEnabled()
+        const chatModels = list.filter((p) => !isEmbeddingProvider(p))
+        setProviders(chatModels)
+
+        // 模型：优先使用默认 provider
+        const defaultProvider = await (window as unknown as Window).api.providers.getDefault()
+        if (defaultProvider && !isEmbeddingProvider(defaultProvider)) {
+          setSelectedProviderId(defaultProvider.id)
+        } else if (chatModels.length > 0) {
+          setSelectedProviderId(chatModels[0].id)
+        }
+      } catch (err) {
+        console.error('Failed to load providers:', err)
+      }
+    }
+    loadProviders().then()
+    const unsubscribe = (window as unknown as Window).api.providers.onChanged(() => {
+      loadProviders().then()
+    })
+    return unsubscribe
+  }, [])
+
+  const refreshTopics = useCallback(async (): Promise<void> => {
+    try {
+      setTopicsRefreshing(true)
+      setTopicsLoading(true)
+      setTopicsPage(0)
+      const workspaceId = await getActiveWorkspaceId()
+      const result = await (window as unknown as Window).api.harness.getAllTopicsPaginated(
+        workspaceId,
+        0,
+        TOPICS_PAGE_SIZE
+      )
+      setTopics(result.items)
+      // 标记这批 topics 属于哪个工作区：切换工作区时旧列表不能挂到新工作区行下面
+      setTopicsWorkspaceId(workspaceId)
+      setTopicsHasMore(result.hasMore)
+    } catch (err) {
+      console.error('Failed to load topics:', err)
+    } finally {
+      setTopicsLoading(false)
+      setTopicsRefreshing(false)
+    }
+  }, [getActiveWorkspaceId])
+
+  const handleLoadMoreTopics = useCallback(async (): Promise<void> => {
+    if (topicsLoading || !topicsHasMore) return
+    try {
+      setTopicsLoading(true)
+      const nextPage = topicsPage + 1
+      const workspaceId = await getActiveWorkspaceId()
+      const result = await (window as unknown as Window).api.harness.getAllTopicsPaginated(
+        workspaceId,
+        nextPage,
+        TOPICS_PAGE_SIZE
+      )
+      setTopicsPage(nextPage)
+      setTopics((prev) => [...prev, ...result.items])
+      setTopicsWorkspaceId(workspaceId)
+      setTopicsHasMore(result.hasMore)
+    } catch (err) {
+      console.error('Failed to load more topics:', err)
+    } finally {
+      setTopicsLoading(false)
+    }
+  }, [topicsPage, topicsHasMore, topicsLoading, getActiveWorkspaceId])
+
+  useEffect(() => {
+    refreshTopics().then()
+  }, [])
+
+  // 组件卸载时清理所有流监听器
+  useEffect(() => {
+    const chunkCleanups = chunkCleanupsRef.current
+    const doneCleanups = doneCleanupsRef.current
+    const errorCleanups = errorCleanupsRef.current
+    return () => {
+      for (const cleanup of chunkCleanups.values()) cleanup()
+      for (const cleanup of doneCleanups.values()) cleanup()
+      for (const cleanup of errorCleanups.values()) cleanup()
+    }
+  }, [])
+
+  // ── 会话缓存管理 ──
+
+  /** 保存当前对话窗口的状态到缓存 */
+  const saveSessionToCache = useCallback((): void => {
+    const topicId = currentTopicIdRef.current
+    if (topicId == null) return
+    sessionsRef.current.set(topicId, {
+      messages: [...messages],
+      inputValue,
+      attachments: [...attachments],
+      sessionId: currentSessionIdRef.current
+    })
+  }, [messages, inputValue, attachments])
+
+  /** 从缓存恢复会话到当前对话窗口 */
+  const restoreSessionFromCache = useCallback((topicId: number): boolean => {
+    const cached = sessionsRef.current.get(topicId)
+    if (!cached) return false
+    setMessages(cached.messages)
+    setInputValue(cached.inputValue)
+    setAttachments(cached.attachments)
+    currentSessionIdRef.current = cached.sessionId
+    return true
+  }, [])
+
+  // ── 处理流式 chunk 的核心逻辑（主代理 + 智能体） ──
+
+  /** 将 stream chunk 应用到消息上，返回更新后的 messages 浅拷贝 */
+  const applyChunkToMessages = useCallback(
+    (msgs: Message[], aiMessageId: string, chunk: StreamChunk, topicId: number): Message[] => {
+      let activeCauseIds = activeSubAgentCauseIdsRef.current.get(topicId)
+      if (!activeCauseIds) {
+        activeCauseIds = new Set()
+        activeSubAgentCauseIdsRef.current.set(topicId, activeCauseIds)
+      }
+      return msgs.map((msg) => {
+        if (msg.id !== aiMessageId) return msg
+
+        const updatedReasoning = chunk.reasoning_content
+          ? msg.reasoning_content &&
+            String(chunk.reasoning_content).startsWith(msg.reasoning_content)
+            ? String(chunk.reasoning_content)
+            : msg.reasoning_content &&
+                msg.reasoning_content.endsWith(String(chunk.reasoning_content))
+              ? msg.reasoning_content
+              : (msg.reasoning_content || '') + chunk.reasoning_content
+          : msg.reasoning_content
+
+        const updatedContent = chunk.content
+          ? msg.content && chunk.content.startsWith(msg.content)
+            ? chunk.content
+            : msg.content + chunk.content
+          : msg.content
+
+        let updatedToolCalls = msg.toolCalls || []
+        if (chunk.tool) {
+          const existingIndex = updatedToolCalls.findIndex((tc) =>
+            isSameToolCall(tc, chunk.tool as ToolCall)
+          )
+          if (existingIndex >= 0) {
+            updatedToolCalls = [
+              ...updatedToolCalls.slice(0, existingIndex),
+              chunk.tool as ToolCall,
+              ...updatedToolCalls.slice(existingIndex + 1)
+            ]
+          } else {
+            updatedToolCalls = [...updatedToolCalls, chunk.tool as ToolCall]
+          }
+        }
+        let updatedBlocks = [...msg.blocks]
+
+        // 「正在重试」过渡块仅在请求未恢复时展示：一旦真实内容/工具/智能体/压缩结果到达，
+        // 说明重试已成功、模型开始正常输出，立即移除该过渡块
+        const retryFinished =
+          Boolean(chunk.content) ||
+          Boolean(chunk.reasoning_content) ||
+          Boolean(chunk.tool) ||
+          Boolean(chunk.subAgent) ||
+          Boolean(chunk.historyCompacted)
+        if (retryFinished) {
+          updatedBlocks = updatedBlocks.filter((b) => b.type !== 'retrying')
+        }
+        // 摘要压缩失败/放弃（全程没有 historyCompacted 结果）时，正文一旦开始就收起
+        // 残留的「正在压缩早期对话…」过渡卡（避免压缩卡与正文并行误导）
+        if (retryFinished && !updatedBlocks.some((b) => b.type === 'historyCompacted')) {
+          updatedBlocks = updatedBlocks.filter((b) => b.type !== 'historyCompacting')
+        }
+
+        // 模型单次请求失败后在原调用处自动重试（不整轮重跑）：插入「正在重试」过渡行，
+        // 只保留最新一次进度；已输出的历史内容与工具块原样保留（重试不会作废它们）
+        if (chunk.retrying) {
+          updatedBlocks = updatedBlocks.filter((b) => b.type !== 'retrying')
+          updatedBlocks.push({
+            type: 'retrying',
+            retrying: { attempt: chunk.retrying.attempt, retries: chunk.retrying.retries }
+          })
+        }
+
+        // 本轮热记忆注入：置于消息块最顶部（首个 chunk 到达，仅插入一次）
+        if (chunk.memoryInjected) {
+          const exists = updatedBlocks.some((b) => b.type === 'memoryInjected')
+          if (!exists) {
+            updatedBlocks.unshift({
+              type: 'memoryInjected',
+              memory: {
+                user: chunk.memoryInjected.user,
+                memory: chunk.memoryInjected.memory,
+                usage: chunk.memoryInjected.usage
+              }
+            })
+          }
+        }
+
+        // 摘要压缩开始：插入「压缩中」过渡块（仅当前轮展示，不落库；
+        // 结果块到达后在原位置替换，压缩失败时随消息结束隐藏）
+        if (chunk.historyCompacting) {
+          const exists = updatedBlocks.some(
+            (b) => b.type === 'historyCompacting' || b.type === 'historyCompacted'
+          )
+          if (!exists) {
+            updatedBlocks.push({ type: 'historyCompacting' })
+          }
+        }
+
+        // 本轮早期对话摘要压缩：紧随记忆注入块（正文流开始前到达，仅插入一次）
+        if (chunk.historyCompacted) {
+          const compacted = {
+            type: 'historyCompacted' as const,
+            compaction: {
+              compressedCount: chunk.historyCompacted.compressedCount,
+              retainedCount: chunk.historyCompacted.retainedCount,
+              boundaryId: chunk.historyCompacted.boundaryId
+            }
+          }
+          // 原地替换「压缩中」过渡块（保持卡片位置稳定）
+          const compactingIdx = updatedBlocks.findIndex((b) => b.type === 'historyCompacting')
+          if (compactingIdx >= 0) {
+            updatedBlocks[compactingIdx] = compacted
+          } else if (!updatedBlocks.some((b) => b.type === 'historyCompacted')) {
+            updatedBlocks.push(compacted)
+          }
+        }
+
+        if (chunk.reasoning_content) {
+          const reasoningDelta = computeTextDelta(
+            String(chunk.reasoning_content),
+            msg.reasoning_content || ''
+          )
+          if (reasoningDelta) {
+            const lastBlock = updatedBlocks[updatedBlocks.length - 1]
+            if (lastBlock?.type === 'reasoning') {
+              updatedBlocks[updatedBlocks.length - 1] = {
+                type: 'reasoning',
+                reasoning: (lastBlock.reasoning || '') + reasoningDelta
+              }
+            } else {
+              pushBlock(updatedBlocks, { type: 'reasoning', reasoning: reasoningDelta })
+            }
+          }
+        }
+
+        if (chunk.content) {
+          const contentDelta = computeTextDelta(String(chunk.content), msg.content || '')
+          if (contentDelta) {
+            const lastBlock = updatedBlocks[updatedBlocks.length - 1]
+            if (lastBlock?.type === 'text') {
+              updatedBlocks[updatedBlocks.length - 1] = {
+                type: 'text',
+                text: (lastBlock.text || '') + contentDelta
+              }
+            } else {
+              pushBlock(updatedBlocks, { type: 'text', text: contentDelta })
+            }
+          }
+        }
+
+        if (chunk.tool) {
+          if (chunk.tool.name !== 'task') {
+            if (chunk.tool.status === 'completed') {
+              for (let i = updatedBlocks.length - 1; i >= 0; i--) {
+                const b = updatedBlocks[i]
+                if (
+                  b.type === 'tool' &&
+                  b.tool &&
+                  b.tool.status !== 'completed' &&
+                  isSameToolCall(b.tool, chunk.tool)
+                ) {
+                  updatedBlocks[i] = {
+                    type: 'tool',
+                    tool: {
+                      ...b.tool,
+                      output: chunk.tool.output,
+                      status: chunk.tool.status,
+                      card: chunk.tool.card
+                    }
+                  }
+                  break
+                }
+              }
+            } else if (chunk.tool.status === 'preparing') {
+              const exists = updatedBlocks.some(
+                (b) =>
+                  b.type === 'tool' && isSameToolCall(b.tool as ToolCall, chunk.tool as ToolCall)
+              )
+              if (!exists) {
+                const blockTool = {
+                  name: chunk.tool.name,
+                  input: {},
+                  output: '',
+                  status: 'preparing' as const,
+                  id: chunk.tool.id
+                }
+                pushBlock(updatedBlocks, { type: 'tool', tool: blockTool })
+              }
+            } else {
+              let merged = false
+              for (let i = updatedBlocks.length - 1; i >= 0; i--) {
+                const b = updatedBlocks[i]
+                if (
+                  b.type === 'tool' &&
+                  b.tool?.status === 'preparing' &&
+                  isSameToolCall(b.tool, chunk.tool)
+                ) {
+                  updatedBlocks[i] = {
+                    type: 'tool',
+                    tool: {
+                      name: chunk.tool.name,
+                      input: chunk.tool.input,
+                      output: '',
+                      status: 'executing',
+                      id: b.tool.id ?? chunk.tool.id
+                    }
+                  }
+                  merged = true
+                  break
+                }
+              }
+              // 防御：部分 provider 首个工具块不携带工具名（以占位名 'tool' 登记）——
+              // 未按名称匹配到 preparing 块时，并入最近的占位块并改名为真实工具名，
+              // 避免「tool · 参数构建中…」幽灵块与真实工具块并存
+              if (!merged) {
+                const placeholderIdx = findPlaceholderPreparingTool(updatedBlocks)
+                if (placeholderIdx >= 0) {
+                  const b = updatedBlocks[placeholderIdx]
+                  if (b.type === 'tool' && b.tool) {
+                    updatedBlocks[placeholderIdx] = {
+                      type: 'tool',
+                      tool: {
+                        name: chunk.tool.name,
+                        input: chunk.tool.input,
+                        output: '',
+                        status: 'executing',
+                        id: b.tool.id ?? chunk.tool.id
+                      }
+                    }
+                    merged = true
+                  }
+                }
+              }
+              if (!merged) {
+                const blockTool = {
+                  name: chunk.tool.name,
+                  input: chunk.tool.input,
+                  output: chunk.tool.output,
+                  status: (chunk.tool.status || 'executing') as ToolCall['status'],
+                  id: chunk.tool.id
+                }
+                pushBlock(updatedBlocks, { type: 'tool', tool: blockTool })
+              }
+            }
+          }
+        }
+
+        if (chunk.subAgent) {
+          const sa = chunk.subAgent
+
+          const findSaBlock = (): number => {
+            for (let i = updatedBlocks.length - 1; i >= 0; i--) {
+              const block = updatedBlocks[i]
+              if (block.type !== 'subAgent' || !block.subAgent) continue
+              if (sa.causeId && block.subAgent.causeId && block.subAgent.causeId === sa.causeId) {
+                return i
+              }
+              if (block.subAgent.name === sa.name && (!sa.causeId || !block.subAgent.causeId)) {
+                return i
+              }
+            }
+            return -1
+          }
+
+          if (sa.status === 'started') {
+            const idx = findSaBlock()
+            if (idx < 0) {
+              pushBlock(updatedBlocks, {
+                type: 'subAgent',
+                subAgent: {
+                  name: sa.name,
+                  causeId: sa.causeId,
+                  status: 'started',
+                  taskDescription: sa.taskDescription
+                },
+                children: []
+              })
+            } else {
+              // 复制后更新：不改写与旧状态共享的 subAgent 对象（渲染/更新期就地改共享对象
+              // 是文本自复制的隐患，统一走不可变替换）
+              const existing = updatedBlocks[idx]
+              const prevSa = existing.subAgent!
+              updatedBlocks[idx] = {
+                ...existing,
+                subAgent: {
+                  ...prevSa,
+                  status: 'started',
+                  taskDescription: prevSa.taskDescription || sa.taskDescription
+                }
+              }
+            }
+            if (sa.causeId) {
+              activeCauseIds.add(sa.causeId)
+            }
+          } else if (sa.status === 'dispatched') {
+            // 后台派发轻量卡：定格「已派发」，仅名称+简述+会话 id（结果在顶部栏查看）
+            const idx = findSaBlock()
+            if (idx < 0) {
+              pushBlock(updatedBlocks, {
+                type: 'subAgent',
+                subAgent: {
+                  name: sa.name,
+                  causeId: sa.causeId,
+                  status: 'dispatched',
+                  taskDescription: sa.taskDescription,
+                  subagentId: sa.subagentId
+                },
+                children: []
+              })
+            } else {
+              const existing = updatedBlocks[idx]
+              const prevSa = existing.subAgent!
+              updatedBlocks[idx] = {
+                ...existing,
+                subAgent: {
+                  ...prevSa,
+                  status: 'dispatched',
+                  taskDescription: prevSa.taskDescription || sa.taskDescription,
+                  subagentId: sa.subagentId ?? prevSa.subagentId
+                }
+              }
+            }
+          } else if (sa.status === 'completed' || sa.status === 'error') {
+            const idx = findSaBlock()
+            if (idx >= 0) {
+              const existing = updatedBlocks[idx]
+              const prevSa = existing.subAgent!
+              updatedBlocks[idx] = {
+                ...existing,
+                subAgent: {
+                  ...prevSa,
+                  status: sa.status,
+                  output: sa.output ?? prevSa.output,
+                  error: sa.error ?? prevSa.error,
+                  taskDescription: prevSa.taskDescription || sa.taskDescription
+                }
+              }
+            }
+            if (sa.causeId) {
+              activeCauseIds.delete(sa.causeId)
+            }
+          } else if (sa.content || sa.reasoning_content || sa.tool) {
+            const idx = findSaBlock()
+            let block: MessageBlock
+            if (idx >= 0) {
+              // 复制成新块后再就地更新：新块独占 subAgent 对象与 children 数组，
+              // 后续对 block.subAgent/block.children 的写入不会污染与旧状态共享的对象
+              const existing = updatedBlocks[idx]
+              block = {
+                ...existing,
+                subAgent: { ...existing.subAgent! },
+                children: existing.children ? [...existing.children] : []
+              }
+              updatedBlocks[idx] = block
+            } else {
+              block = {
+                type: 'subAgent',
+                subAgent: {
+                  name: sa.name,
+                  causeId: sa.causeId,
+                  status: 'running',
+                  taskDescription: sa.taskDescription
+                },
+                children: []
+              }
+              pushBlock(updatedBlocks, block)
+            }
+            if (block.subAgent!.status !== 'completed' && block.subAgent!.status !== 'error') {
+              block.subAgent!.status = 'running'
+            }
+            block.subAgent!.taskDescription = block.subAgent!.taskDescription || sa.taskDescription
+            if (!block.children) block.children = []
+
+            if (sa.reasoning_content) {
+              const totalPrevReasoning = block.children
+                .filter((c) => c.type === 'reasoning')
+                .map((c) => c.reasoning || '')
+                .join('')
+              const reasoningDelta = computeTextDelta(
+                String(sa.reasoning_content),
+                totalPrevReasoning
+              )
+              if (reasoningDelta) {
+                const lastChild = block.children[block.children.length - 1]
+                if (lastChild?.type === 'reasoning') {
+                  block.children[block.children.length - 1] = {
+                    type: 'reasoning',
+                    reasoning: (lastChild.reasoning || '') + reasoningDelta
+                  }
+                } else {
+                  pushBlock(block.children, { type: 'reasoning', reasoning: reasoningDelta })
+                }
+              }
+            }
+
+            if (sa.content) {
+              const totalPrevText = block.children
+                .filter((c) => c.type === 'text')
+                .map((c) => c.text || '')
+                .join('')
+              const contentDelta = computeTextDelta(String(sa.content), totalPrevText)
+              if (contentDelta) {
+                const lastChild = block.children[block.children.length - 1]
+                if (lastChild?.type === 'text') {
+                  block.children[block.children.length - 1] = {
+                    type: 'text',
+                    text: (lastChild.text || '') + contentDelta
+                  }
+                } else {
+                  pushBlock(block.children, { type: 'text', text: contentDelta })
+                }
+              }
+            }
+
+            if (sa.tool) {
+              if (sa.tool.name !== 'task') {
+                if (sa.tool.status === 'completed') {
+                  for (let i = block.children.length - 1; i >= 0; i--) {
+                    const c = block.children[i]
+                    if (
+                      c.type === 'tool' &&
+                      c.tool &&
+                      c.tool.status !== 'completed' &&
+                      isSameToolCall(c.tool, sa.tool)
+                    ) {
+                      block.children[i] = {
+                        type: 'tool',
+                        tool: {
+                          ...c.tool,
+                          output: sa.tool.output,
+                          status: sa.tool.status,
+                          card: sa.tool.card
+                        }
+                      }
+                      break
+                    }
+                  }
+                } else if (sa.tool.status === 'preparing') {
+                  const exists = block.children.some(
+                    (c) =>
+                      c.type === 'tool' && isSameToolCall(c.tool as ToolCall, sa.tool as ToolCall)
+                  )
+                  if (!exists) {
+                    pushBlock(block.children, {
+                      type: 'tool',
+                      tool: {
+                        name: sa.tool.name,
+                        input: {},
+                        output: '',
+                        status: 'preparing',
+                        id: sa.tool.id
+                      }
+                    })
+                  }
+                } else {
+                  let merged = false
+                  for (let i = block.children.length - 1; i >= 0; i--) {
+                    const c = block.children[i]
+                    if (
+                      c.type === 'tool' &&
+                      c.tool?.status === 'preparing' &&
+                      isSameToolCall(c.tool, sa.tool)
+                    ) {
+                      block.children[i] = {
+                        type: 'tool',
+                        tool: {
+                          name: sa.tool.name,
+                          input: sa.tool.input,
+                          output: '',
+                          status: 'executing',
+                          id: c.tool.id ?? sa.tool.id
+                        }
+                      }
+                      merged = true
+                      break
+                    }
+                  }
+                  // 防御：部分 provider 首个工具块不携带工具名（以占位名 'tool' 登记）——
+                  // 未按名称匹配到 preparing 块时，并入最近的占位块并改名为真实工具名
+                  if (!merged) {
+                    const placeholderIdx = findPlaceholderPreparingTool(block.children)
+                    if (placeholderIdx >= 0) {
+                      const c = block.children[placeholderIdx]
+                      if (c.type === 'tool' && c.tool) {
+                        block.children[placeholderIdx] = {
+                          type: 'tool',
+                          tool: {
+                            name: sa.tool.name,
+                            input: sa.tool.input,
+                            output: '',
+                            status: 'executing',
+                            id: c.tool.id ?? sa.tool.id
+                          }
+                        }
+                        merged = true
+                      }
+                    }
+                  }
+                  if (!merged) {
+                    pushBlock(block.children, {
+                      type: 'tool',
+                      tool: {
+                        name: sa.tool.name,
+                        input: sa.tool.input,
+                        output: sa.tool.output,
+                        status: (sa.tool.status || 'executing') as ToolCall['status'],
+                        id: sa.tool.id
+                      }
+                    })
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        return {
+          ...msg,
+          content: updatedContent,
+          blocks: updatedBlocks,
+          toolCalls: updatedToolCalls.length > 0 ? updatedToolCalls : undefined,
+          reasoning_content: updatedReasoning,
+          // 瞬时字段：记录最后 chunk 时间戳，供静默指示（正在生成…）判定
+          lastChunkAt: Date.now()
+        }
+      })
+    },
+    []
+  )
+
+  // ── 开始流式监听（每个 topic 独立） ──
+
+  const startStreamListener = useCallback(
+    (topicId: number, aiMessageId: string): void => {
+      // 清理旧的监听器
+      chunkCleanupsRef.current.get(topicId)?.()
+      doneCleanupsRef.current.get(topicId)?.()
+      errorCleanupsRef.current.get(topicId)?.()
+
+      // ── 流式 chunk 合批（渲染进程 OOM 修复）──────────────────────────
+      // 此前每条 chunk IPC 到达都立即全量重渲染整条消息：ReactMarkdown 解析 + 语法高亮 +
+      // KaTeX 作用于全文，超长回复下累计 O(L²)，主线程被占满、GC 让位、IPC 事件积压，
+      // 内存峰值持续走高直至渲染进程被 OOM kill。合批把高频 chunk 排队，按间隔合并成
+      // 「一次会话更新 + 一次 React commit」——commit 数从「每条 chunk」降到 ~30/s 以内，
+      // 内容仍按到达顺序逐 chunk 追加（与既有增量/去重约定一致，不丢内容、不改语义）。
+      let pendingChunks: StreamChunk[] = []
+      let flushTimer: ReturnType<typeof setTimeout> | null = null
+      let flushIntervalMs = CHUNK_FLUSH_BASE_INTERVAL_MS
+
+      /** 排空积压 chunk：按顺序逐 chunk 应用，只做一次会话缓存写入 + 一次 React commit */
+      const applyPendingChunks = (): void => {
+        flushTimer = null
+        if (pendingChunks.length === 0) return
+        const session = sessionsRef.current.get(topicId)
+        if (!session) return
+        const batch = pendingChunks
+        pendingChunks = []
+        const startedAt = performance.now()
+        let updatedMessages = session.messages
+        for (const chunk of batch) {
+          updatedMessages = applyChunkToMessages(updatedMessages, aiMessageId, chunk, topicId)
+        }
+        sessionsRef.current.set(topicId, { ...session, messages: updatedMessages })
+        // 复用 session cache 的结果直接更新 React state
+        // （避免 setMessages(prev => ...) 中 updater 被 StrictMode 双重调用导致重复块）
+        if (currentTopicIdRef.current === topicId) {
+          setMessages(updatedMessages)
+        }
+        // 自适应间隔：正文越长单次全量渲染越贵，间隔随长度线性放大；本批处理耗时
+        // （工具/智能体密集批次）同样拉大间隔，给主线程与 GC 喘息
+        const aiMsg = updatedMessages.find((m) => m.id === aiMessageId)
+        const textLen = Math.max(aiMsg?.content?.length ?? 0, aiMsg?.reasoning_content?.length ?? 0)
+        const took = performance.now() - startedAt
+        flushIntervalMs = Math.min(
+          CHUNK_FLUSH_MAX_INTERVAL_MS,
+          Math.max(
+            CHUNK_FLUSH_BASE_INTERVAL_MS,
+            CHUNK_FLUSH_BASE_INTERVAL_MS + textLen * CHUNK_FLUSH_INTERVAL_PER_CHAR_MS,
+            took * 2
+          )
+        )
+        // 排空期间到达的新 chunk 已重新入队，立即续排
+        scheduleFlush()
+      }
+
+      /** 若当前没有待触发的排空定时器则安排一个 */
+      const scheduleFlush = (): void => {
+        if (flushTimer != null || pendingChunks.length === 0) return
+        flushTimer = setTimeout(applyPendingChunks, flushIntervalMs)
+      }
+
+      const chunkCleanup = (window as unknown as Window).api.harness.onStreamChunk(
+        (chunk: StreamChunk) => {
+          // topicId 守卫：只处理属于本话题的 chunk（Set 分发机制会使所有 handler 收到所有 chunk）
+          if (chunk.__topicId !== topicId) return
+          if (!sessionsRef.current.get(topicId)) return
+          pendingChunks.push(chunk)
+          scheduleFlush()
+        }
+      )
+      // 注销前先落完积压 chunk（done/error/删除话题等路径），避免最后一段内容丢失
+      chunkCleanupsRef.current.set(topicId, () => {
+        applyPendingChunks()
+        chunkCleanup()
+      })
+
+      const doneCleanup = (window as unknown as Window).api.harness.onStreamDone(
+        ({ topicId: doneTopicId, assistantDialogueId, userDialogueId }) => {
+          // 守卫：只处理本 topic 的完成事件（Set 分发可能导致旧 handler 收到其他 topic 的事件）
+          if (doneTopicId !== topicId) return
+
+          // 先落完积压 chunk：done 事件可能与最后一批 chunk 同 tick 到达，
+          // 若不先排空，末尾正文会丢在积压队列里（随后会话缓存被清理）
+          applyPendingChunks()
+
+          // 清理对应 topic 的加载状态
+          isLoadingMapRef.current.delete(doneTopicId)
+          syncLoadingTopics()
+
+          // 完成后清除缓存（后续切换回来直接读数据库）
+          sessionsRef.current.delete(doneTopicId)
+
+          // 清理智能体追踪
+          activeSubAgentCauseIdsRef.current.delete(doneTopicId)
+
+          // 清理流监听器（doneCleanup 自身由 startStreamListener L575-576 在下一次同 topic 启动时清理）
+          chunkCleanupsRef.current.get(doneTopicId)?.()
+          chunkCleanupsRef.current.delete(doneTopicId)
+          doneCleanupsRef.current.delete(doneTopicId)
+          errorCleanupsRef.current.get(doneTopicId)?.()
+          errorCleanupsRef.current.delete(doneTopicId)
+
+          // 刷新话题列表
+          refreshTopics().then()
+
+          // 如果是当前显示的话题，更新 UI
+          if (currentTopicIdRef.current === doneTopicId) {
+            setIsLoading(false)
+            setMessages((prev) => {
+              // 本轮落库的是两条消息：最后一条流式中的助手消息 + 它前面那条用户消息。
+              // 两条都要挂上库内行 id——删除「这一轮」时按 id 删，只给助手挂会导致
+              // 用户那条留在库里（表现为「只删掉了助手」）
+              let lastLoading = -1
+              prev.forEach((msg, i) => {
+                if (msg.loading) lastLoading = i
+              })
+              let lastUser = -1
+              for (let i = lastLoading - 1; i >= 0; i--) {
+                if (prev[i].role === 'user') {
+                  lastUser = i
+                  break
+                }
+              }
+              return prev.map((msg, i) => {
+                if (msg.loading) {
+                  return {
+                    ...msg,
+                    loading: false,
+                    dialogueId:
+                      i === lastLoading ? (assistantDialogueId ?? msg.dialogueId) : msg.dialogueId,
+                    // 结束兜底移除「正在重试」过渡块（成功路径在首个数据 chunk 时已移除；
+                    // 此处覆盖中止/重试耗尽等未产生数据的收尾）
+                    blocks: msg.blocks.filter((b) => b.type !== 'retrying')
+                  }
+                }
+                if (i === lastUser) {
+                  return { ...msg, dialogueId: userDialogueId ?? msg.dialogueId }
+                }
+                return msg
+              })
+            })
+          }
+        }
+      )
+      doneCleanupsRef.current.set(topicId, doneCleanup)
+
+      // 注册流错误监听：模型不存在 / 被禁用等启动阶段的错误
+      const errorCleanup = (window as unknown as Window).api.harness.onStreamError(
+        ({ error: errMsg, topicId: errorTopicId }) => {
+          // 守卫：只处理本 topic 的错误
+          if (errorTopicId !== topicId) return
+
+          // 先落完积压 chunk，再整体替换为错误信息，避免与最后一批正文竞态
+          applyPendingChunks()
+
+          console.error(`[Stream] Error for topic ${topicId}: ${errMsg}`)
+
+          // 更新会话缓存中的 AI 消息为错误信息
+          const session = sessionsRef.current.get(topicId)
+          if (session) {
+            const updatedMessages = session.messages.map((msg) =>
+              msg.id === aiMessageId ? { ...msg, content: errMsg, blocks: [], loading: false } : msg
+            )
+            sessionsRef.current.set(topicId, {
+              ...session,
+              messages: updatedMessages
+            })
+          }
+
+          // 如果当前正在显示此 topic，同步更新 React 状态
+          if (currentTopicIdRef.current === topicId) {
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === aiMessageId
+                  ? { ...msg, content: errMsg, blocks: [], loading: false }
+                  : msg
+              )
+            )
+          }
+        }
+      )
+      errorCleanupsRef.current.set(topicId, errorCleanup)
+    },
+    [applyChunkToMessages, syncLoadingTopics]
+  )
+
+  // ── 目标自动续跑轮监听（常驻，不随普通轮的 done 清理）──
+  // 目标轮次驱动器在主进程发起新轮时先下发 goalRound 标记 chunk：
+  // 挂载「自动续跑」用户消息 + 助手占位，并为本轮注册流监听（普通用户轮由 handleSend 挂载）。
+  useEffect(() => {
+    const cleanup = (window as unknown as Window).api.harness.onStreamChunk(
+      (chunk: StreamChunk) => {
+        if (!chunk.goalRound) return
+        const topicId = chunk.__topicId ?? 0
+        if (!topicId) return
+        const { round, objective } = chunk.goalRound
+
+        const userMessage: Message = {
+          id: `goal-user-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          role: 'user',
+          content: objective,
+          blocks: [{ type: 'goalRound', round }],
+          timestamp: Date.now()
+        }
+        const aiMessageId = `goal-ai-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+        const initialAiMessage: Message = {
+          id: aiMessageId,
+          role: 'assistant',
+          content: '',
+          blocks: [],
+          timestamp: Date.now(),
+          toolCalls: [],
+          loading: true
+        }
+
+        // 标记加载状态（停止按钮可用、侧边栏转圈）
+        isLoadingMapRef.current.set(topicId, true)
+        syncLoadingTopics()
+        if (currentTopicIdRef.current === topicId) {
+          setIsLoading(true)
+          setMessages((prev) => [...prev, userMessage, initialAiMessage])
+        }
+
+        // 更新会话缓存并启动本轮监听（后续 chunk 由本轮监听器处理）
+        const session = sessionsRef.current.get(topicId)
+        const base = session?.messages ?? []
+        sessionsRef.current.set(topicId, {
+          messages: [...base, userMessage, initialAiMessage],
+          inputValue: session?.inputValue ?? '',
+          attachments: session?.attachments ?? [],
+          sessionId: aiMessageId
+        })
+        currentSessionIdRef.current = aiMessageId
+        startStreamListener(topicId, aiMessageId)
+      }
+    )
+    return cleanup
+  }, [startStreamListener, syncLoadingTopics])
+
+  // ── Handlers ──
+
+  const handleNewHarness = useCallback((): void => {
+    saveSessionToCache()
+    setMessages([])
+    setCurrentTopicId(null)
+    currentTopicIdRef.current = null
+    messagesBelongToTopicRef.current = null
+    setInputValue('')
+    setAttachments([])
+    setIsLoading(false)
+  }, [saveSessionToCache])
+
+  const handleSelectTopic = useCallback(
+    async (topic: HarnessTopicRow): Promise<void> => {
+      // 不在加载时禁止切换，允许自由切换
+
+      // 保存当前话题状态到缓存
+      saveSessionToCache()
+
+      currentTopicIdRef.current = topic.id
+      setCurrentTopicId(topic.id)
+
+      // 先尝试从缓存恢复（进行中的会话）
+      const restored = restoreSessionFromCache(topic.id)
+      if (restored) {
+        // 从缓存恢复，同步 loading 状态
+        setIsLoading(isLoadingMapRef.current.get(topic.id) ?? false)
+        messagesBelongToTopicRef.current = topic.id
+        // 重置分页状态（修复：此前早退不重置,残留上一话题的 messagesPage/messagesHasMore,
+        // 点「加载更多」会用上一话题的页码对当前话题取数,造成漏页/重叠）
+        currentSessionIdRef.current = null
+        setMessagesPage(0)
+        setMessagesHasMore(true)
+        return
+      }
+
+      // 缓存未命中：从数据库分页加载第一页
+      currentSessionIdRef.current = null
+      setIsLoading(false)
+      setMessagesPage(0)
+      setMessagesHasMore(true)
+
+      try {
+        const result = await (window as unknown as Window).api.harness.getDialoguesByTopicPaginated(
+          topic.id,
+          0,
+          MESSAGES_PAGE_SIZE
+        )
+        const loadedMessages: Message[] = result.items.map((d) => ({
+          id: String(d.id),
+          role: d.role,
+          content: d.content,
+          blocks: d.blocks ? JSON.parse(d.blocks) : [],
+          // created_at 库列为可空（DEFAULT NOW()），缺失时退回当前时间
+          timestamp: d.created_at ? new Date(d.created_at).getTime() : Date.now(),
+          loading: false
+        }))
+        setMessages(loadedMessages)
+        setMessagesHasMore(result.hasMore)
+      } catch (err) {
+        console.error('Failed to load dialogues:', err)
+        setMessages([])
+      }
+
+      messagesBelongToTopicRef.current = topic.id
+
+      setInputValue('')
+      setAttachments([])
+    },
+    [saveSessionToCache, restoreSessionFromCache]
+  )
+
+  /**
+   * 分支：把当前话题里到 upToIndex 为止的消息复制成一个新话题。
+   *
+   * 三件事必须一起做，否则就是「点了没反应」：
+   *  1) 新话题落库（createTopic）并逐条复制消息（addDialogue）；
+   *  2) **刷新话题列表**——侧边栏读的是 topics 状态，绕过它建的话题不会出现在列表里；
+   *  3) **切到新话题**——复用 handleSelectTopic，让它走正常的加载/缓存/分页流程。
+   */
+  const handleBranchConversation = useCallback(
+    async (upToIndex: number): Promise<void> => {
+      const messageKey = 'harness-branch'
+      const slice = messages.slice(0, upToIndex + 1)
+      if (slice.length === 0) return
+      try {
+        viewMessage(messageKey, 'loading', '正在创建分支会话...')
+        const workspaceId = await getActiveWorkspaceId()
+        const firstQuestion = slice.find((m) => m.role === 'user')?.content ?? '未命名'
+        const title = `分支 · ${firstQuestion.replace(/\s+/g, ' ').trim().slice(0, 30)}`
+        const newTopicId = await (window as unknown as Window).api.harness.createTopic(
+          workspaceId,
+          title
+        )
+        for (const item of slice) {
+          await (window as unknown as Window).api.harness.addDialogue({
+            topic_id: newTopicId,
+            role: item.role,
+            content: item.content,
+            blocks: JSON.stringify(item.blocks ?? [])
+          })
+        }
+        // 先刷新列表（新话题 updated_at 最新，排在第一页首位），再从刷新结果里取出行去切换
+        const result = await (window as unknown as Window).api.harness.getAllTopicsPaginated(
+          workspaceId,
+          0,
+          TOPICS_PAGE_SIZE
+        )
+        setTopics(result.items)
+        setTopicsWorkspaceId(workspaceId)
+        setTopicsPage(0)
+        setTopicsHasMore(result.hasMore)
+        const created = result.items.find((t) => t.id === newTopicId)
+        if (created) {
+          await handleSelectTopic(created)
+          viewMessage(messageKey, 'success', `已分支到新会话（${slice.length} 条消息）`, 2)
+        } else {
+          await refreshTopics()
+          viewMessage(messageKey, 'success', '已创建分支会话，可在左侧会话列表打开', 3)
+        }
+      } catch (error) {
+        console.error('Failed to branch conversation:', error)
+        viewMessage(messageKey, 'error', '分支失败')
+      }
+    },
+    [messages, getActiveWorkspaceId, handleSelectTopic, refreshTopics, viewMessage]
+  )
+
+  const handleDeleteTopic = useCallback(
+    async (topicId: number, e?: React.MouseEvent): Promise<void> => {
+      e?.stopPropagation()
+      try {
+        // 如果删除的是正在流式输出的话题，先取消后端流
+        if (isLoadingMapRef.current.has(topicId)) {
+          ;(window as unknown as Window).api.harness.cancelStream()
+        }
+
+        await (window as unknown as Window).api.harness.deleteTopic(topicId)
+
+        // 清理该话题的所有缓存和监听器
+        sessionsRef.current.delete(topicId)
+        isLoadingMapRef.current.delete(topicId)
+        syncLoadingTopics()
+        chunkCleanupsRef.current.get(topicId)?.()
+        chunkCleanupsRef.current.delete(topicId)
+        doneCleanupsRef.current.get(topicId)?.()
+        doneCleanupsRef.current.delete(topicId)
+        errorCleanupsRef.current.get(topicId)?.()
+        errorCleanupsRef.current.delete(topicId)
+        activeSubAgentCauseIdsRef.current.delete(topicId)
+
+        if (currentTopicIdRef.current === topicId) {
+          handleNewHarness()
+        }
+        await refreshTopics()
+      } catch (err) {
+        console.error('Failed to delete topic:', err)
+      }
+    },
+    [handleNewHarness, syncLoadingTopics]
+  )
+
+  const handleLoadMoreMessages = useCallback(async (): Promise<void> => {
+    if (messagesLoadingMore || !messagesHasMore || currentTopicIdRef.current == null) return
+    try {
+      setMessagesLoadingMore(true)
+      const nextPage = messagesPage + 1
+      const result = await (window as unknown as Window).api.harness.getDialoguesByTopicPaginated(
+        currentTopicIdRef.current,
+        nextPage,
+        MESSAGES_PAGE_SIZE
+      )
+      setMessagesPage(nextPage)
+      // 更旧的消息插入到列表头部
+      const olderMessages: Message[] = result.items.map((d) => ({
+        id: String(d.id),
+        role: d.role,
+        content: d.content,
+        blocks: d.blocks ? JSON.parse(d.blocks) : [],
+        // created_at 库列为可空（DEFAULT NOW()），缺失时退回当前时间
+        timestamp: d.created_at ? new Date(d.created_at).getTime() : Date.now(),
+        loading: false
+      }))
+      setMessages((prev) => [...olderMessages, ...prev])
+      setMessagesHasMore(result.hasMore)
+    } catch (err) {
+      console.error('Failed to load more messages:', err)
+    } finally {
+      setMessagesLoadingMore(false)
+    }
+  }, [messagesPage, messagesHasMore, messagesLoadingMore])
+
+  const handleCopy = useCallback(async (text: string, id: string): Promise<void> => {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopiedId(id)
+      setTimeout(() => setCopiedId(null), 2000)
+    } catch (err) {
+      console.error('Failed to copy:', err)
+    }
+  }, [])
+
+  const handleSend = useCallback(async (): Promise<void> => {
+    if (!inputValue.trim()) return
+
+    // 新一轮问答开始：清空输入框上方的进行中任务卡片（等待模型重新规划）
+    window.dispatchEvent(new CustomEvent('harness-send-started'))
+
+    const currentAttachments = [...attachments]
+    setAttachments([])
+
+    const currentImages = currentAttachments.filter((a) => a.isImage).map((a) => a.dataUrl)
+    const currentDocuments = currentAttachments
+      .filter((a) => !a.isImage)
+      .map((a) => ({ fileName: a.fileName, filePath: a.dataUrl }))
+
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      role: 'user',
+      content: inputValue.trim(),
+      blocks: currentAttachments.map((a) =>
+        a.isImage
+          ? { type: 'image' as const, image_url: a.dataUrl }
+          : { type: 'document' as const, fileName: a.fileName }
+      ),
+      timestamp: Date.now()
+    }
+
+    setMessages((prev) => [...prev, userMessage])
+    setInputValue('')
+
+    const aiMessageId = `${Date.now()}_${currentTopicIdRef.current ?? 'new'}_${Math.random().toString(36).slice(2, 8)}`
+
+    const initialAiMessage: Message = {
+      id: aiMessageId,
+      role: 'assistant',
+      content: '',
+      blocks: [],
+      timestamp: Date.now(),
+      toolCalls: [],
+      loading: true
+    }
+
+    setMessages((prev) => [...prev, initialAiMessage])
+
+    try {
+      // 如果还没有 topic，先创建（让话题立即出现在侧边栏）
+      let topicId = currentTopicIdRef.current
+      if (!topicId) {
+        const title = userMessage.content.slice(0, 50)
+        const workspaceId = await getActiveWorkspaceId()
+        topicId = await (window as unknown as Window).api.harness.createTopic(workspaceId, title)
+        currentTopicIdRef.current = topicId
+        setCurrentTopicId(topicId)
+        refreshTopics().then()
+      }
+
+      // 记录本轮输入到全局输入历史（输入框 ↑/↓ 键切换用，localStorage 持久化，上限 100 条）
+      const sentText = inputValue.trim()
+      const inputHistory = inputHistoryRef.current
+      if (inputHistory[inputHistory.length - 1] !== sentText) {
+        inputHistory.push(sentText)
+        if (inputHistory.length > INPUT_HISTORY_MAX) {
+          inputHistory.splice(0, inputHistory.length - INPUT_HISTORY_MAX)
+        }
+        try {
+          localStorage.setItem(INPUT_HISTORY_STORAGE_KEY, JSON.stringify(inputHistory))
+        } catch {
+          // 存储失败不影响发送流程
+        }
+      }
+
+      currentSessionIdRef.current = aiMessageId
+
+      // 标记加载状态
+      isLoadingMapRef.current.set(topicId, true)
+      syncLoadingTopics()
+      setIsLoading(true)
+
+      // 启动流监听（独立于当前对话窗口，持续更新缓存）
+      startStreamListener(topicId, aiMessageId)
+
+      // 缓存当前会话——使用 messagesBelongToTopicRef 防止跨话题污染：
+      // 如果 handleSelectTopic 的异步 DB 加载尚未完成，messages 仍属于旧话题，
+      // 此时应丢弃旧消息，从新对话开始（否则会把 A 的历史混入 B 的会话缓存）
+      const sameTopic = messagesBelongToTopicRef.current === topicId
+      const baseMessages = sameTopic ? messages : ([] as Message[])
+      const currentMessages: Message[] = [...baseMessages, userMessage, initialAiMessage]
+      sessionsRef.current.set(topicId, {
+        messages: currentMessages,
+        inputValue: '',
+        attachments: [],
+        sessionId: aiMessageId
+      })
+      messagesBelongToTopicRef.current = topicId
+
+      // 同步 React 状态
+      setMessages(currentMessages)
+
+      ;(window as unknown as Window).api.harness.startMessageStream(userMessage.content, {
+        images: currentImages.length > 0 ? currentImages : undefined,
+        documents: currentDocuments.length > 0 ? currentDocuments : undefined,
+        topicId,
+        providerId: selectedProviderId ?? undefined
+      })
+    } catch (error) {
+      console.error('Error sending message:', error)
+      const errorMessage: Message = {
+        id: aiMessageId,
+        role: 'assistant',
+        content: '抱歉，发生了错误，请稍后重试。',
+        blocks: [],
+        timestamp: Date.now(),
+        loading: false
+      }
+      setMessages((prev) => prev.map((msg) => (msg.id === aiMessageId ? errorMessage : msg)))
+
+      // 清理加载状态
+      const topicId = currentTopicIdRef.current
+      if (topicId != null) {
+        isLoadingMapRef.current.delete(topicId)
+        syncLoadingTopics()
+        setIsLoading(false)
+      }
+    }
+  }, [
+    messages,
+    inputValue,
+    attachments,
+    selectedProviderId,
+    startStreamListener,
+    syncLoadingTopics
+  ])
+
+  // 用 ref 持有最新消息快照（修复：handleDeleteMessagePair 此前依赖 [messages],流式期间
+  // 每个 chunk 重建回调,作为 onDelete 传给全部消息组件击穿 React.memo → 每 chunk 全量重渲染历史消息）
+  const messagesSnapshotRef = useRef<Message[]>([])
+  messagesSnapshotRef.current = messages
+
+  const handleDeleteMessagePair = useCallback(
+    async (msgIndex: number): Promise<void> => {
+      const msgs = [...messagesSnapshotRef.current]
+      const current = msgs[msgIndex]
+      if (!current) return
+
+      const indicesToDelete: number[] = []
+
+      if (current.role === 'user') {
+        indicesToDelete.push(msgIndex)
+        if (msgIndex + 1 < msgs.length && msgs[msgIndex + 1].role === 'assistant') {
+          indicesToDelete.push(msgIndex + 1)
+        }
+      } else if (current.role === 'assistant') {
+        if (msgIndex - 1 >= 0 && msgs[msgIndex - 1].role === 'user') {
+          indicesToDelete.push(msgIndex - 1)
+        }
+        indicesToDelete.push(msgIndex)
+      }
+
+      try {
+        for (const idx of indicesToDelete) {
+          const dialogueId = resolveDialogueId(msgs[idx])
+          if (dialogueId !== null) {
+            await (window as unknown as Window).api.harness.deleteDialogue(dialogueId)
+          } else {
+            // 流式期间的消息用临时 id（Date.now() 时间戳），拿它去删会命中不存在的行
+            console.warn(`[Harness] 跳过删除：消息尚无库内 id（index=${idx}）`)
+          }
+        }
+      } catch (err) {
+        console.error('Failed to delete dialogue:', err)
+      }
+
+      const targetIds = new Set(
+        indicesToDelete.map((i) => msgs[i]?.id).filter((id): id is string => typeof id === 'string')
+      )
+      setMessages((prev) => {
+        const next = prev.filter((m) => !targetIds.has(m.id))
+        if (next.length === 0) {
+          const deletedTopicId = currentTopicIdRef.current
+          currentTopicIdRef.current = null
+          messagesBelongToTopicRef.current = null
+          setCurrentTopicId(null)
+          if (deletedTopicId != null) {
+            sessionsRef.current.delete(deletedTopicId)
+            isLoadingMapRef.current.delete(deletedTopicId)
+            syncLoadingTopics()
+          }
+        }
+        return next
+      })
+    },
+    [syncLoadingTopics]
+  )
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>): void => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault()
+        handleSend().then()
+      }
+    },
+    [handleSend]
+  )
+
+  const handleStop = useCallback((): void => {
+    ;(window as unknown as Window).api.harness.cancelStream()
+
+    const topicId = currentTopicIdRef.current
+    if (topicId != null) {
+      isLoadingMapRef.current.delete(topicId)
+      syncLoadingTopics()
+      setIsLoading(false)
+
+      // 清理流监听器
+      chunkCleanupsRef.current.get(topicId)?.()
+      chunkCleanupsRef.current.delete(topicId)
+      doneCleanupsRef.current.get(topicId)?.()
+      doneCleanupsRef.current.delete(topicId)
+      errorCleanupsRef.current.get(topicId)?.()
+      errorCleanupsRef.current.delete(topicId)
+    }
+
+    setMessages((prev) => prev.map((msg) => (msg.loading ? { ...msg, loading: false } : msg)))
+  }, [syncLoadingTopics])
+
+  const groupedProviderOptions = useMemo(() => {
+    const grouped = new Map<string, { value: number; displayName: string; model: string }[]>()
+    for (const p of providers) {
+      if (!grouped.has(p.provider)) {
+        grouped.set(p.provider, [])
+      }
+      grouped
+        .get(p.provider)!
+        .push({ value: p.id, displayName: getProviderDisplayName(p), model: p.model })
+    }
+    return Array.from(grouped.entries()).map(([provider, opts]) => ({
+      label: provider.charAt(0).toUpperCase() + provider.slice(1),
+      options: opts.map((o) => ({
+        value: o.value,
+        label: o.displayName,
+        providerType: provider
+      }))
+    }))
+  }, [providers])
+
+  return {
+    // state
+    messages,
+    inputValue,
+    setInputValue,
+    availableTools,
+    copiedId,
+    currentTopicId,
+    topics,
+    topicsWorkspaceId,
+    sidebarOpen,
+    setSidebarOpen,
+    providers,
+    selectedProviderId,
+    setSelectedProviderId,
+    attachments,
+    setAttachments,
+    isLoading,
+    loadingTopicIds,
+    // refs
+    messagesEndRef,
+    textareaRef,
+    inputHistoryRef,
+    currentSessionIdRef,
+    currentTopicIdRef,
+    // computed
+    selectedProvider,
+    modelSupportsTools,
+    modelSupportsVision,
+    groupedProviderOptions,
+    // pagination
+    topicsHasMore,
+    topicsLoading,
+    topicsRefreshing,
+    messagesHasMore,
+    messagesLoadingMore,
+    // handlers
+    handleSelectTopic,
+    handleDeleteTopic,
+    handleCopy,
+    handleSend,
+    handleNewHarness,
+    handleDeleteMessagePair,
+    handleBranchConversation,
+    handleKeyDown,
+    handleStop,
+    handleLoadMoreTopics,
+    handleLoadMoreMessages,
+    refreshTopics
+  }
+}

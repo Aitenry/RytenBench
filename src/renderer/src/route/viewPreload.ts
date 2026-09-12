@@ -3,8 +3,8 @@ import type { ComponentType } from 'react'
 /**
  * 视图 chunk 预加载
  *
- * 背景：Chat / Planner / Music 是 React.lazy 拆包页面，首次切换时才现场加载对应
- * chunk。Chat 的 chunk 含 monaco 编辑器（约 6MB），下载后还要在主线程求值，
+ * 背景：Harness / Planner / Music 是 React.lazy 拆包页面，首次切换时才现场加载对应
+ * chunk。Harness 的 chunk 含 monaco 编辑器（约 6MB），下载后还要在主线程求值，
  * 求值期间渲染进程无法绘制新画面，界面会「卡在上一页」好几秒。
  *
  * 方案：
@@ -15,13 +15,13 @@ import type { ComponentType } from 'react'
  *    而不是停留在旧页面。
  */
 
-export type LazyViewKey = 'chat' | 'planner' | 'music'
+export type LazyViewKey = 'harness' | 'planner' | 'music'
 
 type LazyModule = () => Promise<{ default: ComponentType }>
 
 /** 与 MainRoutes 中 lazy() 工厂指向同一份动态 import，加载后由模块缓存共享 */
 const factories: Record<LazyViewKey, LazyModule> = {
-  chat: () => import('../views/chat/Index'),
+  harness: () => import('../views/harness/Index'),
   planner: () => import('../views/planner/Index'),
   music: () => import('../views/music/Index')
 }
@@ -29,7 +29,7 @@ const factories: Record<LazyViewKey, LazyModule> = {
 const inflight = new Map<LazyViewKey, Promise<void>>()
 
 export function isLazyViewKey(key: string): key is LazyViewKey {
-  return key === 'chat' || key === 'planner' || key === 'music'
+  return key === 'harness' || key === 'planner' || key === 'music'
 }
 
 /** 立即加载指定视图的 chunk；幂等，重复调用共享同一次加载 */
@@ -55,7 +55,7 @@ let scheduled = false
 export function scheduleViewPreload(): void {
   if (scheduled) return
   scheduled = true
-  runWhenIdle(() => preloadView('chat'), 3000, 3000)
+  runWhenIdle(() => preloadView('harness'), 3000, 3000)
   runWhenIdle(() => preloadView('planner'), 5000, 2500)
   runWhenIdle(() => preloadView('music'), 6500, 2500)
 }

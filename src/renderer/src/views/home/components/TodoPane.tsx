@@ -1,25 +1,32 @@
-import React, { useCallback, useEffect, useState } from 'react'
-import { theme, Button, Spin, Empty, App, Tag } from 'antd'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { theme, Input, Spin, Empty, Tag, Tooltip } from 'antd'
 import {
   RiPlayLine,
   RiCheckLine,
   RiRefreshLine,
-  RiDeleteBinLine,
+  RiSettings3Line,
   RiEditLine,
   RiTimeLine,
   RiFlag2Line,
-  RiPriceTag3Line
+  RiPriceTag3Line,
+  RiLoader2Line,
+  RiErrorWarningLine
 } from '@remixicon/react'
 import dayjs from 'dayjs'
 import { Window } from '../../../../resource/types/window'
-import { useMessage } from '@renderer/hooks/useMessage'
-import TodoEditModal, { type TodoFormValues } from '@renderer/components/todo/TodoEditModal'
+import TipTapMarkdownEditor from '@renderer/components/markdown/TipTapMarkdownEditor'
 import type { TodoItem } from '@renderer/types/models'
 
 interface TodoPaneProps {
   todoId: number
-  /** 变更回调：更新后回传新数据；删除后回传 null */
-  onChanged: (todo: TodoItem | null) => void
+  /** 父级令牌：树行「⋯」改了状态/元信息后自增，页面据此重新读库 */
+  reloadToken?: number
+  /** 状态流转：与树行「⋯」共用同一套逻辑（写库 + 刷新树 + 让本页重新读库） */
+  onSetStatus: (todo: TodoItem, status: number) => void | Promise<void>
+  /** 打开属性弹窗（标题 / 截止日期 / 优先级 / 状态 / 分类） */
+  onOpenProperties: (todo: TodoItem) => void
+  /** 标题保存成功后回传，用于就地更新树行与面包屑（省一次全量刷新） */
+  onTitleSaved: (todoId: number, title: string) => void
 }
 
 const STATUS_META: Record<number, { label: string; color: string; bg: string }> = {
@@ -39,103 +46,196 @@ const PRIORITY_COLORS: Record<number, string> = {
   7: '#722ed1'
 }
 
-const TodoPane: React.FC<TodoPaneProps> = ({ todoId, onChanged }) => {
+type SaveState = 'saved' | 'saving' | 'dirty' | 'error'
+
+/** 标题 / 正文自动保存延迟（与文档编辑器同款节奏） */
+const AUTO_SAVE_DELAY = 1500
+
+const TodoPane: React.FC<TodoPaneProps> = ({
+  todoId,
+  reloadToken = 0,
+  onSetStatus,
+  onOpenProperties,
+  onTitleSaved
+}) => {
   const { token } = theme.useToken()
   const api = (window as unknown as Window).api
-  const { viewMessage } = useMessage()
-  const { modal } = App.useApp()
 
   const [todo, setTodo] = useState<TodoItem | null>(null)
   const [loading, setLoading] = useState(true)
   const [notFound, setNotFound] = useState(false)
-  const [editOpen, setEditOpen] = useState(false)
 
-  const load = useCallback(async (): Promise<void> => {
-    setLoading(true)
+  /* ── 标题 + 正文（Markdown）：与文档页同源，都在这页里内联编辑 ── */
+  const [title, setTitle] = useState('')
+  const [content, setContent] = useState('')
+  const [saveState, setSaveState] = useState<SaveState>('saved')
+  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null)
+  const titleRef = useRef('')
+  const contentRef = useRef('')
+  const lastSavedRef = useRef<{ title: string; content: string }>({ title: '', content: '' })
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const savingRef = useRef(false)
+
+  /* 父级回调走 ref，避免保存闭包过期 */
+  const onTitleSavedRef = useRef(onTitleSaved)
+  onTitleSavedRef.current = onTitleSaved
+
+  /**
+   * 立即落库（标题 + 正文一起写）。仅在确有改动时写；保存期间产生的新编辑在结束后补排一次
+   * （照搬文档编辑器的修复：否则这批编辑会被静默吞掉，界面还显示「已保存」）
+   */
+  const saveNow = useCallback(async (): Promise<void> => {
+    const nextTitle = titleRef.current
+    const nextContent = contentRef.current
+    const last = lastSavedRef.current
+    const dbTitle = nextTitle.trim() === '' ? '未命名待办' : nextTitle
+    if (nextTitle === last.title && nextContent === last.content) {
+      setSaveState('saved')
+      return
+    }
+    if (savingRef.current) return
+    savingRef.current = true
+    setSaveState('saving')
     try {
-      const result = await api.todoItems.getById(todoId)
-      if (result.length > 0) {
-        setTodo(result[0])
-      } else {
-        setNotFound(true)
-      }
+      await api.todoItems.update(todoId, { title: dbTitle, content: nextContent })
+      const titleChanged = nextTitle !== last.title
+      lastSavedRef.current = { title: nextTitle, content: nextContent }
+      setSaveState('saved')
+      setLastSavedAt(new Date())
+      // 标题变了才回传（正文每次自动保存都刷父级没必要）
+      if (titleChanged) onTitleSavedRef.current(todoId, dbTitle)
     } catch (error) {
-      console.error('Failed to load todo:', error)
-      setNotFound(true)
+      console.error('Failed to save todo:', error)
+      setSaveState('error')
     } finally {
-      setLoading(false)
+      savingRef.current = false
+      const cur = lastSavedRef.current
+      if (titleRef.current !== cur.title || contentRef.current !== cur.content) {
+        if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+        saveTimerRef.current = setTimeout(() => {
+          saveNow().then()
+        }, AUTO_SAVE_DELAY)
+      }
     }
   }, [api, todoId])
+
+  /** 有未落库编辑时先冲刷：状态流转 / 打开属性 / 重新加载前调用，避免本地编辑被库里的旧值覆盖 */
+  const flushPending = useCallback(async (): Promise<void> => {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current)
+      saveTimerRef.current = null
+    }
+    while (savingRef.current) {
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+    const last = lastSavedRef.current
+    if (titleRef.current !== last.title || contentRef.current !== last.content) {
+      await saveNow()
+    }
+  }, [saveNow])
+
+  const markChanged = useCallback((): void => {
+    const last = lastSavedRef.current
+    if (titleRef.current === last.title && contentRef.current === last.content) {
+      setSaveState('saved')
+      return
+    }
+    setSaveState('dirty')
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+    saveTimerRef.current = setTimeout(() => {
+      saveNow().then()
+    }, AUTO_SAVE_DELAY)
+  }, [saveNow])
+
+  const load = useCallback(
+    async (silent = false): Promise<void> => {
+      if (!silent) setLoading(true)
+      try {
+        const result = await api.todoItems.getById(todoId)
+        if (result.length > 0) {
+          const row = result[0]
+          setTodo(row)
+          const rowTitle = row.title ?? ''
+          const markdown = row.content ?? ''
+          titleRef.current = rowTitle
+          contentRef.current = markdown
+          lastSavedRef.current = { title: rowTitle, content: markdown }
+          setTitle(rowTitle)
+          setContent(markdown)
+          setSaveState('saved')
+        } else {
+          setNotFound(true)
+        }
+      } catch (error) {
+        console.error('Failed to load todo:', error)
+        setNotFound(true)
+      } finally {
+        if (!silent) setLoading(false)
+      }
+    },
+    [api, todoId]
+  )
 
   useEffect(() => {
     setNotFound(false)
     load().then()
   }, [load])
 
-  const updateStatus = useCallback(
-    async (status: number, message: string): Promise<void> => {
-      const messageKey = 'todo-status'
-      try {
-        viewMessage(messageKey, 'loading', '正在更新状态...')
-        await api.todoItems.update(todoId, { status })
-        viewMessage(messageKey, 'success', message, 2)
-        await load()
-        const fresh = await api.todoItems.getById(todoId)
-        onChanged(fresh.length > 0 ? fresh[0] : null)
-      } catch (error) {
-        console.error('Failed to update todo status:', error)
-        viewMessage(messageKey, 'error', '更新状态失败')
-      }
+  /* 卸载（切换待办 / 离开页面）时冲刷未保存的标题与正文 */
+  useEffect(() => {
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+      void (async () => {
+        while (savingRef.current) {
+          await new Promise((resolve) => setTimeout(resolve, 50))
+        }
+        const last = lastSavedRef.current
+        const pendingTitle = titleRef.current
+        const pendingContent = contentRef.current
+        if (pendingTitle !== last.title || pendingContent !== last.content) {
+          try {
+            await api.todoItems.update(todoId, {
+              title: pendingTitle.trim() === '' ? '未命名待办' : pendingTitle,
+              content: pendingContent
+            })
+          } catch (error) {
+            console.error('Failed to flush todo on unmount:', error)
+          }
+        }
+      })()
+    }
+  }, [api, todoId])
+
+  /* 树行「⋯」改了状态 / 元信息后由父级令牌触发重新读库：
+   *  先冲刷未保存编辑（避免用库里的旧值覆盖本地编辑），静默刷新不闪 loading */
+  const firstReloadRef = useRef(true)
+  useEffect(() => {
+    if (firstReloadRef.current) {
+      firstReloadRef.current = false
+      return
+    }
+    void (async () => {
+      await flushPending()
+      await load(true)
+    })()
+  }, [reloadToken, flushPending, load])
+
+  const handleTitleChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>): void => {
+      titleRef.current = e.target.value
+      setTitle(e.target.value)
+      markChanged()
     },
-    [api, todoId, viewMessage, load, onChanged]
+    [markChanged]
   )
 
-  const handleDelete = useCallback((): void => {
-    modal.confirm({
-      title: '确定要删除这条待办吗？',
-      content: '删除后无法恢复。',
-      okText: '删除',
-      okButtonProps: { danger: true },
-      cancelText: '取消',
-      onOk: async () => {
-        const messageKey = 'todo-delete'
-        try {
-          viewMessage(messageKey, 'loading', '正在删除...')
-          await api.todoItems.delete(todoId)
-          viewMessage(messageKey, 'success', '已删除', 2)
-          onChanged(null)
-        } catch (error) {
-          console.error('Failed to delete todo:', error)
-          viewMessage(messageKey, 'error', '删除失败')
-        }
-      }
-    })
-  }, [api, todoId, viewMessage, onChanged, modal])
-
-  const handleEditSave = useCallback(
-    async (values: TodoFormValues): Promise<void> => {
-      const messageKey = 'todo-edit'
-      try {
-        viewMessage(messageKey, 'loading', '正在保存待办...')
-        await api.todoItems.update(todoId, {
-          title: values.title,
-          description: values.description,
-          due_date: values.due_date,
-          priority: values.priority,
-          status: values.status,
-          category: values.category
-        })
-        viewMessage(messageKey, 'success', '待办已更新', 2)
-        setEditOpen(false)
-        await load()
-        const fresh = await api.todoItems.getById(todoId)
-        onChanged(fresh.length > 0 ? fresh[0] : null)
-      } catch (error) {
-        console.error('Failed to update todo:', error)
-        viewMessage(messageKey, 'error', '保存待办失败')
-      }
+  const handleContentChange = useCallback(
+    (markdown: string): void => {
+      contentRef.current = markdown
+      setContent(markdown)
+      markChanged()
     },
-    [api, todoId, viewMessage, load, onChanged]
+    [markChanged]
   )
 
   if (loading) {
@@ -163,85 +263,189 @@ const TodoPane: React.FC<TodoPaneProps> = ({ todoId, onChanged }) => {
     )
   }
 
-  const status = STATUS_META[todo.status] ?? STATUS_META[0]
-  const priorityColor = PRIORITY_COLORS[todo.priority] ?? token.colorTextTertiary
+  // status/priority 库列为可空（DEFAULT 0），null 按默认值处理
+  const status = STATUS_META[todo.status ?? 0] ?? STATUS_META[0]
+  const priorityColor = PRIORITY_COLORS[todo.priority ?? 0] ?? token.colorTextTertiary
   const overdue =
     todo.status !== 2 && todo.due_date && dayjs(todo.due_date).isBefore(dayjs(), 'day')
+
+  /** 状态切换（标题行最右，纯图标）：待办 —▶→ 进行中 —✓→ 已完成 —↻→ 待办。
+   *  用目标状态的色系做成常驻浅底圆角块——三个状态的图标形状各不相同，
+   *  靠这层底把它固定成「同一个按钮」，颜色顺带说明会推进到哪个状态 */
+  const step =
+    (todo.status ?? 0) === 0
+      ? {
+          label: '开始任务',
+          icon: RiPlayLine,
+          color: STATUS_META[1].color,
+          bg: STATUS_META[1].bg,
+          next: 1
+        }
+      : (todo.status ?? 0) === 1
+        ? {
+            label: '标记完成',
+            icon: RiCheckLine,
+            color: STATUS_META[2].color,
+            bg: STATUS_META[2].bg,
+            next: 2
+          }
+        : {
+            label: '重新激活',
+            icon: RiRefreshLine,
+            color: STATUS_META[0].color,
+            bg: STATUS_META[0].bg,
+            next: 0
+          }
+
+  const handleAdvanceStatus = async (): Promise<void> => {
+    await flushPending()
+    await onSetStatus(todo, step.next)
+  }
+
+  const handleOpenProperties = async (): Promise<void> => {
+    await flushPending()
+    // 带上刚冲刷的标题，弹窗不会显示旧值
+    onOpenProperties({ ...todo, title: titleRef.current || todo.title })
+  }
+
+  /* 底部状态条右侧的时间轴（原元信息网格：字段不变，压成一行，格式统一为 YYYY-MM-DD HH:mm） */
+  const metaParts: string[] = []
+  if (todo.created_at) metaParts.push(`创建 ${dayjs(todo.created_at).format('YYYY-MM-DD HH:mm')}`)
+  if (todo.updated_at) metaParts.push(`更新 ${dayjs(todo.updated_at).format('YYYY-MM-DD HH:mm')}`)
+  if (todo.started_at) metaParts.push(`开始 ${dayjs(todo.started_at).format('YYYY-MM-DD HH:mm')}`)
+  if (todo.completed_at)
+    metaParts.push(`完成 ${dayjs(todo.completed_at).format('YYYY-MM-DD HH:mm')}`)
+
+  const saveIndicator = ((): React.ReactNode => {
+    switch (saveState) {
+      case 'saving':
+        return (
+          <>
+            <RiLoader2Line size={13} className="spin-anim" style={{ color: token.colorPrimary }} />
+            <span style={{ color: token.colorTextSecondary }}>保存中…</span>
+          </>
+        )
+      case 'dirty':
+        return (
+          <>
+            <RiEditLine size={13} style={{ color: token.colorTextTertiary }} />
+            <span style={{ color: token.colorTextTertiary }}>未保存</span>
+          </>
+        )
+      case 'error':
+        return (
+          <>
+            <RiErrorWarningLine size={13} style={{ color: token.colorError }} />
+            <span style={{ color: token.colorError }}>保存失败</span>
+          </>
+        )
+      default:
+        return (
+          <>
+            <RiCheckLine size={13} style={{ color: token.colorSuccess }} />
+            <span style={{ color: token.colorTextTertiary }}>
+              已保存{lastSavedAt ? ` ${dayjs(lastSavedAt).format('HH:mm:ss')}` : ''}
+            </span>
+          </>
+        )
+    }
+  })()
 
   return (
     <PaneShell>
       <div
-        className="custom-scrollbar"
         style={{
-          flex: 1,
-          overflowY: 'auto',
-          padding: '32px 48px 48px',
+          display: 'flex',
+          flexDirection: 'column',
+          minHeight: 0,
+          height: '100%',
           maxWidth: 876,
           width: '100%',
           margin: '0 auto'
         }}
       >
-        {/* 标题 */}
-        <div
-          style={{
-            fontSize: 24,
-            fontWeight: 700,
-            lineHeight: 1.4,
-            color: token.colorText,
-            textDecoration: todo.status === 2 ? 'line-through' : 'none',
-            textDecorationColor: token.colorTextTertiary,
-            marginBottom: 14
-          }}
-        >
-          {todo.title}
-        </div>
+        {/* 固定头部：标题（可编辑）+ 状态切换 + 状态标签 + 属性（不随正文滚动） */}
+        <div style={{ padding: '17px 17px 0', flexShrink: 0 }}>
+          {/* 标题行：标题直接改，最右是纯图标的状态切换 */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Input
+              variant="borderless"
+              value={title}
+              onChange={handleTitleChange}
+              placeholder="未命名待办"
+              maxLength={120}
+              style={{
+                flex: 1,
+                minWidth: 0,
+                fontSize: 24,
+                fontWeight: 700,
+                padding: 0,
+                letterSpacing: -0.01,
+                textDecoration: todo.status === 2 ? 'line-through' : 'none',
+                textDecorationColor: token.colorTextTertiary
+              }}
+            />
+            <Tooltip title={step.label} placement="bottomRight">
+              <button
+                onClick={() => {
+                  void handleAdvanceStatus()
+                }}
+                style={{
+                  width: 30,
+                  height: 30,
+                  flexShrink: 0,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  border: 'none',
+                  borderRadius: 8,
+                  background: step.bg,
+                  color: step.color,
+                  cursor: 'pointer',
+                  transition: 'background 0.15s'
+                }}
+                onMouseEnter={(e) => {
+                  // 8 位 hex 末两位是 alpha：悬停把同色底提亮一档
+                  e.currentTarget.style.background = `${step.color}2e`
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = step.bg
+                }}
+              >
+                <step.icon size={18} />
+              </button>
+            </Tooltip>
+          </div>
 
-        {/* 状态标签行 */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            flexWrap: 'wrap',
-            marginBottom: 18
-          }}
-        >
-          <Tag
-            bordered={false}
+          {/* 状态标签行 */}
+          <div
             style={{
-              margin: 0,
-              color: status.color,
-              background: status.bg,
-              fontSize: 12,
-              padding: '1px 10px',
-              borderRadius: 10
-            }}
-          >
-            {status.label}
-          </Tag>
-          <Tag
-            bordered={false}
-            style={{
-              margin: 0,
-              color: priorityColor,
-              background: token.colorFillTertiary,
-              fontSize: 12,
-              padding: '1px 10px',
-              borderRadius: 10,
               display: 'flex',
               alignItems: 'center',
-              gap: 5
+              gap: 8,
+              flexWrap: 'wrap',
+              marginTop: 8,
+              marginBottom: 0
             }}
           >
-            <RiFlag2Line size={12} />
-            优先级 P{todo.priority}
-          </Tag>
-          {todo.category && (
             <Tag
-              bordered={false}
+              variant="filled"
               style={{
                 margin: 0,
-                color: token.colorTextSecondary,
+                color: status.color,
+                background: status.bg,
+                fontSize: 12,
+                padding: '1px 10px',
+                borderRadius: 10
+              }}
+            >
+              {status.label}
+            </Tag>
+            <Tag
+              variant="filled"
+              style={{
+                margin: 0,
+                color: priorityColor,
                 background: token.colorFillTertiary,
                 fontSize: 12,
                 padding: '1px 10px',
@@ -251,128 +455,134 @@ const TodoPane: React.FC<TodoPaneProps> = ({ todoId, onChanged }) => {
                 gap: 5
               }}
             >
-              <RiPriceTag3Line size={12} />
-              {todo.category}
+              <RiFlag2Line size={12} />
+              优先级 P{todo.priority}
             </Tag>
-          )}
-          {todo.due_date && (
-            <Tag
-              bordered={false}
+            {todo.category && (
+              <Tag
+                variant="filled"
+                style={{
+                  margin: 0,
+                  color: token.colorTextSecondary,
+                  background: token.colorFillTertiary,
+                  fontSize: 12,
+                  padding: '1px 10px',
+                  borderRadius: 10,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 5
+                }}
+              >
+                <RiPriceTag3Line size={12} />
+                {todo.category}
+              </Tag>
+            )}
+            {todo.due_date && (
+              <Tag
+                variant="filled"
+                style={{
+                  margin: 0,
+                  color: overdue ? token.colorError : token.colorTextSecondary,
+                  background: overdue ? token.colorErrorBg : token.colorFillTertiary,
+                  fontSize: 12,
+                  padding: '1px 10px',
+                  borderRadius: 10,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 5
+                }}
+              >
+                <RiTimeLine size={12} />
+                {overdue ? `已逾期 · ` : '截止 '}
+                {dayjs(todo.due_date).format('YYYY-MM-DD')}
+              </Tag>
+            )}
+            {/* 属性：标题 / 截止日期 / 优先级 / 状态 / 分类（与文档页的「属性」同位）。
+                做成描边小胶囊：同排的标签是信息（实底），它是入口（描边） */}
+            <span
+              onClick={() => {
+                void handleOpenProperties()
+              }}
               style={{
-                margin: 0,
-                color: overdue ? token.colorError : token.colorTextSecondary,
-                background: overdue ? token.colorErrorBg : token.colorFillTertiary,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                cursor: 'pointer',
                 fontSize: 12,
                 padding: '1px 10px',
                 borderRadius: 10,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 5
+                border: `1px solid ${token.colorBorderSecondary}`,
+                color: token.colorTextTertiary,
+                background: 'transparent',
+                transition: 'all 0.15s'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = token.colorFillTertiary
+                e.currentTarget.style.color = token.colorTextSecondary
+                e.currentTarget.style.borderColor = token.colorTextTertiary
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'transparent'
+                e.currentTarget.style.color = token.colorTextTertiary
+                e.currentTarget.style.borderColor = token.colorBorderSecondary
               }}
             >
-              <RiTimeLine size={12} />
-              {overdue ? `已逾期 · ` : '截止 '}
-              {dayjs(todo.due_date).format('YYYY-MM-DD')}
-            </Tag>
-          )}
-        </div>
-
-        {/* 描述 */}
-        {todo.description && (
-          <div
-            style={{
-              padding: '16px 18px',
-              borderRadius: 10,
-              background: token.colorFillQuaternary,
-              fontSize: 14,
-              lineHeight: 1.8,
-              color: token.colorText,
-              whiteSpace: 'pre-wrap',
-              marginBottom: 20
-            }}
-          >
-            {todo.description}
+              <RiSettings3Line size={12} />
+              属性
+            </span>
           </div>
-        )}
-
-        {/* 操作 */}
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 28 }}>
-          {todo.status === 0 && (
-            <Button
-              type="primary"
-              icon={<RiPlayLine size={14} />}
-              onClick={() => updateStatus(1, '已标记为进行中')}
-            >
-              开始任务
-            </Button>
-          )}
-          {todo.status !== 2 && (
-            <Button icon={<RiCheckLine size={14} />} onClick={() => updateStatus(2, '已完成')}>
-              标记完成
-            </Button>
-          )}
-          {todo.status === 2 && (
-            <Button
-              icon={<RiRefreshLine size={14} />}
-              onClick={() => updateStatus(0, '已重新激活')}
-            >
-              重新激活
-            </Button>
-          )}
-          <Button icon={<RiEditLine size={14} />} onClick={() => setEditOpen(true)}>
-            编辑
-          </Button>
-          <Button danger icon={<RiDeleteBinLine size={14} />} onClick={handleDelete}>
-            删除
-          </Button>
         </div>
 
-        {/* 元信息 */}
+        {/* 正文内容：与文档同款 TipTap Markdown 编辑器，占满剩余高度并自带滚动 */}
         <div
           style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
-            gap: '10px 24px',
-            paddingTop: 16,
-            borderTop: `1px solid ${token.colorBorderSecondary}`
+            flex: 1,
+            minHeight: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            marginTop: 18,
+            ['--ed-body-pad-top' as string]: '8px'
           }}
         >
-          <Meta
-            token={token}
-            label="创建时间"
-            value={dayjs(todo.created_at).format('YYYY-MM-DD HH:mm')}
+          <TipTapMarkdownEditor
+            key={todoId}
+            value={content}
+            onChange={handleContentChange}
+            onSave={() => {
+              void saveNow()
+            }}
+            placeholder="写点什么…支持 Markdown（# 标题、- 列表、``` 代码块）"
           />
-          <Meta
-            token={token}
-            label="更新时间"
-            value={dayjs(todo.updated_at).format('YYYY-MM-DD HH:mm')}
-          />
-          {todo.started_at && (
-            <Meta
-              token={token}
-              label="开始时间"
-              value={dayjs(todo.started_at).format('YYYY-MM-DD HH:mm')}
-            />
-          )}
-          {todo.completed_at && (
-            <Meta
-              token={token}
-              label="完成时间"
-              value={dayjs(todo.completed_at).format('YYYY-MM-DD HH:mm')}
-            />
-          )}
+        </div>
+
+        {/* 底部状态条：保存状态 + 时间信息 */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            height: 32,
+            padding: '0 16px',
+            flexShrink: 0,
+            borderTop: `1px solid ${token.colorBorderSecondary}`,
+            fontSize: 12
+          }}
+        >
+          {saveIndicator}
+          <span style={{ flex: 1 }} />
+          <span
+            style={{
+              fontSize: 11,
+              color: token.colorTextTertiary,
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis'
+            }}
+          >
+            {metaParts.join(' · ')}
+          </span>
         </div>
       </div>
-
-      <TodoEditModal
-        editModalOpen={editOpen}
-        currentTodo={todo}
-        onEditClose={() => setEditOpen(false)}
-        onEditSave={handleEditSave}
-        addModalOpen={false}
-        onAddClose={() => {}}
-        onAddSave={async () => {}}
-      />
     </PaneShell>
   )
 }
@@ -393,17 +603,6 @@ const PaneShell: React.FC<{
     }}
   >
     {children}
-  </div>
-)
-
-const Meta: React.FC<{
-  token: ReturnType<typeof theme.useToken>['token']
-  label: string
-  value: string
-}> = ({ token, label, value }) => (
-  <div>
-    <div style={{ fontSize: 12, color: token.colorTextTertiary, marginBottom: 2 }}>{label}</div>
-    <div style={{ fontSize: 13.5, color: token.colorText }}>{value}</div>
   </div>
 )
 
