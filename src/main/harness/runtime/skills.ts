@@ -64,7 +64,9 @@ export function loadSkills(options: SkillLoaderOptions): SkillInfo[] {
           name: name ?? entry.name,
           description: description ?? '',
           content:
-            body.length > MAX_SKILL_CHARS ? body.slice(0, MAX_SKILL_CHARS) + '\n...（截断）' : body
+            body.length > MAX_SKILL_CHARS
+              ? body.slice(0, MAX_SKILL_CHARS) + '\n... (truncated)'
+              : body
         })
       } catch {
         // SKILL.md 不可读，跳过
@@ -79,13 +81,13 @@ export function loadSkills(options: SkillLoaderOptions): SkillInfo[] {
 /** 构建技能段系统提示词 */
 export function buildSkillsPromptSection(skills: SkillInfo[]): string {
   if (skills.length === 0) return ''
-  let prompt = `\n\n## 可用技能\n以下是你可以使用的技能。当用户请求涉及这些能力时，按技能说明执行：\n`
+  let prompt = `\n\n## Available Skills\nSkills you can use. When a user request falls within one of these skills, follow that skill's instructions:\n`
   let total = 0
   for (const skill of skills) {
-    const block = `\n### ${skill.name}（${skill.id}）\n${skill.description ? `描述：${skill.description}\n` : ''}${skill.content}`
+    const block = `\n### ${skill.name} (${skill.id})\n${skill.description ? `Description: ${skill.description}\n` : ''}${skill.content}`
     total += block.length
     if (total > MAX_TOTAL_CHARS) {
-      prompt += `\n（技能过多，其余略）`
+      prompt += `\n(too many skills; the remaining ones are omitted)`
       break
     }
     prompt += block

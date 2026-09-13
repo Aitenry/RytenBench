@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { Button, Modal, Popover, theme } from 'antd'
 import { RiAiAgentLine } from '@remixicon/react'
+import type { TFunction } from 'i18next'
+import { useTranslation } from '@renderer/i18n'
 import type { Window } from '../../../../resource/types/window'
 import type { SubagentSessionRow } from '../../../../../main/harness/runtime/subagent-sessions'
 
@@ -14,12 +16,18 @@ import type { SubagentSessionRow } from '../../../../../main/harness/runtime/sub
  *   无需手动刷新按钮。
  */
 
-/** 状态徽标文案与颜色 */
-const statusMeta = (row: SubagentSessionRow): { text: string; color: string } => {
-  if (row.status === 'running') return { text: '进行中', color: '#1677ff' }
-  if (row.lastStatus === 'failed') return { text: '失败', color: '#ef4444' }
-  if (row.lastStatus === 'killed') return { text: '已停止', color: '#8c8c8c' }
-  return { text: '已完成', color: '#52c41a' }
+/** 状态徽标文案与颜色（非组件函数：译文由调用方传入 t） */
+const statusMeta = (t: TFunction, row: SubagentSessionRow): { text: string; color: string } => {
+  if (row.status === 'running') {
+    return { text: t('harness.backgroundAgents.running'), color: '#1677ff' }
+  }
+  if (row.lastStatus === 'failed') {
+    return { text: t('harness.backgroundAgents.failed'), color: '#ef4444' }
+  }
+  if (row.lastStatus === 'killed') {
+    return { text: t('harness.backgroundAgents.killed'), color: '#8c8c8c' }
+  }
+  return { text: t('harness.backgroundAgents.completed'), color: '#52c41a' }
 }
 
 /** 会话输出视图（agentOutput / 后端推送同构） */
@@ -36,6 +44,7 @@ interface BackgroundAgentsButtonProps {
 
 const BackgroundAgentsButton: React.FC<BackgroundAgentsButtonProps> = ({ currentTopicId }) => {
   const { token } = theme.useToken()
+  const { t } = useTranslation()
   const [agents, setAgents] = useState<SubagentSessionRow[]>([])
   const [popoverOpen, setPopoverOpen] = useState(false)
   const [viewing, setViewing] = useState<SubagentSessionRow | null>(null)
@@ -117,13 +126,17 @@ const BackgroundAgentsButton: React.FC<BackgroundAgentsButtonProps> = ({ current
   ).length
   const failedCount = agents.filter((a) => a.status === 'idle' && a.lastStatus === 'failed').length
   const killedCount = agents.filter((a) => a.status === 'idle' && a.lastStatus === 'killed').length
-  if (runningCount > 0) countParts.push(`${runningCount} 进行中`)
-  if (completedCount > 0) countParts.push(`${completedCount} 已完成`)
-  if (failedCount > 0) countParts.push(`${failedCount} 失败`)
-  if (killedCount > 0) countParts.push(`${killedCount} 已停止`)
-  const summaryText = countParts.join('，')
+  if (runningCount > 0)
+    countParts.push(t('harness.backgroundAgents.runningCount', { count: runningCount }))
+  if (completedCount > 0)
+    countParts.push(t('harness.backgroundAgents.completedCount', { count: completedCount }))
+  if (failedCount > 0)
+    countParts.push(t('harness.backgroundAgents.failedCount', { count: failedCount }))
+  if (killedCount > 0)
+    countParts.push(t('harness.backgroundAgents.killedCount', { count: killedCount }))
+  const summaryText = countParts.join(t('harness.backgroundAgents.summarySeparator'))
 
-  const viewingMeta = viewing ? statusMeta(viewing) : null
+  const viewingMeta = viewing ? statusMeta(t, viewing) : null
 
   // 没有任何后台子代理任务：整块隐藏（顶部栏不占位）
   if (agents.length === 0) return null
@@ -131,7 +144,7 @@ const BackgroundAgentsButton: React.FC<BackgroundAgentsButtonProps> = ({ current
   const listContent = (
     <div className="min-w-72 max-w-96 py-1">
       {agents.map((agent) => {
-        const meta = statusMeta(agent)
+        const meta = statusMeta(t, agent)
         return (
           <button
             key={agent.id}
@@ -216,7 +229,7 @@ const BackgroundAgentsButton: React.FC<BackgroundAgentsButtonProps> = ({ current
                 className="shrink-0 rounded pl-2 text-sm"
                 style={{ color: token.colorTextSecondary }}
               >
-                任务
+                {t('harness.backgroundAgents.promptLabel')}
               </span>
               {viewingMeta ? (
                 <span
@@ -247,7 +260,10 @@ const BackgroundAgentsButton: React.FC<BackgroundAgentsButtonProps> = ({ current
               border: `1px solid ${token.colorBorderSecondary}`
             }}
           >
-            {output?.text || (viewing?.status === 'running' ? '正在生成…' : '暂无输出')}
+            {output?.text ||
+              (viewing?.status === 'running'
+                ? t('harness.backgroundAgents.generating')
+                : t('harness.backgroundAgents.noOutput'))}
           </pre>
         </div>
       </Modal>

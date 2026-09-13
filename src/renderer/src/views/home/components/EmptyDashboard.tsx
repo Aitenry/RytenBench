@@ -8,6 +8,7 @@ import {
   RiTimeLine
 } from '@remixicon/react'
 import dayjs from 'dayjs'
+import { useTranslation } from '@renderer/i18n'
 import type { DocListItem, TodoItem as TodoItemRow, WikiRow } from '@renderer/types/models'
 
 interface EmptyDashboardProps {
@@ -32,9 +33,17 @@ const EmptyDashboard: React.FC<EmptyDashboardProps> = ({
   onCreateWiki
 }) => {
   const { token } = theme.useToken()
+  const { t } = useTranslation()
 
   const hour = new Date().getHours()
-  const greeting = hour < 6 ? '夜深了' : hour < 12 ? '早上好' : hour < 18 ? '下午好' : '晚上好'
+  const greeting =
+    hour < 6
+      ? t('home.dashboard.greetingNight')
+      : hour < 12
+        ? t('home.dashboard.greetingMorning')
+        : hour < 18
+          ? t('home.dashboard.greetingAfternoon')
+          : t('home.dashboard.greetingEvening')
 
   const pendingTodos = useMemo(() => {
     return todos
@@ -119,12 +128,12 @@ const EmptyDashboard: React.FC<EmptyDashboardProps> = ({
         <div
           style={{ fontSize: 26, fontWeight: 700, color: token.colorText, letterSpacing: -0.01 }}
         >
-          {greeting}，欢迎回来
+          {t('home.dashboard.welcomeBack', { greeting })}
         </div>
         <div
           style={{ fontSize: 13, color: token.colorTextTertiary, marginTop: 6, marginBottom: 24 }}
         >
-          {dayjs().format('YYYY 年 M 月 D 日 dddd')} · 从左侧文档树选择内容，或快速新建开始记录
+          {dayjs().format(t('home.dashboard.dateFormat'))} · {t('home.dashboard.subtitle')}
         </div>
 
         {/* 统计 */}
@@ -133,22 +142,26 @@ const EmptyDashboard: React.FC<EmptyDashboardProps> = ({
             <RiFileTextLine size={15} />,
             token.colorPrimary,
             docs.length,
-            '文档',
-            `最近更新 ${docs.length > 0 ? dayjs(recentDocs[0].updated_at).format('MM-DD') : '—'}`
+            t('home.term.doc'),
+            t('home.dashboard.recentUpdate', {
+              date: docs.length > 0 ? dayjs(recentDocs[0].updated_at).format('MM-DD') : '—'
+            })
           )}
           {statBlock(
             <RiCheckboxCircleLine size={15} />,
             '#fa8c16',
             todos.filter((t) => t.status !== 2).length,
-            '未完成待办',
-            overdueCount > 0 ? `${overdueCount} 项已逾期` : '无逾期'
+            t('home.dashboard.pendingTodos'),
+            overdueCount > 0
+              ? t('home.dashboard.overdueCount', { count: overdueCount })
+              : t('home.dashboard.noOverdue')
           )}
           {statBlock(
             <RiBook2Line size={15} />,
             '#722ed1',
             wikis.length,
-            '知识库',
-            '知识沉淀与归档'
+            t('home.term.wiki'),
+            t('home.dashboard.wikiSubtitle')
           )}
         </div>
 
@@ -157,19 +170,19 @@ const EmptyDashboard: React.FC<EmptyDashboardProps> = ({
           <QuickCreate
             token={token}
             icon={<RiFileTextLine size={15} />}
-            label="新建文档"
+            label={t('home.doc.create')}
             onClick={onCreateDoc}
           />
           <QuickCreate
             token={token}
             icon={<RiCheckboxCircleLine size={15} />}
-            label="新建待办"
+            label={t('home.todo.create')}
             onClick={onCreateTodo}
           />
           <QuickCreate
             token={token}
             icon={<RiBook2Line size={15} />}
-            label="新建知识库"
+            label={t('home.wiki.create')}
             onClick={onCreateWiki}
           />
         </div>
@@ -177,9 +190,13 @@ const EmptyDashboard: React.FC<EmptyDashboardProps> = ({
         {/* 两栏：待办 / 最近文档 */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
           <section>
-            <SectionTitle token={token} label="待办事项" count={pendingTodos.length} />
+            <SectionTitle
+              token={token}
+              label={t('home.dashboard.todoSection')}
+              count={pendingTodos.length}
+            />
             {pendingTodos.length === 0 ? (
-              <EmptyHint token={token} text="暂无未完成的待办" />
+              <EmptyHint token={token} text={t('home.dashboard.noPendingTodos')} />
             ) : (
               pendingTodos.map((t) => {
                 const overdue = t.due_date && dayjs(t.due_date).isBefore(dayjs(), 'day')
@@ -254,9 +271,13 @@ const EmptyDashboard: React.FC<EmptyDashboardProps> = ({
           </section>
 
           <section>
-            <SectionTitle token={token} label="最近文档" count={recentDocs.length} />
+            <SectionTitle
+              token={token}
+              label={t('home.dashboard.recentDocsSection')}
+              count={recentDocs.length}
+            />
             {recentDocs.length === 0 ? (
-              <EmptyHint token={token} text="暂无文档，点击「新建文档」开始写作" />
+              <EmptyHint token={token} text={t('home.dashboard.noDocsHint')} />
             ) : (
               recentDocs.map((d) => (
                 <div

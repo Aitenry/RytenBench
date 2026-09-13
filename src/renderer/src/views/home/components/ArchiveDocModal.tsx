@@ -3,6 +3,7 @@ import { Modal, Spin, Empty, theme } from 'antd'
 import { RiBook2Line, RiFolder2Line } from '@remixicon/react'
 import { Window } from '../../../../resource/types/window'
 import { useMessage } from '@renderer/hooks/useMessage'
+import { useTranslation } from '@renderer/i18n'
 import type { DocListItem, WikiRow, WikiDirectoryRow } from '@renderer/types/models'
 
 interface ArchiveDocModalProps {
@@ -26,6 +27,7 @@ const ArchiveDocModal: React.FC<ArchiveDocModalProps> = ({
   const { token } = theme.useToken()
   const api = (window as unknown as Window).api
   const { viewMessage } = useMessage()
+  const { t } = useTranslation()
 
   const itemStyle = (active: boolean): React.CSSProperties => ({
     display: 'flex',
@@ -81,25 +83,25 @@ const ArchiveDocModal: React.FC<ArchiveDocModalProps> = ({
     if (!doc || selectedDirId == null) return
     const messageKey = 'archive-doc'
     try {
-      viewMessage(messageKey, 'loading', '正在归档文档...')
+      viewMessage(messageKey, 'loading', t('home.archive.archiving'))
       await api.wikis.addNoteToDirectory(selectedDirId, doc.id)
-      viewMessage(messageKey, 'success', '文档归档成功！', 2)
+      viewMessage(messageKey, 'success', t('home.archive.success'), 2)
       onArchived()
       onClose()
     } catch (error) {
       console.error('Failed to archive doc:', error)
-      viewMessage(messageKey, 'error', '归档文档失败')
+      viewMessage(messageKey, 'error', t('home.archive.failed'))
     }
-  }, [doc, selectedDirId, api, viewMessage, onArchived, onClose])
+  }, [doc, selectedDirId, api, viewMessage, onArchived, onClose, t])
 
   return (
     <Modal
-      title={`归档「${doc?.title ?? ''}」到知识库目录`}
+      title={t('home.archive.title', { name: doc?.title ?? '' })}
       open={open}
       onCancel={onClose}
       onOk={handleArchive}
-      okText="归档"
-      cancelText="取消"
+      okText={t('home.archive.ok')}
+      cancelText={t('common.action.cancel')}
       okButtonProps={{ disabled: selectedDirId == null }}
       width={520}
     >
@@ -114,9 +116,11 @@ const ArchiveDocModal: React.FC<ArchiveDocModalProps> = ({
             paddingRight: 8
           }}
         >
-          <div style={{ fontWeight: 600, marginBottom: 8, fontSize: 13 }}>1. 选择知识库</div>
+          <div style={{ fontWeight: 600, marginBottom: 8, fontSize: 13 }}>
+            {t('home.archive.stepWiki')}
+          </div>
           {wikis.length === 0 ? (
-            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无知识库" />
+            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('home.wiki.empty')} />
           ) : (
             wikis.map((wiki) => {
               const active = selectedWikiId === wiki.id
@@ -145,15 +149,21 @@ const ArchiveDocModal: React.FC<ArchiveDocModalProps> = ({
         </div>
         {/* 目录列表 */}
         <div className="custom-scrollbar" style={{ flex: 1, overflowY: 'auto' }}>
-          <div style={{ fontWeight: 600, marginBottom: 8, fontSize: 13 }}>2. 选择目录</div>
+          <div style={{ fontWeight: 600, marginBottom: 8, fontSize: 13 }}>
+            {t('home.archive.stepDirectory')}
+          </div>
           {selectedWikiId == null ? (
-            <div style={{ color: token.colorTextTertiary, fontSize: 12.5 }}>请先选择知识库</div>
+            <div style={{ color: token.colorTextTertiary, fontSize: 12.5 }}>
+              {t('home.archive.selectWikiFirst')}
+            </div>
           ) : dirsLoading ? (
             <div style={{ display: 'flex', justifyContent: 'center', padding: 24 }}>
               <Spin size="small" />
             </div>
           ) : directories.length === 0 ? (
-            <div style={{ color: token.colorTextTertiary, fontSize: 12.5 }}>该知识库暂无目录</div>
+            <div style={{ color: token.colorTextTertiary, fontSize: 12.5 }}>
+              {t('home.archive.noDirectories')}
+            </div>
           ) : (
             directories.map((dir) => {
               const active = selectedDirId === dir.id

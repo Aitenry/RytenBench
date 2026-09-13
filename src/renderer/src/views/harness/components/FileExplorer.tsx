@@ -7,6 +7,7 @@ import {
   RiRefreshLine
 } from '@remixicon/react'
 import type { Window } from '../../../../resource/types/window'
+import { useTranslation } from '@renderer/i18n'
 
 export interface FileEntry {
   name: string
@@ -43,6 +44,7 @@ const FileExplorer: React.FC<FileExplorerProps> = ({
 }) => {
   const [rootNodes, setRootNodes] = useState<TreeNode[]>([])
   const [loading, setLoading] = useState(false)
+  const { t } = useTranslation()
 
   const fetchDir = useCallback(async (dirPath: string): Promise<FileEntry[]> => {
     const win = window as unknown as Window
@@ -201,12 +203,12 @@ const FileExplorer: React.FC<FileExplorerProps> = ({
           className="text-xs font-medium"
           style={{ color: colorTextSecondary, letterSpacing: '0.3px' }}
         >
-          资源编辑器
+          {t('harness.fileExplorer.title')}
         </span>
         <button
           className="flex items-center justify-center w-6 h-6 rounded-md hover:opacity-70 transition-opacity"
           onClick={loadRoot}
-          title="Refresh"
+          title={t('harness.fileExplorer.refresh')}
           style={{ color: colorTextTertiary }}
         >
           <RiRefreshLine size={14} />
@@ -217,11 +219,11 @@ const FileExplorer: React.FC<FileExplorerProps> = ({
       <div className="flex-1 overflow-y-auto py-1 history-scrollbar">
         {loading ? (
           <p className="text-xs text-center py-6" style={{ color: colorTextTertiary }}>
-            Loading...
+            {t('harness.fileExplorer.loading')}
           </p>
         ) : rootNodes.length === 0 ? (
           <p className="text-xs text-center py-6" style={{ color: colorTextTertiary }}>
-            Empty folder
+            {t('harness.fileExplorer.empty')}
           </p>
         ) : (
           rootNodes.map((node) => renderNode(node, 0))

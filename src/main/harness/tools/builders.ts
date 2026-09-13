@@ -28,62 +28,65 @@ export const toolBuilders: Record<string, ToolFactory> = {
 
 // ============================================================================
 // Tool Info — 前端下拉列表
+// 注意：这里的 label/description 只是**兜底**，真正下发前会由
+// ipc/misc.ts 按当前界面语言用 mainMessages().tools 覆盖（未收录的名字才用这里的值）。
+// 它们与各工具给模型看的 description 是两回事，改这里不影响模型行为。
 // ============================================================================
 
 export const availableTools: ToolInfo[] = [
   {
     name: 'get_weather',
-    label: '天气查询',
-    description: '查询当前实况和未来天气预报',
+    label: 'Weather',
+    description: 'Current conditions and forecast',
     icon: 'RiSunCloudyLine',
     color: '#1677ff'
   },
   {
     name: 'get_time',
-    label: '时间查询',
-    description: '获取当前日期和时间',
+    label: 'Time',
+    description: 'Current date and time',
     icon: 'RiTimeLine',
     color: '#52c41a'
   },
   {
     name: 'manage_todos',
-    label: '待办管理',
-    description: '查看、创建、更新和删除待办事项',
+    label: 'To-dos',
+    description: 'View, create, update and delete to-dos',
     icon: 'RiListCheck3',
     color: '#fa8c16'
   },
   {
     name: 'manage_docs',
-    label: '文档管理',
-    description: '搜索、查看、创建、编辑和删除文档',
+    label: 'Documents',
+    description: 'Search, view, create, edit and delete documents',
     icon: 'RiFileSearchLine',
     color: '#722ed1'
   },
   {
     name: 'manage_wikis',
-    label: '知识库',
-    description: '浏览和管理知识库、目录、文档归档',
+    label: 'Knowledge base',
+    description: 'Browse and manage knowledge bases, folders and archived documents',
     icon: 'RiBook2Line',
     color: '#13c2c2'
   },
   {
     name: 'search_graph',
-    label: '图谱搜索',
-    description: '在知识图谱中搜索实体',
+    label: 'Graph search',
+    description: 'Search entities in the knowledge graph',
     icon: 'RiMindMap',
     color: '#eb2f96'
   },
   {
     name: 'manage_planner',
-    label: '规划管理',
-    description: '查看甘特图和任务树结构',
+    label: 'Planner',
+    description: 'Inspect the Gantt chart and task tree',
     icon: 'RiBarChartHorizontalLine',
     color: '#2f54eb'
   },
   {
     name: 'manage_music',
-    label: '音乐管理',
-    description: '查看歌单和曲目',
+    label: 'Music',
+    description: 'Browse playlists and tracks',
     icon: 'RiPlayListLine',
     color: '#a0d911'
   }

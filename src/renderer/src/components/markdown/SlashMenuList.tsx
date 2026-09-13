@@ -1,4 +1,5 @@
 import React, { forwardRef, useEffect, useImperativeHandle, useState } from 'react'
+import { useTranslation } from '@renderer/i18n'
 import type { SlashMenuItemDef, SlashMenuTheme } from './slash-menu'
 
 export interface SlashMenuListProps {
@@ -16,6 +17,7 @@ export interface SlashMenuListHandle {
  */
 const SlashMenuList = forwardRef<SlashMenuListHandle, SlashMenuListProps>(
   ({ items, theme, command }, ref) => {
+    const { t } = useTranslation()
     const [index, setIndex] = useState(0)
 
     /* items 变化（查询过滤）时重置选中项 */
@@ -60,7 +62,7 @@ const SlashMenuList = forwardRef<SlashMenuListHandle, SlashMenuListProps>(
     return (
       <div className="slash-menu custom-scrollbar" style={cssVars}>
         {items.length === 0 ? (
-          <div className="slash-empty">无匹配块</div>
+          <div className="slash-empty">{t('markdown.slash.noMatch')}</div>
         ) : (
           items.slice(0, 8).map((item, i) => (
             <button
@@ -78,13 +80,13 @@ const SlashMenuList = forwardRef<SlashMenuListHandle, SlashMenuListProps>(
                 ) : null}
               </span>
               <span className="slash-item-info">
-                <span className="slash-item-title">{item.title}</span>
-                {item.description && <span className="slash-item-desc">{item.description}</span>}
+                <span className="slash-item-title">{t(item.title)}</span>
+                {item.description && <span className="slash-item-desc">{t(item.description)}</span>}
               </span>
             </button>
           ))
         )}
-        <div className="slash-menu-footer">↑↓ 选择 · Enter 插入 · Esc 关闭</div>
+        <div className="slash-menu-footer">{t('markdown.slash.footer')}</div>
       </div>
     )
   }

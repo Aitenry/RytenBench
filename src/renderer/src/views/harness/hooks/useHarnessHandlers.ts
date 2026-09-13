@@ -5,6 +5,7 @@ import { Window, ToolInfo } from '../../../../resource/types/window'
 import type { Message, Attachment, ToolCall, MessageBlock } from '@renderer/types/harness'
 import type { StreamChunk } from '../../../../../main/harness/types'
 import { useMessage } from '@renderer/hooks/useMessage'
+import { useTranslation } from '@renderer/i18n'
 import {
   isSameToolCall,
   computeTextDelta,
@@ -125,6 +126,7 @@ function resolveDialogueId(message: Message | undefined): number | null {
 
 export const useHarnessHandlers = (): UseHarnessHandlersReturn => {
   const { viewMessage } = useMessage()
+  const { t } = useTranslation()
   const [messages, setMessages] = useState<Message[]>([])
   const [inputValue, setInputValue] = useState('')
   const [availableTools, setAvailableTools] = useState<ToolInfo[]>([])
@@ -1179,10 +1181,13 @@ export const useHarnessHandlers = (): UseHarnessHandlersReturn => {
       const slice = messages.slice(0, upToIndex + 1)
       if (slice.length === 0) return
       try {
-        viewMessage(messageKey, 'loading', '正在创建分支会话...')
+        viewMessage(messageKey, 'loading', t('harness.handlers.branchCreating'))
         const workspaceId = await getActiveWorkspaceId()
-        const firstQuestion = slice.find((m) => m.role === 'user')?.content ?? '未命名'
-        const title = `分支 · ${firstQuestion.replace(/\s+/g, ' ').trim().slice(0, 30)}`
+        const firstQuestion =
+          slice.find((m) => m.role === 'user')?.content ?? t('harness.handlers.branchUntitled')
+        const title = t('harness.handlers.branchTitle', {
+          title: firstQuestion.replace(/\s+/g, ' ').trim().slice(0, 30)
+        })
         const newTopicId = await (window as unknown as Window).api.harness.createTopic(
           workspaceId,
           title
@@ -1208,17 +1213,22 @@ export const useHarnessHandlers = (): UseHarnessHandlersReturn => {
         const created = result.items.find((t) => t.id === newTopicId)
         if (created) {
           await handleSelectTopic(created)
-          viewMessage(messageKey, 'success', `已分支到新会话（${slice.length} 条消息）`, 2)
+          viewMessage(
+            messageKey,
+            'success',
+            t('harness.handlers.branchSuccess', { count: slice.length }),
+            2
+          )
         } else {
           await refreshTopics()
-          viewMessage(messageKey, 'success', '已创建分支会话，可在左侧会话列表打开', 3)
+          viewMessage(messageKey, 'success', t('harness.handlers.branchListHint'), 3)
         }
       } catch (error) {
         console.error('Failed to branch conversation:', error)
-        viewMessage(messageKey, 'error', '分支失败')
+        viewMessage(messageKey, 'error', t('harness.handlers.branchFailed'))
       }
     },
-    [messages, getActiveWorkspaceId, handleSelectTopic, refreshTopics, viewMessage]
+    [messages, getActiveWorkspaceId, handleSelectTopic, refreshTopics, viewMessage, t]
   )
 
   const handleDeleteTopic = useCallback(
@@ -1403,7 +1413,7 @@ export const useHarnessHandlers = (): UseHarnessHandlersReturn => {
       const errorMessage: Message = {
         id: aiMessageId,
         role: 'assistant',
-        content: '抱歉，发生了错误，请稍后重试。',
+        content: t('harness.handlers.sendFailed'),
         blocks: [],
         timestamp: Date.now(),
         loading: false
@@ -1424,7 +1434,8 @@ export const useHarnessHandlers = (): UseHarnessHandlersReturn => {
     attachments,
     selectedProviderId,
     startStreamListener,
-    syncLoadingTopics
+    syncLoadingTopics,
+    t
   ])
 
   // 用 ref 持有最新消息快照（修复：handleDeleteMessagePair 此前依赖 [messages],流式期间

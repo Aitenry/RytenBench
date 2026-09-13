@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { Modal, Radio, Checkbox, Input, theme } from 'antd'
 import { RiQuestionAnswerLine } from '@remixicon/react'
+import { useTranslation } from '@renderer/i18n'
 import { Window } from '../../../../resource/types/window'
 import type { PendingQuestionView } from '../../../../../main/harness/runtime/ask'
 
@@ -22,6 +23,7 @@ interface AnswerDraft {
 
 const AskQuestionModal: React.FC<{ currentTopicId: number | null }> = ({ currentTopicId }) => {
   const { token } = theme.useToken()
+  const { t } = useTranslation()
 
   const [pending, setPending] = useState<PendingQuestionView | null>(null)
   const [drafts, setDrafts] = useState<Record<string, AnswerDraft>>({})
@@ -105,12 +107,12 @@ const AskQuestionModal: React.FC<{ currentTopicId: number | null }> = ({ current
       title={
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
           <RiQuestionAnswerLine size={16} style={{ color: token.colorPrimary }} />
-          需要你的确认
+          {t('harness.askQuestion.title')}
         </span>
       }
       closable={false}
       maskClosable={false}
-      okText="提交回答"
+      okText={t('harness.askQuestion.okText')}
       cancelButtonProps={{ style: { display: 'none' } }}
       okButtonProps={{ disabled: !canSubmit(), loading: submitting }}
       onOk={() => void handleSubmit()}
@@ -168,7 +170,7 @@ const AskQuestionModal: React.FC<{ currentTopicId: number | null }> = ({ current
               ) : (
                 <Input.TextArea
                   autoSize={{ minRows: 2, maxRows: 4 }}
-                  placeholder="输入你的回答…"
+                  placeholder={t('harness.askQuestion.customPlaceholder')}
                   value={draft?.custom ?? ''}
                   onChange={(e) => updateDraft(q.id, { custom: e.target.value })}
                 />
@@ -178,7 +180,7 @@ const AskQuestionModal: React.FC<{ currentTopicId: number | null }> = ({ current
           )
         })}
         <div style={{ fontSize: 11, color: token.colorTextTertiary }}>
-          提交后模型将在本轮对话中继续执行；点「停止生成」可取消提问并中止本轮。
+          {t('harness.askQuestion.footerHint')}
         </div>
       </div>
     </Modal>

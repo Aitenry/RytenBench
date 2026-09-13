@@ -12,6 +12,11 @@ import { ChatBedrockConverse } from '@langchain/aws'
 import { ChatCloudflareWorkersAI } from '@langchain/cloudflare'
 import logger from 'electron-log'
 import { getDefaultProvider, getProviderById, LlmProviderConfig } from '../database/mapper/provider'
+import { buildThinkingParams } from './thinking-params'
+import { TOP_K_PROVIDERS } from '../../shared/model-params'
+
+/** 接受 Top K 的供应商（来自共享配置，未收录的协议不下发该参数） */
+const TOP_K_PROVIDER_SET = new Set(TOP_K_PROVIDERS)
 
 /**
  * 大模型供应商服务
@@ -169,51 +174,98 @@ class ProviderService {
 
   // --- 各供应商工厂方法 ---
 
+  /**
+   * 请求的输出上限：优先用 max_tokens 列；列为空时回退到模型档案里的「输出」上限
+   * （设置界面的「上下文窗口 → 输出」是唯一真源，两者取值一致）。
+   */
+  private resolveMaxTokens(config: LlmProviderConfig): number | null {
+    if (config.max_tokens && config.max_tokens > 0) return config.max_tokens
+    const meta = config.metadata as { max_output_tokens?: unknown } | null
+    const fromProfile = typeof meta?.max_output_tokens === 'number' ? meta.max_output_tokens : 0
+    return fromProfile > 0 ? fromProfile : null
+  }
+
+  /**
+   * 逐模型请求参数的统一注入点（温度 / Top P / Top K / 思考模式）。
+   * 所有供应商工厂方法在返回前调用，避免每个分支各写一遍；
+   * 留空的采样参数一律不下发，交给供应商走「最佳默认配置」。
+   */
+  private applyModelParams(
+    fields: Record<string, unknown>,
+    config: LlmProviderConfig,
+    extra: Record<string, unknown>
+  ): void {
+    const provider = config.provider.toLowerCase()
+    if (config.temperature != null) fields.temperature = config.temperature
+    if (config.top_p != null) fields.topP = config.top_p
+    if (config.top_k != null && TOP_K_PROVIDER_SET.has(provider)) fields.topK = config.top_k
+
+    const thinking = buildThinkingParams({
+      provider,
+      anthropicFormat: String(extra.api_format ?? 'openai').toLowerCase() === 'anthropic',
+      mode: config.thinking_mode,
+      maxTokens: this.resolveMaxTokens(config)
+    })
+    if (!thinking) return
+    if (thinking.fields) Object.assign(fields, thinking.fields)
+    if (thinking.modelKwargs) {
+      // 与 extra_config 里已有的 modelKwargs 合并（用户自定义参数不丢）
+      const merged = {
+        ...((fields.modelKwargs as Record<string, unknown> | undefined) ?? {}),
+        ...thinking.modelKwargs
+      }
+      fields.modelKwargs = merged
+    }
+  }
+
   private buildOpenAI(config: LlmProviderConfig, extra: Record<string, unknown>): ChatOpenAI {
     const fields: Record<string, unknown> = {
       model: config.model,
-      temperature: config.temperature,
       // 统一开启流式：invoke() 内部走流式请求，逐 token（含工具参数增量）触发回调，
       // 长参数构建期间前端才能收到 preparing →「生成中」；LangGraph messages 模式
       // 自带聚合去重（emittedChatModelRunIds + dedupe），不会重复下发最终消息
       streaming: true,
       ...extra
     }
-    if (config.max_tokens) fields.maxTokens = config.max_tokens
+    const maxTokens = this.resolveMaxTokens(config)
+    if (maxTokens) fields.maxTokens = maxTokens
     if (config.api_key) fields.apiKey = config.api_key
     if (config.base_url) fields.configuration = { baseURL: config.base_url }
+    this.applyModelParams(fields, config, extra)
     return new ChatOpenAI(fields)
   }
 
   private buildAnthropic(config: LlmProviderConfig, extra: Record<string, unknown>): ChatAnthropic {
     const fields: Record<string, unknown> = {
       model: config.model,
-      temperature: config.temperature,
       // 统一开启流式：invoke() 内部走流式请求，逐 token（含工具参数增量）触发回调，
       // 长参数构建期间前端才能收到 preparing →「生成中」；LangGraph messages 模式
       // 自带聚合去重（emittedChatModelRunIds + dedupe），不会重复下发最终消息
       streaming: true,
       ...extra
     }
-    if (config.max_tokens) fields.maxTokens = config.max_tokens
+    const maxTokens = this.resolveMaxTokens(config)
+    if (maxTokens) fields.maxTokens = maxTokens
     if (config.api_key) fields.apiKey = config.api_key
     if (config.base_url) fields.anthropicApiUrl = config.base_url
+    this.applyModelParams(fields, config, extra)
     return new ChatAnthropic(fields)
   }
 
   private buildDeepSeek(config: LlmProviderConfig, extra: Record<string, unknown>): ChatDeepSeek {
     const fields: Record<string, unknown> = {
       model: config.model,
-      temperature: config.temperature,
       // 统一开启流式：invoke() 内部走流式请求，逐 token（含工具参数增量）触发回调，
       // 长参数构建期间前端才能收到 preparing →「生成中」；LangGraph messages 模式
       // 自带聚合去重（emittedChatModelRunIds + dedupe），不会重复下发最终消息
       streaming: true,
       ...extra
     }
-    if (config.max_tokens) fields.maxTokens = config.max_tokens
+    const maxTokens = this.resolveMaxTokens(config)
+    if (maxTokens) fields.maxTokens = maxTokens
     if (config.api_key) fields.apiKey = config.api_key
     if (config.base_url) fields.configuration = { baseURL: config.base_url }
+    this.applyModelParams(fields, config, extra)
     return new ChatDeepSeek(fields)
   }
 
@@ -222,60 +274,64 @@ class ProviderService {
     extra: Record<string, unknown>
   ): ChatGoogleGenerativeAI {
     const fields: Record<string, unknown> = {
-      temperature: config.temperature,
       streaming: true,
       ...extra
     }
-    if (config.max_tokens) fields.maxOutputTokens = config.max_tokens
+    const maxTokens = this.resolveMaxTokens(config)
+    if (maxTokens) fields.maxOutputTokens = maxTokens
     if (config.api_key) fields.apiKey = config.api_key
     if (config.base_url) fields.baseUrl = config.base_url
+    this.applyModelParams(fields, config, extra)
     return new ChatGoogleGenerativeAI(config.model, fields)
   }
 
   private buildVertexAI(config: LlmProviderConfig, extra: Record<string, unknown>): ChatVertexAI {
     const fields: Record<string, unknown> = {
       model: config.model,
-      temperature: config.temperature,
       // 统一开启流式：invoke() 内部走流式请求，逐 token（含工具参数增量）触发回调，
       // 长参数构建期间前端才能收到 preparing →「生成中」；LangGraph messages 模式
       // 自带聚合去重（emittedChatModelRunIds + dedupe），不会重复下发最终消息
       streaming: true,
       ...extra
     }
-    if (config.max_tokens) fields.maxOutputTokens = config.max_tokens
+    const maxTokens = this.resolveMaxTokens(config)
+    if (maxTokens) fields.maxOutputTokens = maxTokens
     if (config.api_key) fields.apiKey = config.api_key
+    this.applyModelParams(fields, config, extra)
     return new ChatVertexAI(fields)
   }
 
   private buildMistralAI(config: LlmProviderConfig, extra: Record<string, unknown>): ChatMistralAI {
     const fields: Record<string, unknown> = {
       model: config.model,
-      temperature: config.temperature,
       // 统一开启流式：invoke() 内部走流式请求，逐 token（含工具参数增量）触发回调，
       // 长参数构建期间前端才能收到 preparing →「生成中」；LangGraph messages 模式
       // 自带聚合去重（emittedChatModelRunIds + dedupe），不会重复下发最终消息
       streaming: true,
       ...extra
     }
-    if (config.max_tokens) fields.maxTokens = config.max_tokens
+    const maxTokens = this.resolveMaxTokens(config)
+    if (maxTokens) fields.maxTokens = maxTokens
     if (config.api_key) fields.apiKey = config.api_key
     if (config.base_url) fields.serverURL = config.base_url
+    this.applyModelParams(fields, config, extra)
     return new ChatMistralAI(fields)
   }
 
   private buildOllama(config: LlmProviderConfig, extra: Record<string, unknown>): ChatOllama {
     const fields: Record<string, unknown> = {
       model: config.model,
-      temperature: config.temperature,
       // 统一开启流式：invoke() 内部走流式请求，逐 token（含工具参数增量）触发回调，
       // 长参数构建期间前端才能收到 preparing →「生成中」；LangGraph messages 模式
       // 自带聚合去重（emittedChatModelRunIds + dedupe），不会重复下发最终消息
       streaming: true,
       ...extra
     }
-    if (config.max_tokens) fields.numPredict = config.max_tokens
+    const maxTokens = this.resolveMaxTokens(config)
+    if (maxTokens) fields.numPredict = maxTokens
     if (config.api_key) fields.apiKey = config.api_key
     if (config.base_url) fields.baseUrl = config.base_url
+    this.applyModelParams(fields, config, extra)
     return new ChatOllama(fields)
   }
 
@@ -285,16 +341,17 @@ class ProviderService {
   ): ChatOpenRouter {
     const fields: Record<string, unknown> = {
       model: config.model,
-      temperature: config.temperature,
       // 统一开启流式：invoke() 内部走流式请求，逐 token（含工具参数增量）触发回调，
       // 长参数构建期间前端才能收到 preparing →「生成中」；LangGraph messages 模式
       // 自带聚合去重（emittedChatModelRunIds + dedupe），不会重复下发最终消息
       streaming: true,
       ...extra
     }
-    if (config.max_tokens) fields.maxTokens = config.max_tokens
+    const maxTokens = this.resolveMaxTokens(config)
+    if (maxTokens) fields.maxTokens = maxTokens
     if (config.api_key) fields.apiKey = config.api_key
     if (config.base_url) fields.configuration = { baseURL: config.base_url }
+    this.applyModelParams(fields, config, extra)
     return new ChatOpenRouter(fields)
   }
 
@@ -302,16 +359,17 @@ class ProviderService {
     // xAI API 兼容 OpenAI 格式
     const fields: Record<string, unknown> = {
       model: config.model,
-      temperature: config.temperature,
       // 统一开启流式：invoke() 内部走流式请求，逐 token（含工具参数增量）触发回调，
       // 长参数构建期间前端才能收到 preparing →「生成中」；LangGraph messages 模式
       // 自带聚合去重（emittedChatModelRunIds + dedupe），不会重复下发最终消息
       streaming: true,
       ...extra
     }
-    if (config.max_tokens) fields.maxTokens = config.max_tokens
+    const maxTokens = this.resolveMaxTokens(config)
+    if (maxTokens) fields.maxTokens = maxTokens
     if (config.api_key) fields.apiKey = config.api_key
     if (config.base_url) fields.configuration = { baseURL: config.base_url }
+    this.applyModelParams(fields, config, extra)
     return new ChatXAI(fields)
   }
 
@@ -321,14 +379,14 @@ class ProviderService {
   ): ChatBedrockConverse {
     const fields: Record<string, unknown> = {
       model: config.model,
-      temperature: config.temperature,
       // 统一开启流式：invoke() 内部走流式请求，逐 token（含工具参数增量）触发回调，
       // 长参数构建期间前端才能收到 preparing →「生成中」；LangGraph messages 模式
       // 自带聚合去重（emittedChatModelRunIds + dedupe），不会重复下发最终消息
       streaming: true,
       ...extra
     }
-    if (config.max_tokens) fields.maxTokens = config.max_tokens
+    const maxTokens = this.resolveMaxTokens(config)
+    if (maxTokens) fields.maxTokens = maxTokens
     if (config.api_key) {
       // Bedrock 使用 AWS credentials，API key 不走常规路径
       // 支持通过 extra_config 传入 credentials
@@ -337,6 +395,7 @@ class ProviderService {
       // Bedrock 通过 region 指定端点
       if (!fields.region) fields.region = 'us-east-1'
     }
+    this.applyModelParams(fields, config, extra)
     return new ChatBedrockConverse(fields)
   }
 
@@ -350,6 +409,7 @@ class ProviderService {
       ...extra
     }
     if (config.api_key) fields.cloudflareApiToken = config.api_key
+    this.applyModelParams(fields, config, extra)
     return new ChatCloudflareWorkersAI(fields)
   }
 }

@@ -1,90 +1,46 @@
+import { getMainLanguage, mainFormat } from '../i18n'
+import { getWeatherToolTexts } from '../i18n/tool-results-weather'
+
 // ============================================================================
-// 天气工具公共模块 — weatherCodeMap、风向、地理编码、日期格式化
-// 用于 harness tool (weather.ts) 和 widget (index.ts) 共享
+// 天气工具公共模块 — 风向、地理编码、日期格式化
+// 用于 harness tool (weather.ts) 和底栏组件（主进程 weather.ts）共享
+// 天气码/风向/周几的**文案**都在 src/main/i18n/tool-results-weather.ts，按语言取
 // ============================================================================
 
-/**
- * WMO 天气码 → 中文描述
- * @see https://open-meteo.com/en/docs (WMO Weather interpretation codes)
- * @see https://github.com/symfony/ai-open-meteo-tool (官方实现参考)
- */
-export const weatherCodeMap: Record<number, string> = {
-  0: '晴天',
-  1: '大部晴朗',
-  2: '局部多云',
-  3: '多云',
-  45: '有雾',
-  48: '冰雾',
-  51: '小毛毛雨',
-  53: '中毛毛雨',
-  55: '大毛毛雨',
-  56: '小冻毛毛雨',
-  57: '大冻毛毛雨',
-  61: '小雨',
-  63: '中雨',
-  65: '大雨',
-  66: '小冻雨',
-  67: '大冻雨',
-  71: '小雪',
-  73: '中雪',
-  75: '大雪',
-  77: '雪粒',
-  80: '小阵雨',
-  81: '中阵雨',
-  82: '大阵雨',
-  85: '小阵雪',
-  86: '大阵雪',
-  95: '雷暴',
-  96: '小冰雹雷暴',
-  99: '大冰雹雷暴'
+/** 16 方位缩写（度数与风向词表共用下标：`Math.round(degrees / 22.5) % 16`） */
+const WIND_DIRECTION_CODES = [
+  'N',
+  'NNE',
+  'NE',
+  'ENE',
+  'E',
+  'ESE',
+  'SE',
+  'SSE',
+  'S',
+  'SSW',
+  'SW',
+  'WSW',
+  'W',
+  'WNW',
+  'NW',
+  'NNW'
+] as const
+
+/** 度数 → 风向描述（按当前界面语言取词表） */
+export function windDirectionLabelFor(degrees: number, texts = getWeatherTexts()): string {
+  const key = WIND_DIRECTION_CODES[Math.round(degrees / 22.5) % 16]
+  const map = texts.windDirections as Record<string, string>
+  return map[key] ?? `${degrees.toFixed(0)}°`
 }
 
-/** 度数 → 中文风向描述 */
-export function windDirectionLabel(degrees: number): string {
-  const codes = [
-    'N',
-    'NNE',
-    'NE',
-    'ENE',
-    'E',
-    'ESE',
-    'SE',
-    'SSE',
-    'S',
-    'SSW',
-    'SW',
-    'WSW',
-    'W',
-    'WNW',
-    'NW',
-    'NNW'
-  ]
-  const map: Record<string, string> = {
-    N: '北风',
-    NNE: '北东北风',
-    NE: '东北风',
-    ENE: '东东北风',
-    E: '东风',
-    ESE: '东东南风',
-    SE: '东南风',
-    SSE: '南东南风',
-    S: '南风',
-    SSW: '南西南风',
-    SW: '西南风',
-    WSW: '西西南风',
-    W: '西风',
-    WNW: '西西北风',
-    NW: '西北风',
-    NNW: '北西北风'
-  }
-  return map[codes[Math.round(degrees / 22.5) % 16]] ?? `${degrees.toFixed(0)}°`
-}
-
-/** 地理编码：地点名 → 经纬度候选列表 */
+/** 地理编码：地点名 → 经纬度候选列表（返回的地名按界面语言本地化） */
 export async function geocodeLocation(
   location: string
 ): Promise<Array<{ lat: number; lon: number; name: string; admin1?: string; country: string }>> {
-  const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(location)}&count=5&language=zh&format=json`
+  // 结果会作为地名渲染在工具卡片上，所以 language 跟随界面语言而不是写死 zh
+  const lang = getMainLanguage() === 'en-US' ? 'en' : 'zh'
+  const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(location)}&count=5&language=${lang}&format=json`
   try {
     const res = await fetch(url)
     if (!res.ok) return []
@@ -115,7 +71,25 @@ export function formatDate(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
 
-/** Date → 周几中文 */
-export function weekdayLabel(date: Date): string {
-  return ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][date.getDay()]
+// ============================================================================
+// 语言感知文案 — 工具卡片跟随界面语言（词条见 i18n/tool-results-weather.ts）
+// ============================================================================
+
+/** Date.getDay() → 词条键（0 = 周日） */
+const WEEKDAY_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const
+
+/** 当前语言的天气工具文案（含天气码、风向、周几词表） */
+export function getWeatherTexts(): ReturnType<typeof getWeatherToolTexts> {
+  return getWeatherToolTexts()
+}
+
+/** 天气码 → 当前语言描述；未收录时回落到词条里的「天气码 N」兜底 */
+export function weatherCodeLabel(code: number, texts = getWeatherTexts()): string {
+  const codes = texts.codes as Record<number, string>
+  return codes[code] ?? mainFormat(texts.unknownCode, { code })
+}
+
+/** Date → 当前语言周几 */
+export function weekdayLabelFor(date: Date, texts = getWeatherTexts()): string {
+  return texts.weekdays[WEEKDAY_KEYS[date.getDay()]]
 }

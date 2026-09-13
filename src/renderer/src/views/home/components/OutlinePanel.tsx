@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { theme, Empty } from 'antd'
 import { RiListCheck2, RiInformationLine } from '@remixicon/react'
 import { useEditorState, type Editor } from '@tiptap/react'
+import { useTranslation } from '@renderer/i18n'
 import dayjs from 'dayjs'
 
 export interface OutlineHeading {
@@ -27,6 +28,7 @@ interface OutlinePanelProps {
 
 const OutlinePanel: React.FC<OutlinePanelProps> = ({ editor, scrollRef, meta, width = 236 }) => {
   const { token } = theme.useToken()
+  const { t } = useTranslation()
   const [activePos, setActivePos] = useState<number | null>(null)
   const rafRef = useRef(0)
 
@@ -135,7 +137,7 @@ const OutlinePanel: React.FC<OutlinePanelProps> = ({ editor, scrollRef, meta, wi
           }}
         >
           <RiListCheck2 size={14} style={{ color: token.colorTextTertiary }} />
-          大纲
+          {t('home.outline.title')}
         </div>
         <div
           className="custom-scrollbar"
@@ -144,7 +146,7 @@ const OutlinePanel: React.FC<OutlinePanelProps> = ({ editor, scrollRef, meta, wi
           {headings.length === 0 ? (
             <Empty
               image={Empty.PRESENTED_IMAGE_SIMPLE}
-              description={<span style={{ fontSize: 12 }}>暂无标题</span>}
+              description={<span style={{ fontSize: 12 }}>{t('home.outline.empty')}</span>}
               style={{ margin: '24px 0' }}
             />
           ) : (
@@ -215,7 +217,7 @@ const OutlinePanel: React.FC<OutlinePanelProps> = ({ editor, scrollRef, meta, wi
             }}
           >
             <RiInformationLine size={14} style={{ color: token.colorTextTertiary }} />
-            属性
+            {t('home.term.properties')}
           </div>
           {tagChips.length > 0 && (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
@@ -237,18 +239,22 @@ const OutlinePanel: React.FC<OutlinePanelProps> = ({ editor, scrollRef, meta, wi
             </div>
           )}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <MetaRow token={token} label="字数" value={`${meta.wordCount ?? 0}`} />
+            <MetaRow
+              token={token}
+              label={t('home.outline.wordCount')}
+              value={`${meta.wordCount ?? 0}`}
+            />
             {meta.createdAt && (
               <MetaRow
                 token={token}
-                label="创建"
+                label={t('home.outline.created')}
                 value={dayjs(meta.createdAt).format('YYYY-MM-DD HH:mm')}
               />
             )}
             {meta.updatedAt && (
               <MetaRow
                 token={token}
-                label="更新"
+                label={t('home.outline.updated')}
                 value={dayjs(meta.updatedAt).format('YYYY-MM-DD HH:mm')}
               />
             )}

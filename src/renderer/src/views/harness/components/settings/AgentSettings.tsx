@@ -23,6 +23,7 @@ import {
   TeamOutlined
 } from '@ant-design/icons'
 import { useMessage } from '@renderer/hooks/useMessage'
+import { useTranslation } from '@renderer/i18n'
 import { Window } from '../../../../../resource/types/window'
 import type { AgentConfigRow, AgentConfigInput } from '../../../../../../main/database/mapper/agent'
 import type { ProviderOption } from '@renderer/types/components'
@@ -46,6 +47,7 @@ const AgentSettings: React.FC = () => {
 
   const { viewMessage } = useMessage()
   const { modal } = App.useApp()
+  const { t } = useTranslation()
 
   // 当前工作区 ID
   const [workspaceId, setWorkspaceId] = useState(0)
@@ -91,12 +93,16 @@ const AgentSettings: React.FC = () => {
         setTotal(result.total)
         setCurrentPage(page)
       } catch (error) {
-        viewMessage('agent-load', 'error', `加载失败: ${error}`)
+        viewMessage(
+          'agent-load',
+          'error',
+          t('common.message.loadFailedWithReason', { reason: String(error) })
+        )
       } finally {
         setLoading(false)
       }
     },
-    [viewMessage]
+    [viewMessage, t]
   )
 
   const loadOptions = useCallback(async () => {
@@ -122,10 +128,14 @@ const AgentSettings: React.FC = () => {
       setWorkspaceId(wsId)
       return wsId
     } catch (error) {
-      viewMessage('agent-options', 'error', `加载选项失败: ${error}`)
+      viewMessage(
+        'agent-options',
+        'error',
+        t('common.message.loadFailedWithReason', { reason: String(error) })
+      )
       return 0
     }
-  }, [viewMessage])
+  }, [viewMessage, t])
 
   useEffect(() => {
     loadOptions().then((wsId) => {
@@ -150,9 +160,13 @@ const AgentSettings: React.FC = () => {
     setMainSaving(true)
     try {
       await (window as unknown as Window).api.mainAgent.update(mainAgent)
-      viewMessage('main-save', 'success', '主智能体已保存', 2)
+      viewMessage('main-save', 'success', t('agentSettings.main.saved'), 2)
     } catch (error) {
-      viewMessage('main-save', 'error', `保存失败: ${error}`)
+      viewMessage(
+        'main-save',
+        'error',
+        t('common.message.saveFailedWithReason', { reason: String(error) })
+      )
     } finally {
       setMainSaving(false)
     }
@@ -199,10 +213,10 @@ const AgentSettings: React.FC = () => {
 
       if (editingAgent) {
         await (window as unknown as Window).api.agents.update(workspaceId, editingAgent.id, input)
-        viewMessage('agent-save', 'success', '智能体已更新', 2)
+        viewMessage('agent-save', 'success', t('agentSettings.messages.agentUpdated'), 2)
       } else {
         await (window as unknown as Window).api.agents.create(input)
-        viewMessage('agent-save', 'success', '智能体已创建', 2)
+        viewMessage('agent-save', 'success', t('agentSettings.messages.agentCreated'), 2)
         // 通知记忆树刷新（后端已自动创建记忆目录）
         window.dispatchEvent(new CustomEvent('memory-tree-refresh'))
       }
@@ -210,7 +224,11 @@ const AgentSettings: React.FC = () => {
       setModalOpen(false)
       await loadPage(currentPage, workspaceId)
     } catch (error) {
-      viewMessage('agent-save', 'error', `保存失败: ${error}`)
+      viewMessage(
+        'agent-save',
+        'error',
+        t('common.message.saveFailedWithReason', { reason: String(error) })
+      )
     } finally {
       setSaving(false)
     }
@@ -222,28 +240,41 @@ const AgentSettings: React.FC = () => {
         enable: checked
       })
       setAgents((prev) => prev.map((a) => (a.id === agent.id ? { ...a, enable: checked } : a)))
-      viewMessage('agent-toggle', 'success', checked ? '已开启' : '已关闭', 1)
+      viewMessage(
+        'agent-toggle',
+        'success',
+        t(checked ? 'agentSettings.messages.opened' : 'agentSettings.messages.closed'),
+        1
+      )
     } catch (error) {
-      viewMessage('agent-toggle', 'error', `切换失败: ${error}`)
+      viewMessage(
+        'agent-toggle',
+        'error',
+        t('agentSettings.messages.toggleFailedWithReason', { reason: String(error) })
+      )
     }
   }
 
   const handleDelete = async (agent: AgentConfigRow): Promise<void> => {
     modal.confirm({
-      title: `确认删除智能体"${agent.rename || agent.name}"？`,
-      content: '删除后不可恢复。',
-      okText: '确认删除',
+      title: t('agentSettings.messages.deleteConfirmTitle', { name: agent.rename || agent.name }),
+      content: t('common.message.irreversible'),
+      okText: t('common.action.confirm'),
       okType: 'danger',
-      cancelText: '取消',
+      cancelText: t('common.action.cancel'),
       onOk: async () => {
         try {
           await (window as unknown as Window).api.agents.delete(workspaceId, agent.id)
-          viewMessage('agent-delete', 'success', '已删除', 2)
+          viewMessage('agent-delete', 'success', t('agentSettings.messages.deleted'), 2)
           // 通知记忆树刷新（后端已自动删除记忆目录）
           window.dispatchEvent(new CustomEvent('memory-tree-refresh'))
           await loadPage(currentPage, workspaceId)
         } catch (error) {
-          viewMessage('agent-delete', 'error', `删除失败: ${error}`)
+          viewMessage(
+            'agent-delete',
+            'error',
+            t('common.message.deleteFailedWithReason', { reason: String(error) })
+          )
         }
       }
     })
@@ -264,7 +295,7 @@ const AgentSettings: React.FC = () => {
 
   const handleImportExec = async (raw: string): Promise<void> => {
     if (!raw) {
-      viewMessage('import-error', 'warning', '文件内容为空')
+      viewMessage('import-error', 'warning', t('agentSettings.messages.importEmptyFile'))
       return
     }
 
@@ -272,17 +303,17 @@ const AgentSettings: React.FC = () => {
     try {
       data = JSON.parse(raw)
     } catch {
-      viewMessage('import-error', 'error', 'JSON 格式错误，请检查')
+      viewMessage('import-error', 'error', t('agentSettings.messages.importInvalidJson'))
       return
     }
 
     if (!Array.isArray(data)) {
-      viewMessage('import-error', 'error', 'JSON 内容必须是一个数组')
+      viewMessage('import-error', 'error', t('agentSettings.messages.importNotArray'))
       return
     }
 
     if (data.length === 0) {
-      viewMessage('import-error', 'warning', '导入内容为空')
+      viewMessage('import-error', 'warning', t('agentSettings.messages.importEmptyContent'))
       return
     }
 
@@ -299,7 +330,7 @@ const AgentSettings: React.FC = () => {
     try {
       for (const item of data) {
         if (!item.name) {
-          skipped.push('(缺少 name)')
+          skipped.push(t('agentSettings.messages.importStrippedSkippedName'))
           continue
         }
 
@@ -309,7 +340,12 @@ const AgentSettings: React.FC = () => {
           const removed = item.tools.filter((t) => !validToolNames.has(t))
           filteredTools = item.tools.filter((t) => validToolNames.has(t))
           if (removed.length > 0) {
-            stripped.push(`${item.name}: 工具 [${removed.join(', ')}] 不存在，已移除`)
+            stripped.push(
+              t('agentSettings.messages.importMissingTool', {
+                name: item.name,
+                items: removed.join(', ')
+              })
+            )
           }
         } else {
           filteredTools = []
@@ -325,7 +361,12 @@ const AgentSettings: React.FC = () => {
           const removed = skillArr.filter((s) => !validSkillIds.has(s))
           filteredSkills = skillArr.filter((s) => validSkillIds.has(s))
           if (removed.length > 0) {
-            stripped.push(`${item.name}: 技能 [${removed.join(', ')}] 不存在，已移除`)
+            stripped.push(
+              t('agentSettings.messages.importMissingSkill', {
+                name: item.name,
+                items: removed.join(', ')
+              })
+            )
           }
         } else {
           filteredSkills = []
@@ -337,7 +378,12 @@ const AgentSettings: React.FC = () => {
           if (validModelKeys.has(item.model)) {
             validModel = item.model
           } else {
-            stripped.push(`${item.name}: 模型 "${item.model}" 不存在，已移除`)
+            stripped.push(
+              t('agentSettings.messages.importMissingModel', {
+                name: item.name,
+                model: item.model
+              })
+            )
           }
         }
 
@@ -357,23 +403,34 @@ const AgentSettings: React.FC = () => {
         imported++
       }
     } catch (err) {
-      viewMessage('import-error', 'error', `导入过程出错: ${err}`)
+      viewMessage(
+        'import-error',
+        'error',
+        t('agentSettings.messages.importFailedWithReason', { reason: String(err) })
+      )
     } finally {
       setImportLoading(false)
     }
 
     // 汇总提示
     const parts: string[] = []
-    if (imported > 0) parts.push(`成功导入 ${imported} 个智能体`)
-    if (skipped.length > 0) parts.push(`${skipped.length} 个被跳过`)
-    const summary = parts.length > 0 ? parts.join('，') : '未导入任何智能体'
+    if (imported > 0) {
+      parts.push(t('agentSettings.messages.importSummaryImported', { count: imported }))
+    }
+    if (skipped.length > 0) {
+      parts.push(t('agentSettings.messages.importSummarySkipped', { count: skipped.length }))
+    }
+    const summary =
+      parts.length > 0
+        ? parts.join(t('agentSettings.messages.importSummarySeparator'))
+        : t('agentSettings.messages.importSummaryNone')
     viewMessage('import-summary', 'success', summary)
 
     // 逐条展示剔除提示
     if (stripped.length > 0) {
       setTimeout(() => {
         modal.info({
-          title: '以下字段已自动剔除不存在的项',
+          title: t('agentSettings.messages.importStrippedTitle'),
           content: (
             <ul className="pl-4 m-0 text-sm">
               {stripped.map((s, i) => (
@@ -404,7 +461,8 @@ const AgentSettings: React.FC = () => {
       const text = (ev.target?.result as string) || ''
       handleImportExec(text)
     }
-    reader.onerror = () => viewMessage('import-file', 'error', '读取文件失败')
+    reader.onerror = () =>
+      viewMessage('import-file', 'error', t('agentSettings.messages.readFileFailed'))
     reader.readAsText(file)
   }
 
@@ -416,28 +474,28 @@ const AgentSettings: React.FC = () => {
   return (
     <div>
       <SettingsPageHeader
-        title="智能体"
-        description="配置主智能体的默认工具与技能，以及可委托任务的子智能体"
+        title={t('agentSettings.pageTitle')}
+        description={t('agentSettings.pageDescription')}
       />
 
       {/* ====== 主智能体 ====== */}
       <SettingsSection
-        title="主智能体"
+        title={t('agentSettings.sections.mainAgent')}
         icon={<RobotOutlined size={14} />}
         extra={
           <Button type="primary" size="small" loading={mainSaving} onClick={handleMainSave}>
-            保存
+            {t('common.action.save')}
           </Button>
         }
       >
         <SettingRow
-          title="默认工具"
-          description="选择主智能体可用的系统工具"
+          title={t('agentSettings.main.defaultTools')}
+          description={t('agentSettings.main.defaultToolsDescription')}
           control={
             <Select
               mode="multiple"
               size="small"
-              placeholder="选择工具"
+              placeholder={t('agentSettings.main.defaultToolsPlaceholder')}
               value={mainAgent.tools}
               onChange={(value) => setMainAgent((prev) => ({ ...prev, tools: value }))}
               allowClear
@@ -487,20 +545,22 @@ const AgentSettings: React.FC = () => {
           }
         />
         <SettingRow
-          title="默认技能"
-          description="选择主智能体可用的技能"
+          title={t('agentSettings.main.defaultSkills')}
+          description={t('agentSettings.main.defaultSkillsDescription')}
           control={
             <Select
               mode="multiple"
               size="small"
-              placeholder="选择技能（不选则无技能）"
+              placeholder={t('agentSettings.main.defaultSkillsPlaceholder')}
               value={mainAgent.skills}
               onChange={(value) => setMainAgent((prev) => ({ ...prev, skills: value }))}
               allowClear
               disabled={skills.length === 0}
               style={{ minWidth: 280 }}
               notFoundContent={
-                skills.length === 0 ? '未找到技能，请先在技能设置中配置目录' : '无匹配技能'
+                skills.length === 0
+                  ? t('agentSettings.form.skillsNotConfigured')
+                  : t('agentSettings.form.skillsNoMatch')
               }
               maxTagCount="responsive"
               options={skills.map((s) => ({
@@ -514,9 +574,13 @@ const AgentSettings: React.FC = () => {
 
       {/* ====== 子智能体列表 ====== */}
       <SettingsSection
-        title="子智能体"
+        title={t('agentSettings.sections.subagents')}
         icon={<TeamOutlined size={14} />}
-        description={`共 ${total} 个，只有开启的智能体才会在对话中生效`}
+        description={
+          total > 1
+            ? t('agentSettings.list.description_other', { count: total })
+            : t('agentSettings.list.description_one', { count: total })
+        }
         extra={
           <div className="flex items-center" style={{ gap: 8 }}>
             <Button
@@ -525,7 +589,7 @@ const AgentSettings: React.FC = () => {
               loading={importLoading}
               onClick={() => fileInputRef.current?.click()}
             >
-              导入
+              {t('common.action.import')}
             </Button>
             <Button
               type="primary"
@@ -533,7 +597,7 @@ const AgentSettings: React.FC = () => {
               size="small"
               onClick={() => openEditModal()}
             >
-              新建
+              {t('agentSettings.list.newAgent')}
             </Button>
           </div>
         }
@@ -595,7 +659,9 @@ const AgentSettings: React.FC = () => {
                 >
                   {agent.tools && (
                     <Badge
-                      count={`${(JSON.parse(agent.tools) as string[]).length} 工具`}
+                      count={t('agentSettings.list.toolCount', {
+                        count: (JSON.parse(agent.tools) as string[]).length
+                      })}
                       style={{
                         background: colorFillAlter,
                         color: colorTextTertiary,
@@ -615,7 +681,9 @@ const AgentSettings: React.FC = () => {
                   )}
                   {agent.skills && JSON.parse(agent.skills).length > 0 && (
                     <Badge
-                      count={`${(JSON.parse(agent.skills) as string[]).length} 技能`}
+                      count={t('agentSettings.list.skillCount', {
+                        count: (JSON.parse(agent.skills) as string[]).length
+                      })}
                       style={{
                         background: colorFillAlter,
                         color: colorTextTertiary,
@@ -647,7 +715,7 @@ const AgentSettings: React.FC = () => {
               color: colorTextSecondary
             }}
           >
-            暂无智能体，点击右上角「新建」创建
+            {t('agentSettings.empty.noAgents')}
           </div>
         )}
       </SettingsSection>
@@ -655,62 +723,74 @@ const AgentSettings: React.FC = () => {
       {/* 编辑/创建弹窗 */}
       <Modal
         title={
-          editingAgent ? `编辑智能体: ${editingAgent.rename || editingAgent.name}` : '新建智能体'
+          editingAgent
+            ? t('agentSettings.form.editTitle', {
+                name: editingAgent.rename || editingAgent.name
+              })
+            : t('agentSettings.form.createTitle')
         }
         open={modalOpen}
         onCancel={() => setModalOpen(false)}
         onOk={handleSave}
         confirmLoading={saving}
         width={640}
-        okText="保存"
-        cancelText="取消"
+        okText={t('common.action.save')}
+        cancelText={t('common.action.cancel')}
         styles={{ body: { padding: 0 } }}
       >
         <div className="py-4 px-5 custom-scrollbar" style={{ maxHeight: 480, overflowY: 'auto' }}>
           <Form form={form} layout="vertical" size="small">
             <div className="flex gap-3 items-end">
-              <Form.Item label="中文名称" name="rename" style={{ flex: 1 }}>
-                <Input placeholder="如 研究代理（可选）" />
+              <Form.Item
+                label={t('agentSettings.form.chineseName')}
+                name="rename"
+                style={{ flex: 1 }}
+              >
+                <Input placeholder={t('agentSettings.form.chineseNamePlaceholder')} />
               </Form.Item>
               <Form.Item
-                label="英文标识名"
+                label={t('agentSettings.form.identifier')}
                 name="name"
                 rules={[
-                  { required: true, message: '请输入英文标识名' },
+                  { required: true, message: t('agentSettings.form.identifierRequired') },
                   {
                     pattern: /^[a-z][a-z0-9-]*$/,
-                    message: '只能包含小写字母、数字和连字符'
+                    message: t('agentSettings.form.identifierPattern')
                   }
                 ]}
                 style={{ flex: 1 }}
               >
-                <Input placeholder="如 research-agent" />
+                <Input placeholder={t('agentSettings.form.identifierPlaceholder')} />
               </Form.Item>
-              <Form.Item label="启用" name="enable" valuePropName="checked">
+              <Form.Item
+                label={t('agentSettings.form.enabled')}
+                name="enable"
+                valuePropName="checked"
+              >
                 <Switch />
               </Form.Item>
             </div>
 
             <Form.Item
-              label="功能描述"
+              label={t('agentSettings.form.description')}
               name="description"
-              rules={[{ required: true, message: '请输入功能描述' }]}
+              rules={[{ required: true, message: t('agentSettings.form.descriptionRequired') }]}
             >
-              <TextArea rows={3} placeholder="描述智能体的功能，主智能体据此决定何时委托任务" />
+              <TextArea rows={3} placeholder={t('agentSettings.form.descriptionPlaceholder')} />
             </Form.Item>
 
             <Form.Item
-              label="系统提示词"
+              label={t('agentSettings.form.systemPrompt')}
               name="prompt"
-              rules={[{ required: true, message: '请输入系统提示词' }]}
+              rules={[{ required: true, message: t('agentSettings.form.systemPromptRequired') }]}
             >
-              <TextArea rows={6} placeholder="智能体的系统角色和行为规范" />
+              <TextArea rows={6} placeholder={t('agentSettings.form.systemPromptPlaceholder')} />
             </Form.Item>
 
-            <Form.Item label="可用工具" name="tools">
+            <Form.Item label={t('agentSettings.form.tools')} name="tools">
               <Select
                 mode="multiple"
-                placeholder="选择智能体可用的系统工具（不选则无工具）"
+                placeholder={t('agentSettings.form.toolsPlaceholder')}
                 options={availableTools.map((t) => ({
                   value: t.name,
                   label: `${t.label} (${t.description})`
@@ -721,12 +801,12 @@ const AgentSettings: React.FC = () => {
             </Form.Item>
 
             <Form.Item
-              label="模型（可选）"
+              label={t('agentSettings.form.model')}
               name="model"
-              tooltip="覆盖主智能体的模型，留空则使用主智能体模型。仅显示非 Embedding 模型"
+              tooltip={t('agentSettings.form.modelTooltip')}
             >
               <Select
-                placeholder="使用主智能体默认模型"
+                placeholder={t('agentSettings.form.modelPlaceholder')}
                 options={providerOptions}
                 allowClear
                 showSearch
@@ -735,13 +815,13 @@ const AgentSettings: React.FC = () => {
             </Form.Item>
 
             <Form.Item
-              label="技能（可选）"
+              label={t('agentSettings.form.skills')}
               name="skills"
-              tooltip="从已加载的技能目录中选择智能体可用的技能"
+              tooltip={t('agentSettings.form.skillsTooltip')}
             >
               <Select
                 mode="multiple"
-                placeholder="选择智能体可用的技能（不选则无技能）"
+                placeholder={t('agentSettings.form.skillsPlaceholder')}
                 options={skills.map((s) => ({
                   value: s.id,
                   label: `${s.name}${s.description ? ` — ${s.description}` : ''}`
@@ -749,7 +829,9 @@ const AgentSettings: React.FC = () => {
                 allowClear
                 disabled={skills.length === 0}
                 notFoundContent={
-                  skills.length === 0 ? '未找到技能，请先在技能设置中配置目录' : '无匹配技能'
+                  skills.length === 0
+                    ? t('agentSettings.form.skillsNotConfigured')
+                    : t('agentSettings.form.skillsNoMatch')
                 }
                 maxTagCount={4}
               />

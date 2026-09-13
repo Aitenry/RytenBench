@@ -8,6 +8,8 @@ import {
   deleteGoalByTopic,
   type GoalRow
 } from '../../database/mapper/goal'
+import { mainFormat } from '../../i18n'
+import { getAgentToolTexts } from '../../i18n/tool-results-agent'
 
 /**
  * 对话目标系统（goal）— 对应 deepseek-harness 的 dsh-goal / dsh-tool-goal 体系
@@ -137,10 +139,15 @@ export class GoalStore {
 
   /** CAS 校验：目标 id + revision 必须与当前一致 */
   private assertCurrent(goalId: string, revision: number, view: GoalView | null): GoalView {
-    if (!view) throw new Error('当前话题没有目标。请先用 create_goal 创建。')
+    const m = getAgentToolTexts()
+    if (!view) throw new Error(m.goal.noGoal)
     if (view.id !== goalId || view.revision !== revision) {
       throw new Error(
-        `目标已变更（GOAL_STALE_REVISION）：当前 revision=${view.revision}，你携带的是 ${revision}。请先 get_goal 获取最新状态。`
+        mainFormat(m.goal.staleRevision, {
+          marker: 'GOAL_STALE_REVISION',
+          current: view.revision,
+          provided: revision
+        })
       )
     }
     return view
@@ -161,7 +168,7 @@ export class GoalStore {
     const current = await this.load(topicId)
     if (current && current.phase !== 'complete') {
       throw new Error(
-        `当前已有进行中的目标（phase=${current.phase}）。请先完成/阻塞该目标，或对现有目标使用 update_goal。`
+        mainFormat(getAgentToolTexts().goal.alreadyInProgress, { phase: current.phase })
       )
     }
     const view: GoalView = {
@@ -199,6 +206,7 @@ export class GoalStore {
     // 未落库的假状态，后续 load/CAS 读到脏数据）
     const base = this.assertCurrent(goalId, revision, current)
     const view: GoalView = { ...base }
+    const m = getAgentToolTexts()
     let armChange: 'add' | 'delete' | null = null
 
     switch (action) {
@@ -210,15 +218,17 @@ export class GoalStore {
         break
       }
       case 'pause': {
-        if (view.phase !== 'active') throw new Error(`当前 phase=${view.phase}，不能暂停。`)
+        if (view.phase !== 'active') {
+          throw new Error(mainFormat(m.goal.cannotPause, { phase: view.phase }))
+        }
         view.phase = 'paused'
         armChange = 'delete'
         break
       }
       case 'resume': {
-        if (view.phase === 'complete') throw new Error('已完成的目标不能恢复。')
+        if (view.phase === 'complete') throw new Error(m.goal.cannotResumeComplete)
         if (view.roundsStarted >= view.maxGoalRounds) {
-          throw new Error(`已达轮次上限（${view.maxGoalRounds}），不能恢复。`)
+          throw new Error(mainFormat(m.goal.cannotResumeRoundLimit, { limit: view.maxGoalRounds }))
         }
         view.phase = 'active'
         view.blockedReason = undefined
@@ -226,23 +236,25 @@ export class GoalStore {
         break
       }
       case 'complete': {
-        if (view.phase === 'complete') throw new Error('目标已完成。')
+        if (view.phase === 'complete') throw new Error(m.goal.alreadyComplete)
         view.phase = 'complete'
         armChange = 'delete'
         break
       }
       case 'blocked': {
-        if (view.phase !== 'active') throw new Error(`当前 phase=${view.phase}，不能标记阻塞。`)
+        if (view.phase !== 'active') {
+          throw new Error(mainFormat(m.goal.cannotBlock, { phase: view.phase }))
+        }
         view.phase = 'blocked'
         view.blockedReason = fields?.blockedReason ?? {
           code: 'unspecified',
-          message: '（未提供原因）'
+          message: m.goal.defaultBlockedReason
         }
         armChange = 'delete'
         break
       }
       default:
-        throw new Error(`未知 action: ${action}`)
+        throw new Error(mainFormat(m.goal.unknownAction, { action }))
     }
 
     view.revision += 1
@@ -332,29 +344,34 @@ export function buildGoalTools(store: GoalStore, topicId: number): StructuredToo
   return [
     tool(
       async ({ objective, max_goal_rounds }, config) => {
+        const m = getAgentToolTexts()
         const cfg = readToolConfig((config?.configurable ?? {}) as Record<string, unknown>)
         if (!isDirectHuman(cfg)) {
-          return 'create_goal 需要人类直接请求（当前为自动续跑轮，无权创建新目标）。'
+          return m.goal.createRequiresHumanRequest
         }
         try {
           const view = await store.create(topicId, objective, max_goal_rounds)
           return formatGoal(view)
         } catch (err) {
-          return `创建目标失败: ${(err as Error).message}`
+          return mainFormat(m.goal.createFailed, { message: (err as Error).message })
         }
       },
       {
         name: 'create_goal',
         description:
-          '创建一个长期目标：跨多轮自动推进（每轮完成后自动续跑，直至完成、阻塞或达到轮次上限）。一次只能存在一个进行中的目标；已有目标须先 complete/blocked 才能创建新目标。仅当用户明确表达长期任务意图时使用；简单问答不要创建。',
+          'Create a long-running goal that advances automatically across turns: each round auto-continues until the goal is completed, blocked, or the round limit is reached. Only one goal may be in progress at a time; an existing goal must first be complete or blocked before a new one can be created. Use only when the user expresses a clear long-horizon intent; do not create a goal for simple Q&A.',
         schema: z.object({
-          objective: z.string().describe('目标的具体描述（要完成的客观成果，可被独立验证）'),
+          objective: z
+            .string()
+            .describe(
+              'Concrete objective to achieve: an outcome that can be verified independently'
+            ),
           max_goal_rounds: z
             .number()
             .int()
             .positive()
             .optional()
-            .describe(`自动续跑的轮次上限（默认 ${DEFAULT_MAX_GOAL_ROUNDS}）`)
+            .describe(`Round limit for auto-continuation (default ${DEFAULT_MAX_GOAL_ROUNDS})`)
         })
       }
     ),
@@ -364,21 +381,25 @@ export function buildGoalTools(store: GoalStore, topicId: number): StructuredToo
           const view = await getCurrent()
           return formatGoal(view)
         } catch (err) {
-          return `读取目标失败: ${(err as Error).message}`
+          return mainFormat(getAgentToolTexts().goal.readFailed, {
+            message: (err as Error).message
+          })
         }
       },
       {
         name: 'get_goal',
-        description: '读取当前话题的目标状态（id/revision/phase/轮次等）。',
+        description:
+          'Read the current goal state for this topic (id/revision/phase/rounds and so on).',
         schema: z.object({})
       }
     ),
     tool(
       async ({ goal_id, revision, action, objective, max_goal_rounds, blocked_reason }, config) => {
+        const m = getAgentToolTexts()
         const cfg = readToolConfig((config?.configurable ?? {}) as Record<string, unknown>)
         try {
           const current = await getCurrent()
-          if (!current) return '当前话题没有目标。请先用 create_goal 创建。'
+          if (!current) return m.goal.noGoal
 
           // authority：edit/pause/resume 仅限人类直接请求；
           // complete/blocked 允许人类直接请求或精确命中当前目标轮（自动续跑轮）
@@ -386,14 +407,17 @@ export function buildGoalTools(store: GoalStore, topicId: number): StructuredToo
           const exactRound = isExactGoalRound(cfg, current)
           if (action === 'edit' || action === 'pause' || action === 'resume') {
             if (!direct) {
-              return `${action} 需要人类直接请求（自动续跑轮无权执行该操作；如确需调整，请在用户消息中说明）。`
+              return mainFormat(m.goal.requiresHumanRequest, { action })
             }
           } else if (action === 'complete' || action === 'blocked') {
             if (!direct && !exactRound) {
-              return `${action} 无权执行：既非人类直接请求，也非当前目标轮（goal/revision/round 不匹配）。`
+              return mainFormat(m.goal.notAuthorized, { action })
             }
             if (action === 'blocked' && !direct && current.roundsStarted < MIN_ROUNDS_FOR_BLOCK) {
-              return `自动标记 blocked 至少需要已进行 ${MIN_ROUNDS_FOR_BLOCK} 轮（当前 ${current.roundsStarted} 轮）。若确已无法推进，请在最终回答中向用户说明，由用户决定暂停或调整目标。`
+              return mainFormat(m.goal.blockedMinRounds, {
+                minRounds: MIN_ROUNDS_FOR_BLOCK,
+                rounds: current.roundsStarted
+              })
             }
           }
 
@@ -409,45 +433,49 @@ export function buildGoalTools(store: GoalStore, topicId: number): StructuredToo
           if (!direct && exactRound && (action === 'complete' || action === 'blocked')) {
             const wrapup =
               action === 'complete'
-                ? '目标已标记完成。请在最终回答中给出简短收尾：完成成果、关键证据与后续建议。'
-                : `目标已标记阻塞（${view.blockedReason?.code ?? 'unspecified'}）。请在最终回答中向用户说明阻塞原因与可行的下一步。`
+                ? m.goal.wrapupComplete
+                : mainFormat(m.goal.wrapupBlocked, {
+                    code: view.blockedReason?.code ?? 'unspecified'
+                  })
             return `${formatGoal(view)}\n\n${wrapup}`
           }
           return formatGoal(view)
         } catch (err) {
-          return `更新目标失败: ${(err as Error).message}`
+          return mainFormat(m.goal.updateFailed, { message: (err as Error).message })
         }
       },
       {
         name: 'update_goal',
         description:
-          '更新当前目标：edit（修改目标描述/轮次上限）、pause（暂停）、resume（恢复并继续自动推进）、complete（标记完成）、blocked（标记阻塞，需提供原因）。必须携带 goal_id 与最新 revision（先 get_goal 获取）。edit/pause/resume 仅限人类直接请求；complete/blocked 在自动续跑轮中可直接执行（blocked 需已进行至少 3 轮）。',
+          'Update the current goal. Actions: edit (change the objective or the round limit), pause (stop auto-continuation), resume (restore and resume auto-continuation), complete (mark as completed), blocked (mark as blocked; a reason is required). Always pass goal_id and the latest revision (call get_goal first). edit/pause/resume require a direct human request; complete/blocked may be called from an auto-continuation round (blocked then requires at least 3 rounds already started).',
         schema: z.object({
-          goal_id: z.string().describe('目标 ID（由 create_goal / get_goal 返回）'),
+          goal_id: z.string().describe('Goal ID (from create_goal / get_goal)'),
           revision: z
             .number()
             .int()
             .positive()
-            .describe('当前 revision（过期会被拒绝，先 get_goal）'),
+            .describe('Current revision (a stale revision is rejected; call get_goal first)'),
           action: z
             .enum(['edit', 'pause', 'resume', 'complete', 'blocked'])
-            .describe('要执行的操作'),
-          objective: z.string().optional().describe('（edit 时）新的目标描述'),
+            .describe('Action to perform'),
+          objective: z.string().optional().describe('(edit) New objective'),
           max_goal_rounds: z
             .number()
             .int()
             .positive()
             .optional()
-            .describe('（edit 时）新的轮次上限'),
+            .describe('(edit) New round limit'),
           blocked_reason: z
             .object({
               code: z
                 .string()
-                .describe('稳定的小写 kebab 分类，如 round-limit / model-reported / user-paused'),
-              message: z.string().describe('阻塞原因说明')
+                .describe(
+                  'Stable lowercase kebab-case category, e.g. round-limit / model-reported / user-paused'
+                ),
+              message: z.string().describe('Explanation of the blocking condition')
             })
             .optional()
-            .describe('（blocked 时）阻塞原因')
+            .describe('(blocked) Reason the goal is blocked')
         })
       }
     )

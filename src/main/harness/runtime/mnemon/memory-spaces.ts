@@ -2,6 +2,7 @@ import * as fs from 'fs'
 import * as path from 'path'
 import { PGlite } from '@electric-sql/pglite'
 import logger from 'electron-log'
+import { mainFormat, mainToolMessages } from '../../../i18n'
 import { hashOf } from './runtime-memory'
 import {
   MNEMON_EDGE_TYPES,
@@ -208,7 +209,7 @@ export class MemoryBodyRegistry {
     request: { name?: string; description?: string; active?: boolean }
   ): MemoryBody {
     const body = this.get(id)
-    if (!body) throw new Error(`记忆空间不存在: ${id}`)
+    if (!body) throw new Error(mainFormat(mainToolMessages().mnemon.errors.spaceNotFound, { id }))
     if (request.name !== undefined) body.name = request.name.trim() || body.name
     if (request.description !== undefined) body.description = request.description.trim()
     if (request.active !== undefined) body.active = request.active
@@ -228,14 +229,15 @@ export class MemoryBodyRegistry {
     deactivateSources = true,
     openDb?: (bodyId: string) => Promise<{ db: PGlite; release: () => Promise<void> }>
   ): Promise<{ imported: number; skippedDuplicates: number }> {
+    const tm = mainToolMessages().mnemon
     const target = this.get(targetBodyId)
-    if (!target) throw new Error(`目标记忆空间不存在: ${targetBodyId}`)
+    if (!target) throw new Error(mainFormat(tm.errors.targetSpaceNotFound, { id: targetBodyId }))
 
     const open =
       openDb ??
       (async (bodyId: string): Promise<{ db: PGlite; release: () => Promise<void> }> => {
         const body = this.get(bodyId)
-        if (!body) throw new Error(`记忆空间不存在: ${bodyId}`)
+        if (!body) throw new Error(mainFormat(tm.errors.spaceNotFound, { id: bodyId }))
         const db = await openSpaceDatabase(body.dbPath)
         return { db, release: async () => await db.close() }
       })
@@ -425,8 +427,9 @@ export async function rememberInsight(
   bodyId: string,
   bodyName: string
 ): Promise<Insight> {
+  const tm = mainToolMessages().mnemon
   const content = request.content.trim()
-  if (!content) throw new Error('内容不能为空')
+  if (!content) throw new Error(tm.errors.contentRequired)
   const sourceHash = hashOf(content)
 
   // 查重：完全相同内容不重复写入
@@ -435,7 +438,7 @@ export async function rememberInsight(
     [sourceHash]
   )
   if (Number(existing.rows[0]?.c ?? 0) > 0) {
-    throw new Error('该记忆已存在（内容完全相同），如需更新请先 forget 旧条目')
+    throw new Error(tm.errors.insightExists)
   }
 
   const now = new Date().toISOString()
@@ -526,10 +529,13 @@ export async function linkInsights(
   weight: number,
   reason?: string
 ): Promise<void> {
+  const tm = mainToolMessages().mnemon
   if (!MNEMON_EDGE_TYPES.includes(type)) {
-    throw new Error(`关系类型必须为 ${MNEMON_EDGE_TYPES.join(' / ')}`)
+    throw new Error(
+      mainFormat(tm.errors.relationTypeInvalid, { values: MNEMON_EDGE_TYPES.join(' / ') })
+    )
   }
-  if (sourceId === targetId) throw new Error('不能与自己建立关系')
+  if (sourceId === targetId) throw new Error(tm.errors.selfRelation)
   const now = new Date().toISOString()
   await db.query(
     `INSERT INTO edges (id, source_id, target_id, type, weight, reason, created_at)

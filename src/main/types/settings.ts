@@ -25,6 +25,12 @@ export interface HarnessSettings {
 
 export type ThemeMode = 'light' | 'dark' | 'auto'
 
+/**
+ * UI 语言。只有「简体中文 / English」两项：未选择过时默认选中与操作系统语言一致的那一项，
+ * 因此不存在独立的「跟随系统」档位。
+ */
+export type AppLanguage = 'zh-CN' | 'en-US'
+
 /** 系统托盘设置 */
 export interface TraySettings {
   /** 关闭窗口时最小化到系统托盘（默认开启）；关闭后应用完全退出 */
@@ -40,6 +46,8 @@ export interface SystemSettings {
   defaultEmbeddingModelId?: number
   musicDirectory?: string
   theme?: ThemeMode
+  /** UI 语言；未设置时按操作系统语言取其对应项 */
+  language?: AppLanguage
   /** 系统托盘设置 */
   tray?: TraySettings
   /** 天气缓存数据 */

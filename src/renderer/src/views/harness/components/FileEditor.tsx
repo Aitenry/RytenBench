@@ -7,6 +7,7 @@ import * as monaco from 'monaco-editor'
 import '../utils/monacoSetup'
 import { disableMonacoValidation } from '../utils/monacoSetup'
 import { getLanguageFromPath } from '../utils/fileLang'
+import { useTranslation } from '@renderer/i18n'
 
 export interface OpenFile {
   path: string
@@ -48,6 +49,7 @@ const FileEditor: React.FC<FileEditorProps> = ({
   const activeFile = openFiles.find((f) => f.path === activeFilePath) || null
   const language = activeFile ? getLanguageFromPath(activeFile.path) : 'plaintext'
   const editorTheme = isDarkMode ? 'vs-dark' : 'vs'
+  const { t } = useTranslation()
 
   // --- Tab overflow management ---
   const tabBarRef = useRef<HTMLDivElement>(null)
@@ -382,7 +384,7 @@ const FileEditor: React.FC<FileEditorProps> = ({
                 className="flex items-center justify-center h-full"
                 style={{ color: colorTextTertiary, fontSize: 13 }}
               >
-                Loading editor...
+                {t('harness.fileEditor.loading')}
               </div>
             }
           />

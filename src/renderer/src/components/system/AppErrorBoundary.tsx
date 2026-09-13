@@ -1,5 +1,6 @@
 import React from 'react'
 import { theme } from 'antd'
+import { useTranslation } from '@renderer/i18n'
 
 /**
  * 全局错误边界：渲染进程任意未捕获的 React 渲染错误都会让 React 19 卸载整棵组件树，
@@ -35,6 +36,7 @@ export class AppErrorBoundary extends React.Component<
 
 const BoundaryCard: React.FC<{ error: Error; onReload: () => void }> = ({ error, onReload }) => {
   const { token } = theme.useToken()
+  const { t } = useTranslation()
   return (
     <div
       style={{
@@ -66,10 +68,10 @@ const BoundaryCard: React.FC<{ error: Error; onReload: () => void }> = ({ error,
             marginBottom: 10
           }}
         >
-          RUNTIME ERROR
+          {t('shell.errorBoundary.eyebrow')}
         </div>
         <div style={{ fontSize: 15, fontWeight: 600, color: token.colorText, marginBottom: 10 }}>
-          界面渲染时发生了一个未预期的错误
+          {t('shell.errorBoundary.title')}
         </div>
         <div
           style={{
@@ -99,7 +101,7 @@ const BoundaryCard: React.FC<{ error: Error; onReload: () => void }> = ({ error,
             cursor: 'pointer'
           }}
         >
-          重新加载
+          {t('shell.errorBoundary.reload')}
         </button>
       </div>
     </div>

@@ -52,11 +52,14 @@ export const todoStore = new TodoStore()
 /** 构建待办工具集（闭包绑定 topicId，保证清单归属当前对话） */
 export function buildTodoTools(store: TodoStore, topicId: number): StructuredToolInterface[] {
   const todoSchema = z.object({
-    content: z.string().describe('待办事项内容'),
+    content: z.string().describe('Content of the todo item'),
     status: z
       .enum(['pending', 'in_progress', 'completed'])
-      .describe('状态：pending 待办 / in_progress 进行中 / completed 已完成'),
-    activeForm: z.string().optional().describe('进行中的具体表述（如当前正在执行的动作）')
+      .describe('Status: pending / in_progress / completed'),
+    activeForm: z
+      .string()
+      .optional()
+      .describe('Present-tense phrasing of the work in progress (the action being performed now)')
   })
 
   return [
@@ -73,9 +76,9 @@ export function buildTodoTools(store: TodoStore, topicId: number): StructuredToo
       {
         name: 'write_todos',
         description:
-          '写入/更新当前任务的待办清单。多步任务开始时先列出全部待办（均置为 pending），然后逐项推进：开始执行某一步时立即将该步更新为 in_progress，完成后再更新为 completed，再开始下一步。每步的状态变化都要及时提交，禁止等到所有步骤全部完成后再一次性更新整份清单。',
+          'Write or update the todo list for the current task. For multi-step work, list every todo up front (all pending), then advance one item at a time: set an item to in_progress the moment you start it, set it to completed when it is done, and only then start the next item. Submit each status change as it happens; never wait until every step is finished and then update the whole list at once.',
         schema: z.object({
-          todos: z.array(todoSchema).describe('待办清单（整体替换）')
+          todos: z.array(todoSchema).describe('The todo list (replaces the previous list entirely)')
         })
       }
     ),
@@ -85,7 +88,7 @@ export function buildTodoTools(store: TodoStore, topicId: number): StructuredToo
       },
       {
         name: 'read_todos',
-        description: '读取当前任务的待办清单。',
+        description: 'Read the todo list for the current task.',
         schema: z.object({})
       }
     )

@@ -184,7 +184,9 @@ export async function convertDialoguesToMessages(
   // 截断说明：置于最前，告知模型早期历史被省略
   if (truncated) {
     messages.push(
-      new SystemMessage('（注：更早的对话因篇幅过长已自动省略，本次仅携带最近的内容。）')
+      new SystemMessage(
+        '(Note: earlier conversation was automatically omitted because it exceeded the length budget. Only the most recent messages are included.)'
+      )
     )
   }
 

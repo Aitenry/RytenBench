@@ -1,6 +1,7 @@
 import React from 'react'
 import { Progress, Tag, Typography } from 'antd'
 import { useNotification } from '@renderer/contexts/useNotification'
+import { useTranslation } from '@renderer/i18n'
 import type { BuildProgressNotification } from '@renderer/types/notification'
 
 interface NotificationListProps {
@@ -17,6 +18,7 @@ const NotificationList: React.FC<NotificationListProps> = ({
   colorTextSecondary
 }) => {
   const { notifications } = useNotification()
+  const { t } = useTranslation()
 
   if (notifications.length === 0) {
     return (
@@ -28,7 +30,7 @@ const NotificationList: React.FC<NotificationListProps> = ({
           fontSize: 13
         }}
       >
-        暂无消息
+        {t('shell.notificationList.empty')}
       </div>
     )
   }
@@ -64,7 +66,7 @@ const NotificationList: React.FC<NotificationListProps> = ({
               </Typography.Text>
               {buildItem && buildItem.completed && (
                 <Tag color="success" style={{ fontSize: 11, lineHeight: '18px', margin: 0 }}>
-                  已完成
+                  {t('shell.notificationList.completed')}
                 </Tag>
               )}
               {buildItem && !buildItem.completed && (

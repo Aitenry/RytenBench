@@ -1,6 +1,7 @@
 import { Node, mergeAttributes } from '@tiptap/core'
 import type { NodeViewRenderer, NodeViewRendererProps } from '@tiptap/core'
 import type MarkdownIt from 'markdown-it'
+import { i18n } from '@renderer/i18n'
 
 /* ════════════════════════════════════════════════════════════
    Mermaid 图表适配：```mermaid 代码块渲染为可交互图表
@@ -82,17 +83,17 @@ function createMermaidNodeView(props: NodeViewRendererProps): ReturnType<NodeVie
 
   const label = document.createElement('span')
   label.className = 'tiptap-mermaid-label'
-  label.textContent = 'Mermaid'
+  label.textContent = i18n.t('markdown.mermaid.label')
 
   const btnEdit = document.createElement('button')
   btnEdit.type = 'button'
   btnEdit.className = 'tiptap-mermaid-btn'
-  btnEdit.title = '编辑源码'
+  btnEdit.title = i18n.t('markdown.mermaid.editSource')
 
   const btnRefresh = document.createElement('button')
   btnRefresh.type = 'button'
   btnRefresh.className = 'tiptap-mermaid-btn'
-  btnRefresh.title = '重新渲染'
+  btnRefresh.title = i18n.t('common.action.refresh')
 
   /* 编辑/图表模式切换：按钮图标与悬浮提示同步换 */
   const setEditIcon = (icon: SVGSVGElement, title: string): void => {
@@ -100,19 +101,19 @@ function createMermaidNodeView(props: NodeViewRendererProps): ReturnType<NodeVie
     btnEdit.appendChild(icon)
     btnEdit.title = title
   }
-  setEditIcon(createIcon(ICON_CODE), '编辑源码')
+  setEditIcon(createIcon(ICON_CODE), i18n.t('markdown.mermaid.editSource'))
   btnRefresh.appendChild(createIcon(ICON_REFRESH))
 
   const btnCenter = document.createElement('button')
   btnCenter.type = 'button'
   btnCenter.className = 'tiptap-mermaid-btn'
-  btnCenter.title = '居中画布'
+  btnCenter.title = i18n.t('markdown.mermaid.centerCanvas')
   btnCenter.appendChild(createIcon(ICON_CENTER))
 
   const btnFullscreen = document.createElement('button')
   btnFullscreen.type = 'button'
   btnFullscreen.className = 'tiptap-mermaid-btn'
-  btnFullscreen.title = '全屏窗口预览'
+  btnFullscreen.title = i18n.t('markdown.mermaid.fullscreen')
   btnFullscreen.appendChild(createIcon(ICON_FULLSCREEN))
 
   bar.append(label, btnCenter, btnFullscreen, btnEdit, btnRefresh)
@@ -272,7 +273,7 @@ function createMermaidNodeView(props: NodeViewRendererProps): ReturnType<NodeVie
     const seq = ++renderSeq
     if (renderTimer != null) window.clearTimeout(renderTimer)
     if (!code.trim()) {
-      viewport.textContent = '（空图表，点击「编辑源码」输入 Mermaid 语法）'
+      viewport.textContent = i18n.t('markdown.mermaid.empty')
       viewport.classList.remove('tiptap-mermaid-loading')
       canvas.style.height = ''
       lastRenderedCode = code
@@ -295,7 +296,9 @@ function createMermaidNodeView(props: NodeViewRendererProps): ReturnType<NodeVie
           viewport.textContent = ''
           const err = document.createElement('div')
           err.className = 'tiptap-mermaid-error'
-          err.textContent = `图表语法错误：${error instanceof Error ? error.message : String(error)}`
+          err.textContent = i18n.t('markdown.mermaid.errorWithReason', {
+            reason: error instanceof Error ? error.message : String(error)
+          })
           viewport.append(err)
         })
     }, 100)
@@ -309,7 +312,7 @@ function createMermaidNodeView(props: NodeViewRendererProps): ReturnType<NodeVie
     textarea = null
     dom.classList.remove('tiptap-mermaid-editing')
     canvas.style.display = ''
-    setEditIcon(createIcon(ICON_CODE), '编辑源码')
+    setEditIcon(createIcon(ICON_CODE), i18n.t('markdown.mermaid.editSource'))
     const pos = props.getPos()
     if (pos != null && next !== getCode()) {
       props.editor
@@ -331,7 +334,7 @@ function createMermaidNodeView(props: NodeViewRendererProps): ReturnType<NodeVie
     textarea = null
     dom.classList.remove('tiptap-mermaid-editing')
     canvas.style.display = ''
-    setEditIcon(createIcon(ICON_CODE), '编辑源码')
+    setEditIcon(createIcon(ICON_CODE), i18n.t('markdown.mermaid.editSource'))
     renderDiagram()
   }
 
@@ -340,13 +343,13 @@ function createMermaidNodeView(props: NodeViewRendererProps): ReturnType<NodeVie
     editing = true
     dom.classList.add('tiptap-mermaid-editing')
     canvas.style.display = 'none'
-    setEditIcon(createIcon(ICON_FLOW), '返回图表')
+    setEditIcon(createIcon(ICON_FLOW), i18n.t('markdown.mermaid.backToDiagram'))
     textarea = document.createElement('textarea')
     textarea.className = 'tiptap-mermaid-textarea'
     textarea.value = getCode()
     textarea.rows = Math.max(4, getCode().split('\n').length + 1)
     textarea.spellcheck = false
-    textarea.placeholder = '输入 Mermaid 语法（如 graph TD; A --> B）'
+    textarea.placeholder = i18n.t('markdown.mermaid.placeholder')
     textarea.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
         e.preventDefault()

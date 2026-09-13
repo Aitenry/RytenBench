@@ -9,23 +9,21 @@ export interface Track {
   coverDataUrl: string | null
 }
 
+/** 循环策略：只保留取下一曲的行为，展示名走词条（PlayerControls 的 MODE_LABEL_KEY） */
 export const REPEAT_STRATEGIES = {
   all: {
-    label: '列表循环',
     getNext(currentIndex: number, playlistLength: number): number {
       const next = currentIndex + 1
       return next >= playlistLength ? 0 : next
     }
   },
   one: {
-    label: '单曲循环',
     getNext(currentIndex: number, _playlistLength: number): number {
       void _playlistLength
       return currentIndex
     }
   },
   shuffle: {
-    label: '随机播放',
     getNext(_currentIndex: number, playlistLength: number): number {
       return Math.floor(Math.random() * playlistLength)
     }

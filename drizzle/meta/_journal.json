@@ -29,6 +29,20 @@
       "when": 1789232650201,
       "tag": "0003_rename_chat_to_harness",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1789275698822,
+      "tag": "0004_provider_model_params",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1789275911645,
+      "tag": "0005_temperature_optional",
+      "breakpoints": true
     }
   ]
 }

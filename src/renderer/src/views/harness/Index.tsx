@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { theme, Button } from 'antd'
 import { RiChatAiLine, RiFoldersLine, RiListSettingsLine } from '@remixicon/react'
 import { useTheme } from '@renderer/contexts/useTheme'
+import { useTranslation } from '@renderer/i18n'
 import { useHarness } from '@renderer/contexts/HarnessContextCore'
 import type { Window } from '../../../resource/types/window'
 import HarnessSidebar from './components/HarnessSidebar'
@@ -32,6 +33,7 @@ const Index: React.FC = () => {
   } = theme.useToken()
   const { effectiveTheme } = useTheme()
   const isDarkMode = effectiveTheme === 'dark'
+  const { t } = useTranslation()
 
   const {
     messages,
@@ -111,7 +113,7 @@ const Index: React.FC = () => {
         dir
           .replace(/[/\\]$/, '')
           .split(/[/\\]/)
-          .pop() || '工作区'
+          .pop() || t('harness.sidebar.defaultWorkspaceName')
       const id = await win.api.harness.createWorkspace(name, dir)
       await win.api.systemSettings.update({
         harness: {
@@ -126,7 +128,7 @@ const Index: React.FC = () => {
     } catch (err) {
       console.error('Failed to setup workspace:', err)
     }
-  }, [refreshTopics])
+  }, [refreshTopics, t])
 
   // 工作区切换后刷新工作区路径与话题列表
   const handleWorkspaceChange = useCallback(async () => {
@@ -416,17 +418,17 @@ const Index: React.FC = () => {
                   <RiFoldersLine size={26} />
                 </div>
                 <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: colorText }}>
-                  配置工作区后开始对话
+                  {t('harness.index.setupWorkspaceTitle')}
                 </h2>
                 <p style={{ margin: '8px 0 20px', fontSize: 13, color: colorTextSecondary }}>
-                  会话记录与记忆按工作区隔离。选择一个目录作为工作区后即可开始，其他功能不受影响。
+                  {t('harness.index.setupWorkspaceDescription')}
                 </p>
                 <Button
                   type="primary"
                   icon={<RiFoldersLine size={15} />}
                   onClick={handleWorkspaceSetup}
                 >
-                  选择工作区目录
+                  {t('harness.index.setupWorkspaceButton')}
                 </Button>
               </div>
             </div>
@@ -454,10 +456,10 @@ const Index: React.FC = () => {
                   <RiChatAiLine size={26} />
                 </div>
                 <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: colorText }}>
-                  配置模型后开始对话
+                  {t('harness.index.setupModelTitle')}
                 </h2>
                 <p style={{ margin: '8px 0 20px', fontSize: 13, color: colorTextSecondary }}>
-                  AI 对话需要模型供应商。添加并启用至少一个模型后即可使用，其他功能不受影响。
+                  {t('harness.index.setupModelDescription')}
                 </p>
                 <Button
                   type="primary"
@@ -468,7 +470,7 @@ const Index: React.FC = () => {
                     )
                   }
                 >
-                  去配置模型
+                  {t('harness.index.setupModelButton')}
                 </Button>
               </div>
             </div>

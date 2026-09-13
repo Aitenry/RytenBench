@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react'
 import { Modal, Input, Select, Slider, InputNumber, DatePicker, Form, Alert } from 'antd'
 import dayjs, { type Dayjs } from 'dayjs'
+import { useTranslation } from '@renderer/i18n'
 import type { PlannerTreeNode } from '@renderer/types/planner'
 
 const { RangePicker } = DatePicker
@@ -57,6 +58,7 @@ function sumDescendantWorkHours(node: PlannerTreeNode): number {
 }
 
 const AddTaskModal: React.FC<Props> = ({ open, parentId, editTask, tree, onOk, onCancel }) => {
+  const { t } = useTranslation()
   const [title, setTitle] = useState('')
   const [type, setType] = useState('task')
   const [progress, setProgress] = useState(0)
@@ -144,12 +146,13 @@ const AddTaskModal: React.FC<Props> = ({ open, parentId, editTask, tree, onOk, o
   /** 验证必填项与约束，返回错误信息或 null */
   const validate = (): string | null => {
     // 0. 必填校验
-    if (!title.trim()) return '名称不能为空。'
-    if (!type) return '类型不能为空。'
+    if (!title.trim()) return t('planner.validation.nameRequired')
+    if (!type) return t('planner.validation.typeRequired')
     if (workHours === undefined || workHours === null || workHours <= 0)
-      return '工时不能为空或为 0。'
-    if (priority === undefined || priority === null) return '优先级不能为空。'
-    if (!dateRange || !dateRange[0] || !dateRange[1]) return '时间范围不能为空。'
+      return t('planner.validation.workHoursRequired')
+    if (priority === undefined || priority === null) return t('planner.validation.priorityRequired')
+    if (!dateRange || !dateRange[0] || !dateRange[1])
+      return t('planner.validation.dateRangeRequired')
 
     const startDate = dateRange[0]
     const endDate = dateRange[1]
@@ -158,7 +161,7 @@ const AddTaskModal: React.FC<Props> = ({ open, parentId, editTask, tree, onOk, o
     const days = endDate.startOf('day').diff(startDate.startOf('day'), 'day') + 1
     const maxHours = days * 8
     if (workHours > maxHours) {
-      return `时间范围跨越 ${days} 天，工时最大仅允许 ${maxHours} 小时`
+      return t('planner.validation.workHoursExceeded', { days, maxHours })
     }
 
     // 2. 时间范围层级约束：子级必须在父级时间范围内
@@ -166,10 +169,10 @@ const AddTaskModal: React.FC<Props> = ({ open, parentId, editTask, tree, onOk, o
       const pStart = dayjs(constrainingNode.start_date)
       const pEnd = dayjs(constrainingNode.end_date)
       if (startDate.isBefore(pStart, 'day')) {
-        return `开始日期不能早于父级开始日期（${pStart.format('YYYY-MM-DD')}）`
+        return t('planner.validation.startBeforeParent', { date: pStart.format('YYYY-MM-DD') })
       }
       if (endDate.isAfter(pEnd, 'day')) {
-        return `结束日期不能晚于父级结束日期（${pEnd.format('YYYY-MM-DD')}）`
+        return t('planner.validation.endAfterParent', { date: pEnd.format('YYYY-MM-DD') })
       }
     }
 
@@ -177,7 +180,10 @@ const AddTaskModal: React.FC<Props> = ({ open, parentId, editTask, tree, onOk, o
     if (isEdit && editTask) {
       // 编辑阶段：其下所有任务工时之和不得超过阶段总工时
       if (editTask.type === 'phase' && workHours < childWorkHoursSum) {
-        return `阶段总工时（${workHours}h）不能小于其下所有任务工时之和（${childWorkHoursSum}h）`
+        return t('planner.validation.phaseHoursBelowChildren', {
+          workHours,
+          childHours: childWorkHoursSum
+        })
       }
       // 编辑项目：其下所有阶段工时之和不得超过项目总工时
       if (editTask.type === 'project') {
@@ -186,7 +192,10 @@ const AddTaskModal: React.FC<Props> = ({ open, parentId, editTask, tree, onOk, o
           0
         )
         if (workHours < childPhaseSum) {
-          return `项目总工时（${workHours}h）不能小于其下所有阶段工时之和（${childPhaseSum}h）`
+          return t('planner.validation.projectHoursBelowPhases', {
+            workHours,
+            phaseHours: childPhaseSum
+          })
         }
       }
     }
@@ -198,7 +207,10 @@ const AddTaskModal: React.FC<Props> = ({ open, parentId, editTask, tree, onOk, o
       if (parentNode.type === 'phase') {
         const existedSum = sumDescendantWorkHours(parentNode)
         if (existedSum + workHours > parentHours) {
-          return `该阶段下所有任务工时之和（${existedSum + workHours}h）将超过阶段总工时（${parentHours}h）`
+          return t('planner.validation.exceedPhaseHours', {
+            total: existedSum + workHours,
+            parentHours
+          })
         }
       }
       if (parentNode.type === 'project' && type === 'phase') {
@@ -207,7 +219,10 @@ const AddTaskModal: React.FC<Props> = ({ open, parentId, editTask, tree, onOk, o
           0
         )
         if (existedPhaseSum + workHours > parentHours) {
-          return `该项目下所有阶段工时之和（${existedPhaseSum + workHours}h）将超过项目总工时（${parentHours}h）`
+          return t('planner.validation.exceedProjectHours', {
+            total: existedPhaseSum + workHours,
+            parentHours
+          })
         }
       }
     }
@@ -234,7 +249,10 @@ const AddTaskModal: React.FC<Props> = ({ open, parentId, editTask, tree, onOk, o
       }
       editTask.children.forEach(walk)
       if (found.violation) {
-        return `子任务「${found.violation.title}」（${found.violation.date}）超出新的时间范围，无法保存`
+        return t('planner.validation.childOutOfRange', {
+          title: found.violation.title,
+          date: found.violation.date
+        })
       }
     }
 
@@ -264,9 +282,9 @@ const AddTaskModal: React.FC<Props> = ({ open, parentId, editTask, tree, onOk, o
   }
 
   const getTitle = (): string => {
-    if (isEdit) return '编辑任务'
-    if (parentId !== null) return '添加子任务'
-    return '新建项目'
+    if (isEdit) return t('planner.modal.editTitle')
+    if (parentId !== null) return t('planner.action.addChild')
+    return t('planner.modal.newProjectTitle')
   }
 
   /** 根据上下文确定可用的类型选项 */
@@ -278,25 +296,25 @@ const AddTaskModal: React.FC<Props> = ({ open, parentId, editTask, tree, onOk, o
     if (parentId === null) {
       // 顶层：允许所有类型
       return [
-        { value: 'project', label: '项目' },
-        { value: 'phase', label: '阶段' },
-        { value: 'task', label: '任务' }
+        { value: 'project', label: t('planner.type.project') },
+        { value: 'phase', label: t('planner.type.phase') },
+        { value: 'task', label: t('planner.type.task') }
       ]
     }
     // 子任务：仅允许任务或阶段
     return [
-      { value: 'task', label: '任务' },
-      { value: 'phase', label: '阶段' }
+      { value: 'task', label: t('planner.type.task') },
+      { value: 'phase', label: t('planner.type.phase') }
     ]
   }
 
-  const getTypeLabel = (t: string): string => {
+  const getTypeLabel = (typeValue: string): string => {
     const map: Record<string, string> = {
-      project: '项目',
-      phase: '阶段',
-      task: '任务'
+      project: t('planner.type.project'),
+      phase: t('planner.type.phase'),
+      task: t('planner.type.task')
     }
-    return map[t] ?? t
+    return map[typeValue] ?? typeValue
   }
 
   const typeOptions = getTypeOptions()
@@ -307,8 +325,8 @@ const AddTaskModal: React.FC<Props> = ({ open, parentId, editTask, tree, onOk, o
       open={open}
       onOk={handleOk}
       onCancel={onCancel}
-      okText="确定"
-      cancelText="取消"
+      okText={t('common.action.confirm')}
+      cancelText={t('common.action.cancel')}
       width={420}
       destroyOnHidden
     >
@@ -324,17 +342,17 @@ const AddTaskModal: React.FC<Props> = ({ open, parentId, editTask, tree, onOk, o
           />
         )}
 
-        <Form.Item label="名称" required>
+        <Form.Item label={t('planner.modal.nameLabel')} required>
           <Input
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            placeholder="输入名称"
+            placeholder={t('planner.modal.namePlaceholder')}
             onPressEnter={handleOk}
           />
         </Form.Item>
 
         {(isEdit || parentId !== null) && (
-          <Form.Item label="类型">
+          <Form.Item label={t('planner.modal.typeLabel')}>
             <Select value={type} onChange={(v) => setType(v)} disabled={isEdit}>
               {typeOptions.map((opt) => (
                 <Select.Option key={opt.value} value={opt.value}>
@@ -346,7 +364,7 @@ const AddTaskModal: React.FC<Props> = ({ open, parentId, editTask, tree, onOk, o
         )}
 
         {type !== 'project' && type !== 'phase' && isEdit && (
-          <Form.Item label={`进度 (${progress}%)`}>
+          <Form.Item label={t('planner.modal.progressLabel', { progress })}>
             <Slider
               min={0}
               max={100}
@@ -358,19 +376,23 @@ const AddTaskModal: React.FC<Props> = ({ open, parentId, editTask, tree, onOk, o
         )}
 
         <div className="grid grid-cols-2 gap-4">
-          <Form.Item label="工时" className="mb-0">
+          <Form.Item label={t('planner.modal.workHoursLabel')} className="mb-0">
             <InputNumber
               className="w-full"
               min={0}
               max={maxWorkHours}
               value={workHours}
               onChange={(v) => setWorkHours(v ?? 0)}
-              addonAfter="工时"
+              addonAfter={t('planner.modal.workHoursLabel')}
             />
           </Form.Item>
 
-          <Form.Item label="优先级" className="mb-0">
-            <Select value={priority} onChange={setPriority} placeholder="请选择优先级">
+          <Form.Item label={t('planner.modal.priorityLabel')} className="mb-0">
+            <Select
+              value={priority}
+              onChange={setPriority}
+              placeholder={t('planner.modal.priorityPlaceholder')}
+            >
               {PRIORITY_OPTIONS.map((opt) => (
                 <Select.Option key={opt.value} value={opt.value}>
                   {opt.label}
@@ -380,7 +402,7 @@ const AddTaskModal: React.FC<Props> = ({ open, parentId, editTask, tree, onOk, o
           </Form.Item>
         </div>
 
-        <Form.Item label="时间范围" required>
+        <Form.Item label={t('planner.modal.dateRangeLabel')} required>
           <RangePicker
             className="w-full"
             showTime
@@ -388,7 +410,10 @@ const AddTaskModal: React.FC<Props> = ({ open, parentId, editTask, tree, onOk, o
             onChange={(v) => setDateRange(v as [Dayjs, Dayjs] | null)}
             disabledDate={disabledDate}
             defaultPickerValue={defaultPickerValue}
-            placeholder={['开始时间', '结束时间']}
+            placeholder={[
+              t('planner.modal.startTimePlaceholder'),
+              t('planner.modal.endTimePlaceholder')
+            ]}
           />
         </Form.Item>
       </Form>

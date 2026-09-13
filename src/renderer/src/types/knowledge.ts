@@ -93,54 +93,106 @@ export const ENTITY_TYPE_COLORS: Record<string, string> = {
   realm: '#17A589'
 }
 
-/** 实体类型 → 中文标签映射 */
-export const ENTITY_TYPE_LABELS: Record<string, string> = {
-  person: '人物',
-  organization: '组织',
-  concept: '概念',
-  event: '事件',
-  location: '地点',
-  other: '其他',
-  technology: '技术',
-  product: '产品',
-  system: '体系',
-  document: '文档',
-  standard: '标准',
-  facility: '设施',
-  substance: '物质',
-  process: '流程',
-  role: '角色',
-  skill: '技能',
-  measure: '指标',
-  artifact: '物品',
-  creature: '生物',
-  realm: '等级'
+/**
+ * 实体类型 → 词条键映射。
+ * 本模块不持有 `t`，而 i18next 的 `t()` 只接受字面量键，所以这里存「数据值 → 字面量词条键」，
+ * 由调用方（GraphView / EntityDetail）用 `t()` 求值；表里未收录的类型回退成原始 type 字符串。
+ */
+export type GraphEntityTypeLabelKey =
+  | 'graph.entityType.person'
+  | 'graph.entityType.organization'
+  | 'graph.entityType.concept'
+  | 'graph.entityType.event'
+  | 'graph.entityType.location'
+  | 'graph.entityType.other'
+  | 'graph.entityType.technology'
+  | 'graph.entityType.product'
+  | 'graph.entityType.system'
+  | 'graph.entityType.document'
+  | 'graph.entityType.standard'
+  | 'graph.entityType.facility'
+  | 'graph.entityType.substance'
+  | 'graph.entityType.process'
+  | 'graph.entityType.role'
+  | 'graph.entityType.skill'
+  | 'graph.entityType.measure'
+  | 'graph.entityType.artifact'
+  | 'graph.entityType.creature'
+  | 'graph.entityType.realm'
+
+export const ENTITY_TYPE_LABEL_KEYS: Partial<Record<string, GraphEntityTypeLabelKey>> = {
+  person: 'graph.entityType.person',
+  organization: 'graph.entityType.organization',
+  concept: 'graph.entityType.concept',
+  event: 'graph.entityType.event',
+  location: 'graph.entityType.location',
+  other: 'graph.entityType.other',
+  technology: 'graph.entityType.technology',
+  product: 'graph.entityType.product',
+  system: 'graph.entityType.system',
+  document: 'graph.entityType.document',
+  standard: 'graph.entityType.standard',
+  facility: 'graph.entityType.facility',
+  substance: 'graph.entityType.substance',
+  process: 'graph.entityType.process',
+  role: 'graph.entityType.role',
+  skill: 'graph.entityType.skill',
+  measure: 'graph.entityType.measure',
+  artifact: 'graph.entityType.artifact',
+  creature: 'graph.entityType.creature',
+  realm: 'graph.entityType.realm'
 }
 
-/** 关系类型 → 中文标签映射 */
-export const RELATION_TYPE_LABELS: Record<string, string> = {
-  contains: '包含',
-  part_of: '属于',
-  is_a: '是一种',
-  located_in: '位于',
-  depends_on: '依赖于',
-  related_to: '相关于',
-  leads_to: '导致',
-  uses: '使用',
-  creates: '创建',
-  produces: '生产',
-  operates: '运营',
-  owns: '拥有',
-  acquires: '获得',
-  belongs_to: '归属于',
-  governs: '监管',
-  monitors: '监测',
-  employs: '雇用',
-  mentors: '指导',
-  friend_of: '朋友',
-  enemy_of: '敌人',
-  loves: '爱慕',
-  family_of: '亲属',
-  fights: '战斗',
-  kills: '击杀'
+/** 关系类型 → 词条键映射（同上，取值同样收窄成字面量联合） */
+export type GraphRelationTypeLabelKey =
+  | 'graph.relationType.contains'
+  | 'graph.relationType.part_of'
+  | 'graph.relationType.is_a'
+  | 'graph.relationType.located_in'
+  | 'graph.relationType.depends_on'
+  | 'graph.relationType.related_to'
+  | 'graph.relationType.leads_to'
+  | 'graph.relationType.uses'
+  | 'graph.relationType.creates'
+  | 'graph.relationType.produces'
+  | 'graph.relationType.operates'
+  | 'graph.relationType.owns'
+  | 'graph.relationType.acquires'
+  | 'graph.relationType.belongs_to'
+  | 'graph.relationType.governs'
+  | 'graph.relationType.monitors'
+  | 'graph.relationType.employs'
+  | 'graph.relationType.mentors'
+  | 'graph.relationType.friend_of'
+  | 'graph.relationType.enemy_of'
+  | 'graph.relationType.loves'
+  | 'graph.relationType.family_of'
+  | 'graph.relationType.fights'
+  | 'graph.relationType.kills'
+
+export const RELATION_TYPE_LABEL_KEYS: Partial<Record<string, GraphRelationTypeLabelKey>> = {
+  contains: 'graph.relationType.contains',
+  part_of: 'graph.relationType.part_of',
+  is_a: 'graph.relationType.is_a',
+  located_in: 'graph.relationType.located_in',
+  depends_on: 'graph.relationType.depends_on',
+  related_to: 'graph.relationType.related_to',
+  leads_to: 'graph.relationType.leads_to',
+  uses: 'graph.relationType.uses',
+  creates: 'graph.relationType.creates',
+  produces: 'graph.relationType.produces',
+  operates: 'graph.relationType.operates',
+  owns: 'graph.relationType.owns',
+  acquires: 'graph.relationType.acquires',
+  belongs_to: 'graph.relationType.belongs_to',
+  governs: 'graph.relationType.governs',
+  monitors: 'graph.relationType.monitors',
+  employs: 'graph.relationType.employs',
+  mentors: 'graph.relationType.mentors',
+  friend_of: 'graph.relationType.friend_of',
+  enemy_of: 'graph.relationType.enemy_of',
+  loves: 'graph.relationType.loves',
+  family_of: 'graph.relationType.family_of',
+  fights: 'graph.relationType.fights',
+  kills: 'graph.relationType.kills'
 }

@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react'
 import { RiMusicLine, RiRefreshLine, RiSunCloudyLine } from '@remixicon/react'
 import { useTheme } from '@renderer/contexts/useTheme'
 import { useAudioState, useAudioProgress } from '@renderer/contexts/AudioContext'
+import { useTranslation } from '@renderer/i18n'
 import { formatTime } from '@renderer/utils/formatTime'
 import MusicMiniPlayer from '../MusicMiniPlayer'
 import { Window } from '../../../../resource/types/window'
@@ -30,6 +31,7 @@ const BottomBar: React.FC<BottomBarProps> = ({
   const { effectiveTheme } = useTheme()
   const { currentTrack } = useAudioState()
   const { progress } = useAudioProgress()
+  const { t, i18n } = useTranslation()
   const isDark = effectiveTheme === 'dark'
 
   const [carouselIndex, setCarouselIndex] = useState(0)
@@ -54,6 +56,8 @@ const BottomBar: React.FC<BottomBarProps> = ({
     }
   }, [])
 
+  // 依赖语言：天气文案由主进程按当前语言渲染后下发，切语言要重新拉一次缓存
+  // （主进程缓存里存的是天气码，不重新取就会留上一次语言的中文描述）
   useEffect(() => {
     api.systemSettings.getAll().then((s) => {
       const city = s.ip?.city as string | undefined
@@ -68,7 +72,7 @@ const BottomBar: React.FC<BottomBarProps> = ({
       if (wd?.current) setWeatherData(wd)
     })
     return unsub
-  }, [])
+  }, [i18n.resolvedLanguage])
 
   const carouselItems = useMemo(() => {
     const items: ('music' | 'weather')[] = ['weather']
@@ -119,7 +123,7 @@ const BottomBar: React.FC<BottomBarProps> = ({
             ) : (
               <div className="text-sm">
                 {weatherLoading ? (
-                  <span style={{ color: colorTextSecondary }}>加载中...</span>
+                  <span style={{ color: colorTextSecondary }}>{t('common.state.loading')}</span>
                 ) : weatherData?.current ? (
                   <>
                     <div className="flex items-center justify-between mb-2">
@@ -129,7 +133,7 @@ const BottomBar: React.FC<BottomBarProps> = ({
                       <button
                         className="frame-titlebar-btn"
                         onClick={refreshWeather}
-                        title="刷新天气"
+                        title={t('shell.bottomBar.refreshWeather')}
                       >
                         <RiRefreshLine size={14} />
                       </button>
@@ -143,9 +147,21 @@ const BottomBar: React.FC<BottomBarProps> = ({
                       </span>
                     </div>
                     <div className="flex gap-3 text-xs" style={{ color: colorTextSecondary }}>
-                      <span>体感 {weatherData.current.apparentTemp as string}°C</span>
-                      <span>湿度 {weatherData.current.humidity as number}%</span>
-                      <span>风速 {weatherData.current.windSpeed as string}km/h</span>
+                      <span>
+                        {t('shell.bottomBar.apparentTemp', {
+                          temp: weatherData.current.apparentTemp as string
+                        })}
+                      </span>
+                      <span>
+                        {t('shell.bottomBar.humidity', {
+                          percent: weatherData.current.humidity as number
+                        })}
+                      </span>
+                      <span>
+                        {t('shell.bottomBar.windSpeed', {
+                          speed: weatherData.current.windSpeed as string
+                        })}
+                      </span>
                     </div>
                     {(weatherData.daily as Record<string, unknown>[]).length > 0 && (
                       <div
@@ -169,7 +185,9 @@ const BottomBar: React.FC<BottomBarProps> = ({
                     )}
                   </>
                 ) : (
-                  <span style={{ color: colorTextSecondary }}>暂无天气数据</span>
+                  <span style={{ color: colorTextSecondary }}>
+                    {t('shell.bottomBar.weatherUnavailable')}
+                  </span>
                 )}
               </div>
             )}
@@ -185,7 +203,7 @@ const BottomBar: React.FC<BottomBarProps> = ({
             {carouselItems[carouselIndex] === 'music' ? (
               <span className="flex items-center gap-1.5">
                 <RiMusicLine size={14} />
-                {currentTrack?.title || '音乐'}
+                {currentTrack?.title || t('shell.bottomBar.music')}
                 {currentTrack && (
                   <span style={{ color: colorTextSecondary }}>{formatTime(progress)}</span>
                 )}
@@ -195,7 +213,7 @@ const BottomBar: React.FC<BottomBarProps> = ({
                 <RiSunCloudyLine size={14} />
                 {weatherData?.current
                   ? `${weatherData.current.temp}° ${weatherData.current.weatherDesc}`
-                  : weatherCity || '天气'}
+                  : weatherCity || t('shell.bottomBar.weather')}
               </span>
             )}
           </div>

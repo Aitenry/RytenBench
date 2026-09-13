@@ -2,6 +2,7 @@ import { ipcMain } from 'electron'
 import logger from 'electron-log'
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models'
 import { safeSend } from '../safe-send'
+import { mainMessages } from '../i18n'
 import { settingsStore } from '../context'
 import { getProviderService } from '../provider/service'
 import { KnowledgeGraphService, BuildConfig } from '../graph'
@@ -103,7 +104,7 @@ export function registerGraphIpc(): void {
           logger.error('Error in graph-build-start (model):', error)
           safeSend(event.sender, 'graph-build-error', {
             wikiId,
-            error: '未配置图谱构建模型：请先到「系统设置 → 图谱」中选择用于构建知识图谱的大模型。'
+            error: mainMessages().error.graphModelNotConfigured
           })
           return
         }
@@ -172,7 +173,7 @@ export function registerGraphIpc(): void {
       logger.error('Error in graph-docs-append (model):', error)
       safeSend(event.sender, 'graph-build-error', {
         wikiId,
-        error: '未配置图谱构建模型：请先到「系统设置 → 图谱」中选择用于构建知识图谱的大模型。'
+        error: mainMessages().error.graphModelNotConfigured
       })
       return { entitiesAdded: 0, relationsAdded: 0 }
     }

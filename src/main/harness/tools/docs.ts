@@ -3,6 +3,8 @@ import { tool } from '@langchain/core/tools'
 import type { StructuredToolInterface } from '@langchain/core/tools'
 import * as z from 'zod/v4'
 import { safeSend } from '../../safe-send'
+import { mainFormat, mainPlural } from '../../i18n'
+import { getDocsToolTexts } from '../../i18n/tool-results-docs'
 
 /**
  * 广播文档被工具修改/删除（修复：编辑器对工具写入完全无感知,继续编辑会把工具刚写入的
@@ -29,15 +31,21 @@ async function searchDocsHandler(params: {
 }): Promise<string> {
   const { getAllDocs } = await import('../../database/mapper/document')
   const result = await getAllDocs(params.page ?? 1, params.pageSize ?? 10, undefined, params.query)
-  if (!result.items.length) return `没有找到匹配 "${params.query}" 的文档。`
-  const lines = [`**搜索 "${params.query}"**（共 ${result.total} 条）\n`]
+  const tr = getDocsToolTexts()
+  if (!result.items.length) return mainFormat(tr.docs.searchEmpty, { query: params.query })
+  const lines = [
+    mainFormat(tr.docs.searchHeader, {
+      query: params.query,
+      count: mainPlural(tr.docs.searchCount_one, tr.docs.searchCount_other, result.total)
+    })
+  ]
   for (const doc of result.items) {
     lines.push(`  [${doc.id}] **${doc.title}**`)
     if (doc.tags) {
       const tagList = JSON.parse(doc.tags) as string[]
-      lines.push(`    标签：${tagList.join('、')}`)
+      lines.push(`    ${mainFormat(tr.docs.tagsLabel, { tags: tagList.join(tr.listSeparator) })}`)
     }
-    if (doc.summary) lines.push(`    摘要：${doc.summary}`)
+    if (doc.summary) lines.push(`    ${mainFormat(tr.docs.summaryLabel, { summary: doc.summary })}`)
     lines.push('')
   }
   return lines.join('\n')
@@ -46,15 +54,22 @@ async function searchDocsHandler(params: {
 async function getDocHandler(params: { docId: number; headingId?: string }): Promise<string> {
   const { getDocById } = await import('../../database/mapper/document')
   const doc = await getDocById(params.docId)
-  if (!doc) return `未找到 ID 为 ${params.docId} 的文档。`
+  const tr = getDocsToolTexts()
+  if (!doc) return mainFormat(tr.docs.notFound, { docId: params.docId })
 
   const rawContent = (doc as unknown as Record<string, unknown>).content
   const content = typeof rawContent === 'string' ? rawContent : ''
-  if (!content) return `文档 "${doc.title}" 没有内容。`
+  if (!content) return mainFormat(tr.docs.noContent, { title: doc.title })
 
-  const tags = doc.tags ? `\n标签：${JSON.parse(doc.tags).join('、')}` : ''
-  const summary = doc.summary ? `\n摘要：${doc.summary}` : ''
-  const image = doc.image ? '\n有封面图片' : ''
+  const tags = doc.tags
+    ? `\n${mainFormat(tr.docs.tagsLabel, {
+        tags: (JSON.parse(doc.tags) as string[]).join(tr.listSeparator)
+      })}`
+    : ''
+  const summary = doc.summary
+    ? `\n${mainFormat(tr.docs.summaryLabel, { summary: doc.summary })}`
+    : ''
+  const image = doc.image ? `\n${tr.docs.hasImage}` : ''
 
   if (!params.headingId) {
     return `**${doc.title}** [${doc.id}]${tags}${summary}${image}\n\n---\n${content}\n---`
@@ -85,7 +100,10 @@ async function getDocHandler(params: { docId: number; headingId?: string }): Pro
 
   const targetIdx = headings.findIndex((h) => h.id === params.headingId)
   if (targetIdx === -1)
-    return `未找到标题 ID "${params.headingId}"。可用标题：${headings.map((h) => `[${h.id}] ${h.title}`).join('、')}`
+    return mainFormat(tr.docs.headingNotFound, {
+      headingId: params.headingId,
+      headings: headings.map((h) => `[${h.id}] ${h.title}`).join(tr.listSeparator)
+    })
 
   const target = headings[targetIdx]
 
@@ -104,11 +122,12 @@ async function getDocHandler(params: { docId: number; headingId?: string }): Pro
 async function getDocTocHandler(params: { docId: number }): Promise<string> {
   const { getDocById } = await import('../../database/mapper/document')
   const doc = await getDocById(params.docId)
-  if (!doc) return `未找到 ID 为 ${params.docId} 的文档。`
+  const tr = getDocsToolTexts()
+  if (!doc) return mainFormat(tr.docs.notFound, { docId: params.docId })
 
   const rawContent = (doc as unknown as Record<string, unknown>).content
   const content = typeof rawContent === 'string' ? rawContent : ''
-  if (!content) return `文档 "${doc.title}" 没有内容。`
+  if (!content) return mainFormat(tr.docs.noContent, { title: doc.title })
 
   interface HeadingRef {
     id: string
@@ -130,9 +149,14 @@ async function getDocTocHandler(params: { docId: number }): Promise<string> {
     }
   }
 
-  if (!headings.length) return `文档 "${doc.title}" 没有标题结构。`
+  if (!headings.length) return mainFormat(tr.docs.noHeadings, { title: doc.title })
 
-  const output = [`**${doc.title}** 的目录结构（共 ${headings.length} 个标题）\n`]
+  const output = [
+    mainFormat(tr.docs.tocHeader, {
+      title: doc.title,
+      count: mainPlural(tr.docs.tocCount_one, tr.docs.tocCount_other, headings.length)
+    })
+  ]
   const stack: { level: number }[] = []
   for (const h of headings) {
     while (stack.length > 0 && stack[stack.length - 1].level >= h.level) {
@@ -163,7 +187,7 @@ async function createDocHandler(params: {
     content: params.content ?? null,
     image: null
   })
-  return `文档创建成功！ID: ${id}, 标题: "${params.title}"。创建后可将其归档到知识库目录中（使用 manage_wikis 的 archive 命令）。`
+  return mainFormat(getDocsToolTexts().docs.created, { id, title: params.title })
 }
 
 async function updateDocHandler(params: {
@@ -175,7 +199,8 @@ async function updateDocHandler(params: {
 }): Promise<string> {
   const { updateDoc, getDocById } = await import('../../database/mapper/document')
   const doc = await getDocById(params.docId)
-  if (!doc) return `未找到 ID 为 ${params.docId} 的文档。`
+  const tr = getDocsToolTexts()
+  if (!doc) return mainFormat(tr.docs.notFound, { docId: params.docId })
 
   const updates: Record<string, string | null> = {}
   if (params.title !== undefined) updates.title = params.title
@@ -183,20 +208,21 @@ async function updateDocHandler(params: {
   if (params.tags !== undefined) updates.tags = params.tags
   if (params.content !== undefined) updates.content = params.content
 
-  if (Object.keys(updates).length === 0) return '没有需要更新的字段。'
+  if (Object.keys(updates).length === 0) return tr.docs.noFieldsToUpdate
 
   await updateDoc(params.docId, updates)
   broadcastDocChanged(params.docId, 'updated')
-  return `文档 [${params.docId}] "${doc.title}" 更新成功。`
+  return mainFormat(tr.docs.updated, { docId: params.docId, title: doc.title })
 }
 
 async function deleteDocHandler(params: { docId: number }): Promise<string> {
   const { deleteDoc, getDocById } = await import('../../database/mapper/document')
   const doc = await getDocById(params.docId)
-  if (!doc) return `未找到 ID 为 ${params.docId} 的文档。`
+  const tr = getDocsToolTexts()
+  if (!doc) return mainFormat(tr.docs.notFound, { docId: params.docId })
   await deleteDoc(params.docId)
   broadcastDocChanged(params.docId, 'deleted')
-  return `文档 [${params.docId}] "${doc.title}" 已彻底删除。`
+  return mainFormat(tr.docs.deleted, { docId: params.docId, title: doc.title })
 }
 
 // ============================================================================
@@ -222,41 +248,41 @@ export function buildManageDocsTool(): StructuredToolInterface {
         case 'delete':
           return deleteDocHandler(params as unknown as Parameters<typeof deleteDocHandler>[0])
         default:
-          return `未知命令：${command}。支持：search, toc, get, create, update, delete`
+          return mainFormat(getDocsToolTexts().docs.unknownCommand, { command })
       }
     },
     {
       name: 'manage_docs',
       description:
-        '管理文档（渐进式浏览 + CRUD）。\n' +
-        '  查询命令：\n' +
-        '    search - 全文搜索文档，返回 id、标题、标签、摘要，需要 query，可选 page, pageSize\n' +
-        '    toc - 获取文档的 Markdown 标题目录树（id、标题，按 # 层级缩进），需要 docId\n' +
-        '    get - 获取文档内容。不指定 headingId 返回全文；指定 headingId 返回对应段落，需要 docId，可选 headingId\n' +
-        '  文档 CRUD：\n' +
-        '    create - 创建新文档，需要 title，可选 summary, tags（JSON数组字符串）, content（Markdown格式）\n' +
-        '    update - 更新文档，需要 docId，可选 title, summary, tags, content\n' +
-        '    delete - 彻底删除文档（不可恢复），需要 docId\n' +
-        '  典型工作流：search → toc → get（按需浏览段落）；或通过 manage_wikis 工具 list → directories → docs 获取文档 ID 后，用 get 阅读内容。',
+        'Manage documents (progressive browsing + CRUD).\n' +
+        '  Query commands:\n' +
+        '    search - Full-text search over documents, returning id, title, tags, summary; requires query, optional page, pageSize\n' +
+        '    toc - Get the Markdown heading tree of a document (id, title, indented by # level); requires docId\n' +
+        '    get - Get document content. Without headingId it returns the full text; with headingId it returns that section; requires docId, optional headingId\n' +
+        '  Document CRUD:\n' +
+        '    create - Create a document; requires title, optional summary, tags (JSON array string), content (Markdown)\n' +
+        '    update - Update a document; requires docId, optional title, summary, tags, content\n' +
+        '    delete - Permanently delete a document (irreversible); requires docId\n' +
+        '  Typical workflow: search → toc → get (browse sections on demand); or use the manage_wikis tool via list → directories → docs to obtain a document ID, then read it with get.',
       schema: z.object({
         command: z
           .enum(['search', 'toc', 'get', 'create', 'update', 'delete'])
-          .describe('操作类型'),
-        query: z.string().optional().describe('[search] 搜索关键词'),
-        page: z.number().optional().default(1).describe('[search] 页码'),
-        pageSize: z.number().optional().default(10).describe('[search] 每页条数'),
-        docId: z.number().optional().describe('[toc/get/update/delete] 文档 ID'),
+          .describe('Operation type'),
+        query: z.string().optional().describe('[search] Search keywords'),
+        page: z.number().optional().default(1).describe('[search] Page number'),
+        pageSize: z.number().optional().default(10).describe('[search] Number of items per page'),
+        docId: z.number().optional().describe('[toc/get/update/delete] Document ID'),
         headingId: z
           .string()
           .optional()
-          .describe('[get] 标题 ID（从 toc 获取，如 h-2），不填返回全文'),
-        title: z.string().optional().describe('[create/update] 文档标题'),
-        summary: z.string().optional().describe('[create/update] 文档摘要'),
+          .describe('[get] Heading ID (from toc, e.g. h-2); omit to return the full text'),
+        title: z.string().optional().describe('[create/update] Document title'),
+        summary: z.string().optional().describe('[create/update] Document summary'),
         tags: z
           .string()
           .optional()
-          .describe('[create/update] 文档标签（JSON数组字符串，如 \'["标签1","标签2"]\'）'),
-        content: z.string().optional().describe('[create/update] 文档内容（Markdown格式）')
+          .describe('[create/update] Document tags (JSON array string, e.g. \'["tag1","tag2"]\')'),
+        content: z.string().optional().describe('[create/update] Document content (Markdown)')
       })
     }
   )

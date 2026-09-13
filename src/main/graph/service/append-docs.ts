@@ -26,6 +26,7 @@ import type { ServiceContext } from './llm-invoke'
 import { extractEntitiesAndRelations, gleanEntities } from './extraction'
 import { mergeEntities } from './merging'
 import { extractIncrementalCrossChunkRelations } from './cross-chunk'
+import { mainFormat, mainMessages } from '../../i18n'
 
 export async function appendDocs(
   ctx: ServiceContext,
@@ -38,18 +39,19 @@ export async function appendDocs(
   const maxChunkSize = config?.maxChunkSize
   const startTime = Date.now()
   const totalDocs = docIds.length
+  const gp = mainMessages().graphProgress
 
   const PHASES = {
-    collect: { label: '收集文档', weight: 10 },
-    extract: { label: '抽取实体与关系', weight: 40 },
-    gleaning: { label: '二次抽取遗漏实体', weight: 10 },
-    merge_entities: { label: '实体消歧合并', weight: 10 },
-    cross_chunk: { label: '跨块关系补全', weight: 10 },
-    save_entities: { label: '保存实体', weight: 5 },
-    load_existing_relations: { label: '加载已有关系', weight: 5 },
-    adjust_confidence: { label: '计算混合置信度', weight: 5 },
-    update_confidence: { label: '更新实体置信度', weight: 5 },
-    save_relations: { label: '保存关系', weight: 10 }
+    collect: { label: gp.labels.collect, weight: 10 },
+    extract: { label: gp.labels.extract, weight: 40 },
+    gleaning: { label: gp.labels.gleaning, weight: 10 },
+    merge_entities: { label: gp.labels.mergeEntities, weight: 10 },
+    cross_chunk: { label: gp.labels.crossChunk, weight: 10 },
+    save_entities: { label: gp.labels.saveEntities, weight: 5 },
+    load_existing_relations: { label: gp.labels.loadExistingRelations, weight: 5 },
+    adjust_confidence: { label: gp.labels.adjustConfidence, weight: 5 },
+    update_confidence: { label: gp.labels.updateConfidence, weight: 5 },
+    save_relations: { label: gp.labels.saveRelations, weight: 10 }
   }
 
   const PHASE_ORDER = [
@@ -124,7 +126,7 @@ export async function appendDocs(
   // 1. 并行读取所有文档内容
   currentPhaseIndex = PHASE_ORDER.indexOf('collect')
   phaseProgress = 0
-  sendProgress('collect', '读取文档内容...', { totalDocs })
+  sendProgress('collect', gp.messages.readingDocs, { totalDocs })
 
   const docEntries: { docId: number; content: string; title: string }[] = []
   for (let i = 0; i < docIds.length; i++) {
@@ -141,13 +143,13 @@ export async function appendDocs(
   }
 
   if (docEntries.length === 0) {
-    throw new Error('所选文档均不存在或内容为空')
+    throw new Error(gp.errors.emptyDocs)
   }
 
   // 2. 获取已有图谱实体
   currentPhaseIndex = PHASE_ORDER.indexOf('extract')
   phaseProgress = 0
-  sendProgress('extract', '加载已有图谱实体...', { totalDocs })
+  sendProgress('extract', gp.messages.loadingExistingEntities, { totalDocs })
   const { entities: existingEntities } = await getFullGraphData(wikiId)
 
   // 3. 分块 + 统一抽取（实体+关系）
@@ -160,7 +162,7 @@ export async function appendDocs(
   }
 
   const totalChunks = allChunks.length
-  sendProgress('extract', `开始实体和关系抽取... ${totalChunks} 个文本块`, {
+  sendProgress('extract', mainFormat(gp.messages.extractionStarted, { count: totalChunks }), {
     totalDocs,
     totalChunks
   })
@@ -251,7 +253,12 @@ export async function appendDocs(
     phaseProgress = processedChunks / totalChunks
     sendProgress(
       'extract',
-      `抽取中... ${processedChunks}/${totalChunks} 块（${entityNameToId.size} 实体，${allNewRelations.length} 关系）`,
+      mainFormat(gp.messages.extractionProgress, {
+        done: processedChunks,
+        total: totalChunks,
+        entities: entityNameToId.size,
+        relations: allNewRelations.length
+      }),
       {
         processedDocs: Math.min(processedDocs, totalDocs),
         totalDocs,
@@ -269,7 +276,7 @@ export async function appendDocs(
   if (enableGleaning && allChunks.length > 0) {
     currentPhaseIndex = PHASE_ORDER.indexOf('gleaning')
     phaseProgress = 0
-    sendProgress('gleaning', `二次扫描遗漏实体... ${allChunks.length} 个文本块`, {
+    sendProgress('gleaning', mainFormat(gp.messages.gleaningStarted, { count: allChunks.length }), {
       totalDocs,
       totalChunks,
       entityCount: entityNameToId.size,
@@ -318,7 +325,11 @@ export async function appendDocs(
       phaseProgress = processedChunks / allChunks.length
       sendProgress(
         'gleaning',
-        `二次抽取中... ${processedChunks}/${allChunks.length} 块（${entityNameToId.size} 实体）`,
+        mainFormat(gp.messages.gleaningProgress, {
+          done: processedChunks,
+          total: allChunks.length,
+          entities: entityNameToId.size
+        }),
         {
           processedDocs: Math.min(processedDocs, totalDocs),
           totalDocs,
@@ -352,14 +363,14 @@ export async function appendDocs(
 
   currentPhaseIndex = PHASE_ORDER.indexOf('merge_entities')
   phaseProgress = 0
-  sendProgress('merge_entities', '实体消歧合并中...', {
+  sendProgress('merge_entities', gp.messages.merging, {
     totalDocs,
     entityCount: entityNameToId.size,
     relationCount: allNewRelations.length
   })
   const mergedResult = await mergeEntities(ctx, allEntitiesForMerge, (done, total) => {
     phaseProgress = Math.min(1, done / total)
-    sendProgress('merge_entities', `实体消歧合并中... ${done}/${total} 批次`, {
+    sendProgress('merge_entities', mainFormat(gp.messages.mergingBatches, { done, total }), {
       totalDocs,
       entityCount: entityNameToId.size,
       relationCount: allNewRelations.length,
@@ -368,11 +379,15 @@ export async function appendDocs(
   })
   let mergedEntities = mergedResult.entities
   phaseProgress = 1
-  sendProgress('merge_entities', `实体消歧合并完成，共 ${mergedEntities.length} 个实体`, {
-    totalDocs,
-    entityCount: mergedEntities.length,
-    relationCount: allNewRelations.length
-  })
+  sendProgress(
+    'merge_entities',
+    mainFormat(gp.messages.mergingDone, { count: mergedEntities.length }),
+    {
+      totalDocs,
+      entityCount: mergedEntities.length,
+      relationCount: allNewRelations.length
+    }
+  )
 
   // 5. 跨块关系补全
   const allEntityNames = mergedEntities.map((e) => e.name)
@@ -398,7 +413,7 @@ export async function appendDocs(
     if (chunks.length < 2) continue
 
     const docEntry = docEntries.find((e) => e.docId === docId)
-    const docTitle = docEntry?.title || `文档 #${docId}`
+    const docTitle = docEntry?.title || mainFormat(gp.messages.docFallbackTitle, { id: docId })
 
     const allDocPairs = allNewRelations
       .filter((r) => r.source_note_id === docId)
@@ -438,11 +453,15 @@ export async function appendDocs(
   if (crossChunkTasks.length > 0) {
     currentPhaseIndex = PHASE_ORDER.indexOf('cross_chunk')
     phaseProgress = 0
-    sendProgress('cross_chunk', `跨块关系补全中... ${crossChunkTasks.length} 个片段`, {
-      totalDocs,
-      entityCount: mergedEntities.length,
-      relationCount: allNewRelations.length
-    })
+    sendProgress(
+      'cross_chunk',
+      mainFormat(gp.messages.crossChunkStarted, { count: crossChunkTasks.length }),
+      {
+        totalDocs,
+        entityCount: mergedEntities.length,
+        relationCount: allNewRelations.length
+      }
+    )
 
     for (let i = 0; i < crossChunkTasks.length; i += maxConcurrency) {
       const batch = crossChunkTasks.slice(i, i + maxConcurrency)
@@ -464,27 +483,38 @@ export async function appendDocs(
 
       const processed = Math.min(i + maxConcurrency, crossChunkTasks.length)
       phaseProgress = processed / crossChunkTasks.length
-      sendProgress('cross_chunk', `跨块关系补全中... ${processed}/${crossChunkTasks.length}`, {
-        processedDocs: Math.min(
-          processed,
-          new Set(crossChunkTasks.slice(0, i + maxConcurrency).map((t) => t.docId)).size
-        ),
-        totalDocs,
-        entityCount: mergedEntities.length,
-        relationCount: allNewRelations.length,
-        needsRefresh: true
-      })
+      sendProgress(
+        'cross_chunk',
+        mainFormat(gp.messages.crossChunkProgress, {
+          done: processed,
+          total: crossChunkTasks.length
+        }),
+        {
+          processedDocs: Math.min(
+            processed,
+            new Set(crossChunkTasks.slice(0, i + maxConcurrency).map((t) => t.docId)).size
+          ),
+          totalDocs,
+          entityCount: mergedEntities.length,
+          relationCount: allNewRelations.length,
+          needsRefresh: true
+        }
+      )
     }
   }
 
   // 6. 批量保存合并后的实体
   currentPhaseIndex = PHASE_ORDER.indexOf('save_entities')
   phaseProgress = 0
-  sendProgress('save_entities', `保存 ${mergedEntities.length} 个实体...`, {
-    totalDocs,
-    entityCount: mergedEntities.length,
-    relationCount: allNewRelations.length
-  })
+  sendProgress(
+    'save_entities',
+    mainFormat(gp.messages.savingEntities, { count: mergedEntities.length }),
+    {
+      totalDocs,
+      entityCount: mergedEntities.length,
+      relationCount: allNewRelations.length
+    }
+  )
 
   entityNameToId = await batchUpsertEntities(
     mergedEntities.map((e) => ({
@@ -499,7 +529,7 @@ export async function appendDocs(
     }))
   )
   phaseProgress = 1
-  sendProgress('save_entities', '实体保存完成', {
+  sendProgress('save_entities', gp.messages.entitiesSaved, {
     totalDocs,
     entityCount: entityNameToId.size,
     relationCount: allNewRelations.length
@@ -508,7 +538,7 @@ export async function appendDocs(
   // 7. 查询已有关系，与新抽取关系合并用于置信度计算
   currentPhaseIndex = PHASE_ORDER.indexOf('load_existing_relations')
   phaseProgress = 0
-  sendProgress('load_existing_relations', '加载已有关系...', {
+  sendProgress('load_existing_relations', gp.messages.loadingExistingRelations, {
     totalDocs,
     entityCount: entityNameToId.size,
     relationCount: allNewRelations.length
@@ -529,16 +559,20 @@ export async function appendDocs(
     }))
   ].filter((r) => r.source && r.target)
   phaseProgress = 1
-  sendProgress('load_existing_relations', `加载完成，共 ${existingDbRelations.length} 条关系`, {
-    totalDocs,
-    entityCount: entityNameToId.size,
-    relationCount: allRelationsWithExisting.length
-  })
+  sendProgress(
+    'load_existing_relations',
+    mainFormat(gp.messages.relationsLoaded, { count: existingDbRelations.length }),
+    {
+      totalDocs,
+      entityCount: entityNameToId.size,
+      relationCount: allRelationsWithExisting.length
+    }
+  )
 
   // 8. 混合置信度计算
   currentPhaseIndex = PHASE_ORDER.indexOf('adjust_confidence')
   phaseProgress = 0
-  sendProgress('adjust_confidence', '计算混合置信度...', {
+  sendProgress('adjust_confidence', gp.messages.adjustingConfidence, {
     totalDocs,
     entityCount: entityNameToId.size,
     relationCount: allRelationsWithExisting.length
@@ -555,7 +589,7 @@ export async function appendDocs(
   // 9. 更新实体置信度
   currentPhaseIndex = PHASE_ORDER.indexOf('update_confidence')
   phaseProgress = 0
-  sendProgress('update_confidence', '更新实体置信度...', {
+  sendProgress('update_confidence', gp.messages.updatingConfidence, {
     totalDocs,
     entityCount: entityNameToId.size,
     relationCount: allNewRelations.length
@@ -567,7 +601,7 @@ export async function appendDocs(
     }))
   )
   phaseProgress = 1
-  sendProgress('update_confidence', '实体置信度更新完成', {
+  sendProgress('update_confidence', gp.messages.confidenceUpdated, {
     totalDocs,
     entityCount: entityNameToId.size,
     relationCount: allNewRelations.length
@@ -576,7 +610,7 @@ export async function appendDocs(
   // 10. 去重并批量保存关系
   currentPhaseIndex = PHASE_ORDER.indexOf('save_relations')
   phaseProgress = 0
-  sendProgress('save_relations', '保存关系...', {
+  sendProgress('save_relations', gp.messages.savingCrossChunkRelations, {
     totalDocs,
     entityCount: entityNameToId.size,
     relationCount: allNewRelations.length
@@ -608,11 +642,15 @@ export async function appendDocs(
     }))
   )
   phaseProgress = 1
-  sendProgress('save_relations', `关系保存完成，共 ${savedRelationCount} 条`, {
-    totalDocs,
-    entityCount: entityNameToId.size,
-    relationCount: savedRelationCount
-  })
+  sendProgress(
+    'save_relations',
+    mainFormat(gp.messages.relationsSaved, { count: savedRelationCount }),
+    {
+      totalDocs,
+      entityCount: entityNameToId.size,
+      relationCount: savedRelationCount
+    }
+  )
 
   logger.info(
     `Notes append completed: ${mergedEntities.length - existingEntities.length} entities, ${savedRelationCount} relations in ${Date.now() - startTime}ms`

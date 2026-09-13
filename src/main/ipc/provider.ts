@@ -3,9 +3,15 @@ import * as fs from 'fs'
 import { join } from 'path'
 import logger from 'electron-log'
 import { safeSend } from '../safe-send'
+import { mainFormat, mainMessages } from '../i18n'
 import { settingsStore } from '../context'
 import { getProviderService } from '../provider/service'
-import { type FetchedModelInfo, findModelProfile, geminiModelId } from '../provider/model-tags'
+import {
+  type FetchedModelInfo,
+  findModelProfile,
+  geminiModelId,
+  resolveFetchedModelMetadata
+} from '../provider/model-tags'
 import { HarnessSettings } from '../types/settings'
 import {
   clearProviderCache,
@@ -246,7 +252,7 @@ export function registerProviderIpc(): void {
       // 而不是抛原始的 FK 违例（应用不再自动创建默认工作区）
       const workspaces = await getAllWorkspaces()
       if (!input.workspace_id || !workspaces.some((w) => w.id === input.workspace_id)) {
-        throw new Error('尚未配置工作区，请先在对话页选择工作区目录')
+        throw new Error(mainMessages().error.workspaceNotConfigured)
       }
       const id = await createAgent(input)
       clearAgentCache()
@@ -310,8 +316,8 @@ export function registerProviderIpc(): void {
     return true
   })
 
-  // 拉取供应商的模型列表（元数据直接来自 models-profile.json 档案，不做名称/接口能力推导；
-  // 档案中不存在的模型返回 metadata = null，由用户在设置界面自行填写）
+  // 拉取供应商的模型列表（元数据来自 models-profile.json 档案，不做名称/接口能力推导；
+  // 档案未收录的模型用兜底档案补齐：最低档上下文窗口/最大输出 + 语言模型 + 可调用工具）
   ipcMain.handle(
     'provider-fetch-models',
     async (_event, providerType: string, baseUrl?: string, apiKey?: string) => {
@@ -326,13 +332,18 @@ export function registerProviderIpc(): void {
           const res = await fetch(url, { signal: controller.signal })
           clearTimeout(timeout)
           if (!res.ok) {
-            throw new Error(`Ollama 返回 HTTP ${res.status}`)
+            throw new Error(
+              mainFormat(mainMessages().error.httpFromProvider, {
+                provider: 'Ollama',
+                status: res.status
+              })
+            )
           }
           const data = (await res.json()) as { models?: Record<string, unknown>[] }
           for (const m of data.models || []) {
             const id = typeof m.name === 'string' ? m.name : ''
             if (!id) continue
-            models.push({ id, metadata: findModelProfile(id) })
+            models.push({ id, metadata: resolveFetchedModelMetadata(id) })
           }
         } else if (providerType === 'google-genai') {
           // Gemini 原生接口: GET /v1beta/models?key=...
@@ -345,13 +356,18 @@ export function registerProviderIpc(): void {
           const res = await fetch(url, { signal: controller.signal })
           clearTimeout(timeout)
           if (!res.ok) {
-            throw new Error(`Gemini 返回 HTTP ${res.status}`)
+            throw new Error(
+              mainFormat(mainMessages().error.httpFromProvider, {
+                provider: 'Gemini',
+                status: res.status
+              })
+            )
           }
           const data = (await res.json()) as { models?: Record<string, unknown>[] }
           for (const m of data.models || []) {
             const id = geminiModelId(m)
             if (!id) continue
-            models.push({ id, metadata: findModelProfile(id) })
+            models.push({ id, metadata: resolveFetchedModelMetadata(id) })
           }
         } else {
           // OpenAI 兼容协议: GET /v1/models
@@ -365,13 +381,18 @@ export function registerProviderIpc(): void {
           const res = await fetch(url, { headers, signal: controller.signal })
           clearTimeout(timeout)
           if (!res.ok) {
-            throw new Error(`API 返回 HTTP ${res.status}`)
+            throw new Error(
+              mainFormat(mainMessages().error.httpFromProvider, {
+                provider: 'API',
+                status: res.status
+              })
+            )
           }
           const data = (await res.json()) as { data?: Record<string, unknown>[] }
           for (const m of data.data || []) {
             const id = typeof m.id === 'string' ? m.id : ''
             if (!id) continue
-            models.push({ id, metadata: findModelProfile(id) })
+            models.push({ id, metadata: resolveFetchedModelMetadata(id) })
           }
         }
 
@@ -380,7 +401,7 @@ export function registerProviderIpc(): void {
       } catch (error) {
         const errMsg = error instanceof Error ? error.message : String(error)
         logger.error(`[FetchModels] Failed for ${providerType}:`, errMsg)
-        throw new Error(`拉取模型列表失败：${errMsg}`)
+        throw new Error(mainFormat(mainMessages().error.fetchModelsFailed, { reason: errMsg }))
       }
     }
   )

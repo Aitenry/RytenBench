@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { ConfigProvider, theme } from 'antd'
 import zhCN from 'antd/locale/zh_CN'
+import enUS from 'antd/locale/en_US'
 import type { ThemeMode } from '@renderer/types/settings'
 import { Window } from '../../resource/types/window'
+import { useLanguage } from './useLanguage'
 import { ThemeContext, type ThemeContextType } from './ThemeContextCore'
 
 const { defaultAlgorithm, darkAlgorithm } = theme
@@ -17,6 +19,7 @@ const getTimeBasedTheme = (): 'light' | 'dark' => {
 }
 
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { language } = useLanguage()
   const [themeMode, setThemeModeState] = useState<ThemeMode>('auto')
   const [effectiveTheme, setEffectiveTheme] = useState<'light' | 'dark'>(getTimeBasedTheme())
 
@@ -85,7 +88,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   return (
     <ThemeContext.Provider value={contextValue}>
       <ConfigProvider
-        locale={zhCN}
+        locale={language === 'en-US' ? enUS : zhCN}
         theme={{ algorithm: isDark ? darkAlgorithm : defaultAlgorithm }}
         getPopupContainer={() => document.body}
       >

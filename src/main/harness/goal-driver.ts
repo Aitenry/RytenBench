@@ -1,6 +1,8 @@
 import logger from 'electron-log'
 import { goalStore } from './runtime/goal'
 import type { TurnMeta } from './types'
+import { mainFormat } from '../i18n'
+import { getAgentToolTexts } from '../i18n/tool-results-agent'
 
 /**
  * 目标轮次驱动器（goal-round-driver）— 对应 deepseek-harness 的 dsh-goal-round-driver
@@ -61,7 +63,9 @@ export class GoalRoundDriver {
         await goalStore.update(topicId, goal.id, goal.revision, 'blocked', {
           blockedReason: {
             code: 'round-limit',
-            message: `已达轮次上限（${goal.maxGoalRounds} 轮），自动停止`
+            message: mainFormat(getAgentToolTexts().goalDriver.roundLimitReached, {
+              rounds: goal.maxGoalRounds
+            })
           }
         })
       } catch (err) {
@@ -76,11 +80,11 @@ export class GoalRoundDriver {
 
     const round = updated.roundsStarted
     const question = `<goal_round>
-目标：${updated.objective}
-（自动续跑第 ${round}/${updated.maxGoalRounds} 轮。请继续推进目标，无需向用户确认。）
-- 目标已全部完成：调用 update_goal(action: "complete")；
-- 遇到无法自行解决的阻塞且已进行至少 3 轮：调用 update_goal(action: "blocked", blocked_reason: { code, message })；
-- 否则直接继续工作。完成后请给出本轮成果的简短说明。
+Objective: ${updated.objective}
+(Automatic continuation round ${round}/${updated.maxGoalRounds}. Keep pushing the objective forward — do not ask the user for confirmation.)
+- If the objective is fully achieved: call update_goal(action: "complete").
+- If you hit a blocker you cannot resolve on your own and at least 3 rounds have passed: call update_goal(action: "blocked", blocked_reason: { code, message }).
+- Otherwise just keep working. When you finish, give a short summary of what this round accomplished.
 </goal_round>`
     const turnMeta: TurnMeta = {
       source: 'goal-round',

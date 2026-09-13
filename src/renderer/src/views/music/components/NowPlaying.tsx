@@ -1,12 +1,16 @@
 import React from 'react'
 import { theme } from 'antd'
 import { RiMusic2Line, RiHistoryLine, RiHeartLine } from '@remixicon/react'
+import { useTranslation, Trans } from '@renderer/i18n'
 import type { NowPlayingProps } from '@renderer/types/components'
 
 const RECENTLY_PLAYED_ID = '__recent__'
 const LIKED_TRACKS_ID = '__liked__'
 
+const MONO_FONT = "'JetBrains Mono', 'Cascadia Code', Consolas, 'Courier New', monospace"
+
 const NowPlaying: React.FC<NowPlayingProps> = ({ folder }) => {
+  const { t } = useTranslation()
   const {
     token: {
       colorFillAlter,
@@ -48,14 +52,19 @@ const NowPlaying: React.FC<NowPlayingProps> = ({ folder }) => {
       </div>
       <div className="min-w-0 flex-1">
         <h2 className="text-lg font-semibold truncate" style={{ color: colorText }}>
-          {folder?.name || '未选择歌单'}
+          {folder?.name || t('music.playlist.unnamed')}
         </h2>
         <p className="text-sm truncate" style={{ color: colorTextSecondary }}>
-          {folder?.description || '暂无描述'}
+          {folder?.description || t('music.playlist.noDescription')}
         </p>
         {folder && (
           <p className="text-xs mt-1" style={{ color: colorTextTertiary }}>
-            {folder.track_count} 首
+            {/* 数字走等宽、中文走默认 UI 字体（见 music.ts 词条内的 <mono> 标记） */}
+            <Trans
+              i18nKey="music.playlist.trackCount"
+              count={folder.track_count}
+              components={{ mono: <span style={{ fontFamily: MONO_FONT }} /> }}
+            />
           </p>
         )}
       </div>

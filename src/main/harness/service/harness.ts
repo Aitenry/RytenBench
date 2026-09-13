@@ -15,6 +15,7 @@ import { extractStructuredMessages, convertDialoguesToMessages } from './history
 import { buildHumanMessage } from './message-builder'
 import type { UploadedFileRef } from './message-builder'
 import { runStream } from './stream-handler'
+import { DEFAULT_MAX_TOOL_ROUNDS } from '../../../shared/model-params'
 
 class HarnessService {
   private readonly model: BaseChatModel
@@ -26,6 +27,8 @@ class HarnessService {
   private readonly workspacePath?: string
   private readonly memoryPath?: string
   private readonly workspaceId: number
+  /** 工具调用总次数上限（来自当前模型的「高级配置 → 工具调用轮数」） */
+  private readonly maxToolRounds: number
 
   /**
    * @param model 已创建的 BaseChatModel 实例（由外部 ProviderService 提供）
@@ -37,6 +40,7 @@ class HarnessService {
    * @param workspacePath AI 工作区目录，挂载为虚拟 /
    * @param memoryPath 记忆存储根目录，空表示不启用（其下按工作区 ID 分隔，每个工作区一套独立记忆）
    * @param workspaceId 当前工作区 ID，用于按工作区隔离记忆目录
+   * @param maxToolRounds 工具调用总次数上限（模型设置「工具调用轮数」；缺省用工程默认值）
    */
   constructor(
     model: BaseChatModel,
@@ -47,7 +51,8 @@ class HarnessService {
     enabledSkills?: string[],
     workspacePath?: string,
     memoryPath?: string,
-    workspaceId = 0
+    workspaceId = 0,
+    maxToolRounds: number = DEFAULT_MAX_TOOL_ROUNDS
   ) {
     this.model = model
     this.tools = tools
@@ -58,8 +63,9 @@ class HarnessService {
     this.workspacePath = workspacePath
     this.memoryPath = memoryPath
     this.workspaceId = workspaceId
+    this.maxToolRounds = maxToolRounds
     logger.info(
-      `HarnessService initialized with LangChain Runtime (skillsPath=${this.skillsPath ?? 'disabled'}, workspacePath=${this.workspacePath ?? 'disabled'}, memoryPath=${this.memoryPath ?? 'disabled'}, workspaceId=${this.workspaceId}, subAgents=${this.subAgents.length})`
+      `HarnessService initialized with LangChain Runtime (skillsPath=${this.skillsPath ?? 'disabled'}, workspacePath=${this.workspacePath ?? 'disabled'}, memoryPath=${this.memoryPath ?? 'disabled'}, workspaceId=${this.workspaceId}, subAgents=${this.subAgents.length}, maxToolRounds=${this.maxToolRounds})`
     )
   }
 
@@ -79,6 +85,7 @@ class HarnessService {
       // 均位于 <memoryPath>/workspace-<workspaceId>/ 下（见 mnemon-singleton.ts）
       memoryPath: this.workspaceMemoryPath,
       workspaceId: this.workspaceId,
+      maxToolCalls: this.maxToolRounds,
       mnemon: getMnemonComponent(this.memoryPath, this.workspaceId)
     })
   }

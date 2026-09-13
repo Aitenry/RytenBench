@@ -18,6 +18,7 @@ import ModelSettings from './ModelSettings'
 import AgentSettings from '@renderer/views/harness/components/settings/AgentSettings'
 import SkillsSettings from '@renderer/views/harness/components/settings/SkillsSettings'
 import MemorySettings from '@renderer/views/harness/components/settings/MemorySettings'
+import { useTranslation } from '@renderer/i18n'
 
 export type SettingsTab =
   'general' | 'model' | 'music' | 'graph' | 'system' | 'agents' | 'skills' | 'memory'
@@ -28,29 +29,17 @@ interface TabItem {
   icon: React.ReactNode
 }
 
-/** 全部设置页元数据 */
-const TAB_META: Record<SettingsTab, TabItem> = {
-  general: { key: 'general', label: '通用', icon: <RiSettings3Line size={16} /> },
-  model: { key: 'model', label: '模型', icon: <RiBrainAi3Line size={16} /> },
-  music: { key: 'music', label: '音乐', icon: <RiMusicLine size={16} /> },
-  graph: { key: 'graph', label: '图谱', icon: <RiMindMap size={16} /> },
-  system: { key: 'system', label: '系统', icon: <RiComputerLine size={16} /> },
-  agents: { key: 'agents', label: '智能体', icon: <RiAiAgentLine size={16} /> },
-  skills: { key: 'skills', label: '技能', icon: <RiFileAi2Line size={16} /> },
-  memory: { key: 'memory', label: '记忆', icon: <RiBrain4Line size={16} /> }
-}
-
-/** 完整设置的分组导航：常规 + 助手 */
-const NAV_GROUPS: { label: string; items: TabItem[] }[] = [
+/** 完整设置的分组结构：常规 + 助手（文案在组件内按当前语言求值） */
+const NAV_GROUP_DEFS = [
   {
-    label: '常规',
-    items: ['general', 'model', 'music', 'graph', 'system'].map((k) => TAB_META[k as SettingsTab])
+    labelKey: 'settings.nav.groupGeneral',
+    items: ['general', 'model', 'music', 'graph', 'system']
   },
   {
-    label: '助手',
-    items: ['agents', 'skills', 'memory'].map((k) => TAB_META[k as SettingsTab])
+    labelKey: 'settings.nav.groupAssistant',
+    items: ['agents', 'skills', 'memory']
   }
-]
+] as const satisfies readonly { labelKey: string; items: readonly SettingsTab[] }[]
 
 /**
  * 助手设置（聚焦模式）页签：智能体 → 模型 → 技能 → 记忆。
@@ -101,6 +90,31 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   } = theme.useToken()
 
+  const { t } = useTranslation()
+
+  /** 全部设置页元数据（图标常驻，文案随语言变化） */
+  const tabMeta = useMemo<Record<SettingsTab, TabItem>>(
+    () => ({
+      general: {
+        key: 'general',
+        label: t('settings.nav.general'),
+        icon: <RiSettings3Line size={16} />
+      },
+      model: { key: 'model', label: t('settings.nav.model'), icon: <RiBrainAi3Line size={16} /> },
+      music: { key: 'music', label: t('settings.nav.music'), icon: <RiMusicLine size={16} /> },
+      graph: { key: 'graph', label: t('settings.nav.graph'), icon: <RiMindMap size={16} /> },
+      system: {
+        key: 'system',
+        label: t('settings.nav.system'),
+        icon: <RiComputerLine size={16} />
+      },
+      agents: { key: 'agents', label: t('settings.nav.agents'), icon: <RiAiAgentLine size={16} /> },
+      skills: { key: 'skills', label: t('settings.nav.skills'), icon: <RiFileAi2Line size={16} /> },
+      memory: { key: 'memory', label: t('settings.nav.memory'), icon: <RiBrain4Line size={16} /> }
+    }),
+    [t]
+  )
+
   /** 聚焦模式下生效的页签白名单（其余页面整组隐藏） */
   const onlyTabs = scope === 'assistant' ? ASSISTANT_SETTINGS_TABS : null
 
@@ -115,9 +129,14 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
 
   /** 聚焦模式只渲染白名单内的分组，其余系统级页面整组隐藏 */
   const navGroups = useMemo(() => {
-    if (!onlyTabs || onlyTabs.length === 0) return NAV_GROUPS
-    return [{ label: '助手', items: onlyTabs.map((key) => TAB_META[key]) }]
-  }, [onlyTabs])
+    if (!onlyTabs || onlyTabs.length === 0) {
+      return NAV_GROUP_DEFS.map((group) => ({
+        label: t(group.labelKey),
+        items: group.items.map((key) => tabMeta[key])
+      }))
+    }
+    return [{ label: t('settings.nav.groupAssistant'), items: onlyTabs.map((key) => tabMeta[key]) }]
+  }, [onlyTabs, tabMeta, t])
 
   const renderContent = (): React.ReactNode => {
     switch (activeTab) {
@@ -147,7 +166,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
       title={
         <div className="flex items-center gap-2">
           <RiSettings3Line size={18} style={{ color: colorPrimary }} />
-          <span>设置</span>
+          <span>{t('settings.title')}</span>
         </div>
       }
       open={open}

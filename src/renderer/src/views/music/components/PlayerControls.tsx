@@ -16,9 +16,9 @@ import {
   RiMoreLine,
   RiMusic2Line
 } from '@remixicon/react'
+import { useTranslation } from '@renderer/i18n'
 import { useAudioProgress } from '../../../contexts/AudioContext'
 import { formatTime } from '../../../utils/formatTime'
-import { REPEAT_STRATEGIES } from '../../../types/music'
 import type { RepeatMode } from '../../../types/music'
 import type { PlayerControlsProps } from '@renderer/types/components'
 
@@ -28,10 +28,15 @@ const MODE_ICON: Record<RepeatMode, React.ReactNode> = {
   shuffle: <RiShuffleLine size={20} />
 }
 
-const MODE_LABEL: Record<RepeatMode, string> = {
-  all: REPEAT_STRATEGIES.all.label,
-  one: REPEAT_STRATEGIES.one.label,
-  shuffle: REPEAT_STRATEGIES.shuffle.label
+/** 循环模式提示文案的词条键（模块级只存键，渲染时在组件内 t() 求值）
+    值必须收窄成字面量联合：i18next 的 t() 只接受字面量键，裸 string 过不了类型检查 */
+type RepeatLabelKey =
+  'music.player.repeatAll' | 'music.player.repeatOne' | 'music.player.repeatShuffle'
+
+const MODE_LABEL_KEY: Record<RepeatMode, RepeatLabelKey> = {
+  all: 'music.player.repeatAll',
+  one: 'music.player.repeatOne',
+  shuffle: 'music.player.repeatShuffle'
 }
 
 const PlayerControls: React.FC<PlayerControlsProps> = ({
@@ -50,6 +55,7 @@ const PlayerControls: React.FC<PlayerControlsProps> = ({
   onToggleLike,
   onTogglePlaylist
 }) => {
+  const { t } = useTranslation()
   const { progress, duration, isBuffering } = useAudioProgress()
   const displayDuration = durationProp || duration
 
@@ -140,14 +146,18 @@ const PlayerControls: React.FC<PlayerControlsProps> = ({
           {/* 歌曲信息 */}
           <div className="min-w-0 flex-1">
             <div className="text-sm font-medium truncate" style={{ color: colorText }}>
-              {currentTrack?.title || '未播放'}
+              {currentTrack?.title || t('music.player.notPlaying')}
             </div>
             <div className="text-xs truncate" style={{ color: colorTextTertiary }}>
               {currentTrack?.artist || '--'}
             </div>
           </div>
           {/* 心形喜欢 */}
-          <button onClick={onToggleLike} className="flex-shrink-0 transition-colors">
+          <button
+            onClick={onToggleLike}
+            aria-label={t('music.player.likeTooltip')}
+            className="flex-shrink-0 transition-colors"
+          >
             {liked ? (
               <RiHeartFill size={18} style={{ color: '#1677ff' }} />
             ) : (
@@ -161,20 +171,21 @@ const PlayerControls: React.FC<PlayerControlsProps> = ({
           <ActionBtn
             onClick={onToggleRepeat}
             icon={MODE_ICON[repeatMode]}
-            tooltip={MODE_LABEL[repeatMode]}
+            tooltip={t(MODE_LABEL_KEY[repeatMode])}
             colorDefault={colorTextSecondary}
             colorHover={colorText}
           />
           <ActionBtn
             onClick={onPrev}
             icon={<RiSkipLeftLine size={22} />}
-            tooltip="上一曲"
+            tooltip={t('music.player.prevTooltip')}
             colorDefault={colorTextSecondary}
             colorHover={colorText}
           />
           {/* 蓝色圆形播放/暂停主按钮 */}
           <button
             onClick={onPlayPause}
+            aria-label={isPlaying ? t('music.player.pauseTooltip') : t('music.player.playTooltip')}
             className="flex items-center justify-center w-10 h-10 rounded-full mx-1 transition-transform hover:scale-105 active:scale-95"
             style={{ background: '#1677ff' }}
           >
@@ -187,14 +198,14 @@ const PlayerControls: React.FC<PlayerControlsProps> = ({
           <ActionBtn
             onClick={onNext}
             icon={<RiSkipRightLine size={22} />}
-            tooltip="下一曲"
+            tooltip={t('music.player.nextTooltip')}
             colorDefault={colorTextSecondary}
             colorHover={colorText}
           />
           <ActionBtn
             onClick={onTogglePlaylist}
             icon={<RiPlayListLine size={20} />}
-            tooltip="播放列表"
+            tooltip={t('music.player.playlistTooltip')}
             colorDefault={colorTextSecondary}
             colorHover={colorText}
           />
@@ -204,7 +215,7 @@ const PlayerControls: React.FC<PlayerControlsProps> = ({
         <div className="flex items-center gap-2 w-[280px] justify-end">
           {/* 无损标识 */}
           <span className="text-[10px] text-[#1677ff] border border-[#1677ff]/20 rounded px-1.5 py-0.5 select-none leading-none">
-            无损
+            {t('music.player.lossless')}
           </span>
           <ActionBtn
             onClick={() => {}}
@@ -222,24 +233,27 @@ const PlayerControls: React.FC<PlayerControlsProps> = ({
                 <line x1="8" y1="12" x2="16" y2="12" />
               </svg>
             }
-            tooltip="添加到歌单"
+            tooltip={t('music.player.addToPlaylistTooltip')}
             colorDefault={colorTextSecondary}
             colorHover={colorText}
           />
           {/* 歌词 */}
           <button
             onClick={() => {}}
+            aria-label={t('music.player.lyricsTooltip')}
+            title={t('music.player.lyricsTooltip')}
             className="flex items-center justify-center w-9 h-9 rounded-full text-sm transition-colors select-none"
             style={{ color: colorTextSecondary }}
             onMouseEnter={(e) => (e.currentTarget.style.color = colorText)}
             onMouseLeave={(e) => (e.currentTarget.style.color = colorTextSecondary)}
           >
-            词
+            {t('music.player.lyricsBadge')}
           </button>
           {/* 音量 */}
           <div ref={volumeRef} className="relative flex items-center">
             <button
               onClick={() => setShowVolumeSlider(!showVolumeSlider)}
+              aria-label={t('music.player.volumeLabel')}
               className="flex items-center justify-center w-9 h-9 rounded-full transition-colors"
               style={{ color: colorTextSecondary }}
               onMouseEnter={(e) => (e.currentTarget.style.color = colorText)}
@@ -271,7 +285,7 @@ const PlayerControls: React.FC<PlayerControlsProps> = ({
           <ActionBtn
             onClick={() => {}}
             icon={<RiMoreLine size={20} />}
-            tooltip="更多"
+            tooltip={t('music.player.moreTooltip')}
             colorDefault={colorTextSecondary}
             colorHover={colorText}
           />
@@ -297,6 +311,7 @@ const ActionBtn: React.FC<{
   const btn = (
     <button
       onClick={onClick}
+      aria-label={tooltip}
       className={`flex items-center justify-center w-9 h-9 rounded-full transition-colors ${className}`}
       style={{ color: active ? '#1677ff' : defaultColor }}
       onMouseEnter={(e) => {

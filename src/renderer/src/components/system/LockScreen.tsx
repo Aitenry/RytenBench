@@ -1,10 +1,12 @@
 import React, { useState } from 'react'
 import { Modal, Input, theme } from 'antd'
+import { useTranslation } from '@renderer/i18n'
 import type { LockScreenProps } from '@renderer/types/components'
 
 const LockScreen: React.FC<LockScreenProps> = ({ onUnlock }) => {
   const [password, setPassword] = useState('')
   const [inputValue, setInputValue] = useState('')
+  const { t } = useTranslation()
 
   const {
     token: { colorText, colorTextSecondary }
@@ -39,10 +41,10 @@ const LockScreen: React.FC<LockScreenProps> = ({ onUnlock }) => {
     >
       <div className="text-center p-8">
         <h2 className="text-xl font-semibold mb-4" style={{ color: colorText }}>
-          系统已锁屏
+          {t('shell.unlock.title')}
         </h2>
         <p className="mb-6" style={{ color: colorTextSecondary }}>
-          请输入密码解锁
+          {t('shell.unlock.prompt')}
         </p>
 
         <Input.OTP
@@ -58,7 +60,7 @@ const LockScreen: React.FC<LockScreenProps> = ({ onUnlock }) => {
         />
 
         <div className="text-sm" style={{ color: colorTextSecondary }}>
-          输入6位数字解锁
+          {t('shell.unlock.hint')}
         </div>
       </div>
     </Modal>

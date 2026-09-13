@@ -4,6 +4,7 @@ import mammoth from 'mammoth'
 import TurndownService from 'turndown'
 import { JSDOM } from 'jsdom'
 import { Readability } from '@mozilla/readability'
+import { mainMessages } from '../i18n'
 import { deleteNodePosition } from '../database/mapper/node-position'
 import {
   getDocById,
@@ -131,14 +132,15 @@ export function registerDocumentIpc(): void {
 
   ipcMain.handle('doc-import', async () => {
     try {
+      const m = mainMessages().dialog
       const result = await dialog.showOpenDialog({
         properties: ['openFile'],
         filters: [
           {
-            name: '文档文件',
+            name: m.filterDocumentFiles,
             extensions: ['txt', 'md', 'docx', 'html', 'htm']
           },
-          { name: '所有文件', extensions: ['*'] }
+          { name: m.filterAllFiles, extensions: ['*'] }
         ]
       })
 

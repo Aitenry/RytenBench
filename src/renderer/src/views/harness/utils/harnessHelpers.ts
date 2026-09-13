@@ -1,3 +1,4 @@
+import type { TFunction } from 'i18next'
 import type { ToolCall, MessageBlock } from '@renderer/types/harness'
 
 /** 判断工具块与工具事件是否为同一次调用。
@@ -52,13 +53,15 @@ export const pushBlock = (blocks: MessageBlock[], block: MessageBlock): void => 
  * - preparing：模型已吐出工具名、正在生成参数（阶段二「参数构建中」）
  * - executing：系统正在执行参数
  * - 其余：静态工具名
+ * 非组件函数：译文由调用方传入 t（hook 只能在组件/自定义 Hook 内调用）
  */
 export const getToolStatusLabel = (
+  t: TFunction,
   toolName: string,
   phase: 'preparing' | 'executing' | undefined
 ): string => {
-  if (phase === 'preparing') return `${toolName} · 参数构建中…`
-  if (phase === 'executing') return `${toolName} · 执行中…`
+  if (phase === 'preparing') return t('harness.helpers.toolPreparing', { name: toolName })
+  if (phase === 'executing') return t('harness.helpers.toolExecuting', { name: toolName })
   return toolName
 }
 

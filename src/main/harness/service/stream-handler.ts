@@ -1,5 +1,6 @@
 import { BaseMessage } from '@langchain/core/messages'
 import logger from 'electron-log'
+import { mainFormat, mainMessages } from '../../i18n'
 import { HarnessOptions, StructuredMessage, HistoryCompaction } from '../types'
 import { Runtime } from '../runtime/runtime'
 import { buildHumanMessage } from './message-builder'
@@ -176,14 +177,17 @@ export async function* runStream(
     if (run.error && !signal?.aborted) {
       if (emittedCount === 0) {
         logger.error('[Harness] 运行时执行失败，无任何输出:', run.error)
-        yield { content: `Failed to get response: ${run.error.message}` }
+        yield {
+          content: mainFormat(mainMessages().error.responseFailed, { reason: run.error.message })
+        }
       } else {
         logger.error('[Harness] 运行时部分输出后失败:', run.error)
         yield { streamError: { message: run.error.message } }
       }
     } else if (emittedCount === 0 && !signal?.aborted) {
       logger.warn('[Harness] 运行时未产生任何输出（无错误信息）')
-      yield { content: 'Failed to get response: 模型未返回任何内容，请查看日志或重试。' }
+      const m = mainMessages().error
+      yield { content: mainFormat(m.responseFailed, { reason: m.emptyModelResponse }) }
     }
 
     // 本轮真实用量：交给调用方（IPC 层）在助手消息落库后写入 harness_dialogue_usage
@@ -191,7 +195,7 @@ export async function* runStream(
   } catch (error) {
     logger.error('Error in sendMessageStream:', error)
     yield {
-      content: `Failed to get response: ${error}`
+      content: mainFormat(mainMessages().error.responseFailed, { reason: String(error) })
     }
   }
 }

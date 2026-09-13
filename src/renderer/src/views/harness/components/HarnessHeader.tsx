@@ -6,6 +6,7 @@ import {
   RiLayoutRightLine,
   RiLayoutRightFill
 } from '@remixicon/react'
+import { useTranslation } from '@renderer/i18n'
 import BackgroundAgentsButton from './BackgroundAgentsButton'
 
 interface HarnessHeaderProps {
@@ -26,6 +27,8 @@ const HarnessHeader: React.FC<HarnessHeaderProps> = ({
   colorBorderSecondary,
   currentTopicId
 }) => {
+  const { t } = useTranslation()
+
   return (
     <div
       className="flex items-center justify-between px-2 py-1.5"
@@ -35,6 +38,7 @@ const HarnessHeader: React.FC<HarnessHeaderProps> = ({
         <Button
           type="text"
           size="small"
+          title={t('harness.header.toggleSidebar')}
           icon={sidebarOpen ? <RiSidebarFoldLine size={16} /> : <RiSidebarUnfoldLine size={16} />}
           onClick={onToggleSidebar}
         />
@@ -44,6 +48,7 @@ const HarnessHeader: React.FC<HarnessHeaderProps> = ({
         <Button
           type="text"
           size="small"
+          title={t('harness.header.togglePanel')}
           icon={panelOpen ? <RiLayoutRightFill size={16} /> : <RiLayoutRightLine size={16} />}
           onClick={onTogglePanel}
         />

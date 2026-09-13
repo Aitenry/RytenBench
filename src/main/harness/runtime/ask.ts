@@ -2,6 +2,8 @@ import { tool, type StructuredToolInterface } from '@langchain/core/tools'
 import { z } from 'zod'
 import { randomUUID } from 'crypto'
 import logger from 'electron-log'
+import { mainFormat } from '../../i18n'
+import { getFsToolTexts } from '../../i18n/tool-results-fs'
 
 /**
  * 向用户提问（ask_user_question）— 对应 deepseek-harness 的
@@ -73,11 +75,12 @@ export class QuestionService {
    * signal 中止 → 抛 ASK_ABORTED（工具层捕获后返回取消文案）。
    */
   ask(topicId: number, questions: AskQuestion[], signal?: AbortSignal): Promise<AskAnswer> {
+    const tr = getFsToolTexts()
     return new Promise<AskAnswer>((resolve, reject) => {
       const requestId = `q-${randomUUID()}`
       const onAbort = (): void => {
         this.pending.delete(requestId)
-        const err = new Error('提问已取消（ASK_ABORTED）')
+        const err = new Error(tr.ask.aborted)
         err.name = 'AskAbortedError'
         reject(err)
       }
@@ -140,11 +143,12 @@ export class QuestionService {
 
   /** 话题全部挂起提问中止（流取消时调用） */
   abortTopic(topicId: number): void {
+    const tr = getFsToolTexts()
     for (const [id, record] of this.pending) {
       if (record.topicId !== topicId) continue
       this.pending.delete(id)
       this.detach(record)
-      const err = new Error('提问已取消（ASK_ABORTED）')
+      const err = new Error(tr.ask.aborted)
       err.name = 'AskAbortedError'
       record.reject(err)
     }
@@ -152,10 +156,11 @@ export class QuestionService {
 
   /** 全部挂起提问中止（应用级取消兜底） */
   abortAll(): void {
+    const tr = getFsToolTexts()
     for (const [id, record] of this.pending) {
       this.pending.delete(id)
       this.detach(record)
-      const err = new Error('提问已取消（ASK_ABORTED）')
+      const err = new Error(tr.ask.aborted)
       err.name = 'AskAbortedError'
       record.reject(err)
     }
@@ -166,16 +171,22 @@ export class QuestionService {
 export const questionService = new QuestionService()
 
 const askOptionSchema = z.object({
-  label: z.string().describe('选项文案'),
-  description: z.string().optional().describe('选项说明（一句）')
+  label: z.string().describe('Option text shown to the user'),
+  description: z.string().optional().describe('One-sentence explanation of the option')
 })
 
 const askQuestionSchema = z.object({
-  id: z.string().describe('问题稳定 ID（答案回写时原样返回）'),
-  question: z.string().describe('向用户提出的具体问题'),
-  header: z.string().optional().describe('可选短标题'),
-  options: z.array(askOptionSchema).optional().describe('候选选项（无选项则为自由文本回答）'),
-  multi_select: z.boolean().optional().describe('是否允许多选（默认 false）')
+  id: z.string().describe('Stable question id (echoed back verbatim in the answer)'),
+  question: z.string().describe('The concrete question to ask the user'),
+  header: z.string().optional().describe('Optional short heading'),
+  options: z
+    .array(askOptionSchema)
+    .optional()
+    .describe('Candidate options; without options the answer is free-form text'),
+  multi_select: z
+    .boolean()
+    .optional()
+    .describe('Whether multiple options may be selected (default false)')
 })
 
 /** 构建提问工具（仅注入主代理） */
@@ -191,18 +202,21 @@ export function buildAskUserTool(fallbackTopicId = 0): StructuredToolInterface {
         const answer = await questionService.ask(topicId, questions, config?.signal)
         return JSON.stringify(answer)
       } catch (err) {
+        const tr = getFsToolTexts()
         if ((err as Error)?.name === 'AskAbortedError') {
-          return '提问已取消（ASK_ABORTED）：用户取消了本轮对话。'
+          return tr.ask.abortedDetail
         }
-        return `提问失败: ${(err as Error).message}`
+        return mainFormat(tr.ask.failed, { message: (err as Error).message })
       }
     },
     {
       name: 'ask_user_question',
       description:
-        '向用户提问并在同一轮内等待回答（不结束对话）。用于需要用户确认、选择或补充信息才能继续的场景：如多方案选择、权限确认、关键信息缺失等。一次可提多个问题；推荐选项放第一个并在 label 后加 "(Recommended)"。用户回答后你会收到 JSON：{ answers: [{ id, selected: string[], custom? }] }（单选 selected 只有一个元素）。',
+        'Ask the user one or more questions and wait for the answers within the same turn (the conversation does not end). Use it when you cannot continue without user input: choosing between approaches, confirming a permission or a destructive action, or filling in missing critical information. Ask several questions at once when they belong together. Put the recommended option first and append "(Recommended)" to its label. The answers arrive as JSON: { answers: [{ id, selected: string[], custom? }] } (a single-choice answer has exactly one element in selected).',
       schema: z.object({
-        questions: z.array(askQuestionSchema).describe('要问的问题列表')
+        questions: z
+          .array(askQuestionSchema)
+          .describe('Questions to ask, in the order they should be shown')
       })
     }
   )

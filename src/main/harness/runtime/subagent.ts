@@ -12,6 +12,8 @@ import { buildSkillsPromptSection, loadSkills } from './skills'
 import type { SpillStore } from './spill'
 import { subagentSessions } from './subagent-sessions'
 import type { SubAgentConfig } from '../types'
+import { mainFormat } from '../../i18n'
+import { getAgentToolTexts } from '../../i18n/tool-results-agent'
 
 /**
  * 子代理（task 工具）— 替代 deepagents subagents + task 分派
@@ -43,6 +45,8 @@ export interface SubAgentRuntimeContext {
   spillRef?: { current?: SpillStore }
   /** 子代理图递归上限（由主运行时工程常量推导） */
   recursionLimit: number
+  /** 工具调用总次数上限（模型级「工具调用轮数」；与主图共用同一模型设置） */
+  maxToolCalls: number
   /** 子代理记忆存储根（<memoryPath>/workspace-<wsId>/，其下 sub-agents/<name>/memories/AGENTS.md） */
   memoryPath?: string
   /** 技能目录（含 SKILL.md 的子目录即技能），子代理按声明的 skills 过滤 */
@@ -70,7 +74,7 @@ function buildSubAgentSystemPrompt(ctx: SubAgentRuntimeContext, sa: SubAgentConf
 
   const memory = loadSubAgentMemory(ctx.memoryPath, sa.name)
   if (memory) {
-    prompt += `\n\n## 长期记忆\n${memory}`
+    prompt += `\n\n## Long-term memory\n${memory}`
   }
 
   if (sa.skills && sa.skills.length > 0) {
@@ -88,22 +92,22 @@ function buildSubAgentSystemPrompt(ctx: SubAgentRuntimeContext, sa: SubAgentConf
 /** 构建 task 工具描述：静态引导 + 子代理清单（名称 + 功能描述） */
 function buildTaskDescription(subAgents: SubAgentConfig[]): string {
   if (subAgents.length === 0) {
-    return '将复杂任务委托给专门的子智能体执行。子智能体拥有独立的系统提示词与工具集，适合需要专注处理的子任务。'
+    return 'Delegate complex work to a dedicated subagent. A subagent has its own system prompt and toolset, which suits subtasks that need focused handling.'
   }
   const list = subAgents
     .map((sa) => {
-      const display = sa.rename && sa.rename !== sa.name ? `${sa.rename}（${sa.name}）` : sa.name
-      return `- ${display}: ${sa.description || '（无描述）'}`
+      const display = sa.rename && sa.rename !== sa.name ? `${sa.rename} (${sa.name})` : sa.name
+      return `- ${display}: ${sa.description || '(no description)'}`
     })
     .join('\n')
-  return `将复杂任务委托给专门的子智能体执行。子智能体拥有独立的系统提示词与工具集，适合需要专注处理的子任务。
+  return `Delegate complex work to a dedicated subagent. A subagent has its own system prompt and toolset, which suits subtasks that need focused handling.
 
-可用子智能体：
+Available subagents:
 ${list}
 
-使用规则：
-- 请根据任务性质选择最合适的子智能体，subagent_type 使用子智能体的 name 字段；
-- 子智能体的完整输出会直接展示给用户，任务完成后你只需简短总结或直接收尾，不要复述子智能体已输出的详细内容。`
+Usage rules:
+- Pick the subagent that best fits the task; pass its name field as subagent_type.
+- A subagent's full output is shown to the user directly. Once the task finishes, just give a brief summary or wrap up; do not restate the detail the subagent already produced.`
 }
 
 /** 解析子代理图输入（systemPrompt + 任务消息） */
@@ -118,25 +122,31 @@ function buildSubAgentMessages(
 export function createTaskTool(ctx: SubAgentRuntimeContext): StructuredToolInterface {
   const availableNames =
     ctx.subAgents.length > 0
-      ? `可用名称：${ctx.subAgents.map((s) => s.name).join('、')}`
-      : '（当前没有可用子智能体）'
+      ? `Available names: ${ctx.subAgents.map((s) => s.name).join(', ')}`
+      : '(no subagents available)'
   const taskSchema = z.object({
-    subagent_type: z.string().describe(`要委托的子智能体类型名称。${availableNames}`),
-    description: z.string().optional().describe('任务的简短描述（展示用）'),
-    prompt: z.string().describe('要交给子智能体的完整任务指令'),
+    subagent_type: z
+      .string()
+      .describe(`Name of the subagent type to delegate to. ${availableNames}`),
+    description: z.string().optional().describe('Short description of the task (for display)'),
+    prompt: z.string().describe('Complete task instructions to hand to the subagent'),
     background: z
       .boolean()
       .optional()
       .describe(
-        '为 true 时在后台执行：立即返回 job_id，用 job_output(job_id, wait=true) 轮询结果、job_list 查看任务、job_kill 终止。适合耗时较长的任务。'
+        'When true, run in the background: returns a job_id immediately. Use job_output(job_id, wait=true) to poll for the result, job_list to inspect jobs, and job_kill to terminate. Suited to long-running tasks.'
       )
   })
 
   return tool(
     async ({ subagent_type, description, prompt, background }, config) => {
+      const m = getAgentToolTexts()
       const sa = ctx.subAgents.find((s) => s.name === subagent_type)
       if (!sa) {
-        return `子智能体 "${subagent_type}" 不存在。可用子智能体：${ctx.subAgents.map((s) => s.name).join(', ') || '（无）'}`
+        return mainFormat(m.subagent.notFound, {
+          type: subagent_type,
+          names: ctx.subAgents.map((s) => s.name).join(', ') || m.subagent.noneAvailable
+        })
       }
 
       // 后台模式：启动可续接的子代理会话（send_message/list_agents/interrupt_agent 续接），
@@ -149,10 +159,11 @@ export function createTaskTool(ctx: SubAgentRuntimeContext): StructuredToolInter
           resolveModel: ctx.resolveModel,
           buildTools: ctx.buildTools,
           recursionLimit: ctx.recursionLimit,
+          maxToolCalls: ctx.maxToolCalls,
           spillRef: ctx.spillRef,
           extendSystemPrompt: (s) => buildSubAgentSystemPrompt(ctx, s)
         })
-        return `已启动后台子智能体会话（subagent_id=${row.id}）：${row.label}。会话在后台继续执行，用 job_output(job_id="${row.id}", wait=true) 读取当前轮输出；send_message(subagent_id="${row.id}", message=...) 让它继续下一轮工作；interrupt_agent(agent_id="${row.id}") 中断当前轮；list_agents 查看全部会话状态。`
+        return mainFormat(m.subagent.backgroundStarted, { id: row.id, label: row.label })
       }
 
       const causeId =
@@ -180,7 +191,8 @@ export function createTaskTool(ctx: SubAgentRuntimeContext): StructuredToolInter
           systemPrompt,
           queue,
           spill: ctx.spillRef?.current,
-          subagentCtx: { name: sa.name, causeId }
+          subagentCtx: { name: sa.name, causeId },
+          maxToolCalls: ctx.maxToolCalls
         })
 
         // 流式执行：转发 token / 推理 / 工具块为 sub_* 记录，并累积最终文本。
@@ -211,11 +223,11 @@ export function createTaskTool(ctx: SubAgentRuntimeContext): StructuredToolInter
             })
           }
 
-          const output = fullText.trim() || '（子智能体无文本输出）'
+          const output = fullText.trim() || m.subagent.noTextOutput
           push({ kind: 'sub_end', name: sa.name, causeId, output } satisfies SubAgentRecord)
           // 返回给主模型的内容末尾附加抑制提示：子智能体完整输出已直接展示给用户，
           // 主模型无需在最终回答中复述（否则出现「子智能体块 + 主内容」双份重复）。
-          return `${output}\n\n（以上是子智能体 ${sa.name} 的完整输出，已直接展示给用户。请勿在最终回答中复述上述内容，只需简短收尾。）`
+          return `${output}\n\n(The above is the complete output of subagent ${sa.name} and has already been shown to the user directly. Do not restate it in your final answer; just wrap up briefly.)`
         } catch (err) {
           // 工具调用轮次耗尽：返回已生成的部分内容 + 收尾提示（而非「执行失败」）
           const isRecursion =
@@ -223,14 +235,14 @@ export function createTaskTool(ctx: SubAgentRuntimeContext): StructuredToolInter
           if (isRecursion) {
             logger.warn(`[SubAgent] ${sa.name} 工具调用轮次已达上限，自动停止`)
             const output = fullText.trim()
-              ? `${fullText.trim()}\n（子智能体已达到工具调用轮次上限，自动停止）`
-              : '（子智能体已达到工具调用轮次上限，未能完成任务）'
+              ? `${fullText.trim()}${m.subagent.roundLimitNote}`
+              : m.subagent.roundLimitIncomplete
             push({ kind: 'sub_end', name: sa.name, causeId, output } satisfies SubAgentRecord)
             return output
           }
           const message = err instanceof Error ? err.message : String(err)
           logger.warn(`[SubAgent] ${sa.name} 执行失败:`, err)
-          const output = `子智能体执行失败: ${message}`
+          const output = mainFormat(m.subagent.failed, { message })
           push({ kind: 'sub_end', name: sa.name, causeId, output } satisfies SubAgentRecord)
           return output
         }
@@ -238,7 +250,7 @@ export function createTaskTool(ctx: SubAgentRuntimeContext): StructuredToolInter
         // 模型解析 / 建图等前置步骤失败（流式执行阶段的错误已由内层 catch 处理）
         const message = err instanceof Error ? err.message : String(err)
         logger.warn(`[SubAgent] ${sa.name} 初始化失败:`, err)
-        const output = `子智能体执行失败: ${message}`
+        const output = mainFormat(m.subagent.failed, { message })
         push({ kind: 'sub_end', name: sa.name, causeId, output } satisfies SubAgentRecord)
         return output
       }

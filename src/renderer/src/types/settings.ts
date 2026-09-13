@@ -1,4 +1,5 @@
 export type {
+  AppLanguage,
   Lock,
   SystemSettings,
   GraphSettings,

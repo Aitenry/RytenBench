@@ -28,7 +28,7 @@ export function buildHumanMessage(
   // 告知 agent 上传文件的位置，让 agent 自行用 read_file 按需读取
   if (documents && documents.length > 0) {
     const fileList = documents.map((doc) => `- \`${doc.virtualPath}\` (${doc.fileName})`).join('\n')
-    fullText += `\n\n## 上传的文件\n以下文件已上传到你的文件系统中，请使用 read_file 工具按需读取：\n${fileList}`
+    fullText += `\n\n## Uploaded files\nThe following files are now available in your filesystem. Use the read_file tool to read them as needed:\n${fileList}`
   }
 
   if (!images || images.length === 0) {

@@ -1,5 +1,7 @@
 import React, { useRef, useEffect, useMemo, useCallback } from 'react'
 import { theme } from 'antd'
+import dayjs from 'dayjs'
+import { LANGUAGES, useTranslation } from '@renderer/i18n'
 import { PRIORITY_MAP, DAY_COL_WIDTH, ROW_HEIGHT } from '@renderer/types/planner'
 import type { PlannerTreeNode } from '@renderer/types/planner'
 
@@ -109,6 +111,9 @@ const GanttChart: React.FC<Props> = ({
   treeScrollRef
 }) => {
   const { token } = theme.useToken()
+  // 时间轴日期文案跟随界面语言：i18next 的 locale 名（zh-CN / en-US）映射到 dayjs 的 locale 名
+  const { t, i18n } = useTranslation()
+  const dayjsLocale = LANGUAGES[i18n.resolvedLanguage === 'en-US' ? 'en-US' : 'zh-CN'].dayjs
   const colWidth = DAY_COL_WIDTH
   const headerRef = useRef<HTMLDivElement>(null)
   const bodyRef = useRef<HTMLDivElement>(null)
@@ -150,6 +155,10 @@ const GanttChart: React.FC<Props> = ({
       ganttEndMs: range.end.getTime()
     }
   }, [flatRows, colWidth])
+
+  // 时间轴日期文案：交给 dayjs 本地化，格式串本身随语言（中文「1月5」/ 英文「Jan 5」）
+  const formatAxisDate = (d: Date): string =>
+    dayjs(d).locale(dayjsLocale).format(t('planner.gantt.axisDateFormat'))
 
   // 构建 ID -> 行索引映射
   const rowIndexMap = useMemo(() => {
@@ -299,7 +308,7 @@ const GanttChart: React.FC<Props> = ({
                   i < dates.length - 1 ? `1px solid ${token.colorBorderSecondary}` : 'none'
               }}
             >
-              {d.getMonth() + 1}月{d.getDate()}
+              {formatAxisDate(d)}
             </div>
           ))}
         </div>

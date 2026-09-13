@@ -7,6 +7,12 @@ import * as fs from 'fs'
 import * as path from 'path'
 import { app } from 'electron'
 import logger from 'electron-log'
+import {
+  FALLBACK_CONTEXT_WINDOW,
+  FALLBACK_MAX_OUTPUT_TOKENS,
+  FALLBACK_MODEL_CAPABILITIES,
+  FALLBACK_MODEL_TYPE
+} from '../../shared/model-params'
 
 /** 模型能力字段（models-profile.json 的 capabilities 结构） */
 export interface ModelCapabilities {
@@ -48,7 +54,7 @@ export interface ModelProfileEntry {
 /** 拉取远程模型列表后的返回项 */
 export interface FetchedModelInfo {
   id: string
-  /** 档案中的元数据；档案中不存在时为 null，由用户自行填写 */
+  /** 元数据：档案命中用档案内容，未收录用兜底档案（见 resolveFetchedModelMetadata） */
   metadata: ModelProfileEntry | null
 }
 
@@ -96,6 +102,24 @@ export function loadModelProfiles(): Map<string, ModelProfileEntry> {
  */
 export function findModelProfile(id: string): ModelProfileEntry | null {
   return loadModelProfiles().get(id) ?? null
+}
+
+/**
+ * 「拉取模型列表」专用解析：档案命中直接用官方档案；未收录的模型给一份兜底档案——
+ * 上下文窗口与最大输出都取预设档位的最低值，类型按语言（对话）模型，能力保留
+ * 文本输入输出 / 流式 / 工具调用。这样一键添加进来的模型不会是「什么都没填」的状态，
+ * 用户再按需在「高级配置」里上调。
+ */
+export function resolveFetchedModelMetadata(id: string): ModelProfileEntry {
+  const profile = findModelProfile(id)
+  if (profile) return profile
+  return {
+    id,
+    type: FALLBACK_MODEL_TYPE,
+    capabilities: { ...FALLBACK_MODEL_CAPABILITIES },
+    context_window: FALLBACK_CONTEXT_WINDOW,
+    max_output_tokens: FALLBACK_MAX_OUTPUT_TOKENS
+  }
 }
 
 /**

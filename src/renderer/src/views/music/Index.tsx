@@ -1,5 +1,6 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react'
+import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { theme, App } from 'antd'
+import { useTranslation, Trans } from '@renderer/i18n'
 import { useAudioState } from '../../contexts/AudioContext'
 import type { MusicFolder, Track } from '../../types/music'
 import MusicSidebar from './components/MusicSidebar'
@@ -12,8 +13,17 @@ import EditPlaylistModal from './components/EditPlaylistModal'
 const RECENTLY_PLAYED_ID = '__recent__'
 const LIKED_TRACKS_ID = '__liked__'
 
+const MONO_FONT = "'JetBrains Mono', 'Cascadia Code', Consolas, 'Courier New', monospace"
+
+/** 内置歌单的行内文案（模块级只存词条键，渲染时在组件内 t() 求值） */
+const T_RECENTLY_PLAYED_NAME = 'music.playlist.recentlyPlayedName' as const
+const T_RECENTLY_PLAYED_DESC = 'music.playlist.recentlyPlayedDescription' as const
+const T_LIKED_NAME = 'music.playlist.likedName' as const
+const T_LIKED_DESC = 'music.playlist.likedDescription' as const
+
 const Index: React.FC = () => {
   const { message, modal } = App.useApp()
+  const { t } = useTranslation()
   const {
     token: { colorBgContainer, borderRadiusLG }
   } = theme.useToken()
@@ -48,28 +58,31 @@ const Index: React.FC = () => {
   selectedFolderIdRef.current = selectedFolderId
   const [editingFolder, setEditingFolder] = useState<MusicFolder | null>(null)
 
-  const specialFolders: MusicFolder[] = [
-    {
-      id: RECENTLY_PLAYED_ID,
-      path: '',
-      name: '最近播放',
-      description: '最近播放过的歌曲',
-      track_count: 0,
-      coverDataUrl: null,
-      created_at: '',
-      updated_at: ''
-    },
-    {
-      id: LIKED_TRACKS_ID,
-      path: '',
-      name: '我喜欢',
-      description: '收藏的歌曲',
-      track_count: 0,
-      coverDataUrl: null,
-      created_at: '',
-      updated_at: ''
-    }
-  ]
+  const specialFolders: MusicFolder[] = useMemo(
+    () => [
+      {
+        id: RECENTLY_PLAYED_ID,
+        path: '',
+        name: t(T_RECENTLY_PLAYED_NAME),
+        description: t(T_RECENTLY_PLAYED_DESC),
+        track_count: 0,
+        coverDataUrl: null,
+        created_at: '',
+        updated_at: ''
+      },
+      {
+        id: LIKED_TRACKS_ID,
+        path: '',
+        name: t(T_LIKED_NAME),
+        description: t(T_LIKED_DESC),
+        track_count: 0,
+        coverDataUrl: null,
+        created_at: '',
+        updated_at: ''
+      }
+    ],
+    [t]
+  )
 
   useEffect(() => {
     window.api.music.getFolders().then(setFolders).catch(console.error)
@@ -95,10 +108,10 @@ const Index: React.FC = () => {
         // 只更新列表数据，不中断当前播放信息
         updatePlaylist(tracks, folder.id)
       } catch {
-        message.error('加载曲目失败')
+        message.error(t('music.playlist.loadTracksFailed'))
       }
     },
-    [selectedFolderId, updatePlaylist, setSelectedFolderId]
+    [selectedFolderId, updatePlaylist, setSelectedFolderId, message, t]
   )
 
   const handleDeleteFolder = useCallback(
@@ -106,10 +119,10 @@ const Index: React.FC = () => {
       // 内置歌单不能删除
       if (folderId === RECENTLY_PLAYED_ID || folderId === LIKED_TRACKS_ID) return
       modal.confirm({
-        title: '删除歌单',
-        content: '确定要删除此歌单吗？',
-        okText: '删除',
-        cancelText: '取消',
+        title: t('music.playlist.deleteTitle'),
+        content: t('music.playlist.deleteConfirm'),
+        okText: t('common.action.delete'),
+        cancelText: t('common.action.cancel'),
         okButtonProps: { danger: true },
         onOk: async () => {
           try {
@@ -119,14 +132,14 @@ const Index: React.FC = () => {
               setSelectedFolderId(null)
               clearPlaylist()
             }
-            message.success('歌单已删除')
+            message.success(t('common.action.deleteSuccess'))
           } catch {
-            message.error('删除失败')
+            message.error(t('common.action.deleteFailed'))
           }
         }
       })
     },
-    [selectedFolderId, clearPlaylist, setSelectedFolderId, modal]
+    [selectedFolderId, clearPlaylist, setSelectedFolderId, modal, message, t]
   )
 
   /** 切换收藏状态 */
@@ -147,10 +160,10 @@ const Index: React.FC = () => {
           updatePlaylist(tracks, LIKED_TRACKS_ID)
         }
       } catch {
-        message.error('操作失败')
+        message.error(t('common.message.operationFailed'))
       }
     },
-    [selectedFolderId, playlist, updatePlaylist]
+    [selectedFolderId, playlist, updatePlaylist, message, t]
   )
 
   const handleAddTracks = useCallback(
@@ -166,18 +179,34 @@ const Index: React.FC = () => {
           // 仅更新列表不中断播放
           updatePlaylist(tracks, folderId)
           setSelectedFolderId(folderId)
-          let msg = `已添加 ${result.added.length} 首歌曲`
+          let msg: React.ReactNode = (
+            <Trans
+              i18nKey="music.playlist.addedCount"
+              count={result.added.length}
+              components={{ mono: <span style={{ fontFamily: MONO_FONT }} /> }}
+            />
+          )
           if (result.skipped.length > 0) {
-            msg += `，${result.skipped.length} 首已存在被跳过`
+            msg = (
+              <>
+                {msg}
+                <Trans
+                  i18nKey="music.playlist.skippedCount"
+                  count={result.skipped.length}
+                  components={{ mono: <span style={{ fontFamily: MONO_FONT }} /> }}
+                />
+              </>
+            )
           }
           message.success(msg)
         }
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : '添加失败'
+        // 后端错误信息原样透传（不翻译），无信息时回退到通用文案
+        const msg = err instanceof Error ? err.message : t('common.action.createFailed')
         message.error(msg)
       }
     },
-    [updatePlaylist, setSelectedFolderId]
+    [updatePlaylist, setSelectedFolderId, message, t]
   )
 
   const handleCreateFolder = useCallback(
@@ -188,9 +217,9 @@ const Index: React.FC = () => {
       }
       const updated = await window.api.music.getFolders()
       setFolders(updated)
-      message.success('歌单已创建')
+      message.success(t('music.playlist.created'))
     },
-    []
+    [message, t]
   )
 
   const handleEditFolder = useCallback((folder: MusicFolder) => {
@@ -200,16 +229,16 @@ const Index: React.FC = () => {
   const handleEditSaved = useCallback(async () => {
     const updated = await window.api.music.getFolders()
     setFolders(updated)
-    message.success('歌单已更新')
-  }, [])
+    message.success(t('music.playlist.updated'))
+  }, [message, t])
 
   const selectedFolder: MusicFolder | undefined =
     selectedFolderId === RECENTLY_PLAYED_ID
       ? {
           id: RECENTLY_PLAYED_ID,
           path: '',
-          name: '最近播放',
-          description: '最近播放过的歌曲',
+          name: t(T_RECENTLY_PLAYED_NAME),
+          description: t(T_RECENTLY_PLAYED_DESC),
           track_count: playlist.length,
           coverDataUrl: null,
           created_at: '',
@@ -219,8 +248,8 @@ const Index: React.FC = () => {
         ? {
             id: LIKED_TRACKS_ID,
             path: '',
-            name: '我喜欢',
-            description: '你收藏的歌曲',
+            name: t(T_LIKED_NAME),
+            description: t('music.playlist.likedDescriptionSelected'),
             track_count: playlist.length,
             coverDataUrl: null,
             created_at: '',
@@ -240,7 +269,7 @@ const Index: React.FC = () => {
         // 切走再切回/重启即原样复现）
         await window.api.music.toggleLike(Number(track.id))
         removeFromPlaylist(index)
-        message.success('已取消收藏')
+        message.success(t('music.track.unliked'))
         return
       }
       if (selectedFolderId === RECENTLY_PLAYED_ID) {
@@ -254,12 +283,12 @@ const Index: React.FC = () => {
         // 刷新侧边栏歌单计数
         const updatedFolders = await window.api.music.getFolders()
         setFolders(updatedFolders)
-        message.success('已删除')
+        message.success(t('common.action.deleteSuccess'))
       } catch {
-        message.error('删除失败')
+        message.error(t('common.action.deleteFailed'))
       }
     },
-    [playlist, selectedFolderId, removeFromPlaylist]
+    [playlist, selectedFolderId, removeFromPlaylist, message, t]
   )
 
   /** 重新加载当前歌单数据（手动刷新） */
@@ -280,9 +309,9 @@ const Index: React.FC = () => {
     try {
       await reloadCurrentPlaylist()
     } catch {
-      message.error('刷新曲目失败')
+      message.error(t('common.action.refreshFailed'))
     }
-  }, [reloadCurrentPlaylist])
+  }, [reloadCurrentPlaylist, message, t])
 
   return (
     <div className="h-full flex-1 flex flex-row gap-2.5">

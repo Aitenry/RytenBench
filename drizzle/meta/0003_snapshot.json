@@ -1,6 +1,6 @@
 {
-  "id": "f280da5a-2847-4e24-97b8-fae487822453",
-  "prevId": "a2d15cc0-e597-4b27-9a93-211181aba6bd",
+  "id": "c4f1d7a2-6b28-4f3e-9a51-7d0e2b8c9f31",
+  "prevId": "f280da5a-2847-4e24-97b8-fae487822453",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -123,12 +123,8 @@
           "name": "agent_config_workspace_id_fkey",
           "tableFrom": "agent_config",
           "tableTo": "workspace",
-          "columnsFrom": [
-            "workspace_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["workspace_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -138,10 +134,7 @@
         "agent_config_workspace_id_name_key": {
           "name": "agent_config_workspace_id_name_key",
           "nullsNotDistinct": false,
-          "columns": [
-            "workspace_id",
-            "name"
-          ]
+          "columns": ["workspace_id", "name"]
         }
       },
       "policies": {},
@@ -236,12 +229,8 @@
           "name": "harness_dialogue_topic_id_fkey",
           "tableFrom": "harness_dialogue",
           "tableTo": "harness_topic",
-          "columnsFrom": [
-            "topic_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["topic_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -388,12 +377,8 @@
           "name": "harness_dialogue_usage_workspace_id_fkey",
           "tableFrom": "harness_dialogue_usage",
           "tableTo": "workspace",
-          "columnsFrom": [
-            "workspace_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["workspace_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -401,12 +386,8 @@
           "name": "harness_dialogue_usage_topic_id_fkey",
           "tableFrom": "harness_dialogue_usage",
           "tableTo": "harness_topic",
-          "columnsFrom": [
-            "topic_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["topic_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -414,12 +395,8 @@
           "name": "harness_dialogue_usage_dialogue_id_fkey",
           "tableFrom": "harness_dialogue_usage",
           "tableTo": "harness_dialogue",
-          "columnsFrom": [
-            "dialogue_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["dialogue_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -429,9 +406,7 @@
         "harness_dialogue_usage_dialogue_id_key": {
           "name": "harness_dialogue_usage_dialogue_id_key",
           "nullsNotDistinct": false,
-          "columns": [
-            "dialogue_id"
-          ]
+          "columns": ["dialogue_id"]
         }
       },
       "policies": {},
@@ -627,12 +602,8 @@
           "name": "harness_topic_workspace_id_fkey",
           "tableFrom": "harness_topic",
           "tableTo": "workspace",
-          "columnsFrom": [
-            "workspace_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["workspace_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -803,9 +774,7 @@
         "schema_migrations_script_name_key": {
           "name": "schema_migrations_script_name_key",
           "nullsNotDistinct": false,
-          "columns": [
-            "script_name"
-          ]
+          "columns": ["script_name"]
         }
       },
       "policies": {},
@@ -888,12 +857,8 @@
           "name": "directory_documents_directory_id_fkey",
           "tableFrom": "directory_documents",
           "tableTo": "wiki_directories",
-          "columnsFrom": [
-            "directory_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["directory_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -901,12 +866,8 @@
           "name": "directory_documents_doc_id_fkey",
           "tableFrom": "directory_documents",
           "tableTo": "documents",
-          "columnsFrom": [
-            "doc_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["doc_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -916,10 +877,7 @@
         "directory_documents_directory_id_doc_id_key": {
           "name": "directory_documents_directory_id_doc_id_key",
           "nullsNotDistinct": false,
-          "columns": [
-            "doc_id",
-            "directory_id"
-          ]
+          "columns": ["doc_id", "directory_id"]
         }
       },
       "policies": {},
@@ -1081,12 +1039,8 @@
           "name": "documents_content_image_id_fkey",
           "tableFrom": "documents_content",
           "tableTo": "images",
-          "columnsFrom": [
-            "image_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["image_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -1094,12 +1048,8 @@
           "name": "documents_content_doc_id_fkey",
           "tableFrom": "documents_content",
           "tableTo": "documents",
-          "columnsFrom": [
-            "doc_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["doc_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1109,9 +1059,7 @@
         "documents_content_doc_id_key": {
           "name": "documents_content_doc_id_key",
           "nullsNotDistinct": false,
-          "columns": [
-            "doc_id"
-          ]
+          "columns": ["doc_id"]
         }
       },
       "policies": {},
@@ -1213,12 +1161,8 @@
           "name": "graph_build_jobs_wiki_id_fkey",
           "tableFrom": "graph_build_jobs",
           "tableTo": "wiki",
-          "columnsFrom": [
-            "wiki_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["wiki_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1228,9 +1172,7 @@
         "uq_graph_build_jobs_wiki": {
           "name": "uq_graph_build_jobs_wiki",
           "nullsNotDistinct": false,
-          "columns": [
-            "wiki_id"
-          ]
+          "columns": ["wiki_id"]
         }
       },
       "policies": {},
@@ -1366,12 +1308,8 @@
           "name": "graph_entities_wiki_id_fkey",
           "tableFrom": "graph_entities",
           "tableTo": "wiki",
-          "columnsFrom": [
-            "wiki_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["wiki_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1504,12 +1442,8 @@
           "name": "graph_relations_wiki_id_fkey",
           "tableFrom": "graph_relations",
           "tableTo": "wiki",
-          "columnsFrom": [
-            "wiki_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["wiki_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1517,12 +1451,8 @@
           "name": "graph_relations_source_id_fkey",
           "tableFrom": "graph_relations",
           "tableTo": "graph_entities",
-          "columnsFrom": [
-            "source_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["source_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1530,12 +1460,8 @@
           "name": "graph_relations_target_id_fkey",
           "tableFrom": "graph_relations",
           "tableTo": "graph_entities",
-          "columnsFrom": [
-            "target_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["target_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1590,9 +1516,7 @@
         "workspace_path_key": {
           "name": "workspace_path_key",
           "nullsNotDistinct": false,
-          "columns": [
-            "path"
-          ]
+          "columns": ["path"]
         }
       },
       "policies": {},
@@ -1668,12 +1592,8 @@
           "name": "task_dependencies_task_id_fkey",
           "tableFrom": "task_dependencies",
           "tableTo": "todo_items",
-          "columnsFrom": [
-            "task_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["task_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1681,12 +1601,8 @@
           "name": "task_dependencies_depends_on_task_id_fkey",
           "tableFrom": "task_dependencies",
           "tableTo": "todo_items",
-          "columnsFrom": [
-            "depends_on_task_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["depends_on_task_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1696,10 +1612,7 @@
         "task_dependencies_task_id_depends_on_task_id_key": {
           "name": "task_dependencies_task_id_depends_on_task_id_key",
           "nullsNotDistinct": false,
-          "columns": [
-            "task_id",
-            "depends_on_task_id"
-          ]
+          "columns": ["task_id", "depends_on_task_id"]
         }
       },
       "policies": {},
@@ -1939,12 +1852,8 @@
           "name": "planner_dependencies_task_id_fkey",
           "tableFrom": "planner_dependencies",
           "tableTo": "planner_tasks",
-          "columnsFrom": [
-            "task_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["task_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1952,12 +1861,8 @@
           "name": "planner_dependencies_depends_on_task_id_fkey",
           "tableFrom": "planner_dependencies",
           "tableTo": "planner_tasks",
-          "columnsFrom": [
-            "depends_on_task_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["depends_on_task_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1967,10 +1872,7 @@
         "planner_dependencies_task_id_depends_on_task_id_key": {
           "name": "planner_dependencies_task_id_depends_on_task_id_key",
           "nullsNotDistinct": false,
-          "columns": [
-            "task_id",
-            "depends_on_task_id"
-          ]
+          "columns": ["task_id", "depends_on_task_id"]
         }
       },
       "policies": {},
@@ -2116,12 +2018,8 @@
           "name": "planner_tasks_parent_id_fkey",
           "tableFrom": "planner_tasks",
           "tableTo": "planner_tasks",
-          "columnsFrom": [
-            "parent_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["parent_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -2220,12 +2118,8 @@
           "name": "wiki_image_id_fkey",
           "tableFrom": "wiki",
           "tableTo": "images",
-          "columnsFrom": [
-            "image_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["image_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -2339,12 +2233,8 @@
           "name": "wiki_directories_wiki_id_fkey",
           "tableFrom": "wiki_directories",
           "tableTo": "wiki",
-          "columnsFrom": [
-            "wiki_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["wiki_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -2352,12 +2242,8 @@
           "name": "wiki_directories_parent_id_fkey",
           "tableFrom": "wiki_directories",
           "tableTo": "wiki_directories",
-          "columnsFrom": [
-            "parent_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["parent_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -2430,12 +2316,8 @@
           "name": "music_folders_image_id_fkey",
           "tableFrom": "music_folders",
           "tableTo": "images",
-          "columnsFrom": [
-            "image_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["image_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -2445,9 +2327,7 @@
         "music_folders_path_key": {
           "name": "music_folders_path_key",
           "nullsNotDistinct": false,
-          "columns": [
-            "path"
-          ]
+          "columns": ["path"]
         }
       },
       "policies": {},
@@ -2572,12 +2452,8 @@
           "name": "music_tracks_image_id_fkey",
           "tableFrom": "music_tracks",
           "tableTo": "images",
-          "columnsFrom": [
-            "image_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["image_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -2585,12 +2461,8 @@
           "name": "music_tracks_folder_id_fkey",
           "tableFrom": "music_tracks",
           "tableTo": "music_folders",
-          "columnsFrom": [
-            "folder_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["folder_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -2600,10 +2472,7 @@
         "music_tracks_folder_id_file_hash_key": {
           "name": "music_tracks_folder_id_file_hash_key",
           "nullsNotDistinct": false,
-          "columns": [
-            "folder_id",
-            "file_hash"
-          ]
+          "columns": ["folder_id", "file_hash"]
         }
       },
       "policies": {},

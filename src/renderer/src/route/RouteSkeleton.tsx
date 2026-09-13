@@ -1,6 +1,7 @@
 import React from 'react'
 import { theme } from 'antd'
 import { useTheme } from '@renderer/contexts/useTheme'
+import { useTranslation } from '@renderer/i18n'
 
 export type RouteSkeletonVariant = 'harness' | 'planner' | 'music'
 
@@ -56,6 +57,7 @@ const RouteSkeleton: React.FC<{ variant: RouteSkeletonVariant }> = ({ variant })
     }
   } = theme.useToken()
   const { effectiveTheme } = useTheme()
+  const { t } = useTranslation()
   const isDark = effectiveTheme === 'dark'
 
   const blockColor = isDark ? 'rgba(255,255,255,0.09)' : 'rgba(0,0,0,0.06)'
@@ -247,7 +249,7 @@ const RouteSkeleton: React.FC<{ variant: RouteSkeletonVariant }> = ({ variant })
       {content}
       <div className="rb-skel-tag" style={{ color: colorTextTertiary }}>
         <span className="rb-skel-tag-dot" style={{ background: colorPrimary }} />
-        LOADING
+        {t('shell.routing.loading')}
       </div>
     </div>
   )

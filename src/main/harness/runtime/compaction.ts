@@ -23,6 +23,8 @@
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models'
 import { HumanMessage, SystemMessage } from '@langchain/core/messages'
 import logger from 'electron-log'
+import { mainFormat } from '../../i18n'
+import { getFsToolTexts } from '../../i18n/tool-results-fs'
 import {
   askUserToSwitchModel,
   MODEL_RETRY_LIMIT,
@@ -44,14 +46,14 @@ export const RETAIN_RATIO = 0.2
 /** 摘要输出的目标上限（字符，提示词约束，非硬截断） */
 const SUMMARY_TARGET_CHARS = 2_000
 
-/** checkpoint 落地包裹文案（参考 DSH CHECKPOINT_PREAMBLE，中文意译） */
+/** checkpoint 落地包裹文案（参考 DSH CHECKPOINT_PREAMBLE，英文改写） */
 const CHECKPOINT_PREAMBLE =
-  '以下为早期对话的自动压缩摘要（checkpoint），视作既定背景直接继续任务，无需复述或致谢：'
+  'The following is an automatic compacted summary (checkpoint) of earlier conversation. Treat it as established background and continue the task directly; do not restate or acknowledge it:'
 
-/** 压缩指令（结构逐字保留 DSH COMPACTION_INSTRUCTION；输出语言改为跟随对话语言） */
+/** 压缩指令（结构逐字保留 DSH COMPACTION_INSTRUCTION，统一英文） */
 const COMPACTION_INSTRUCTION = `You are now acting as a compaction engine for this AI coding assistant. Condense the conversation ABOVE into a structured checkpoint that lets another model resume the work with no loss of essential context.
 
-Output EXACTLY the Markdown structure below: keep every section, in order. Use terse bullets, not prose paragraphs. Write "(none)" for an empty section — never drop a section. Write content in the same language as the conversation (中文对话用中文输出).
+Output EXACTLY the Markdown structure below: keep every section, in order. Use terse bullets, not prose paragraphs. Write "(none)" for an empty section — never drop a section. Write the content in the same language as the conversation.
 
 ## Primary Request and Intent
 - [the user's original and evolving goals; quote verbatim where the exact wording matters]
@@ -76,7 +78,7 @@ Rules:
 - Do NOT mention this summarization request or that the context was compacted.
 - Output only the checkpoint text: do not call any tool or take any other action.
 - If the conversation already contains a <compacted-summary> block, it is a PRIOR checkpoint. Do not copy it forward verbatim: preserve still-true facts, drop stale ones, and merge newer information into a single consolidated summary under the same structure.
-请在 ${SUMMARY_TARGET_CHARS} 字符以内完成输出。`
+Complete the output within ${SUMMARY_TARGET_CHARS} characters.`
 
 /** 摘要输入单条记录形态 */
 export interface TranscriptDialogue {
@@ -90,7 +92,7 @@ export function buildTranscript(dialogues: TranscriptDialogue[]): string {
   const lines: string[] = []
   for (const d of dialogues) {
     if (d.role === 'user') {
-      lines.push(`[用户] ${d.content}`)
+      lines.push(`[user] ${d.content}`)
       continue
     }
     // 助手消息：文本块 + 工具块概要
@@ -108,14 +110,14 @@ export function buildTranscript(dialogues: TranscriptDialogue[]): string {
         for (const tb of toolBlocks) {
           const inputText = JSON.stringify(tb.tool?.input ?? {}).slice(0, 300)
           const outputText = (tb.tool?.output ?? '').slice(0, 800)
-          lines.push(`[工具调用] ${tb.tool?.name}（输入：${inputText}）`)
-          if (outputText) lines.push(`[工具结果] ${outputText}`)
+          lines.push(`[tool call] ${tb.tool?.name} (input: ${inputText})`)
+          if (outputText) lines.push(`[tool result] ${outputText}`)
         }
       } catch {
         // blocks 解析失败：仅用 content
       }
     }
-    lines.push(`[助手] ${text}`)
+    lines.push(`[assistant] ${text}`)
   }
   return lines.join('\n')
 }
@@ -143,11 +145,13 @@ export async function summarizeDialogues(
 ): Promise<string> {
   if (signal?.aborted) throw compactionAbortError()
   const mergeBlock = priorSummary
-    ? `以下为既有 checkpoint（需要保留的旧摘要）：\n<compacted-summary>\n${priorSummary}\n</compacted-summary>\n\n以下为摘要之后新增的早期对话，请合并进上述 checkpoint：\n\n${transcript}`
-    : `以下是需要压缩的对话内容：\n\n${transcript}`
+    ? `Existing checkpoint (the prior summary to preserve):\n<compacted-summary>\n${priorSummary}\n</compacted-summary>\n\nEarlier conversation added after that summary — merge it into the checkpoint above:\n\n${transcript}`
+    : `Conversation to compact:\n\n${transcript}`
   const response = await model.invoke(
     [
-      new SystemMessage('你是对话压缩引擎，只输出 checkpoint 文本，不调用任何工具。'),
+      new SystemMessage(
+        'You are a conversation compaction engine. Output only the checkpoint text and call no tools.'
+      ),
       new HumanMessage(`${mergeBlock}\n\n${COMPACTION_INSTRUCTION}`)
     ],
     { signal }
@@ -160,7 +164,7 @@ export async function summarizeDialogues(
           .map((c) => c.text || '')
           .join('')
   const summary = text.trim()
-  if (!summary) throw new Error('摘要输出为空')
+  if (!summary) throw new Error(getFsToolTexts().compaction.summaryEmpty)
   return summary
 }
 
@@ -253,7 +257,10 @@ export function pruneToolOutput(text: string, budget = TOOL_RESULT_PRUNE_CHARS):
   const omitted = text.length - PRUNE_HEAD_CHARS - PRUNE_TAIL_CHARS
   const head = text.slice(0, PRUNE_HEAD_CHARS)
   const tail = text.slice(-PRUNE_TAIL_CHARS)
-  return `${head}\n……（中间 ${omitted.toLocaleString()} 字符已裁剪，完整内容保留在会话记录中）……\n${tail}`
+  const marker = mainFormat(getFsToolTexts().compaction.toolResultPruned, {
+    omitted: omitted.toLocaleString()
+  })
+  return `${head}\n${marker}\n${tail}`
 }
 
 /** 供日志使用的安全错误格式化 */

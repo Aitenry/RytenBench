@@ -2,6 +2,7 @@ import { dialog, ipcMain } from 'electron'
 import * as fs from 'fs'
 import crypto from 'crypto'
 import { resolve, sep } from 'path'
+import { mainMessages } from '../i18n'
 import { settingsStore } from '../context'
 import {
   getAllFolders,
@@ -28,7 +29,7 @@ export function registerMusicIpc(): void {
   ipcMain.handle('music-select-directory', async () => {
     const result = await dialog.showOpenDialog({
       properties: ['openDirectory'],
-      title: '选择音乐根目录'
+      title: mainMessages().dialog.selectMusicRoot
     })
     if (result.canceled || result.filePaths.length === 0) return null
     return result.filePaths[0]
@@ -75,7 +76,7 @@ export function registerMusicIpc(): void {
 
   ipcMain.handle('music-create-folder', async (_event, name: string, description?: string) => {
     const musicDir = settingsStore.get('musicDirectory') as string | undefined
-    if (!musicDir) throw new Error('未设置音乐目录')
+    if (!musicDir) throw new Error(mainMessages().error.musicDirNotSet)
 
     const folderId = crypto.randomUUID()
     const folderPath = `${musicDir}\\${folderId}`.replace(/\//g, '\\')
@@ -109,10 +110,11 @@ export function registerMusicIpc(): void {
   )
 
   ipcMain.handle('music-select-image', async () => {
+    const m = mainMessages().dialog
     const result = await dialog.showOpenDialog({
       properties: ['openFile'],
-      title: '选择封面图片',
-      filters: [{ name: '图片文件', extensions: ['jpg', 'jpeg', 'png', 'webp', 'bmp'] }]
+      title: m.selectCoverImage,
+      filters: [{ name: m.filterImageFiles, extensions: ['jpg', 'jpeg', 'png', 'webp', 'bmp'] }]
     })
     if (result.canceled || result.filePaths.length === 0) return null
 
@@ -131,10 +133,11 @@ export function registerMusicIpc(): void {
   )
 
   ipcMain.handle('music-update-folder-cover', async (_event, folderId: string) => {
+    const m = mainMessages().dialog
     const result = await dialog.showOpenDialog({
       properties: ['openFile'],
-      title: '选择歌单封面',
-      filters: [{ name: '图片文件', extensions: ['jpg', 'jpeg', 'png', 'webp', 'bmp'] }]
+      title: m.selectPlaylistCover,
+      filters: [{ name: m.filterImageFiles, extensions: ['jpg', 'jpeg', 'png', 'webp', 'bmp'] }]
     })
     if (result.canceled || result.filePaths.length === 0) return null
 
@@ -150,14 +153,14 @@ export function registerMusicIpc(): void {
   ipcMain.handle('music-add-tracks', async (_event, folderId: string) => {
     try {
       const folder = await getFolderById(folderId)
-      if (!folder) throw new Error('歌单不存在')
+      if (!folder) throw new Error(mainMessages().error.playlistNotFound)
 
       const result = await dialog.showOpenDialog({
         properties: ['openFile', 'multiSelections'],
-        title: '选择音乐文件',
+        title: mainMessages().dialog.selectMusicFiles,
         filters: [
           {
-            name: '音频文件',
+            name: mainMessages().dialog.filterAudioFiles,
             extensions: ['mp3', 'flac', 'wav', 'ogg', 'aac', 'm4a', 'wma', 'ape', 'wv']
           }
         ]
@@ -273,7 +276,7 @@ export function registerMusicIpc(): void {
   ipcMain.handle('music-delete-track', async (_event, trackId: number) => {
     try {
       const result = await deleteTrackById(trackId)
-      if (!result) throw new Error('歌曲不存在')
+      if (!result) throw new Error(mainMessages().error.trackNotFound)
 
       // 删除物理文件
       if (fs.existsSync(result.filePath)) {
@@ -315,10 +318,11 @@ export function registerMusicIpc(): void {
   )
 
   ipcMain.handle('music-update-track-cover', async (_event, trackId: number) => {
+    const m = mainMessages().dialog
     const result = await dialog.showOpenDialog({
       properties: ['openFile'],
-      title: '选择封面图片',
-      filters: [{ name: '图片文件', extensions: ['jpg', 'jpeg', 'png', 'webp', 'bmp'] }]
+      title: m.selectCoverImage,
+      filters: [{ name: m.filterImageFiles, extensions: ['jpg', 'jpeg', 'png', 'webp', 'bmp'] }]
     })
     if (result.canceled || result.filePaths.length === 0) return null
 
@@ -340,7 +344,7 @@ export function registerMusicIpc(): void {
     const root = resolve(musicDir)
     const target = resolve(filePath)
     if (target !== root && !target.startsWith(root + sep)) {
-      throw new Error('文件不在音乐目录内，已拒绝访问')
+      throw new Error(mainMessages().error.fileOutsideMusicDir)
     }
     const buffer = await fs.promises.readFile(target)
     return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength)

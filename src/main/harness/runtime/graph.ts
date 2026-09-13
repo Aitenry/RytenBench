@@ -128,7 +128,7 @@ export interface GraphRunOptions {
 }
 
 /** 工具调用轮次耗尽时的收尾提示（推送为文本记录，而非让整条流报错） */
-export const RECURSION_STOP_NOTE = '\n（已达到工具调用轮次上限，已自动停止）'
+export const RECURSION_STOP_NOTE = '\n(Tool call round limit reached; stopped automatically)'
 
 /** 判断是否为 LangGraph 递归上限错误（instanceof 兜底 name 检查） */
 function isRecursionError(err: unknown): boolean {

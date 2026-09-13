@@ -9,6 +9,7 @@ import {
   RiHeartLine,
   RiHeartFill
 } from '@remixicon/react'
+import { useTranslation } from '@renderer/i18n'
 import { formatTime } from '../../../utils/formatTime'
 import type { Track } from '../../../types/music'
 import type { PlaylistTableProps } from '@renderer/types/components'
@@ -22,6 +23,7 @@ const PlaylistTable: React.FC<PlaylistTableProps> = ({
   onToggleLike
 }) => {
   const { message } = App.useApp()
+  const { t } = useTranslation()
   const {
     token: { colorFillAlter, colorTextTertiary }
   } = theme.useToken()
@@ -48,7 +50,7 @@ const PlaylistTable: React.FC<PlaylistTableProps> = ({
     const newCover = await window.api.music.updateTrackCover(Number(editingTrack.id))
     if (newCover) {
       setCoverPreview(newCover)
-      message.success('封面已更新')
+      message.success(t('music.playlist.coverUpdated'))
       onUpdate()
     }
   }
@@ -62,7 +64,7 @@ const PlaylistTable: React.FC<PlaylistTableProps> = ({
         artist: values.artist,
         album: values.album || ''
       })
-      message.success('歌曲信息已更新')
+      message.success(t('music.track.editSuccess'))
       setEditModalOpen(false)
       onUpdate()
     } catch {
@@ -90,7 +92,7 @@ const PlaylistTable: React.FC<PlaylistTableProps> = ({
       )
     },
     {
-      title: '标题',
+      title: t('music.track.columnTitle'),
       dataIndex: 'title',
       key: 'title',
       ellipsis: true,
@@ -99,21 +101,21 @@ const PlaylistTable: React.FC<PlaylistTableProps> = ({
       )
     },
     {
-      title: '艺术家',
+      title: t('music.track.columnArtist'),
       dataIndex: 'artist',
       key: 'artist',
       ellipsis: true,
       responsive: ['md']
     },
     {
-      title: '专辑',
+      title: t('music.track.columnAlbum'),
       dataIndex: 'album',
       key: 'album',
       ellipsis: true,
       responsive: ['lg']
     },
     {
-      title: '时长',
+      title: t('music.track.columnDuration'),
       dataIndex: 'duration',
       key: 'duration',
       width: 70,
@@ -173,8 +175,8 @@ const PlaylistTable: React.FC<PlaylistTableProps> = ({
         style={{ color: colorTextTertiary }}
       >
         <RiMusic2Line size={64} />
-        <p className="mt-4 text-lg">暂无音乐</p>
-        <p className="mt-1 text-sm">选择歌单后开始播放</p>
+        <p className="mt-4 text-lg">{t('music.track.empty')}</p>
+        <p className="mt-1 text-sm">{t('music.track.emptyHint')}</p>
       </div>
     )
   }
@@ -194,16 +196,16 @@ const PlaylistTable: React.FC<PlaylistTableProps> = ({
           className: `cursor-pointer group ${currentIndex === index ? 'bg-blue-50/50' : ''}`,
           style: { cursor: 'pointer' }
         })}
-        locale={{ emptyText: <Empty description="暂无曲目" /> }}
+        locale={{ emptyText: <Empty description={t('music.track.tableEmpty')} /> }}
       />
 
       <Modal
-        title="编辑歌曲信息"
+        title={t('music.track.editTitle')}
         open={editModalOpen}
         onOk={handleEditSave}
         onCancel={() => setEditModalOpen(false)}
-        okText="保存"
-        cancelText="取消"
+        okText={t('common.action.save')}
+        cancelText={t('common.action.cancel')}
       >
         {/* 封面 — 点击更换，hover 显示遮罩 */}
         <div className="flex justify-center mb-5">
@@ -222,23 +224,37 @@ const PlaylistTable: React.FC<PlaylistTableProps> = ({
             {/* hover 遮罩 */}
             <div className="absolute inset-0 bg-black/40 flex flex-col items-center justify-center gap-1 opacity-0 group-hover/cover:opacity-100 transition-opacity">
               <RiCameraLine size={22} className="text-white" />
-              <span className="text-xs text-white">更换封面</span>
+              <span className="text-xs text-white">{t('music.playlist.coverChange')}</span>
             </div>
           </div>
         </div>
 
         <Form form={editForm} layout="vertical">
-          <Form.Item name="title" label="标题" rules={[{ required: true, message: '请输入标题' }]}>
+          <Form.Item
+            name="title"
+            label={t('music.track.columnTitle')}
+            rules={[
+              {
+                required: true,
+                message: t('common.message.pleaseInput', { field: t('music.track.columnTitle') })
+              }
+            ]}
+          >
             <Input />
           </Form.Item>
           <Form.Item
             name="artist"
-            label="艺术家"
-            rules={[{ required: true, message: '请输入艺术家' }]}
+            label={t('music.track.columnArtist')}
+            rules={[
+              {
+                required: true,
+                message: t('common.message.pleaseInput', { field: t('music.track.columnArtist') })
+              }
+            ]}
           >
             <Input />
           </Form.Item>
-          <Form.Item name="album" label="专辑">
+          <Form.Item name="album" label={t('music.track.columnAlbum')}>
             <Input />
           </Form.Item>
         </Form>

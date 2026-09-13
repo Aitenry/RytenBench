@@ -7,6 +7,7 @@ import trayMenuHtml from '../resource/tray-menu.html?asset'
 import { settingsStore } from '../context'
 import { getMainWindow } from '../windows/window-manager'
 import { safeSend } from '../safe-send'
+import { mainMessages } from '../i18n'
 import { ThemeMode, TraySettings } from '../types/settings'
 
 // 系统托盘：品牌视觉图标（暖纸圆角方 + 墨色 Georgia R + 朱砂划线，1x/2x 双表示）。
@@ -21,7 +22,6 @@ let menuOpening = false // 弹出过程中（等待菜单页加载）防重入
 let lastMenuHideAt = 0 // 上次隐藏时间，用于抑制 blur→right-click 竞态下的重放动画
 let menuFlip: 'up' | 'down' = 'up' // 最近一次弹出方向（开关刷新数据时保持动画方向）
 
-const TRAY_TOOLTIP = 'RytenBench — AI 桌面工作台'
 // 菜单体尺寸；窗口 = 菜单体 + 2×MENU_PAD（四周留出 CSS 阴影区，避免阴影被窗口裁剪）
 const MENU_W = 280
 const MENU_H = 202
@@ -73,26 +73,27 @@ function toggleMainWindow(): void {
 
 /* ---------------- 自绘菜单窗口 ---------------- */
 
-/** 构建菜单数据（每次弹出前重建，保证文案与勾选态实时） */
+/** 构建菜单数据（每次弹出前重建，保证文案与勾选态实时；文案随界面语言） */
 function buildMenuItems(): MenuItem[] {
   const win = getMainWindow()
   const visible = !!win && !win.isDestroyed() && win.isVisible()
+  const m = mainMessages()
   return [
     {
       type: 'action',
       id: 'toggle-window',
-      label: visible ? '隐藏窗口' : '显示主窗口',
+      label: visible ? m.tray.hideWindow : m.tray.showWindow,
       icon: 'chevron'
     },
     { type: 'separator' },
     {
       type: 'checkbox',
       id: 'toggle-tray',
-      label: '关闭到系统托盘',
+      label: m.tray.closeToTray,
       checked: isCloseToTrayEnabled()
     },
     { type: 'separator' },
-    { type: 'action', id: 'quit', label: '退出 RytenBench', danger: true, icon: 'power' }
+    { type: 'action', id: 'quit', label: m.tray.quit, danger: true, icon: 'power' }
   ]
 }
 
@@ -196,6 +197,7 @@ function sendMenuData(force = false): void {
   // 且违反项目「主进程推送统一走 safeSend」约定）
   safeSend(menuWindow.webContents, 'tray-menu-data', {
     items: buildMenuItems(),
+    subtitle: mainMessages().tray.subtitle,
     theme: getMenuTheme(),
     flip: menuFlip,
     version: app.getVersion()
@@ -281,7 +283,7 @@ export function createTray(): void {
       buffer: nativeImage.createFromPath(tray32Icon).toPNG()
     })
     tray = new Tray(image)
-    tray.setToolTip(TRAY_TOOLTIP)
+    tray.setToolTip(mainMessages().tray.tooltip)
     tray.on('click', () => {
       hideTrayMenu()
       showMainWindow()
@@ -305,5 +307,5 @@ export function isTrayAvailable(): boolean {
 /** 同步托盘状态（设置变化 / 窗口显隐时由外部调用；菜单数据在每次弹出时重建，天然保持最新） */
 export function syncTrayState(): void {
   if (!tray) return
-  tray.setToolTip(TRAY_TOOLTIP)
+  tray.setToolTip(mainMessages().tray.tooltip)
 }

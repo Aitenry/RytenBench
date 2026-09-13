@@ -7,6 +7,8 @@ import logger from 'electron-log'
 import { buildAgentGraph } from './agent'
 import { invokeGraph } from './graph'
 import type { SpillStore } from './spill'
+import { mainFormat } from '../../i18n'
+import { getAgentToolTexts } from '../../i18n/tool-results-agent'
 
 /**
  * 工作流工具（workflow）— 对应 deepseek-harness 的 dsh-workflow / dsh-tool-workflow 体系
@@ -38,6 +40,8 @@ export interface WorkflowToolContext {
   /** 工作流子代理工具集（业务工具 + 文件工具；不含任务/目标/提问/续接控制） */
   buildAgentTools: () => StructuredToolInterface[]
   recursionLimit: number
+  /** 工具调用总次数上限（模型级「工具调用轮数」；与主图共用同一模型设置） */
+  maxToolCalls: number
   spillRef?: { current?: SpillStore }
 }
 
@@ -56,8 +60,9 @@ const ALLOWED_SCHEMA_KEYS = new Set([
 function assertSchemaSubset(schema: Record<string, unknown>, path = 'schema'): void {
   for (const key of Object.keys(schema)) {
     if (!ALLOWED_SCHEMA_KEYS.has(key)) {
+      const m = getAgentToolTexts()
       throw new Error(
-        `UNSUPPORTED_SCHEMA: ${path}.${key}（仅支持 type/properties/required/additionalProperties/items/enum/const/oneOf）`
+        `UNSUPPORTED_SCHEMA: ${mainFormat(m.workflow.unsupportedSchema, { path, key })}`
       )
     }
   }
@@ -158,15 +163,20 @@ export async function runWorkflow(
   signal?: AbortSignal,
   maxTotalAgents = DEFAULT_MAX_TOTAL_AGENTS
 ): Promise<WorkflowRunResult> {
+  const m = getAgentToolTexts()
   // meta 前置校验（DSH start() 同步校验：meta 非法 → META_INVALID）
   if (!meta || typeof meta !== 'object') {
-    return { stopReason: 'error', error: 'META_INVALID: meta 必须是对象', agentsStarted: 0 }
+    return {
+      stopReason: 'error',
+      error: `META_INVALID: ${m.workflow.metaMustBeObject}`,
+      agentsStarted: 0
+    }
   }
   const name = (meta as { name?: unknown }).name
   if (typeof name !== 'string' || !name.trim()) {
     return {
       stopReason: 'error',
-      error: 'META_INVALID: meta.name 必须是非空字符串',
+      error: `META_INVALID: ${m.workflow.metaNameRequired}`,
       agentsStarted: 0
     }
   }
@@ -178,7 +188,7 @@ export async function runWorkflow(
     ) {
       return {
         stopReason: 'error',
-        error: 'META_INVALID: meta.phases 必须是 {title} 数组',
+        error: `META_INVALID: ${m.workflow.metaPhasesRequired}`,
         agentsStarted: 0
       }
     }
@@ -227,7 +237,9 @@ export async function runWorkflow(
   const agentHook = async (prompt: string, opts?: Record<string, unknown>): Promise<unknown> => {
     checkCancelled()
     if (agentsStarted >= maxTotalAgents) {
-      throw new Error(`AGENT_CAP: 代理总数超过上限（${maxTotalAgents}）`)
+      throw new Error(
+        `AGENT_CAP: ${mainFormat(m.workflow.agentCapExceeded, { limit: maxTotalAgents })}`
+      )
     }
     // 选项白名单（DSH：其余如 effort/isolation/agentType 一律拒绝杀脚本）
     if (opts) {
@@ -235,7 +247,7 @@ export async function runWorkflow(
       for (const key of Object.keys(opts)) {
         if (!allowed.has(key)) {
           throw new Error(
-            `UNSUPPORTED_OPTION: agent 选项 "${key}" 不受支持（仅 label/phase/schema/model）`
+            `UNSUPPORTED_OPTION: ${mainFormat(m.workflow.unsupportedOption, { key })}`
           )
         }
       }
@@ -245,7 +257,7 @@ export async function runWorkflow(
       assertSchemaSubset(schema)
     }
     if (typeof prompt !== 'string' || !prompt.trim()) {
-      throw new Error('agent() 需要非空的字符串 prompt')
+      throw new Error(m.workflow.emptyPrompt)
     }
 
     agentsStarted++
@@ -260,8 +272,9 @@ export async function runWorkflow(
         model,
         tools,
         systemPrompt:
-          '你是工作流中的一个独立执行单元。专注于完成交给你的单一任务，直接给出结果文本；若调用方声明了 schema，请输出符合 schema 的 JSON。不要向用户提问，不要委托他人，不要复述任务要求。',
-        spill: ctx.spillRef?.current
+          'You are a single execution unit inside a workflow. Focus on the one task you were given and return the result text directly; if the caller declared a schema, output JSON that matches that schema. Do not ask the user questions, do not delegate to others, and do not restate the task instructions.',
+        spill: ctx.spillRef?.current,
+        maxToolCalls: ctx.maxToolCalls
       })
       const messages = await invokeGraph(
         graph,
@@ -379,7 +392,7 @@ export async function runWorkflow(
         // 并中止已启动的在飞子代理
         cancelled = true
         workflowAbort.abort()
-        reject(new Error('WORKFLOW_TIMEOUT: 脚本执行超过 30 分钟，已强制停止'))
+        reject(new Error(`WORKFLOW_TIMEOUT: ${m.workflow.timeout}`))
       }, WORKFLOW_HARD_TIMEOUT_MS)
     })
     const value = await Promise.race([vmExecution, hardGuard])
@@ -419,34 +432,38 @@ export function buildWorkflowTool(ctx: WorkflowToolContext): StructuredToolInter
     },
     {
       name: 'workflow',
-      description: `运行一个 JavaScript 编排脚本，把工作扇出给多个一次性子代理并行/流水线执行（适合批量审计、多角度研究、大规模独立任务）。
+      description: `Run a JavaScript orchestration script that fans work out to many one-shot subagents in parallel or as a pipeline (suited to bulk audits, multi-angle research, and large batches of independent tasks).
 
-脚本契约（纯 JavaScript 函数体，支持顶层 await，以 return <值> 结束；返回值须可 JSON 序列化）：
-- agent(prompt, opts?)：启动一个子代理执行到完成。无 opts.schema 时返回其最终文本；有 opts.schema（对象根 JSON Schema，仅支持 type/properties/required/additionalProperties/items/enum/const/oneOf）时返回校验后的对象。子代理失败返回 null（用 .filter(Boolean) 过滤）。opts 可选 label（展示用）/phase/schema/model（如 'provider:model'）；其它选项一律报错。
-- pipeline(items, ...stages)：每个元素依次通过全部 stage（stage 签名为 (prev, item, index)），元素间无屏障；单个 stage 抛错 = 该元素变 null 并跳过其剩余 stage。
-- parallel(thunks)：并发执行全部 thunk 并等待全部完成（屏障）；thunk 抛错解析为 null。
-- phase(title) / log(message)：进度记录；args：工具调用的 args 原样传入。
+Script contract (a plain JavaScript function body that supports top-level await and ends with return <value>; the returned value must be JSON-serializable):
+- agent(prompt, opts?): start one subagent and run it to completion. Without opts.schema it resolves to the subagent's final text; with opts.schema (an object-rooted JSON Schema supporting only type/properties/required/additionalProperties/items/enum/const/oneOf) it resolves to the validated object. A failed subagent resolves to null (filter with .filter(Boolean)). opts accepts label (for display)/phase/schema/model (such as 'provider:model'); any other option is rejected loudly.
+- pipeline(items, ...stages): run every item through all stages in order (stage signature is (prev, item, index)) with no barrier between items; a single stage that throws drops that item to null and skips its remaining stages.
+- parallel(thunks): run all thunks concurrently and await all of them (a barrier); a thunk that throws resolves to null.
+- phase(title) / log(message): progress narration; args is the tool call's args passed through verbatim.
 
-错误语义：误用钩子（坏参数/不支持选项/超上限）会抛出并终止整个脚本；结果 JSON 为 { stopReason: 'completed'|'cancelled'|'error', value?, error?, agentsStarted }。`,
+Error semantics: a misused hook (bad arguments, unsupported option, tripped cap) throws and kills the entire script; the result JSON is { stopReason: 'completed'|'cancelled'|'error', value?, error?, agentsStarted }.`,
       schema: z.object({
         script: z
           .string()
-          .describe('纯 JavaScript 脚本体（非 TypeScript；顶层 await 允许；以 return 结束）'),
+          .describe(
+            'Plain JavaScript script body (not TypeScript; top-level await allowed; end with return)'
+          ),
         meta: z
           .object({
-            name: z.string().describe('工作流名称（kebab-case）'),
-            description: z.string().optional().describe('一句话说明'),
-            whenToUse: z.string().optional().describe('使用场景说明'),
+            name: z.string().describe('Workflow name (kebab-case)'),
+            description: z.string().optional().describe('One-line description'),
+            whenToUse: z.string().optional().describe('Guidance on when this workflow applies'),
             phases: z
               .array(z.object({ title: z.string() }))
               .optional()
-              .describe('阶段声明（phase(title) 匹配展示）')
+              .describe('Phase declarations (matched by phase(title) calls)')
           })
-          .describe('工作流身份信息'),
+          .describe('Workflow identity information'),
         args: z
           .unknown()
           .optional()
-          .describe('传给脚本的输入（脚本内以 args 全局变量读取，原样透传）')
+          .describe(
+            'Input passed to the script (read inside the script as the global args, passed through verbatim)'
+          )
       })
     }
   )

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { theme } from 'antd'
 import { RiFlag2Line } from '@remixicon/react'
+import { useTranslation } from '@renderer/i18n'
 import { Window } from '../../../../resource/types/window'
 import type { GoalView } from '../../../../../main/harness/runtime/goal'
 
@@ -29,6 +30,7 @@ const GoalBar: React.FC<{ currentTopicId: number | null }> = ({ currentTopicId }
   } = theme.useToken()
 
   const [goal, setGoal] = useState<GoalView | null>(null)
+  const { t } = useTranslation()
 
   // 用 ref 持有当前 topicId，避免每次变化重新订阅
   const currentTopicIdRef = useRef(currentTopicId)
@@ -59,10 +61,10 @@ const GoalBar: React.FC<{ currentTopicId: number | null }> = ({ currentTopicId }
   if (!goal) return null
 
   const phaseText: Record<GoalView['phase'], string> = {
-    active: '进行中',
-    paused: '已暂停',
-    blocked: '已阻塞',
-    complete: '已完成'
+    active: t('harness.goalBar.phaseActive'),
+    paused: t('harness.goalBar.phasePaused'),
+    blocked: t('harness.goalBar.phaseBlocked'),
+    complete: t('harness.goalBar.phaseComplete')
   }
   const phaseColor: Record<GoalView['phase'], string> = {
     active: colorPrimary,
@@ -111,7 +113,10 @@ const GoalBar: React.FC<{ currentTopicId: number | null }> = ({ currentTopicId }
         </div>
         {goal.blockedReason && (
           <div style={{ fontSize: 11, lineHeight: '16px', color: colorTextTertiary }}>
-            阻塞（{goal.blockedReason.code}）：{goal.blockedReason.message}
+            {t('harness.goalBar.blocked', {
+              code: goal.blockedReason.code,
+              message: goal.blockedReason.message
+            })}
           </div>
         )}
       </div>
@@ -145,7 +150,10 @@ const GoalBar: React.FC<{ currentTopicId: number | null }> = ({ currentTopicId }
           {phaseText[goal.phase]}
         </span>
         <span style={{ fontSize: 11, color: colorTextTertiary, whiteSpace: 'nowrap' }}>
-          第 {goal.roundsStarted}/{goal.maxGoalRounds} 轮
+          {t('harness.goalBar.round', {
+            current: goal.roundsStarted,
+            max: goal.maxGoalRounds
+          })}
         </span>
       </div>
     </div>

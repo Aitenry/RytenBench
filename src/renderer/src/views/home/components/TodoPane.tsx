@@ -15,6 +15,7 @@ import {
 import dayjs from 'dayjs'
 import { Window } from '../../../../resource/types/window'
 import TipTapMarkdownEditor from '@renderer/components/markdown/TipTapMarkdownEditor'
+import { useTranslation } from '@renderer/i18n'
 import type { TodoItem } from '@renderer/types/models'
 
 interface TodoPaneProps {
@@ -29,10 +30,13 @@ interface TodoPaneProps {
   onTitleSaved: (todoId: number, title: string) => void
 }
 
-const STATUS_META: Record<number, { label: string; color: string; bg: string }> = {
-  0: { label: '待办', color: '#1677ff', bg: 'rgba(22,119,255,0.1)' },
-  1: { label: '进行中', color: '#fa8c16', bg: 'rgba(250,140,22,0.12)' },
-  2: { label: '已完成', color: '#52c41a', bg: 'rgba(82,196,26,0.12)' }
+/** 状态 → 词条键 / 配色（词条键在组件内 t() 求值，模块级常量表不调 hook） */
+type TodoStatusKey = 'home.status.pending' | 'home.status.doing' | 'home.status.done'
+
+const STATUS_META: Record<number, { labelKey: TodoStatusKey; color: string; bg: string }> = {
+  0: { labelKey: 'home.status.pending', color: '#1677ff', bg: 'rgba(22,119,255,0.1)' },
+  1: { labelKey: 'home.status.doing', color: '#fa8c16', bg: 'rgba(250,140,22,0.12)' },
+  2: { labelKey: 'home.status.done', color: '#52c41a', bg: 'rgba(82,196,26,0.12)' }
 }
 
 const PRIORITY_COLORS: Record<number, string> = {
@@ -59,6 +63,7 @@ const TodoPane: React.FC<TodoPaneProps> = ({
   onTitleSaved
 }) => {
   const { token } = theme.useToken()
+  const { t } = useTranslation()
   const api = (window as unknown as Window).api
 
   const [todo, setTodo] = useState<TodoItem | null>(null)
@@ -88,7 +93,7 @@ const TodoPane: React.FC<TodoPaneProps> = ({
     const nextTitle = titleRef.current
     const nextContent = contentRef.current
     const last = lastSavedRef.current
-    const dbTitle = nextTitle.trim() === '' ? '未命名待办' : nextTitle
+    const dbTitle = nextTitle.trim() === '' ? t('home.todo.untitled') : nextTitle
     if (nextTitle === last.title && nextContent === last.content) {
       setSaveState('saved')
       return
@@ -117,7 +122,7 @@ const TodoPane: React.FC<TodoPaneProps> = ({
         }, AUTO_SAVE_DELAY)
       }
     }
-  }, [api, todoId])
+  }, [api, todoId, t])
 
   /** 有未落库编辑时先冲刷：状态流转 / 打开属性 / 重新加载前调用，避免本地编辑被库里的旧值覆盖 */
   const flushPending = useCallback(async (): Promise<void> => {
@@ -195,7 +200,7 @@ const TodoPane: React.FC<TodoPaneProps> = ({
         if (pendingTitle !== last.title || pendingContent !== last.content) {
           try {
             await api.todoItems.update(todoId, {
-              title: pendingTitle.trim() === '' ? '未命名待办' : pendingTitle,
+              title: pendingTitle.trim() === '' ? t('home.todo.untitled') : pendingTitle,
               content: pendingContent
             })
           } catch (error) {
@@ -204,7 +209,7 @@ const TodoPane: React.FC<TodoPaneProps> = ({
         }
       })()
     }
-  }, [api, todoId])
+  }, [api, todoId, t])
 
   /* 树行「⋯」改了状态 / 元信息后由父级令牌触发重新读库：
    *  先冲刷未保存编辑（避免用库里的旧值覆盖本地编辑），静默刷新不闪 loading */
@@ -258,7 +263,7 @@ const TodoPane: React.FC<TodoPaneProps> = ({
   if (notFound || !todo) {
     return (
       <PaneShell>
-        <Empty description="待办不存在或已被删除" style={{ marginTop: 120 }} />
+        <Empty description={t('home.todo.notFound')} style={{ marginTop: 120 }} />
       </PaneShell>
     )
   }
@@ -275,7 +280,7 @@ const TodoPane: React.FC<TodoPaneProps> = ({
   const step =
     (todo.status ?? 0) === 0
       ? {
-          label: '开始任务',
+          label: t('home.todo.actionStart'),
           icon: RiPlayLine,
           color: STATUS_META[1].color,
           bg: STATUS_META[1].bg,
@@ -283,14 +288,14 @@ const TodoPane: React.FC<TodoPaneProps> = ({
         }
       : (todo.status ?? 0) === 1
         ? {
-            label: '标记完成',
+            label: t('home.todo.actionComplete'),
             icon: RiCheckLine,
             color: STATUS_META[2].color,
             bg: STATUS_META[2].bg,
             next: 2
           }
         : {
-            label: '重新激活',
+            label: t('home.todo.actionReactivate'),
             icon: RiRefreshLine,
             color: STATUS_META[0].color,
             bg: STATUS_META[0].bg,
@@ -310,11 +315,22 @@ const TodoPane: React.FC<TodoPaneProps> = ({
 
   /* 底部状态条右侧的时间轴（原元信息网格：字段不变，压成一行，格式统一为 YYYY-MM-DD HH:mm） */
   const metaParts: string[] = []
-  if (todo.created_at) metaParts.push(`创建 ${dayjs(todo.created_at).format('YYYY-MM-DD HH:mm')}`)
-  if (todo.updated_at) metaParts.push(`更新 ${dayjs(todo.updated_at).format('YYYY-MM-DD HH:mm')}`)
-  if (todo.started_at) metaParts.push(`开始 ${dayjs(todo.started_at).format('YYYY-MM-DD HH:mm')}`)
+  if (todo.created_at)
+    metaParts.push(
+      t('home.todo.metaCreated', { time: dayjs(todo.created_at).format('YYYY-MM-DD HH:mm') })
+    )
+  if (todo.updated_at)
+    metaParts.push(
+      t('home.todo.metaUpdated', { time: dayjs(todo.updated_at).format('YYYY-MM-DD HH:mm') })
+    )
+  if (todo.started_at)
+    metaParts.push(
+      t('home.todo.metaStarted', { time: dayjs(todo.started_at).format('YYYY-MM-DD HH:mm') })
+    )
   if (todo.completed_at)
-    metaParts.push(`完成 ${dayjs(todo.completed_at).format('YYYY-MM-DD HH:mm')}`)
+    metaParts.push(
+      t('home.todo.metaCompleted', { time: dayjs(todo.completed_at).format('YYYY-MM-DD HH:mm') })
+    )
 
   const saveIndicator = ((): React.ReactNode => {
     switch (saveState) {
@@ -322,21 +338,21 @@ const TodoPane: React.FC<TodoPaneProps> = ({
         return (
           <>
             <RiLoader2Line size={13} className="spin-anim" style={{ color: token.colorPrimary }} />
-            <span style={{ color: token.colorTextSecondary }}>保存中…</span>
+            <span style={{ color: token.colorTextSecondary }}>{t('home.editor.saving')}</span>
           </>
         )
       case 'dirty':
         return (
           <>
             <RiEditLine size={13} style={{ color: token.colorTextTertiary }} />
-            <span style={{ color: token.colorTextTertiary }}>未保存</span>
+            <span style={{ color: token.colorTextTertiary }}>{t('home.editor.unsaved')}</span>
           </>
         )
       case 'error':
         return (
           <>
             <RiErrorWarningLine size={13} style={{ color: token.colorError }} />
-            <span style={{ color: token.colorError }}>保存失败</span>
+            <span style={{ color: token.colorError }}>{t('common.action.saveFailed')}</span>
           </>
         )
       default:
@@ -344,7 +360,9 @@ const TodoPane: React.FC<TodoPaneProps> = ({
           <>
             <RiCheckLine size={13} style={{ color: token.colorSuccess }} />
             <span style={{ color: token.colorTextTertiary }}>
-              已保存{lastSavedAt ? ` ${dayjs(lastSavedAt).format('HH:mm:ss')}` : ''}
+              {lastSavedAt
+                ? t('home.editor.savedWithTime', { time: dayjs(lastSavedAt).format('HH:mm:ss') })
+                : t('home.editor.saved')}
             </span>
           </>
         )
@@ -372,7 +390,7 @@ const TodoPane: React.FC<TodoPaneProps> = ({
               variant="borderless"
               value={title}
               onChange={handleTitleChange}
-              placeholder="未命名待办"
+              placeholder={t('home.todo.untitled')}
               maxLength={120}
               style={{
                 flex: 1,
@@ -439,7 +457,7 @@ const TodoPane: React.FC<TodoPaneProps> = ({
                 borderRadius: 10
               }}
             >
-              {status.label}
+              {t(status.labelKey)}
             </Tag>
             <Tag
               variant="filled"
@@ -456,7 +474,7 @@ const TodoPane: React.FC<TodoPaneProps> = ({
               }}
             >
               <RiFlag2Line size={12} />
-              优先级 P{todo.priority}
+              {t('home.todo.priority', { level: todo.priority })}
             </Tag>
             {todo.category && (
               <Tag
@@ -493,7 +511,7 @@ const TodoPane: React.FC<TodoPaneProps> = ({
                 }}
               >
                 <RiTimeLine size={12} />
-                {overdue ? `已逾期 · ` : '截止 '}
+                {overdue ? t('home.todo.overduePrefix') : t('home.todo.duePrefix')}
                 {dayjs(todo.due_date).format('YYYY-MM-DD')}
               </Tag>
             )}
@@ -528,7 +546,7 @@ const TodoPane: React.FC<TodoPaneProps> = ({
               }}
             >
               <RiSettings3Line size={12} />
-              属性
+              {t('home.term.properties')}
             </span>
           </div>
         </div>
@@ -551,7 +569,7 @@ const TodoPane: React.FC<TodoPaneProps> = ({
             onSave={() => {
               void saveNow()
             }}
-            placeholder="写点什么…支持 Markdown（# 标题、- 列表、``` 代码块）"
+            placeholder={t('home.todo.contentPlaceholder')}
           />
         </div>
 

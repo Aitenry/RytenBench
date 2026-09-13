@@ -26,9 +26,10 @@ import { theme } from 'antd'
 import { Window } from '../../../resource/types/window'
 import {
   ENTITY_TYPE_COLORS,
-  ENTITY_TYPE_LABELS,
-  RELATION_TYPE_LABELS
+  ENTITY_TYPE_LABEL_KEYS,
+  RELATION_TYPE_LABEL_KEYS
 } from '@renderer/types/knowledge'
+import { useTranslation } from '@renderer/i18n'
 import type { EntityDetailProps } from '@renderer/types/components'
 
 const ENTITY_ICONS: Record<string, React.ReactNode> = {
@@ -67,6 +68,9 @@ const EntityDetail: React.FC<EntityDetailProps> = ({
   const {
     token: { colorBgContainer, borderRadiusLG }
   } = theme.useToken()
+  const { t, i18n } = useTranslation()
+  /** 时间戳按当前界面语言格式化（原先硬编码 zh-CN，英文界面下仍是中文习惯） */
+  const dateLocale = i18n.resolvedLanguage === 'en-US' ? 'en-US' : 'zh-CN'
 
   // 构建 entity id → name 的快速查找表
   const entityNameMap = React.useMemo(() => {
@@ -130,7 +134,7 @@ const EntityDetail: React.FC<EntityDetailProps> = ({
           height: '100%'
         }}
       >
-        <Empty description="点击图谱中的节点查看详情" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+        <Empty description={t('graph.empty.noSelection')} image={Empty.PRESENTED_IMAGE_SIMPLE} />
       </div>
     )
   }
@@ -138,6 +142,9 @@ const EntityDetail: React.FC<EntityDetailProps> = ({
   const relatedRelations = relations.filter(
     (r) => r.source_id === entity.id || r.target_id === entity.id
   )
+
+  const entityTypeLabelKey = ENTITY_TYPE_LABEL_KEYS[entity.type]
+  const entityTypeLabel = entityTypeLabelKey ? t(entityTypeLabelKey) : entity.type
 
   const aliases: string[] = entity.aliases
     ? (() => {
@@ -201,12 +208,14 @@ const EntityDetail: React.FC<EntityDetailProps> = ({
         </div>
 
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
-          <Tag color={ENTITY_TYPE_COLORS[entity.type]}>
-            {ENTITY_TYPE_LABELS[entity.type] || entity.type}
-          </Tag>
+          <Tag color={ENTITY_TYPE_COLORS[entity.type]}>{entityTypeLabel}</Tag>
           {/* confidence 库列为可空（DEFAULT 1），null 按默认置信度 1 处理 */}
           {(entity.confidence ?? 1) < 1 && (
-            <Tag>置信度: {((entity.confidence ?? 1) * 100).toFixed(0)}%</Tag>
+            <Tag>
+              {t('graph.detail.confidence', {
+                percent: ((entity.confidence ?? 1) * 100).toFixed(0)
+              })}
+            </Tag>
           )}
         </div>
       </div>
@@ -214,7 +223,7 @@ const EntityDetail: React.FC<EntityDetailProps> = ({
       {/* Description */}
       {entity.description && (
         <div style={{ marginBottom: 16 }}>
-          <Text strong>描述</Text>
+          <Text strong>{t('graph.detail.description')}</Text>
           <Paragraph
             type="secondary"
             style={{ marginTop: 4, marginBottom: 0, fontSize: 13 }}
@@ -228,7 +237,7 @@ const EntityDetail: React.FC<EntityDetailProps> = ({
       {/* Aliases */}
       {aliases.length > 0 && (
         <div style={{ marginBottom: 16 }}>
-          <Text strong>别名</Text>
+          <Text strong>{t('graph.detail.aliases')}</Text>
           <div style={{ marginTop: 4, display: 'flex', gap: 4, flexWrap: 'wrap' }}>
             {aliases.map((alias) => (
               <Tag key={alias} color="default">
@@ -242,7 +251,7 @@ const EntityDetail: React.FC<EntityDetailProps> = ({
       {/* Source Docs */}
       {sourceDocIds.length > 0 && (
         <div style={{ marginBottom: 16 }}>
-          <Text strong>来源文档 ({sourceDocIds.length})</Text>
+          <Text strong>{t('graph.detail.sourceDocs', { count: sourceDocIds.length })}</Text>
           <div style={{ marginTop: 4, display: 'flex', gap: 4, flexWrap: 'wrap' }}>
             {sourceDocIds.map((id) => (
               <Tag
@@ -257,7 +266,7 @@ const EntityDetail: React.FC<EntityDetailProps> = ({
                 }}
                 onClick={() => onDocClick?.(id)}
               >
-                {docTitles.get(id) || `文档 #${id}`}
+                {docTitles.get(id) || t('graph.detail.docFallback', { id })}
               </Tag>
             ))}
           </div>
@@ -266,13 +275,14 @@ const EntityDetail: React.FC<EntityDetailProps> = ({
 
       {/* Related Relations */}
       <div style={{ marginBottom: 16 }}>
-        <Text strong>关联关系 ({relatedRelations.length})</Text>
+        <Text strong>{t('graph.detail.relatedRelations', { count: relatedRelations.length })}</Text>
         {relatedRelations.length > 0 ? (
           <div style={{ marginTop: 8 }}>
             {relatedRelations.map((rel) => {
               const isSource = rel.source_id === entity.id
               const otherId = isSource ? rel.target_id : rel.source_id
-              const relLabel = RELATION_TYPE_LABELS[rel.relation_type] || rel.relation_type
+              const relationLabelKey = RELATION_TYPE_LABEL_KEYS[rel.relation_type]
+              const relLabel = relationLabelKey ? t(relationLabelKey) : rel.relation_type
 
               return (
                 <div
@@ -284,7 +294,10 @@ const EntityDetail: React.FC<EntityDetailProps> = ({
                     {isSource
                       ? entity.name
                       : entityNameMap.get(rel.source_id) || `#${rel.source_id}`}
-                    <Text type="secondary"> --{relLabel}→ </Text>
+                    <Text type="secondary">
+                      {' '}
+                      {t('graph.detail.relationLine', { relation: relLabel })}{' '}
+                    </Text>
                     {isSource
                       ? entityNameMap.get(rel.target_id) || `#${rel.target_id}`
                       : entity.name}
@@ -300,18 +313,18 @@ const EntityDetail: React.FC<EntityDetailProps> = ({
           </div>
         ) : (
           <Text type="secondary" style={{ fontSize: 12 }}>
-            暂无关联关系
+            {t('graph.detail.noRelations')}
           </Text>
         )}
       </div>
 
       {/* Metadata */}
       <Descriptions size="small" column={1} style={{ marginTop: 8 }}>
-        <Descriptions.Item label="创建时间">
-          {entity.created_at ? new Date(entity.created_at).toLocaleString('zh-CN') : '—'}
+        <Descriptions.Item label={t('graph.detail.createdAt')}>
+          {entity.created_at ? new Date(entity.created_at).toLocaleString(dateLocale) : '—'}
         </Descriptions.Item>
-        <Descriptions.Item label="更新时间">
-          {entity.updated_at ? new Date(entity.updated_at).toLocaleString('zh-CN') : '—'}
+        <Descriptions.Item label={t('graph.detail.updatedAt')}>
+          {entity.updated_at ? new Date(entity.updated_at).toLocaleString(dateLocale) : '—'}
         </Descriptions.Item>
       </Descriptions>
     </div>

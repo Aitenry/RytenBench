@@ -1,5 +1,6 @@
 import { ipcMain } from 'electron'
 import { settingsStore } from '../context'
+import { mainMessages } from '../i18n'
 import { getActiveWorkspaceId } from '../database/workspace-context'
 import { HarnessSettings } from '../types/settings'
 import type { MnemonComponent } from '../harness/runtime/mnemon'
@@ -22,7 +23,7 @@ export function registerMnemonIpc(): void {
   ipcMain.handle('mnemon-snapshot', async () => {
     const component = await currentMnemonComponent()
     if (!component) {
-      return { configured: false, error: '未配置记忆存储目录' }
+      return { configured: false, error: mainMessages().error.memoryDirNotConfigured }
     }
     const [runtime, bodies, documents] = await Promise.all([
       Promise.resolve(component.runtimeMemory.snapshot()),
@@ -46,7 +47,8 @@ export function registerMnemonIpc(): void {
       }
     ) => {
       const component = await currentMnemonComponent()
-      if (!component) return { success: false, message: '未配置记忆存储目录' }
+      if (!component)
+        return { success: false, message: mainMessages().error.memoryDirNotConfigured }
       // 参数守卫（修复：request 为 undefined 时 `request.action` 直接 TypeError，
       // 且该 handler 无 try/catch，异常会挂起调用方）
       if (
@@ -55,7 +57,7 @@ export function registerMnemonIpc(): void {
         typeof request.action !== 'string' ||
         typeof request.target !== 'string'
       ) {
-        return { success: false, message: '请求参数无效' }
+        return { success: false, message: mainMessages().error.invalidRequest }
       }
       return await component.runtimeMemory.mutate({
         action: request.action as 'add' | 'replace' | 'remove',
@@ -79,7 +81,8 @@ export function registerMnemonIpc(): void {
     'mnemon-body-create',
     async (_event, request: { name: string; description: string }) => {
       const component = await currentMnemonComponent()
-      if (!component) return { success: false, message: '未配置记忆存储目录' }
+      if (!component)
+        return { success: false, message: mainMessages().error.memoryDirNotConfigured }
       try {
         const body = await component.service.createBody(request)
         return { success: true, body }
@@ -98,7 +101,8 @@ export function registerMnemonIpc(): void {
       request: { name?: string; description?: string; active?: boolean }
     ) => {
       const component = await currentMnemonComponent()
-      if (!component) return { success: false, message: '未配置记忆存储目录' }
+      if (!component)
+        return { success: false, message: mainMessages().error.memoryDirNotConfigured }
       try {
         const body = component.service.updateBody(id, request)
         return { success: true, body }

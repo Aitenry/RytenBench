@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
+import { useTranslation } from '@renderer/i18n'
 import { renderMermaidDiagram } from './mermaid'
 
 interface MermaidDiagramProps {
@@ -8,6 +9,7 @@ interface MermaidDiagramProps {
 
 /** 只读预览中的 Mermaid 图表（mermaid 包懒加载，主题跟随明暗） */
 const MermaidDiagram: React.FC<MermaidDiagramProps> = ({ code, isDarkMode = false }) => {
+  const { t } = useTranslation()
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading')
   const [svg, setSvg] = useState('')
   const [error, setError] = useState('')
@@ -48,14 +50,14 @@ const MermaidDiagram: React.FC<MermaidDiagramProps> = ({ code, isDarkMode = fals
   if (state === 'error') {
     return (
       <div className="mermaid-block mermaid-error">
-        <div>图表语法错误：{error}</div>
+        <div>{t('markdown.mermaid.errorWithReason', { reason: error })}</div>
       </div>
     )
   }
 
   // 加载中但已有旧图：继续展示旧图（仅首次无图时显示加载提示）
   if (!svg) {
-    return <div className="mermaid-block mermaid-loading">图表渲染中…</div>
+    return <div className="mermaid-block mermaid-loading">{t('markdown.mermaid.loading')}</div>
   }
 
   return <div ref={blockRef} className="mermaid-block" dangerouslySetInnerHTML={{ __html: svg }} />

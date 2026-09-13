@@ -9,11 +9,15 @@ import {
   RiLink
 } from '@remixicon/react'
 import { type PlannerTreeNode, PRIORITY_MAP } from '@renderer/types/planner'
+import { useTranslation } from '@renderer/i18n'
 
-const TYPE_LABELS: Record<string, { label: string; color: string; bg: string }> = {
-  project: { label: '项目', color: '#1677ff', bg: 'rgba(22,119,255,0.12)' },
-  phase: { label: '阶段', color: '#722ed1', bg: 'rgba(114,46,209,0.12)' },
-  task: { label: '任务', color: '#52c41a', bg: 'rgba(82,196,26,0.12)' }
+/** 任务类型取值 → 词条键（模块级常量表不持有 t，由组件内 t() 求值） */
+type TypeLabelKey = 'planner.type.project' | 'planner.type.phase' | 'planner.type.task'
+
+const TYPE_LABELS: Record<string, { labelKey: TypeLabelKey; color: string; bg: string }> = {
+  project: { labelKey: 'planner.type.project', color: '#1677ff', bg: 'rgba(22,119,255,0.12)' },
+  phase: { labelKey: 'planner.type.phase', color: '#722ed1', bg: 'rgba(114,46,209,0.12)' },
+  task: { labelKey: 'planner.type.task', color: '#52c41a', bg: 'rgba(82,196,26,0.12)' }
 }
 
 interface Props {
@@ -38,6 +42,7 @@ const TaskListView: React.FC<Props> = ({
   onDeleteTask,
   onEditTask
 }) => {
+  const { t } = useTranslation()
   const { token } = theme.useToken()
   const { modal } = App.useApp()
   const [hoveredId, setHoveredId] = useState<number | null>(null)
@@ -70,11 +75,10 @@ const TaskListView: React.FC<Props> = ({
     const isHovered = hoveredId === node.id
     // priority / progress 库列为可空（DEFAULT 0），null 按默认值处理
     const p = PRIORITY_MAP[node.priority ?? 0] ?? PRIORITY_MAP[4]
-    const typeMeta = TYPE_LABELS[node.type] ?? {
-      label: node.type,
-      color: token.colorTextSecondary,
-      bg: token.colorFillTertiary
-    }
+    const typeMeta = TYPE_LABELS[node.type]
+    const typeLabel = typeMeta ? t(typeMeta.labelKey) : node.type
+    const typeColor = typeMeta ? typeMeta.color : token.colorTextSecondary
+    const typeBg = typeMeta ? typeMeta.bg : token.colorFillTertiary
 
     rows.push(
       <div
@@ -141,12 +145,12 @@ const TaskListView: React.FC<Props> = ({
               display: 'inline-block',
               padding: '1px 8px',
               borderRadius: 8,
-              background: typeMeta.bg,
-              color: typeMeta.color,
+              background: typeBg,
+              color: typeColor,
               lineHeight: '18px'
             }}
           >
-            {typeMeta.label}
+            {typeLabel}
           </span>
         </span>
         {/* 进度 */}
@@ -205,7 +209,9 @@ const TaskListView: React.FC<Props> = ({
         {/* 依赖 */}
         <span style={{ ...cellStyle(52), color: token.colorTextTertiary, textAlign: 'center' }}>
           {node.dependencies.length > 0 ? (
-            <Tooltip title={`依赖 ${node.dependencies.length} 个任务`}>
+            <Tooltip
+              title={t('planner.list.dependencyTooltip', { count: node.dependencies.length })}
+            >
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
                 <RiLink size={12} />
                 {node.dependencies.length}
@@ -228,7 +234,7 @@ const TaskListView: React.FC<Props> = ({
             }}
           >
             {node.type !== 'task' && (
-              <Tooltip title="添加子任务">
+              <Tooltip title={t('planner.action.addChild')}>
                 <Button
                   type="text"
                   size="small"
@@ -241,7 +247,7 @@ const TaskListView: React.FC<Props> = ({
                 />
               </Tooltip>
             )}
-            <Tooltip title="编辑">
+            <Tooltip title={t('common.action.edit')}>
               <Button
                 type="text"
                 size="small"
@@ -253,7 +259,7 @@ const TaskListView: React.FC<Props> = ({
                 }}
               />
             </Tooltip>
-            <Tooltip title="删除">
+            <Tooltip title={t('common.action.delete')}>
               <Button
                 type="text"
                 size="small"
@@ -264,10 +270,10 @@ const TaskListView: React.FC<Props> = ({
                   e.stopPropagation()
                   // 与树视图一致的二次确认（修复：此前一行误点即删整棵子树且无撤销）
                   modal.confirm({
-                    title: '删除任务',
-                    content: `确定删除「${node.title}」及其所有子任务吗？`,
-                    okText: '删除',
-                    cancelText: '取消',
+                    title: t('planner.confirm.deleteTitle'),
+                    content: t('planner.confirm.deleteWithChildren', { name: node.title }),
+                    okText: t('common.action.delete'),
+                    cancelText: t('common.action.cancel'),
                     okButtonProps: { danger: true },
                     onOk: () => onDeleteTask(node.id)
                   })
@@ -303,13 +309,15 @@ const TaskListView: React.FC<Props> = ({
     >
       <span style={cellStyle(18)} />
       <span style={{ ...cellStyle(40), textAlign: 'right' }}>#</span>
-      <span style={{ flex: 1, minWidth: 0, maxWidth: 360 }}>任务名称</span>
-      <span style={{ ...cellStyle(56), textAlign: 'center' }}>类型</span>
-      <span style={cellStyle(110)}>进度</span>
-      <span style={{ ...cellStyle(44, true) }}>工时</span>
-      <span style={{ ...cellStyle(44), textAlign: 'center' }}>优先级</span>
-      <span style={cellStyle(120)}>日期</span>
-      <span style={{ ...cellStyle(52), textAlign: 'center' }}>依赖</span>
+      <span style={{ flex: 1, minWidth: 0, maxWidth: 360 }}>{t('planner.list.colName')}</span>
+      <span style={{ ...cellStyle(56), textAlign: 'center' }}>{t('planner.list.colType')}</span>
+      <span style={cellStyle(110)}>{t('planner.list.colProgress')}</span>
+      <span style={{ ...cellStyle(44, true) }}>{t('planner.list.colWorkHours')}</span>
+      <span style={{ ...cellStyle(44), textAlign: 'center' }}>{t('planner.list.colPriority')}</span>
+      <span style={cellStyle(120)}>{t('planner.list.colDate')}</span>
+      <span style={{ ...cellStyle(52), textAlign: 'center' }}>
+        {t('planner.list.colDependency')}
+      </span>
       <span style={{ width: 84, flexShrink: 0 }} />
     </div>
   )
@@ -326,9 +334,9 @@ const TaskListView: React.FC<Props> = ({
             className="flex flex-col items-center justify-center h-full gap-2"
             style={{ color: token.colorTextTertiary }}
           >
-            <span className="text-sm">暂无项目</span>
+            <span className="text-sm">{t('planner.empty.noProjects')}</span>
             <Button type="link" size="small" onClick={() => onAddTask(null)}>
-              创建第一个项目
+              {t('planner.action.createFirstProject')}
             </Button>
           </div>
         ) : (

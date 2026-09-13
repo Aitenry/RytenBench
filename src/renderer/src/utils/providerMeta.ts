@@ -1,46 +1,71 @@
 import type { ModelCapabilities, ModelMetadata } from '../types/provider'
 
-/** metadata 的 capabilities 中可选能力项（与 models-profile.json 字段一致） */
+/**
+ * 模型请求参数预设 / 协议能力判定统一从共享模块转出（主进程与渲染层同源，
+ * 避免「界面能选、后端不认」这类漂移）。
+ */
+export {
+  CONTEXT_WINDOW_PRESETS,
+  MAX_OUTPUT_PRESETS,
+  FALLBACK_CONTEXT_WINDOW,
+  FALLBACK_MAX_OUTPUT_TOKENS,
+  DEFAULT_MAX_TOOL_ROUNDS,
+  THINKING_MODE_OPTIONS,
+  SAMPLING_PARAM_SPECS,
+  TOP_K_PROVIDERS,
+  supportsThinkingControl,
+  type ThinkingMode,
+  type SamplingParamName
+} from '../../../shared/model-params'
+
+/** Token 数量的紧凑展示：4000 → 4k，128000 → 128k，1000000 → 1M */
+export function formatTokenCount(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return '—'
+  if (value >= 1_000_000) {
+    const m = value / 1_000_000
+    return `${Number(m.toFixed(Number.isInteger(m) ? 0 : 1))}M`
+  }
+  if (value >= 1000) {
+    const k = value / 1000
+    return `${Number(k.toFixed(Number.isInteger(k) ? 0 : 1))}k`
+  }
+  return String(value)
+}
+
+/**
+ * metadata 的 capabilities 中可选能力项（与 models-profile.json 字段一致）。
+ *
+ * 只保留 key：原先的 `label` 中文字面量只被已删除的 `getCapabilityLabel` 使用，
+ * 界面展示名一律走词条（`modelSettings.capabilityBadge.*`）。
+ */
 export interface CapabilityOption {
   key: keyof ModelCapabilities
-  label: string
 }
 
 /** 编辑表单中用到的能力选项 */
 export const CAPABILITY_OPTIONS: CapabilityOption[] = [
-  { key: 'supports_image_input', label: '视觉输入' },
-  { key: 'supports_audio_input', label: '音频输入' },
-  { key: 'supports_video_input', label: '视频输入' },
-  { key: 'supports_image_output', label: '图像输出' },
-  { key: 'supports_function_calling', label: '工具调用' },
-  { key: 'supports_thinking', label: '思考/推理' },
-  { key: 'supports_streaming', label: '流式输出' },
-  { key: 'supports_json_mode', label: 'JSON 模式' },
-  { key: 'supports_structured_output', label: '结构化输出' },
-  { key: 'supports_batch', label: '批量处理' },
-  { key: 'supports_fine_tuning', label: '微调' },
-  { key: 'supports_embeddings', label: '嵌入能力' }
+  { key: 'supports_image_input' },
+  { key: 'supports_audio_input' },
+  { key: 'supports_video_input' },
+  { key: 'supports_image_output' },
+  { key: 'supports_function_calling' },
+  { key: 'supports_thinking' },
+  { key: 'supports_streaming' },
+  { key: 'supports_json_mode' },
+  { key: 'supports_structured_output' },
+  { key: 'supports_batch' },
+  { key: 'supports_fine_tuning' },
+  { key: 'supports_embeddings' }
 ]
 
 /** 表格行内展示的关键能力标签（仅取对功能影响最大的几项） */
 export const CAPABILITY_BADGES: CapabilityOption[] = [
-  { key: 'supports_image_input', label: '视觉' },
-  { key: 'supports_function_calling', label: '工具' },
-  { key: 'supports_thinking', label: '思考' },
-  { key: 'supports_streaming', label: '流式' },
-  { key: 'supports_embeddings', label: '嵌入' }
+  { key: 'supports_image_input' },
+  { key: 'supports_function_calling' },
+  { key: 'supports_thinking' },
+  { key: 'supports_streaming' },
+  { key: 'supports_embeddings' }
 ]
-
-/** 模型类型中文标签（metadata.type） */
-export const MODEL_TYPE_LABELS: Record<string, string> = {
-  'text-generation': '对话',
-  'image-generation': '图像生成',
-  'audio-generation': '音频生成',
-  'video-generation': '视频生成',
-  embedding: '嵌入',
-  rerank: '重排',
-  other: '其他'
-}
 
 /** 安全读取能把 capabilities 对象；非对象（缺失/异常）返回空对象 */
 export function getCapabilities(metadata: ModelMetadata | null | undefined): ModelCapabilities {

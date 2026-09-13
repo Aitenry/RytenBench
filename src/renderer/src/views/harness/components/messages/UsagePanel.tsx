@@ -1,6 +1,7 @@
 import React from 'react'
 import { theme } from 'antd'
 import { RiDatabase2Line } from '@remixicon/react'
+import { useTranslation } from '@renderer/i18n'
 import type { UsageDetails } from '../../utils/usage'
 
 /**
@@ -17,36 +18,52 @@ const exact = (value: number): string => value.toLocaleString('en-US')
 
 const UsagePanel: React.FC<{ details: UsageDetails }> = ({ details }) => {
   const { token } = theme.useToken()
+  const { t } = useTranslation()
 
-  const rows: { label: string; value: React.ReactNode; dim?: boolean }[] = []
+  const rows: { label: string; value: string; dim?: boolean }[] = []
   if (details.hasCache) {
     if (details.inputTokens > 0) {
       rows.push({
-        label: '缓存命中',
+        label: t('harness.usagePanel.cacheHit'),
         value: `${((details.cacheReadTokens / details.inputTokens) * 100).toFixed(1)}%`
       })
     }
     rows.push({
-      label: '未缓存输入',
+      label: t('harness.usagePanel.uncachedInput'),
       value: `${exact(details.inputTokens - details.cacheReadTokens)} tok`
     })
-    rows.push({ label: '缓存读取', value: `${exact(details.cacheReadTokens)} tok` })
+    rows.push({
+      label: t('harness.usagePanel.cacheRead'),
+      value: `${exact(details.cacheReadTokens)} tok`
+    })
     if (details.cacheWriteTokens > 0) {
-      rows.push({ label: '缓存写入', value: `${exact(details.cacheWriteTokens)} tok` })
+      rows.push({
+        label: t('harness.usagePanel.cacheWrite'),
+        value: `${exact(details.cacheWriteTokens)} tok`
+      })
     }
   } else {
-    rows.push({ label: '输入', value: `${exact(details.inputTokens)} tok` })
+    rows.push({ label: t('harness.usagePanel.input'), value: `${exact(details.inputTokens)} tok` })
   }
-  rows.push({ label: '输出', value: `${exact(details.outputTokens)} tok` })
+  rows.push({ label: t('harness.usagePanel.output'), value: `${exact(details.outputTokens)} tok` })
   if (details.hasReasoning) {
-    rows.push({ label: '└ 其中推理', value: `${exact(details.reasoningTokens)} tok`, dim: true })
+    rows.push({
+      label: t('harness.usagePanel.reasoning'),
+      value: `${exact(details.reasoningTokens)} tok`,
+      dim: true
+    })
   }
-  if (details.calls > 1) rows.push({ label: '模型调用', value: `${details.calls} 次` })
+  if (details.calls > 1) {
+    rows.push({
+      label: t('harness.usagePanel.calls'),
+      value: t('harness.usagePanel.callsValue', { count: details.calls })
+    })
+  }
 
   return (
     <div
       role="dialog"
-      aria-label="本轮用量"
+      aria-label={t('harness.usagePanel.title')}
       style={{
         width: 300,
         background: token.colorBgElevated,
@@ -69,7 +86,7 @@ const UsagePanel: React.FC<{ details: UsageDetails }> = ({ details }) => {
           }}
         >
           <RiDatabase2Line size={14} />
-          本轮用量
+          {t('harness.usagePanel.title')}
         </span>
         <span style={{ flex: 1 }} />
         <span
@@ -89,7 +106,9 @@ const UsagePanel: React.FC<{ details: UsageDetails }> = ({ details }) => {
       {/* 提供方 / 模型：长路径独占一行，不塞进右对齐的值列 */}
       {details.route && (
         <div style={{ marginBottom: 8 }}>
-          <div style={{ fontSize: 11.5, color: token.colorTextTertiary }}>提供方 / 模型</div>
+          <div style={{ fontSize: 11.5, color: token.colorTextTertiary }}>
+            {t('harness.usagePanel.route')}
+          </div>
           <div
             style={{
               fontSize: 12.5,
@@ -121,7 +140,7 @@ const UsagePanel: React.FC<{ details: UsageDetails }> = ({ details }) => {
                 color: row.dim ? token.colorTextQuaternary : token.colorTextTertiary
               }}
             >
-              {row.label}
+              {row.dim ? `└ ${row.label}` : row.label}
             </dt>
             <dd
               style={{

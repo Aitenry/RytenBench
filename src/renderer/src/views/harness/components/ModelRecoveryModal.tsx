@@ -7,6 +7,7 @@ import {
   RiArrowDownSLine
 } from '@remixicon/react'
 import type { Window } from '../../../../resource/types/window'
+import { useTranslation } from '@renderer/i18n'
 import type { PendingQuestionView } from '../../../../../main/harness/runtime/ask'
 
 /**
@@ -34,10 +35,11 @@ interface PickerItem {
   name: string
 }
 
-/** 分组标题：供应商首字母大写（openai → OpenAI）；多段名逐段大写（google-genai → Google-Genai） */
+/** 分组标题：供应商首字母大写（openai → OpenAI）；多段名逐段大写（google-genai → Google-Genai）。
+ *  'other' 是「无供应商」的兜底分组名（数据标识，非用户可见中文），原样首字母大写显示。 */
 const displayGroup = (group: string): string => {
   const g = (group || '').trim().toLowerCase()
-  if (!g || g === 'other') return '其他'
+  if (!g) return ''
   return g
     .replaceAll('_', '-')
     .split('-')
@@ -56,6 +58,7 @@ const ModelRecoveryModal: React.FC<ModelRecoveryModalProps> = ({ currentTopicId 
       colorError
     }
   } = theme.useToken()
+  const { t } = useTranslation()
 
   const currentTopicIdRef = useRef(currentTopicId)
   currentTopicIdRef.current = currentTopicId
@@ -229,7 +232,7 @@ const ModelRecoveryModal: React.FC<ModelRecoveryModalProps> = ({ currentTopicId 
       title={
         <span className="flex items-center gap-2">
           <RiErrorWarningLine size={18} style={{ color: colorError }} />
-          <span>模型请求失败</span>
+          <span>{t('harness.modelRecovery.title')}</span>
         </span>
       }
       width={560}
@@ -240,7 +243,7 @@ const ModelRecoveryModal: React.FC<ModelRecoveryModalProps> = ({ currentTopicId 
       footer={
         <div className="flex items-center justify-end gap-2">
           <Button disabled={submitting} onClick={() => submit(question.abandonLabel ?? '')}>
-            放弃本轮
+            {t('harness.modelRecovery.abandon')}
           </Button>
           <Button
             type="primary"
@@ -249,7 +252,7 @@ const ModelRecoveryModal: React.FC<ModelRecoveryModalProps> = ({ currentTopicId 
             loading={submitting}
             onClick={() => selected != null && submit(selected)}
           >
-            用所选模型继续
+            {t('harness.modelRecovery.continueWithModel')}
           </Button>
         </div>
       }
@@ -278,7 +281,7 @@ const ModelRecoveryModal: React.FC<ModelRecoveryModalProps> = ({ currentTopicId 
           <Input
             allowClear
             prefix={<RiSearchLine size={14} style={{ color: colorTextTertiary }} />}
-            placeholder="搜索模型名称"
+            placeholder={t('harness.modelRecovery.searchPlaceholder')}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             variant="filled"
@@ -377,14 +380,14 @@ const ModelRecoveryModal: React.FC<ModelRecoveryModalProps> = ({ currentTopicId 
               style={{ color: colorTextTertiary, fontSize: 12 }}
             >
               {searching
-                ? `未找到匹配「${query.trim()}」的模型`
-                : '当前没有可用模型，可在「设置 → 模型」中添加并启用后再试。'}
+                ? t('harness.modelRecovery.noMatch', { query: query.trim() })
+                : t('harness.modelRecovery.noModels')}
             </div>
           ) : null}
         </div>
 
         <div style={{ color: colorTextTertiary, fontSize: 12 }}>
-          切换后将从中断位置用新模型继续执行，不会重发问题或重跑已执行的工具。
+          {t('harness.modelRecovery.hint')}
         </div>
       </div>
     </Modal>

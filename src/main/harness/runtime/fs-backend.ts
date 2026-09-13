@@ -4,6 +4,8 @@ import * as fs from 'fs'
 import * as path from 'path'
 import { exec } from 'child_process'
 import logger from 'electron-log'
+import { mainFormat, mainPlural } from '../../i18n'
+import { getFsToolTexts } from '../../i18n/tool-results-fs'
 
 /**
  * 虚拟文件系统工具集 — 替代 deepagents FilesystemBackend / SafeFilesystemBackend
@@ -55,13 +57,14 @@ function resolveVirtualPath(
   vp: string,
   mounts: FsMount[]
 ): { realPath: string } | { error: string } {
-  if (!vp) return { error: '路径不能为空' }
+  const tr = getFsToolTexts()
+  if (!vp) return { error: tr.path.empty }
 
   // 统一为 POSIX 分隔符
   let normalized = vp.replace(/\\/g, '/')
   // Windows 绝对路径（如 E:\...）一律拒绝，防止扫描驱动器
   if (/^[a-zA-Z]:\//.test(normalized)) {
-    return { error: `路径 "${vp}" 是绝对路径，请使用虚拟路径（如 /uploads/xxx）` }
+    return { error: mainFormat(tr.path.absolute, { path: vp }) }
   }
   if (!normalized.startsWith('/')) {
     normalized = '/' + normalized
@@ -80,13 +83,13 @@ function resolveVirtualPath(
       // 二次校验：确保解析结果仍在挂载根内（防 ../ 逃逸）
       const relative = path.relative(mount.root, realPath)
       if (relative.startsWith('..') || path.isAbsolute(relative)) {
-        return { error: `路径 "${vp}" 越出挂载根目录` }
+        return { error: mainFormat(tr.path.escapesMount, { path: vp }) }
       }
       return { realPath }
     }
   }
 
-  return { error: `路径 "${vp}" 未挂载到任何虚拟目录` }
+  return { error: mainFormat(tr.path.notMounted, { path: vp }) }
 }
 
 /** 工具输出统一格式化（字符串原样；对象 JSON 序列化；超硬上限截断，溢出策略负责内联预览） */
@@ -94,7 +97,9 @@ function formatOutput(output: unknown): string {
   if (output == null) return 'OK'
   const text = typeof output === 'string' ? output : JSON.stringify(output)
   if (text.length > MAX_OUTPUT_CHARS) {
-    return `${text.slice(0, MAX_OUTPUT_CHARS)}\n...（输出过大，已截断，共 ${text.length} 字符）`
+    const tr = getFsToolTexts()
+    const note = mainFormat(tr.output.truncated, { total: text.length })
+    return `${text.slice(0, MAX_OUTPUT_CHARS)}\n...${note}`
   }
   return text
 }
@@ -150,6 +155,7 @@ export function buildFsTools(options: FsBackendOptions): StructuredToolInterface
   }
   if (mounts.length === 0) return []
 
+  const tr = getFsToolTexts()
   const resolve = (vp: string): { realPath: string } | { error: string } =>
     resolveVirtualPath(vp, mounts)
 
@@ -160,7 +166,7 @@ export function buildFsTools(options: FsBackendOptions): StructuredToolInterface
         if ('error' in resolved) return resolved.error
         try {
           const stat = fs.statSync(resolved.realPath)
-          if (!stat.isFile()) return `路径不是文件: ${file_path}`
+          if (!stat.isFile()) return mainFormat(tr.read.notFile, { path: file_path })
           let content = fs.readFileSync(resolved.realPath, 'utf-8')
           // 内存保护：超过 2M 字符的文件只保留前 2M 字符
           const oversized = content.length > MAX_FILE_READ_CHARS
@@ -173,32 +179,46 @@ export function buildFsTools(options: FsBackendOptions): StructuredToolInterface
             const lines = content.split('\n')
             const endLine = limit != null ? startLine + limit - 1 : lines.length
             const sliced = lines.slice(startLine - 1, endLine)
-            const lineNote = `（第 ${startLine}-${Math.min(endLine, lines.length)} 行 / 共 ${lines.length} 行${oversized ? '，文件超大仅索引前 2M 字符' : ''}）\n`
+            const shownEnd = Math.min(endLine, lines.length)
+            const lineNote = mainFormat(
+              oversized ? tr.read.lineRangeOversized : tr.read.lineRange,
+              { start: startLine, end: shownEnd, total: lines.length }
+            )
             return lineNote + sliced.join('\n')
           }
           // 内联读取上限：超出部分不进入模型上下文（read 工具自有边界，不走溢出策略，
           // 参考 dsh-spill-policy 的 read 豁免——大文件用 offset/limit 或 grep 按需读取）
           if (content.length > MAX_FILE_CHARS) {
-            return `${content.slice(0, MAX_FILE_CHARS)}\n...（文件过长，共 ${content.length.toLocaleString()} 字符，已省略中间内容。可用 offset/limit 参数按行读取任意片段，或用 grep 检索关键字。）`
+            const note = mainFormat(tr.read.truncated, {
+              total: content.length.toLocaleString()
+            })
+            return `${content.slice(0, MAX_FILE_CHARS)}\n...${note}`
           }
           return content
         } catch (err) {
-          return `读取文件失败: ${(err as Error).message}`
+          return mainFormat(tr.read.failed, { message: (err as Error).message })
         }
       },
       {
         name: 'read_file',
         description:
-          '读取虚拟文件系统中的文件内容（UTF-8）。路径使用虚拟路径，如 /uploads/report.txt 或 /memories/_global/memories/AGENTS.md。大文件超出内联上限时会给出溢出文件定位符，可用 offset/limit 按行读取其中片段，或用 grep 检索。',
+          'Read a file (UTF-8) from the virtual filesystem. Paths are virtual and must start with "/", e.g. /uploads/report.txt or /memories/_global/memories/AGENTS.md. When a file exceeds the inline limit, the result starts with a spill locator for the full content: use offset/limit to read a line range of that file, or grep to locate what you need.',
         schema: z.object({
-          file_path: z.string().describe('要读取的文件的虚拟路径'),
+          file_path: z.string().describe('Virtual path of the file to read'),
           offset: z
             .number()
             .int()
             .positive()
             .optional()
-            .describe('起始行号（从 1 开始），用于按需读取大文件的片段'),
-          limit: z.number().int().positive().optional().describe('读取的行数，与 offset 配合使用')
+            .describe(
+              'Start line number (1-based); use to read one part of a large file on demand'
+            ),
+          limit: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe('Number of lines to read, used together with offset')
         })
       }
     ),
@@ -211,17 +231,21 @@ export function buildFsTools(options: FsBackendOptions): StructuredToolInterface
           // 异步写（修复：同步写阻塞主进程事件循环）
           await fs.promises.mkdir(path.dirname(resolved.realPath), { recursive: true })
           await fs.promises.writeFile(resolved.realPath, content, 'utf-8')
-          return `已写入 ${file_path}（${Buffer.byteLength(content, 'utf-8')} 字节）`
+          return mainFormat(tr.write.written, {
+            path: file_path,
+            bytes: Buffer.byteLength(content, 'utf-8')
+          })
         } catch (err) {
-          return `写入文件失败: ${(err as Error).message}`
+          return mainFormat(tr.write.failed, { message: (err as Error).message })
         }
       },
       {
         name: 'write_file',
-        description: '写入（或覆盖）虚拟文件系统中的文件，自动创建父目录。',
+        description:
+          'Write a file in the virtual filesystem, overwriting it if it already exists. Missing parent directories are created automatically.',
         schema: z.object({
-          file_path: z.string().describe('要写入的文件的虚拟路径'),
-          content: z.string().describe('文件内容')
+          file_path: z.string().describe('Virtual path of the file to write'),
+          content: z.string().describe('Full file content')
         })
       }
     ),
@@ -231,7 +255,7 @@ export function buildFsTools(options: FsBackendOptions): StructuredToolInterface
         // 空 old_string 会使下方的非重叠计数循环永不终止（indexOf('', idx) 恒等于 idx，
         // idx = found + 0 永不前进）——同步死循环直接卡死主进程事件循环，入口必须显式拒绝
         if (!old_string) {
-          return 'old_string 不能为空：请提供文件中真实存在的原文片段作为查找目标。'
+          return tr.edit.emptyOldString
         }
         const resolved = resolve(file_path)
         if ('error' in resolved) return resolved.error
@@ -247,35 +271,41 @@ export function buildFsTools(options: FsBackendOptions): StructuredToolInterface
             idx = found + old_string.length
           }
           if (count === 0) {
-            return `未找到匹配内容，未做任何修改。请检查 old_string 是否与文件内容完全一致（包括空白与换行）。`
+            return tr.edit.noMatch
           }
           if (count > 1 && !replace_all) {
-            return `old_string 在文件中出现 ${count} 次。请提供更长的唯一上下文，或将 replace_all 设为 true。`
+            return mainPlural(tr.edit.occurrences_one, tr.edit.occurrences_other, count)
           }
           const updated = replace_all
             ? current.split(old_string).join(new_string)
             : current.replace(old_string, new_string)
           fs.writeFileSync(resolved.realPath, updated, 'utf-8')
-          return `已更新 ${file_path}：替换了 ${count} 处。`
+          return mainFormat(mainPlural(tr.edit.updated_one, tr.edit.updated_other, count), {
+            path: file_path
+          })
         } catch (err) {
-          return `编辑文件失败: ${(err as Error).message}`
+          return mainFormat(tr.edit.failed, { message: (err as Error).message })
         }
       },
       {
         name: 'edit_file',
         description:
-          '编辑虚拟文件系统中的文件：将 old_string 替换为 new_string。要求 old_string 唯一匹配；多匹配时需提供更长上下文或设置 replace_all。',
+          'Edit a file in the virtual filesystem by replacing old_string with new_string. old_string must match the file content exactly and be unique; when it occurs more than once, either provide a longer unique context or set replace_all to true. Prefer this over write_file for targeted changes.',
         schema: z.object({
-          file_path: z.string().describe('要编辑的文件的虚拟路径'),
+          file_path: z.string().describe('Virtual path of the file to edit'),
           old_string: z
             .string()
-            .min(1, 'old_string 不能为空')
-            .describe('要查找并替换的原文（必须与文件内容完全一致）'),
-          new_string: z.string().describe('替换后的新内容'),
+            .min(1, 'old_string must not be empty')
+            .describe(
+              'Exact text to find and replace (must match the file content character for character)'
+            ),
+          new_string: z.string().describe('Replacement text'),
           replace_all: z
             .boolean()
             .optional()
-            .describe('为 true 时替换全部匹配；默认 false（要求唯一匹配）')
+            .describe(
+              'When true, replace every occurrence; defaults to false (a unique match is required)'
+            )
         })
       }
     ),
@@ -294,14 +324,18 @@ export function buildFsTools(options: FsBackendOptions): StructuredToolInterface
           }
           return JSON.stringify({ path: dirPath ?? '/', files, dirs })
         } catch (err) {
-          return `列出目录失败: ${(err as Error).message}`
+          return mainFormat(tr.ls.failed, { message: (err as Error).message })
         }
       },
       {
         name: 'ls',
-        description: '列出虚拟文件系统目录下的文件与子目录。',
+        description:
+          'List the files and subdirectories directly inside a virtual filesystem directory (one level, not recursive). Use glob to match paths recursively by pattern.',
         schema: z.object({
-          path: z.string().optional().describe('目录的虚拟路径，默认根目录 /')
+          path: z
+            .string()
+            .optional()
+            .describe('Virtual path of the directory, defaults to the root /')
         })
       }
     ),
@@ -322,15 +356,19 @@ export function buildFsTools(options: FsBackendOptions): StructuredToolInterface
             logger.warn(`[FsBackend] glob "${pattern}" blocked by ${code}`)
             return JSON.stringify({ pattern, files: [] })
           }
-          return `搜索失败: ${(err as Error).message}`
+          return mainFormat(tr.glob.failed, { message: (err as Error).message })
         }
       },
       {
         name: 'glob',
-        description: '按 glob 模式（支持 *、**、?）在虚拟文件系统中递归搜索文件与目录路径。',
+        description:
+          'Find files and directories by path pattern in the virtual filesystem. Patterns support *, ** and ? (e.g. **/*.md) and are matched against paths, not file contents; use grep to search inside files.',
         schema: z.object({
-          pattern: z.string().describe('glob 模式，如 **/*.md'),
-          path: z.string().optional().describe('搜索起始目录的虚拟路径，默认根目录 /')
+          pattern: z.string().describe('Glob pattern, e.g. **/*.md'),
+          path: z
+            .string()
+            .optional()
+            .describe('Virtual path of the directory to start from, defaults to the root /')
         })
       }
     ),
@@ -371,16 +409,22 @@ export function buildFsTools(options: FsBackendOptions): StructuredToolInterface
             logger.warn(`[FsBackend] grep "${pattern}" blocked by ${code}`)
             return JSON.stringify({ matches: [] })
           }
-          return `搜索失败: ${(err as Error).message}`
+          return mainFormat(tr.glob.failed, { message: (err as Error).message })
         }
       },
       {
         name: 'grep',
-        description: '在虚拟文件系统中递归搜索匹配正则表达式的文本行。',
+        description:
+          'Search file contents in the virtual filesystem and return matching lines with their paths and line numbers. The pattern is a regular expression matched against each line; use glob to narrow which files are searched.',
         schema: z.object({
-          pattern: z.string().describe('正则表达式'),
-          path: z.string().optional().describe('搜索起始目录的虚拟路径，默认根目录 /'),
-          glob: z.string().optional().describe('可选的文件名 glob 过滤')
+          pattern: z
+            .string()
+            .describe('Regular expression matched against each line of file content'),
+          path: z
+            .string()
+            .optional()
+            .describe('Virtual path of the directory to start from, defaults to the root /'),
+          glob: z.string().optional().describe('Optional glob filter for the file paths to search')
         })
       }
     )
@@ -415,7 +459,7 @@ export function buildFsTools(options: FsBackendOptions): StructuredToolInterface
                 let text = out
                 if (errOut) text += (text ? '\n' : '') + `[stderr]\n${errOut}`
                 if (text.length > MAX_EXEC_CHARS) {
-                  text = `${text.slice(0, MAX_EXEC_CHARS)}\n...（输出过长，已截断）`
+                  text = `${text.slice(0, MAX_EXEC_CHARS)}\n...${tr.exec.truncated}`
                 }
                 resolvePromise(JSON.stringify({ exitCode, stdout: text }))
               }
@@ -442,9 +486,9 @@ export function buildFsTools(options: FsBackendOptions): StructuredToolInterface
         {
           name: 'execute',
           description:
-            '在工作区目录中执行 shell 命令（Windows），返回 stdout/stderr 与退出码。仅用于只读查询与工作区内的操作。',
+            'Run a shell command (Windows) with the workspace directory as the working directory, returning stdout/stderr and the exit code. Use it for read-only queries and operations confined to the workspace; prefer `read_file`, `write_file`, `ls`, `glob` and `grep` for file and directory work.',
           schema: z.object({
-            command: z.string().describe('要执行的 shell 命令')
+            command: z.string().describe('Shell command to execute')
           })
         }
       )

@@ -29,6 +29,7 @@ import {
 } from '@remixicon/react'
 import { Window } from '../../../../resource/types/window'
 import { useMessage } from '@renderer/hooks/useMessage'
+import { useTranslation } from '@renderer/i18n'
 import type {
   DocListItem,
   TodoItem as TodoItemRow,
@@ -45,10 +46,11 @@ interface WikiTreeData {
   notesByDir: Map<number, number[]>
 }
 
-const TODO_STATUS_META: Record<number, { label: string; color: string }> = {
-  0: { label: '待办', color: '#1677ff' },
-  1: { label: '进行中', color: '#fa8c16' },
-  2: { label: '已完成', color: '#52c41a' }
+/** 待办状态只用于取色；展示名走词条（home.status.*） */
+const TODO_STATUS_META: Record<number, { color: string }> = {
+  0: { color: '#1677ff' },
+  1: { color: '#fa8c16' },
+  2: { color: '#52c41a' }
 }
 
 /* ──────────── 缩进网格 ──────────── */
@@ -138,6 +140,7 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
   const { token } = theme.useToken()
   const { viewMessage } = useMessage()
   const { modal } = App.useApp()
+  const { t } = useTranslation()
   const api = (window as unknown as Window).api
 
   const [search, setSearch] = useState('')
@@ -154,8 +157,8 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
 
   /* ── 目录编辑弹窗 ── */
   const [dirModalOpen, setDirModalOpen] = useState(false)
-  const [dirModalTitle, setDirModalTitle] = useState('新建目录')
-  const [dirName, setDirName] = useState('新目录')
+  const [dirModalTitle, setDirModalTitle] = useState(t('home.dir.create'))
+  const [dirName, setDirName] = useState(t('home.dir.defaultName'))
   const [dirTarget, setDirTarget] = useState<{
     wikiId: number
     parent: WikiDirectoryRow | null
@@ -164,8 +167,9 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
   const [dirSaving, setDirSaving] = useState(false)
 
   const docTitle = useCallback(
-    (docId: number): string => allDocs.find((d) => d.id === docId)?.title ?? `文档 ${docId}`,
-    [allDocs]
+    (docId: number): string =>
+      allDocs.find((d) => d.id === docId)?.title ?? t('home.doc.titleWithId', { id: docId }),
+    [allDocs, t]
   )
 
   /* ── 加载 / 刷新知识库目录树 ── */
@@ -274,33 +278,41 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
   }, [])
 
   /* ── 目录 CRUD ── */
-  const openCreateDir = useCallback((wikiId: number, parent: WikiDirectoryRow | null) => {
-    setEditingDir(null)
-    setDirTarget({ wikiId, parent })
-    setDirName('新目录')
-    setDirModalTitle(parent ? `在「${parent.name}」下新建目录` : '新建目录')
-    setDirModalOpen(true)
-  }, [])
+  const openCreateDir = useCallback(
+    (wikiId: number, parent: WikiDirectoryRow | null) => {
+      setEditingDir(null)
+      setDirTarget({ wikiId, parent })
+      setDirName(t('home.dir.defaultName'))
+      setDirModalTitle(
+        parent ? t('home.dir.createSubTitle', { name: parent.name }) : t('home.dir.create')
+      )
+      setDirModalOpen(true)
+    },
+    [t]
+  )
 
-  const openRenameDir = useCallback((dir: WikiDirectoryRow) => {
-    setEditingDir(dir)
-    setDirTarget({ wikiId: dir.wiki_id, parent: null })
-    setDirName(dir.name)
-    setDirModalTitle('重命名目录')
-    setDirModalOpen(true)
-  }, [])
+  const openRenameDir = useCallback(
+    (dir: WikiDirectoryRow) => {
+      setEditingDir(dir)
+      setDirTarget({ wikiId: dir.wiki_id, parent: null })
+      setDirName(dir.name)
+      setDirModalTitle(t('home.dir.renameTitle'))
+      setDirModalOpen(true)
+    },
+    [t]
+  )
 
   const handleDirModalOk = useCallback(async (): Promise<void> => {
     const messageKey = 'dir-save'
     setDirSaving(true)
     try {
       if (editingDir) {
-        viewMessage(messageKey, 'loading', '正在保存目录...')
+        viewMessage(messageKey, 'loading', t('home.dir.saving'))
         await api.wikis.updateDirectory(editingDir.id, { name: dirName })
-        viewMessage(messageKey, 'success', '目录已保存', 2)
+        viewMessage(messageKey, 'success', t('home.dir.saved'), 2)
         await loadWikiTree(editingDir.wiki_id, true)
       } else if (dirTarget) {
-        viewMessage(messageKey, 'loading', '正在创建目录...')
+        viewMessage(messageKey, 'loading', t('home.dir.creating'))
         await api.wikis.addDirectory({
           wiki_id: dirTarget.wikiId,
           parent_id: dirTarget.parent?.id ?? null,
@@ -309,69 +321,69 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
           // level 库列为可空（DEFAULT 0），null 按 0 处理
           level: dirTarget.parent ? (dirTarget.parent.level ?? 0) + 1 : 0
         })
-        viewMessage(messageKey, 'success', '目录创建成功！', 2)
+        viewMessage(messageKey, 'success', t('home.dir.createSuccess'), 2)
         await loadWikiTree(dirTarget.wikiId, true)
       }
       setDirModalOpen(false)
     } catch (error) {
       console.error('Failed to save directory:', error)
-      viewMessage(messageKey, 'error', '保存目录失败')
+      viewMessage(messageKey, 'error', t('home.dir.saveFailed'))
     } finally {
       setDirSaving(false)
     }
-  }, [api, viewMessage, loadWikiTree, editingDir, dirTarget, dirName])
+  }, [api, viewMessage, loadWikiTree, editingDir, dirTarget, dirName, t])
 
   const handleDeleteDir = useCallback(
     (dir: WikiDirectoryRow) => {
       modal.confirm({
-        title: `确定要删除目录「${dir.name}」吗？`,
-        content: '目录中的文档不会被删除，只会与目录解除关联。',
-        okText: '删除',
+        title: t('home.dir.deleteTitle', { name: dir.name }),
+        content: t('home.dir.deleteContent'),
+        okText: t('common.action.delete'),
         okButtonProps: { danger: true },
-        cancelText: '取消',
+        cancelText: t('common.action.cancel'),
         onOk: async () => {
           const messageKey = 'dir-delete'
           try {
-            viewMessage(messageKey, 'loading', '正在删除目录...')
+            viewMessage(messageKey, 'loading', t('home.dir.deleting'))
             await api.wikis.deleteDirectory(dir.id)
-            viewMessage(messageKey, 'success', '目录已删除', 2)
+            viewMessage(messageKey, 'success', t('home.dir.deleteSuccess'), 2)
             await loadWikiTree(dir.wiki_id, true)
             /* 目录删除后其中的文档解除关联回到文档库，通知父级刷新列表 */
             onDocsChanged?.()
           } catch (error) {
             console.error('Failed to delete directory:', error)
-            viewMessage(messageKey, 'error', '删除目录失败')
+            viewMessage(messageKey, 'error', t('home.dir.deleteFailed'))
           }
         }
       })
     },
-    [api, viewMessage, loadWikiTree, onDocsChanged, modal]
+    [api, viewMessage, loadWikiTree, onDocsChanged, modal, t]
   )
 
   const handleRemoveDocFromDir = useCallback(
     (wikiId: number, dir: WikiDirectoryRow, docId: number, docName: string) => {
       modal.confirm({
-        title: `从「${dir.name}」移除「${docName}」？`,
-        content: '仅解除目录关联，文档本身不会被删除。',
-        okText: '移除',
-        cancelText: '取消',
+        title: t('home.dir.removeDocTitle', { dir: dir.name, name: docName }),
+        content: t('home.dir.removeDocContent'),
+        okText: t('common.action.remove'),
+        cancelText: t('common.action.cancel'),
         onOk: async () => {
           const messageKey = 'remove-doc'
           try {
-            viewMessage(messageKey, 'loading', '正在移除...')
+            viewMessage(messageKey, 'loading', t('home.dir.removing'))
             await api.wikis.removeNoteFromDirectory(dir.id, docId)
-            viewMessage(messageKey, 'success', '已从目录移除', 2)
+            viewMessage(messageKey, 'success', t('home.dir.removed'), 2)
             await loadWikiTree(wikiId, true)
             /* 文档解除关联后回到文档库，通知父级刷新列表 */
             onDocsChanged?.()
           } catch (error) {
             console.error('Failed to remove doc from directory:', error)
-            viewMessage(messageKey, 'error', '移除失败')
+            viewMessage(messageKey, 'error', t('home.dir.removeFailed'))
           }
         }
       })
     },
-    [api, viewMessage, loadWikiTree, onDocsChanged, modal]
+    [api, viewMessage, loadWikiTree, onDocsChanged, modal, t]
   )
 
   /* ── 数据分组（时间字段运行时可能是 Date/number，统一转字符串比较） ── */
@@ -528,10 +540,25 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
      *  待办 —开始任务→ 进行中 —标记完成→ 已完成 —重新激活→ 待办 */
     const step =
       status === 0
-        ? { key: 'start', label: '开始任务', icon: <RiPlayLine size={14} />, next: 1 }
+        ? {
+            key: 'start',
+            label: t('home.todo.actionStart'),
+            icon: <RiPlayLine size={14} />,
+            next: 1
+          }
         : status === 1
-          ? { key: 'done', label: '标记完成', icon: <RiCheckLine size={14} />, next: 2 }
-          : { key: 'reactivate', label: '重新激活', icon: <RiRefreshLine size={14} />, next: 0 }
+          ? {
+              key: 'done',
+              label: t('home.todo.actionComplete'),
+              icon: <RiCheckLine size={14} />,
+              next: 2
+            }
+          : {
+              key: 'reactivate',
+              label: t('home.todo.actionReactivate'),
+              icon: <RiRefreshLine size={14} />,
+              next: 0
+            }
 
     const items: MenuProps['items'] = [
       {
@@ -543,13 +570,13 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
       { type: 'divider' },
       {
         key: 'edit',
-        label: '编辑',
+        label: t('common.action.edit'),
         icon: <RiEditLine size={14} />,
         onClick: () => onEditTodo(todo)
       },
       {
         key: 'delete',
-        label: '删除',
+        label: t('common.action.delete'),
         icon: <RiDeleteBinLine size={14} />,
         danger: true,
         onClick: () => onDeleteTodo(todo)
@@ -638,7 +665,7 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
         </span>
         <span style={{ marginLeft: 2, fontSize: 11, color: token.colorTextTertiary }}>{count}</span>
         <span style={{ flex: 1 }} />
-        <Tooltip title={`新建${label}`}>
+        <Tooltip title={t('home.tree.createNamed', { name: label })}>
           <button
             style={{
               width: 20,
@@ -728,7 +755,7 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
             {rowMenu([
               {
                 key: 'new-doc',
-                label: '新建文档',
+                label: t('home.doc.create'),
                 icon: <RiFileAddLine size={14} />,
                 onClick: () => onCreateDocInDirectory(dir.id, { wikiId, dirName: dir.name })
               },
@@ -736,7 +763,7 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
                 ? [
                     {
                       key: 'import-doc',
-                      label: '导入文档',
+                      label: t('home.doc.import'),
                       icon: <RiUpload2Line size={14} />,
                       onClick: () => onImportDocToDirectory(dir.id, { wikiId, dirName: dir.name })
                     }
@@ -744,20 +771,20 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
                 : []),
               {
                 key: 'new-subdir',
-                label: '新建子目录',
+                label: t('home.dir.createChild'),
                 icon: <RiFolderAddLine size={14} />,
                 onClick: () => openCreateDir(wikiId, dir)
               },
               { type: 'divider' },
               {
                 key: 'rename',
-                label: '重命名',
+                label: t('common.action.rename'),
                 icon: <RiEditLine size={14} />,
                 onClick: () => openRenameDir(dir)
               },
               {
                 key: 'delete',
-                label: '删除目录',
+                label: t('home.dir.delete'),
                 danger: true,
                 icon: <RiDeleteBinLine size={14} />,
                 onClick: () => handleDeleteDir(dir)
@@ -803,7 +830,7 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
                 {rowMenu([
                   {
                     key: 'open',
-                    label: '打开',
+                    label: t('common.action.open'),
                     icon: <RiExternalLinkLine size={14} />,
                     onClick: () =>
                       onSelect({
@@ -814,19 +841,19 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
                   },
                   {
                     key: 'doc-graph',
-                    label: '查看图谱',
+                    label: t('home.graph.view'),
                     icon: <RiMindMap size={14} />,
                     onClick: () => onOpenDocGraph(wikiId, noteId)
                   },
                   {
                     key: 'remove',
-                    label: '从目录移除',
+                    label: t('home.dir.removeDoc'),
                     icon: <RiFolderTransferLine size={14} />,
                     onClick: () => handleRemoveDocFromDir(wikiId, dir, noteId, title)
                   },
                   {
                     key: 'archive',
-                    label: '归档到其他目录',
+                    label: t('home.doc.archiveToOtherDir'),
                     icon: <RiInboxArchiveLine size={14} />,
                     onClick: () => {
                       /* 目录内文档不在 docs（未归档列表）里，必须从 allDocs 查 */
@@ -837,7 +864,7 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
                   { type: 'divider' },
                   {
                     key: 'delete',
-                    label: '彻底删除',
+                    label: t('home.doc.deleteHard'),
                     danger: true,
                     icon: <RiDeleteBinLine size={14} />,
                     onClick: () => {
@@ -869,7 +896,7 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
       return (
         <Empty
           image={Empty.PRESENTED_IMAGE_SIMPLE}
-          description="无匹配结果"
+          description={t('home.search.noResults')}
           style={{ marginTop: 32 }}
         />
       )
@@ -881,7 +908,7 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
             {renderGroupHeader(
               token.colorTextQuaternary,
               <RiFileTextLine size={13} />,
-              '文档',
+              t('home.term.doc'),
               matchedDocs.length
             )}
             {matchedDocs.map((d) => {
@@ -912,18 +939,18 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
                   {rowMenu([
                     {
                       key: 'open',
-                      label: '打开',
+                      label: t('common.action.open'),
                       onClick: () => onSelect({ kind: 'doc', docId: d.id })
                     },
                     {
                       key: 'archive',
-                      label: '归档到知识库',
+                      label: t('home.doc.archiveToWiki'),
                       onClick: () => onArchiveDoc(d)
                     },
                     { type: 'divider' },
                     {
                       key: 'delete',
-                      label: '删除文档',
+                      label: t('home.doc.delete'),
                       danger: true,
                       onClick: () => onDeleteDoc(d)
                     }
@@ -938,7 +965,7 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
             {renderGroupHeader(
               token.colorTextQuaternary,
               <RiTodoLine size={13} />,
-              '待办',
+              t('home.term.todo'),
               matchedTodos.length
             )}
             {matchedTodos.map((t) => (
@@ -967,7 +994,7 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
             {renderGroupHeader(
               token.colorTextQuaternary,
               <RiBook2Line size={13} />,
-              '知识库',
+              t('home.term.wiki'),
               matchedWikis.length
             )}
             {matchedWikis.map((w) => {
@@ -991,14 +1018,14 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
                   {rowMenu([
                     {
                       key: 'graph',
-                      label: '查看图谱',
+                      label: t('home.graph.view'),
                       icon: <RiMindMap size={14} />,
                       onClick: () => onOpenGraph(w)
                     },
-                    { key: 'edit', label: '编辑知识库', onClick: () => onEditWiki(w) },
+                    { key: 'edit', label: t('home.wiki.edit'), onClick: () => onEditWiki(w) },
                     {
                       key: 'delete',
-                      label: '删除知识库',
+                      label: t('home.wiki.delete'),
                       danger: true,
                       onClick: () => onDeleteWiki(w)
                     }
@@ -1048,7 +1075,7 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
             onChange={(e) => setSearch(e.target.value)}
             onFocus={() => setSearchFocused(true)}
             onBlur={() => setSearchFocused(false)}
-            placeholder="搜索文档 / 待办 / 知识库"
+            placeholder={t('home.search.placeholder')}
             style={{
               flex: 1,
               minWidth: 0,
@@ -1074,7 +1101,7 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
             {renderSectionHeader(
               'docs',
               <RiFileTextLine size={13} />,
-              '文档库',
+              t('home.term.docLibrary'),
               docs.length,
               onCreateDoc
             )}
@@ -1089,7 +1116,7 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
                     userSelect: 'none'
                   }}
                 >
-                  暂无文档
+                  {t('home.doc.empty')}
                 </div>
               ) : (
                 sortedDocs.map((d) => {
@@ -1125,18 +1152,18 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
                       {rowMenu([
                         {
                           key: 'open',
-                          label: '打开',
+                          label: t('common.action.open'),
                           onClick: () => onSelect({ kind: 'doc', docId: d.id })
                         },
                         {
                           key: 'archive',
-                          label: '归档到知识库',
+                          label: t('home.doc.archiveToWiki'),
                           onClick: () => onArchiveDoc(d)
                         },
                         { type: 'divider' },
                         {
                           key: 'delete',
-                          label: '删除文档',
+                          label: t('home.doc.delete'),
                           danger: true,
                           onClick: () => onDeleteDoc(d)
                         }
@@ -1149,7 +1176,7 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
             {renderSectionHeader(
               'todos',
               <RiCheckboxCircleLine size={13} />,
-              '待办',
+              t('home.term.todo'),
               todos.length,
               onCreateTodo
             )}
@@ -1164,28 +1191,28 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
                     userSelect: 'none'
                   }}
                 >
-                  暂无待办
+                  {t('home.todo.empty')}
                 </div>
               ) : (
                 (
                   [
                     {
                       key: 'pending',
-                      label: '待办',
+                      label: t('home.status.pending'),
                       items: todoGroups.pending,
                       icon: RiCheckboxBlankCircleLine,
                       color: TODO_STATUS_META[0].color
                     },
                     {
                       key: 'doing',
-                      label: '进行中',
+                      label: t('home.status.doing'),
                       items: todoGroups.doing,
                       icon: RiPlayCircleLine,
                       color: TODO_STATUS_META[1].color
                     },
                     {
                       key: 'done',
-                      label: '已完成',
+                      label: t('home.status.done'),
                       items: todoGroups.done,
                       icon: RiCheckboxCircleLine,
                       color: TODO_STATUS_META[2].color
@@ -1262,7 +1289,7 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
             {renderSectionHeader(
               'wikis',
               <RiArchiveStackLine size={13} />,
-              '知识库',
+              t('home.term.wiki'),
               wikis.length,
               onCreateWiki
             )}
@@ -1277,7 +1304,7 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
                     userSelect: 'none'
                   }}
                 >
-                  暂无知识库
+                  {t('home.wiki.empty')}
                 </div>
               ) : (
                 wikis.map((w) => {
@@ -1309,26 +1336,26 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
                           rowMenu([
                             {
                               key: 'graph',
-                              label: '查看图谱',
+                              label: t('home.graph.view'),
                               icon: <RiMindMap size={14} />,
                               onClick: () => onOpenGraph(w)
                             },
                             {
                               key: 'new-dir',
-                              label: '新建目录',
+                              label: t('home.dir.create'),
                               icon: <RiFolderAddLine size={14} />,
                               onClick: () => openCreateDir(w.id, null)
                             },
                             { type: 'divider' },
                             {
                               key: 'edit',
-                              label: '编辑知识库',
+                              label: t('home.wiki.edit'),
                               icon: <RiEditLine size={14} />,
                               onClick: () => onEditWiki(w)
                             },
                             {
                               key: 'delete',
-                              label: '删除知识库',
+                              label: t('home.wiki.delete'),
                               danger: true,
                               icon: <RiDeleteBinLine size={14} />,
                               onClick: () => onDeleteWiki(w)
@@ -1351,14 +1378,14 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
         open={dirModalOpen}
         onOk={handleDirModalOk}
         onCancel={() => setDirModalOpen(false)}
-        okText="保存"
-        cancelText="取消"
+        okText={t('common.action.save')}
+        cancelText={t('common.action.cancel')}
         confirmLoading={dirSaving}
         width={380}
       >
         <Input
           autoFocus
-          placeholder="目录名称"
+          placeholder={t('home.field.directoryName')}
           value={dirName}
           onChange={(e) => setDirName(e.target.value)}
           onPressEnter={handleDirModalOk}

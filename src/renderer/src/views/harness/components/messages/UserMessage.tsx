@@ -1,6 +1,7 @@
 import React from 'react'
 import { Image, Tag } from 'antd'
 import { RiAttachment2, RiFlag2Line } from '@remixicon/react'
+import { useTranslation } from '@renderer/i18n'
 import type { Message } from '@renderer/types/harness'
 
 interface UserMessageProps {
@@ -11,6 +12,14 @@ interface UserMessageProps {
   colorBorderSecondary: string
 }
 
+/**
+ * 目标自动续跑消息的正文：goal_round 块的第 2 行是带标签的目标本身
+ * （提示词里是 `目标：…` / `Objective: …`）。标签随提示词语言变化，
+ * 所以这里统一剥掉行首的短标签，而不是硬编码某一种写法。
+ */
+const goalObjective = (content: string): string =>
+  (content.split('\n')[1] ?? '').replace(/^\s*[^:：\s]{1,16}[:：]\s*/, '')
+
 const UserMessage: React.FC<UserMessageProps> = ({
   message,
   isDarkMode,
@@ -18,6 +27,8 @@ const UserMessage: React.FC<UserMessageProps> = ({
   colorTextSecondary,
   colorBorderSecondary
 }) => {
+  const { t } = useTranslation()
+
   const imageBlocks = message.blocks.filter((b) => b.type === 'image' && b.image_url)
   const documentBlocks = message.blocks.filter((b) => b.type === 'document' && b.fileName)
   // 目标自动续跑轮：渲染为居中的自动运行横幅（非普通用户气泡）
@@ -39,7 +50,7 @@ const UserMessage: React.FC<UserMessageProps> = ({
           }}
         >
           <RiFlag2Line size={13} />
-          <span>目标自动续跑 · 第 {goalRoundBlock.round ?? '?'} 轮</span>
+          <span>{t('harness.userMessage.goalRound', { round: goalRoundBlock.round ?? '?' })}</span>
           <span style={{ opacity: 0.75 }}>—</span>
           <span
             style={{
@@ -49,7 +60,7 @@ const UserMessage: React.FC<UserMessageProps> = ({
               whiteSpace: 'nowrap'
             }}
           >
-            {(message.content.split('\n')[1] ?? '').replace(/^目标：/, '')}
+            {goalObjective(message.content)}
           </span>
         </div>
       </div>

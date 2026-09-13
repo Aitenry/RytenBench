@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { theme, Modal, Input, Form } from 'antd'
 import { RiMusic2Line, RiCameraLine } from '@remixicon/react'
+import { useTranslation } from '@renderer/i18n'
 import type { EditPlaylistModalProps } from '@renderer/types/components'
 
 const EditPlaylistModal: React.FC<EditPlaylistModalProps> = ({
@@ -9,6 +10,7 @@ const EditPlaylistModal: React.FC<EditPlaylistModalProps> = ({
   onClose,
   onSaved
 }) => {
+  const { t } = useTranslation()
   const {
     token: { colorFillAlter, colorTextTertiary }
   } = theme.useToken()
@@ -61,12 +63,12 @@ const EditPlaylistModal: React.FC<EditPlaylistModalProps> = ({
 
   return (
     <Modal
-      title="编辑歌单"
+      title={t('music.playlist.editTitle')}
       open={open}
       onOk={handleOk}
       onCancel={handleCancel}
-      okText="保存"
-      cancelText="取消"
+      okText={t('common.action.save')}
+      cancelText={t('common.action.cancel')}
       confirmLoading={saving}
     >
       {/* 封面 — 点击更换，hover 显示遮罩 */}
@@ -86,7 +88,7 @@ const EditPlaylistModal: React.FC<EditPlaylistModalProps> = ({
           {/* hover 遮罩 */}
           <div className="absolute inset-0 bg-black/40 flex flex-col items-center justify-center gap-1 opacity-0 group-hover/cover:opacity-100 transition-opacity">
             <RiCameraLine size={22} className="text-white" />
-            <span className="text-xs text-white">更换封面</span>
+            <span className="text-xs text-white">{t('music.playlist.coverChange')}</span>
           </div>
         </div>
       </div>
@@ -94,12 +96,17 @@ const EditPlaylistModal: React.FC<EditPlaylistModalProps> = ({
       <Form form={form} layout="vertical">
         <Form.Item
           name="name"
-          label="歌单名称"
-          rules={[{ required: true, message: '请输入歌单名称' }]}
+          label={t('music.playlist.nameLabel')}
+          rules={[
+            {
+              required: true,
+              message: t('common.message.pleaseInput', { field: t('music.playlist.nameLabel') })
+            }
+          ]}
         >
           <Input />
         </Form.Item>
-        <Form.Item name="description" label="描述">
+        <Form.Item name="description" label={t('music.playlist.descriptionLabel')}>
           <Input.TextArea rows={3} />
         </Form.Item>
       </Form>

@@ -1,5 +1,6 @@
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models'
 import logger from 'electron-log'
+import { mainFormat, mainMessages } from '../../i18n'
 import { questionService } from './ask'
 import type { AskOption, AskQuestion } from './ask'
 
@@ -16,9 +17,6 @@ import type { AskOption, AskQuestion } from './ask'
 /** 模型单次请求失败时的自动重试上限与重试间隔 */
 export const MODEL_RETRY_LIMIT = 2
 export const MODEL_RETRY_DELAY_MS = 800
-
-/** 「换模型继续」提问的保留选项：用户放弃切换时选中它，本轮按原错误收尾 */
-export const RECOVERY_ABANDON_LABEL = '不换模型，放弃本轮生成'
 
 /** 换模型询问所需的上下文（模型调用方能提供的身份信息） */
 export interface ModelRecoveryContext {
@@ -45,6 +43,9 @@ export async function askUserToSwitchModel(
 ): Promise<BaseChatModel | null> {
   const { getEnabledProviders } = await import('../../database/mapper/provider')
   const providers = await getEnabledProviders()
+  // 界面文案按当前语言取一次：放弃项既要展示又要参与回填比较，
+  // 必须用**同一次**取值，否则弹窗期间切语言会导致比较不上
+  const m = mainMessages().modelRecovery
   const seen = new Set<string>()
   const options: AskOption[] = []
   for (const p of providers) {
@@ -54,28 +55,30 @@ export async function askUserToSwitchModel(
     seen.add(label)
     options.push({
       label,
-      description: `供应商：${p.provider}${p.base_url ? ` · ${p.base_url}` : ''}`,
+      description: mainFormat(m.providerDescription, {
+        provider: `${p.provider}${p.base_url ? ` · ${p.base_url}` : ''}`
+      }),
       group: p.provider
     })
   }
   options.push({
-    label: RECOVERY_ABANDON_LABEL,
-    description: '结束本轮生成（已生成内容保留在界面，不落库）'
+    label: m.abandonLabel,
+    description: m.abandonDescription
   })
   const questions: AskQuestion[] = [
     {
       id: 'switch-model',
       kind: 'model-recovery',
-      header: '模型请求失败',
-      question: `当前模型自动重试 ${MODEL_RETRY_LIMIT} 次仍失败。请选择要切换的模型，继续完成当前任务：`,
+      header: m.header,
+      question: mainFormat(m.question, { count: MODEL_RETRY_LIMIT }),
       error: lastError.message,
-      abandonLabel: RECOVERY_ABANDON_LABEL,
+      abandonLabel: m.abandonLabel,
       options
     }
   ]
   const answer = await questionService.ask(ctx.topicId, questions, ctx.signal)
   const selected = answer.answers?.[0]?.selected?.[0] ?? ''
-  if (!selected || selected === RECOVERY_ABANDON_LABEL) return null
+  if (!selected || selected === m.abandonLabel) return null
   // 答案解析（前端专用弹窗查询同一数据源后按 provider id 提交；兼容按 label 提交的旧路径）
   let providerId: number | undefined
   const selectedId = Number(selected)

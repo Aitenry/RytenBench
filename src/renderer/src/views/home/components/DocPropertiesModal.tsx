@@ -3,6 +3,7 @@ import { Modal, Input, Button, Tag as AntTag, Typography } from 'antd'
 import { theme } from 'antd'
 import { Window } from '../../../../resource/types/window'
 import { getTagsArray } from '@renderer/utils/document'
+import { useTranslation } from '@renderer/i18n'
 
 const { Text } = Typography
 
@@ -21,6 +22,7 @@ export interface DocPropertiesModalProps {
  */
 const DocPropertiesModal: React.FC<DocPropertiesModalProps> = ({ open, doc, onClose, onSave }) => {
   const { token } = theme.useToken()
+  const { t } = useTranslation()
   const [editTags, setEditTags] = useState<string[]>([])
   const [tagInput, setTagInput] = useState('')
   const [editImage, setEditImage] = useState<string | null>(null)
@@ -83,12 +85,12 @@ const DocPropertiesModal: React.FC<DocPropertiesModalProps> = ({ open, doc, onCl
 
   return (
     <Modal
-      title={doc?.title ? `属性 · ${doc.title}` : '文档属性'}
+      title={doc?.title ? t('home.props.titleWithDoc', { name: doc.title }) : t('home.props.title')}
       open={open}
       onCancel={onClose}
       onOk={handleSave}
-      okText="保存"
-      cancelText="取消"
+      okText={t('common.action.save')}
+      cancelText={t('common.action.cancel')}
       confirmLoading={saving}
       width={460}
       centered
@@ -97,7 +99,7 @@ const DocPropertiesModal: React.FC<DocPropertiesModalProps> = ({ open, doc, onCl
         {/* 标签 */}
         <div>
           <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 6 }}>
-            标签
+            {t('home.field.tags')}
           </Text>
           <div
             style={{
@@ -123,7 +125,11 @@ const DocPropertiesModal: React.FC<DocPropertiesModalProps> = ({ open, doc, onCl
               </AntTag>
             ))}
             <Input
-              placeholder={editTags.length === 0 ? '输入标签后按回车添加' : '继续添加…'}
+              placeholder={
+                editTags.length === 0
+                  ? t('home.field.tagPlaceholder')
+                  : t('home.field.tagPlaceholderMore')
+              }
               value={tagInput}
               onChange={(e) => setTagInput(e.target.value)}
               onKeyDown={handleAddTag}
@@ -137,15 +143,15 @@ const DocPropertiesModal: React.FC<DocPropertiesModalProps> = ({ open, doc, onCl
         {/* 封面 */}
         <div>
           <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 6 }}>
-            封面
+            {t('home.field.cover')}
           </Text>
           <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
             <Button type="default" onClick={handleSelectImage}>
-              {editImage ? '更换图片' : '上传图片'}
+              {editImage ? t('home.field.changeImage') : t('home.field.uploadImage')}
             </Button>
             {editImage && (
               <Button type="default" danger onClick={() => setEditImage(null)}>
-                移除图片
+                {t('home.field.removeImage')}
               </Button>
             )}
           </div>
@@ -162,7 +168,7 @@ const DocPropertiesModal: React.FC<DocPropertiesModalProps> = ({ open, doc, onCl
             >
               <img
                 src={editImage}
-                alt="文档封面"
+                alt={t('home.field.coverAlt')}
                 style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
               />
             </div>
@@ -172,10 +178,10 @@ const DocPropertiesModal: React.FC<DocPropertiesModalProps> = ({ open, doc, onCl
         {/* 摘要 */}
         <div>
           <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 6 }}>
-            摘要
+            {t('home.field.summary')}
           </Text>
           <Input.TextArea
-            placeholder="一句话描述这篇文档…"
+            placeholder={t('home.props.summaryPlaceholder')}
             value={editSummary}
             onChange={(e) => setEditSummary(e.target.value)}
             maxLength={500}

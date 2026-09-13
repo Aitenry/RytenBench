@@ -9,6 +9,8 @@ import { buildAgentGraph, type StreamMessageLike } from './agent'
 import { jobsRegistry } from './jobs'
 import type { RuntimeRecord } from './types'
 import type { SpillStore } from './spill'
+import { mainFormat } from '../../i18n'
+import { getAgentToolTexts } from '../../i18n/tool-results-agent'
 
 /**
  * 子代理续接会话（continuable subagent sessions）— 对应 deepseek-harness 的
@@ -76,6 +78,8 @@ export interface SubagentSessionRuntime {
   resolveModel: (spec: string | undefined) => Promise<BaseChatModel | undefined>
   buildTools: (subAgent: SubAgentConfig) => StructuredToolInterface[]
   recursionLimit: number
+  /** 工具调用总次数上限（模型级「工具调用轮数」；与主图共用同一模型设置） */
+  maxToolCalls: number
   spillRef?: { current?: SpillStore }
   /** 子代理系统提示词扩展（专属记忆/技能），与 task 工具同源 */
   extendSystemPrompt: (sa: SubAgentConfig) => string
@@ -104,7 +108,10 @@ export class SubagentSessionRegistry {
       id,
       topicId,
       config,
-      label: `${displayName}：${firstMessage.slice(0, 40)}`,
+      label: mainFormat(getAgentToolTexts().subagentSessions.sessionLabel, {
+        name: displayName,
+        task: firstMessage.slice(0, 40)
+      }),
       prompt: firstMessage,
       messages: [],
       inbox: [],
@@ -126,10 +133,10 @@ export class SubagentSessionRegistry {
     const messageId = `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     const record = this.sessions.get(id)
     if (!record || record.topicId !== topicId) {
-      throw new Error(`子代理会话 ${id} 不存在或不属于当前话题。`)
+      throw new Error(mainFormat(getAgentToolTexts().subagentSessions.notFound, { id }))
     }
     if (record.dead) {
-      throw new Error(`子代理会话 ${id} 已随话题删除。`)
+      throw new Error(mainFormat(getAgentToolTexts().subagentSessions.deletedWithTopic, { id }))
     }
     record.inbox.push(message)
     if (record.status === 'idle') {
@@ -233,6 +240,7 @@ export class SubagentSessionRegistry {
     record.currentAbort = new AbortController()
     this.runtimes.set(record, rt)
     this.broadcast(record.topicId)
+    const m = getAgentToolTexts()
 
     // 注册同名后台任务（job id = 会话 id；settlement first-wins）
     const job = jobsRegistry.start(record.topicId, 'subagent', record.label, record.id)
@@ -262,7 +270,9 @@ export class SubagentSessionRegistry {
               }
             } else if (rec.kind === 'tool_call') {
               const inputText = JSON.stringify(rec.input ?? {}).slice(0, 200)
-              job.appendOutput(`[工具] ${rec.name}（参数：${inputText}）`)
+              job.appendOutput(
+                mainFormat(m.subagentSessions.toolCallLine, { name: rec.name, input: inputText })
+              )
             }
           }
         }
@@ -272,7 +282,8 @@ export class SubagentSessionRegistry {
         tools,
         systemPrompt,
         queue: queueRef,
-        spill: rt.spillRef?.current
+        spill: rt.spillRef?.current,
+        maxToolCalls: rt.maxToolCalls
       })
 
       // 会话输入：历史 + 本轮消息
@@ -299,12 +310,14 @@ export class SubagentSessionRegistry {
         record.messages.push(new HumanMessage(message))
         if (partial) record.messages.push(new AIMessage({ content: partial }))
         record.lastStatus = 'killed'
-        record.lastOutput = partial ? `${partial}\n（本轮已被中断）` : '（本轮已被中断）'
+        record.lastOutput = partial
+          ? `${partial}\n${m.subagentSessions.interrupted}`
+          : m.subagentSessions.interrupted
         record.liveOutput = ''
         job.settle('killed', record.lastOutput, 'interrupted')
         return
       }
-      const output = fullText.trim() || '（子智能体无文本输出）'
+      const output = fullText.trim() || m.subagent.noTextOutput
       record.messages.push(new HumanMessage(message))
       record.messages.push(new AIMessage({ content: output }))
       record.lastStatus = 'completed'
@@ -319,7 +332,9 @@ export class SubagentSessionRegistry {
         record.messages.push(new HumanMessage(message))
         if (partial) record.messages.push(new AIMessage({ content: partial }))
         record.lastStatus = 'killed'
-        record.lastOutput = partial ? `${partial}\n（本轮已被中断）` : '（本轮已被中断）'
+        record.lastOutput = partial
+          ? `${partial}\n${m.subagentSessions.interrupted}`
+          : m.subagentSessions.interrupted
         record.liveOutput = ''
         job.settle('killed', record.lastOutput, 'interrupted')
         return
@@ -327,7 +342,7 @@ export class SubagentSessionRegistry {
       const isRecursion =
         err instanceof GraphRecursionError || (err as Error)?.name === 'GraphRecursionError'
       const messageText = isRecursion
-        ? '子智能体达到工具调用轮次上限'
+        ? m.subagentSessions.roundLimitReached
         : err instanceof Error
           ? err.message
           : String(err)
@@ -336,9 +351,8 @@ export class SubagentSessionRegistry {
       record.messages.push(new HumanMessage(message))
       if (partial) record.messages.push(new AIMessage({ content: partial }))
       record.lastStatus = 'failed'
-      record.lastOutput = partial
-        ? `${partial}\n（运行失败：${messageText}）`
-        : `（运行失败：${messageText}）`
+      const failureNote = mainFormat(m.subagentSessions.runFailed, { message: messageText })
+      record.lastOutput = partial ? `${partial}\n${failureNote}` : failureNote
       record.liveOutput = ''
       job.settle('failed', record.lastOutput, messageText)
     } finally {
@@ -377,18 +391,22 @@ export function buildSubagentControlTools(
           const { messageId } = registry.send(subagent_id, topicId, message)
           return JSON.stringify({ messageId })
         } catch (err) {
-          return `发送失败: ${(err as Error).message}`
+          return mainFormat(getAgentToolTexts().subagentSessions.sendFailed, {
+            message: (err as Error).message
+          })
         }
       },
       {
         name: 'send_message',
         description:
-          '向一个后台子智能体会话发送下一条消息，让它继续工作（延续同一段对话与上下文）。若该会话当前正在运行，消息会排队在其当前轮结束后自动执行。只返回投递确认（messageId），子代理的回复用 job_output(job_id) 轮询读取。',
+          'Send the next message to a background subagent session so it keeps working (continuing the same conversation and context). If that session is currently running, the message is queued and runs automatically after its current turn ends. Returns only a delivery confirmation (messageId); poll the subagent reply with job_output(job_id).',
         schema: z.object({
           subagent_id: z
             .string()
-            .describe('子智能体会话 ID（task 后台模式启动时返回，如 subagent-1）'),
-          message: z.string().describe('发送给子智能体的消息内容')
+            .describe(
+              'Subagent session ID (returned when the task tool starts in background mode, e.g. subagent-1)'
+            ),
+          message: z.string().describe('Message content to send to the subagent')
         })
       }
     ),
@@ -400,9 +418,9 @@ export function buildSubagentControlTools(
       {
         name: 'interrupt_agent',
         description:
-          '中断一个后台子智能体会话当前正在运行的一轮（已排队但未开始的消息保留，稍后可 send_message 继续）。会话不存在或已空闲时为无害操作。',
+          'Interrupt the turn currently running in a background subagent session. Messages already queued but not yet started are kept and can be resumed later with send_message. A harmless no-op when the session does not exist or is idle.',
         schema: z.object({
-          agent_id: z.string().describe('要中断的子智能体会话 ID')
+          agent_id: z.string().describe('ID of the subagent session to interrupt')
         })
       }
     ),
@@ -414,12 +432,12 @@ export function buildSubagentControlTools(
       {
         name: 'list_agents',
         description:
-          '列出当前话题的全部后台子智能体会话及其状态（running=当前轮运行中 / idle=空闲待命）与排队消息数。',
+          'List all background subagent sessions for this topic with their statuses (running = current turn in progress / idle = waiting between turns) and queued message counts.',
         schema: z.object({
           scope: z
             .enum(['children', 'descendants'])
             .optional()
-            .describe('范围（当前实现均为平铺的子智能体列表）')
+            .describe('Scope (the current implementation returns a flat list of subagents)')
         })
       }
     )

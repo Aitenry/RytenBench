@@ -3,7 +3,13 @@ import { BaseMessage } from '@langchain/core/messages'
 import type { StructuredToolInterface } from '@langchain/core/tools'
 import logger from 'electron-log'
 import type { SubAgentConfig } from '../types'
-import { buildAgentGraph, buildGraphInput, MAX_TOOL_CALLS, type QueueRef } from './agent'
+import {
+  buildAgentGraph,
+  buildGraphInput,
+  MAX_TOOL_CALLS,
+  MIN_TOOL_CALLS,
+  type QueueRef
+} from './agent'
 import type { ModelUsageRecord } from './usage'
 import { buildFsTools } from './fs-backend'
 import { buildTodoTools, todoStore } from './todo'
@@ -39,7 +45,7 @@ const RITA_BASE_PROMPT = `Your name is Rita. You are a helpful assistant.
 You are in a continuous conversation with the user. All messages in the harness history are genuine prior exchanges between you and this same user — treat them as real conversation context.
 - When the user asks about "previous" or "last time", refer to the conversation history provided.
 - Do NOT claim you cannot see or remember earlier messages. You have full access to the harness history.
-- Keep your responses concise and natural in Chinese unless the user writes in another language.`
+- Reply in the same language the user writes in, and keep responses concise and natural.`
 
 export interface AgentRuntimeOptions {
   /** 已创建的 BaseChatModel 实例（由 ProviderService 提供） */
@@ -60,6 +66,8 @@ export interface AgentRuntimeOptions {
   workspaceId: number
   /** Mnemon 记忆组件（进程级单例，由 HarnessService 注入） */
   mnemon?: MnemonComponent
+  /** 工具调用总次数上限（模型级「工具调用轮数」；缺省用工程默认值） */
+  maxToolCalls?: number
 }
 
 export class Runtime {
@@ -74,13 +82,16 @@ export class Runtime {
   private readonly workflowTool: StructuredToolInterface
   private readonly systemPrompt: string
   private readonly mnemon?: MnemonComponent
-  /** 图递归上限：远宽于 MAX_TOOL_CALLS 护栏（每轮约 2 个节点步 + 收尾余量），
+  /** 图递归上限：远宽于工具调用次数护栏（每轮约 2 个节点步 + 收尾余量），
    *  工具护栏先触发；即使触顶也有 graph.ts 的优雅收尾兜底（不报错）。 */
   private readonly recursionLimit: number
+  /** 工具调用总次数上限（模型级「工具调用轮数」） */
+  private readonly maxToolCalls: number
 
   constructor(opts: AgentRuntimeOptions) {
     this.opts = opts
-    this.recursionLimit = MAX_TOOL_CALLS * 2 + 20
+    this.maxToolCalls = Math.max(MIN_TOOL_CALLS, Math.floor(opts.maxToolCalls ?? MAX_TOOL_CALLS))
+    this.recursionLimit = this.maxToolCalls * 2 + 20
     this.mnemon = opts.mnemon
     this.fsTools = buildFsTools({
       workspacePath: opts.workspacePath,
@@ -98,6 +109,7 @@ export class Runtime {
         queue: this.queueRef,
         spillRef: this.spillRef,
         recursionLimit: this.recursionLimit,
+        maxToolCalls: this.maxToolCalls,
         // 子代理专属记忆根（<memoryPath>/workspace-<wsId>/ 下 sub-agents/<name>/memories/AGENTS.md）
         memoryPath: opts.memoryPath,
         // 技能目录：子代理按声明的 skills 过滤注入
@@ -111,11 +123,12 @@ export class Runtime {
       resolveModel: (spec) => this.resolveSubAgentModel(spec),
       buildAgentTools: () => [...this.opts.tools, ...this.fsTools],
       recursionLimit: this.recursionLimit,
+      maxToolCalls: this.maxToolCalls,
       spillRef: this.spillRef
     })
 
     logger.info(
-      `[Runtime] initialized (recursionLimit=${this.recursionLimit}, maxToolCalls=${MAX_TOOL_CALLS}, fsTools=${this.fsTools.length}, subAgents=${opts.subAgents.length}, taskTool=${this.taskTool ? 'yes' : 'no'}, mnemon=${this.mnemon ? `yes(${this.mnemon.tools.length} tools)` : 'no'}, workspacePath=${opts.workspacePath ?? 'disabled'}, memoryPath=${opts.memoryPath ?? 'disabled'}, skillsPath=${opts.skillsPath ?? 'disabled'})`
+      `[Runtime] initialized (recursionLimit=${this.recursionLimit}, maxToolCalls=${this.maxToolCalls}, fsTools=${this.fsTools.length}, subAgents=${opts.subAgents.length}, taskTool=${this.taskTool ? 'yes' : 'no'}, mnemon=${this.mnemon ? `yes(${this.mnemon.tools.length} tools)` : 'no'}, workspacePath=${opts.workspacePath ?? 'disabled'}, memoryPath=${opts.memoryPath ?? 'disabled'}, skillsPath=${opts.skillsPath ?? 'disabled'})`
     )
   }
 
@@ -178,15 +191,14 @@ export class Runtime {
     if (this.opts.subAgents.length > 0) {
       const list = this.opts.subAgents
         .map((sa) => {
-          const display =
-            sa.rename && sa.rename !== sa.name ? `${sa.rename}（${sa.name}）` : sa.name
-          return `- ${display}: ${sa.description || '（无描述）'}`
+          const display = sa.rename && sa.rename !== sa.name ? `${sa.rename} (${sa.name})` : sa.name
+          return `- ${display}: ${sa.description || '(no description)'}`
         })
         .join('\n')
-      prompt += `\n\n## 子智能体
-你可以使用 task 工具将合适的任务委托给专门的子智能体执行（子智能体拥有独立的系统提示词、工具与模型）。当任务超出你当前处理范围、或属于某个子智能体的专长领域时，优先考虑委托。可用子智能体：
+      prompt += `\n\n## Subagents
+You can use the task tool to delegate suitable work to a dedicated subagent (each subagent has its own system prompt, tools, and model). Prefer delegation when a task is beyond your current reach or falls in a subagent's area of expertise. Available subagents:
 ${list}
-委托完成后，子智能体的完整输出会直接展示给用户，你的最终回答只需简短总结或直接收尾，不要复述子智能体已输出的详细内容。`
+Once a delegation finishes, the subagent's full output is shown to the user directly; your final answer only needs a brief summary or a short wrap-up — do not restate the detail the subagent already produced.`
     }
     const skillsSection = buildSkillsPromptSection(
       loadSkills({ skillsPath: this.opts.skillsPath, enabledSkills: this.opts.enabledSkills })

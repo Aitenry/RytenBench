@@ -3,6 +3,7 @@ import { theme } from 'antd'
 import { useMessage } from '@renderer/hooks/useMessage'
 import { Window } from '../../../../resource/types/window'
 import type { SystemSettings } from '@renderer/types/settings'
+import { useTranslation } from '@renderer/i18n'
 import { SettingsPageHeader, SettingsSection, SettingRow } from './SettingsUI'
 
 const SystemInfo: React.FC = () => {
@@ -11,6 +12,7 @@ const SystemInfo: React.FC = () => {
   } = theme.useToken()
 
   const { viewMessage } = useMessage()
+  const { t } = useTranslation()
   const [settings, setSettings] = useState<SystemSettings | null>(null)
 
   const loadSettings = useCallback(async () => {
@@ -19,37 +21,54 @@ const SystemInfo: React.FC = () => {
       const result = await (window as unknown as Window).api.systemSettings.getAll()
       setSettings(result)
     } catch (error) {
-      viewMessage(msgKey, 'error', `加载失败: ${error}`)
+      viewMessage(
+        msgKey,
+        'error',
+        t('common.message.loadFailedWithReason', { reason: String(error) })
+      )
     }
-  }, [viewMessage])
+  }, [viewMessage, t])
 
   useEffect(() => {
     loadSettings().then()
   }, [loadSettings])
 
   const ipValue = (value: string | undefined): React.ReactNode =>
-    value ? <span>{value}</span> : <span style={{ color: colorTextTertiary }}>未获取</span>
+    value ? (
+      <span>{value}</span>
+    ) : (
+      <span style={{ color: colorTextTertiary }}>{t('systemInfo.unavailable')}</span>
+    )
 
   return (
     <div>
-      <SettingsPageHeader title="系统信息" description="当前系统运行环境信息" />
+      <SettingsPageHeader
+        title={t('systemInfo.pageTitle')}
+        description={t('systemInfo.pageDescription')}
+      />
 
-      <SettingsSection title="运行环境">
-        <SettingRow title="本机 IP" control={ipValue(settings?.ip?.query as string | undefined)} />
+      <SettingsSection title={t('systemInfo.sectionTitle')}>
         <SettingRow
-          title="本机位置"
+          title={t('systemInfo.ipTitle')}
+          control={ipValue(settings?.ip?.query as string | undefined)}
+        />
+        <SettingRow
+          title={t('systemInfo.locationTitle')}
           control={
             settings?.ip?.city ? (
               `${settings.ip.country as string} ${settings.ip.regionName as string} ${settings.ip.city as string}`
             ) : (
-              <span style={{ color: colorTextTertiary }}>未获取</span>
+              <span style={{ color: colorTextTertiary }}>{t('systemInfo.unavailable')}</span>
             )
           }
         />
-        <SettingRow title="运营商" control={ipValue(settings?.ip?.isp as string | undefined)} />
         <SettingRow
-          title="API Key 加密"
-          control={<span style={{ color: '#52c41a' }}>AES-256-GCM（机器唯一密钥）</span>}
+          title={t('systemInfo.ispTitle')}
+          control={ipValue(settings?.ip?.isp as string | undefined)}
+        />
+        <SettingRow
+          title={t('systemInfo.encryptionTitle')}
+          control={<span style={{ color: '#52c41a' }}>{t('systemInfo.encryptionValue')}</span>}
         />
       </SettingsSection>
     </div>

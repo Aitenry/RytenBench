@@ -3,6 +3,7 @@ import { theme, Spin, App } from 'antd'
 import type { Editor } from '@tiptap/react'
 import { Window } from '../../../../resource/types/window'
 import { useMessage } from '@renderer/hooks/useMessage'
+import { useTranslation } from '@renderer/i18n'
 import type { DocListItem, TodoItem as TodoItemRow, WikiRow } from '@renderer/types/models'
 import WikiEditModal from '@renderer/components/wiki/WikiEditModal'
 import TodoEditModal, { type TodoFormValues } from '@renderer/components/todo/TodoEditModal'
@@ -22,6 +23,7 @@ const HomeView: React.FC = () => {
   const api = (window as unknown as Window).api
   const { viewMessage } = useMessage()
   const { modal } = App.useApp()
+  const { t } = useTranslation()
 
   /* ── 数据 ── */
   /** 全部文档（用于树内标题解析与搜索） */
@@ -163,39 +165,39 @@ const HomeView: React.FC = () => {
   const handleCreateDoc = useCallback(async (): Promise<void> => {
     const messageKey = 'home-new-doc'
     try {
-      viewMessage(messageKey, 'loading', '正在创建文档...')
+      viewMessage(messageKey, 'loading', t('home.doc.creating'))
       const docId = await api.docs.add({
-        title: '未命名文档',
+        title: t('home.doc.untitled'),
         image: null,
         summary: null,
         content: '',
         tags: null
       })
-      viewMessage(messageKey, 'success', '文档创建成功', 1)
+      viewMessage(messageKey, 'success', t('home.doc.createSuccess'), 1)
       await loadAll()
       setSelection({ kind: 'doc', docId })
       setFocusTitleDocId(docId)
     } catch (error) {
       console.error('Failed to create doc:', error)
-      viewMessage(messageKey, 'error', '创建文档失败')
+      viewMessage(messageKey, 'error', t('home.doc.createFailed'))
     }
-  }, [api, viewMessage, loadAll])
+  }, [api, viewMessage, loadAll, t])
 
   /* ── 在知识库目录中新建文档（直接打开编辑器） ── */
   const handleCreateDocInDirectory = useCallback(
     async (directoryId: number, context?: { wikiId: number; dirName: string }): Promise<void> => {
       const messageKey = 'home-new-doc-dir'
       try {
-        viewMessage(messageKey, 'loading', '正在创建文档...')
+        viewMessage(messageKey, 'loading', t('home.doc.creating'))
         const docId = await api.docs.add({
-          title: '未命名文档',
+          title: t('home.doc.untitled'),
           image: null,
           summary: null,
           content: '',
           tags: null
         })
         await api.wikis.addNoteToDirectory(directoryId, docId)
-        viewMessage(messageKey, 'success', '文档创建成功', 1)
+        viewMessage(messageKey, 'success', t('home.doc.createSuccess'), 1)
         await loadAll()
         setTreeRefreshKey((k) => k + 1)
         setSelection({
@@ -213,10 +215,10 @@ const HomeView: React.FC = () => {
         setFocusTitleDocId(docId)
       } catch (error) {
         console.error('Failed to create doc in directory:', error)
-        viewMessage(messageKey, 'error', '创建文档失败')
+        viewMessage(messageKey, 'error', t('home.doc.createFailed'))
       }
     },
-    [api, viewMessage, loadAll, wikis]
+    [api, viewMessage, loadAll, wikis, t]
   )
 
   /* ── 从本地文件导入文档到知识库目录 ── */
@@ -226,7 +228,7 @@ const HomeView: React.FC = () => {
       try {
         const imported = await api.docs.importDocument()
         if (!imported) return // 用户取消文件选择
-        viewMessage(messageKey, 'loading', '正在导入文档...')
+        viewMessage(messageKey, 'loading', t('home.doc.importing'))
         const docId = await api.docs.add({
           title: imported.title,
           image: null,
@@ -235,7 +237,7 @@ const HomeView: React.FC = () => {
           tags: null
         })
         await api.wikis.addNoteToDirectory(directoryId, docId)
-        viewMessage(messageKey, 'success', '文档导入成功', 2)
+        viewMessage(messageKey, 'success', t('home.doc.importSuccess'), 2)
         await loadAll()
         setTreeRefreshKey((k) => k + 1)
         setSelection({
@@ -252,10 +254,10 @@ const HomeView: React.FC = () => {
         })
       } catch (error) {
         console.error('Failed to import doc to directory:', error)
-        viewMessage(messageKey, 'error', '导入文档失败')
+        viewMessage(messageKey, 'error', t('home.doc.importFailed'))
       }
     },
-    [api, viewMessage, loadAll, wikis]
+    [api, viewMessage, loadAll, wikis, t]
   )
 
   /* ── 新建待办 ── */
@@ -268,7 +270,7 @@ const HomeView: React.FC = () => {
     }): Promise<void> => {
       const messageKey = 'home-new-todo'
       try {
-        viewMessage(messageKey, 'loading', '正在添加待办事项...')
+        viewMessage(messageKey, 'loading', t('home.todo.creating'))
         const todoId = await api.todoItems.add({
           ...values,
           /* 正文内容与文档同源，创建时留空，进页面后在内联编辑器里写 */
@@ -276,16 +278,16 @@ const HomeView: React.FC = () => {
           status: 0,
           due_date: values.due_date ?? null
         })
-        viewMessage(messageKey, 'success', '待办事项添加成功', 2)
+        viewMessage(messageKey, 'success', t('home.todo.createSuccess'), 2)
         setNewTodoOpen(false)
         await loadAll()
         setSelection({ kind: 'todo', todoId })
       } catch (error) {
         console.error('Failed to create todo:', error)
-        viewMessage(messageKey, 'error', '添加待办事项失败')
+        viewMessage(messageKey, 'error', t('home.todo.createFailed'))
       }
     },
-    [api, viewMessage, loadAll]
+    [api, viewMessage, loadAll, t]
   )
 
   /* ── 待办操作（都从树行「⋯」菜单发起；待办页内只留内容编辑） ── */
@@ -293,12 +295,16 @@ const HomeView: React.FC = () => {
     async (todo: TodoItemRow, status: number): Promise<void> => {
       const messageKey = 'home-todo-status'
       try {
-        viewMessage(messageKey, 'loading', '正在更新状态...')
+        viewMessage(messageKey, 'loading', t('home.todo.updatingStatus'))
         await api.todoItems.update(todo.id, { status })
         viewMessage(
           messageKey,
           'success',
-          status === 2 ? '已完成' : status === 1 ? '已标记为进行中' : '已重新激活',
+          status === 2
+            ? t('home.status.done')
+            : status === 1
+              ? t('home.todo.markedDoing')
+              : t('home.todo.reactivated'),
           2
         )
         await loadAll()
@@ -306,10 +312,10 @@ const HomeView: React.FC = () => {
         setTodoRefreshKey((key) => key + 1)
       } catch (error) {
         console.error('Failed to update todo status:', error)
-        viewMessage(messageKey, 'error', '更新状态失败')
+        viewMessage(messageKey, 'error', t('home.todo.statusUpdateFailed'))
       }
     },
-    [api, viewMessage, loadAll]
+    [api, viewMessage, loadAll, t]
   )
 
   const handleEditTodoSave = useCallback(
@@ -317,7 +323,7 @@ const HomeView: React.FC = () => {
       if (!editTodo) return
       const messageKey = 'home-edit-todo'
       try {
-        viewMessage(messageKey, 'loading', '正在保存待办...')
+        viewMessage(messageKey, 'loading', t('home.todo.saving'))
         await api.todoItems.update(editTodo.id, {
           title: values.title,
           due_date: values.due_date,
@@ -325,16 +331,16 @@ const HomeView: React.FC = () => {
           status: values.status,
           category: values.category
         })
-        viewMessage(messageKey, 'success', '待办已更新', 2)
+        viewMessage(messageKey, 'success', t('home.todo.updated'), 2)
         setEditTodo(null)
         await loadAll()
         setTodoRefreshKey((key) => key + 1)
       } catch (error) {
         console.error('Failed to update todo:', error)
-        viewMessage(messageKey, 'error', '保存待办失败')
+        viewMessage(messageKey, 'error', t('home.todo.saveFailed'))
       }
     },
-    [api, editTodo, viewMessage, loadAll]
+    [api, editTodo, viewMessage, loadAll, t]
   )
 
   /* 待办页里改标题：就地更新列表（树行 + 面包屑），不再为一次标题输入跑全量刷新 */
@@ -345,27 +351,27 @@ const HomeView: React.FC = () => {
   const handleDeleteTodo = useCallback(
     (todo: TodoItemRow): void => {
       modal.confirm({
-        title: '确定要删除这条待办吗？',
-        content: '删除后无法恢复。',
-        okText: '删除',
+        title: t('home.todo.deleteTitle'),
+        content: t('common.message.irreversible'),
+        okText: t('common.action.delete'),
         okButtonProps: { danger: true },
-        cancelText: '取消',
+        cancelText: t('common.action.cancel'),
         onOk: async () => {
           const messageKey = 'home-delete-todo'
           try {
-            viewMessage(messageKey, 'loading', '正在删除...')
+            viewMessage(messageKey, 'loading', t('common.action.deleting'))
             await api.todoItems.delete(todo.id)
-            viewMessage(messageKey, 'success', '已删除', 2)
+            viewMessage(messageKey, 'success', t('common.action.deleteSuccess'), 2)
             if (selection?.kind === 'todo' && selection.todoId === todo.id) setSelection(null)
             await loadAll()
           } catch (error) {
             console.error('Failed to delete todo:', error)
-            viewMessage(messageKey, 'error', '删除失败')
+            viewMessage(messageKey, 'error', t('common.action.deleteFailed'))
           }
         }
       })
     },
-    [api, viewMessage, loadAll, modal, selection]
+    [api, viewMessage, loadAll, modal, selection, t]
   )
 
   /* ── 新建 / 编辑知识库 ── */
@@ -378,17 +384,17 @@ const HomeView: React.FC = () => {
     }): Promise<void> => {
       const messageKey = 'home-new-wiki'
       try {
-        viewMessage(messageKey, 'loading', '正在创建知识库...')
+        viewMessage(messageKey, 'loading', t('home.wiki.creating'))
         await api.wikis.add(data)
-        viewMessage(messageKey, 'success', '知识库创建成功！', 2)
+        viewMessage(messageKey, 'success', t('home.wiki.createSuccess'), 2)
         setNewWikiOpen(false)
         await loadAll()
       } catch (error) {
         console.error('Failed to create wiki:', error)
-        viewMessage(messageKey, 'error', '创建知识库失败')
+        viewMessage(messageKey, 'error', t('home.wiki.createFailed'))
       }
     },
-    [api, viewMessage, loadAll]
+    [api, viewMessage, loadAll, t]
   )
 
   const handleEditWikiSave = useCallback(
@@ -401,35 +407,35 @@ const HomeView: React.FC = () => {
       if (!editWiki) return
       const messageKey = 'home-edit-wiki'
       try {
-        viewMessage(messageKey, 'loading', '正在保存知识库...')
+        viewMessage(messageKey, 'loading', t('home.wiki.saving'))
         await api.wikis.update(editWiki.id, data)
-        viewMessage(messageKey, 'success', '知识库已更新', 2)
+        viewMessage(messageKey, 'success', t('home.wiki.updated'), 2)
         setEditWiki(null)
         await loadAll()
         setTreeRefreshKey((k) => k + 1)
       } catch (error) {
         console.error('Failed to update wiki:', error)
-        viewMessage(messageKey, 'error', '保存知识库失败')
+        viewMessage(messageKey, 'error', t('home.wiki.saveFailed'))
       }
     },
-    [api, viewMessage, loadAll, editWiki]
+    [api, viewMessage, loadAll, editWiki, t]
   )
 
   /* 删除知识库（来自树 ⋯ 菜单） */
   const handleDeleteWiki = useCallback(
     (wiki: WikiRow): void => {
       modal.confirm({
-        title: `确定要删除知识库「${wiki.title}」吗？`,
-        content: '删除后知识库及其目录结构将被移除，目录中的文档不会被删除。',
-        okText: '删除',
+        title: t('home.wiki.deleteTitle', { name: wiki.title }),
+        content: t('home.wiki.deleteContent'),
+        okText: t('common.action.delete'),
         okButtonProps: { danger: true },
-        cancelText: '取消',
+        cancelText: t('common.action.cancel'),
         onOk: async () => {
           const messageKey = 'home-delete-wiki'
           try {
-            viewMessage(messageKey, 'loading', '正在删除知识库...')
+            viewMessage(messageKey, 'loading', t('home.wiki.deleting'))
             await api.wikis.delete(wiki.id)
-            viewMessage(messageKey, 'success', '知识库已删除', 2)
+            viewMessage(messageKey, 'success', t('home.wiki.deleted'), 2)
             /* 若正在查看该知识库的图谱视图（整库或文档子图），删除后回到仪表盘 */
             setSelection((sel) =>
               sel?.kind === 'wiki-graph' && sel.wikiId === wiki.id
@@ -442,12 +448,12 @@ const HomeView: React.FC = () => {
             setTreeRefreshKey((k) => k + 1)
           } catch (error) {
             console.error('Failed to delete wiki:', error)
-            viewMessage(messageKey, 'error', '删除知识库失败')
+            viewMessage(messageKey, 'error', t('home.wiki.deleteFailed'))
           }
         }
       })
     },
-    [api, viewMessage, loadAll, modal]
+    [api, viewMessage, loadAll, modal, t]
   )
 
   /* ── 文档保存 / 删除 / 归档 ── */
@@ -462,17 +468,17 @@ const HomeView: React.FC = () => {
   const handleDeleteDoc = useCallback(
     (doc: DocListItem): void => {
       modal.confirm({
-        title: `确定要删除文档「${doc.title}」吗？`,
-        content: '删除后无法恢复。',
-        okText: '删除',
+        title: t('home.doc.deleteTitle', { name: doc.title }),
+        content: t('common.message.irreversible'),
+        okText: t('common.action.delete'),
         okButtonProps: { danger: true },
-        cancelText: '取消',
+        cancelText: t('common.action.cancel'),
         onOk: async () => {
           const messageKey = 'home-delete-doc'
           try {
-            viewMessage(messageKey, 'loading', '正在删除文档...')
+            viewMessage(messageKey, 'loading', t('home.doc.deleting'))
             await api.docs.delete(doc.id)
-            viewMessage(messageKey, 'success', '文档已删除', 2)
+            viewMessage(messageKey, 'success', t('home.doc.deleteSuccess'), 2)
             setSelection((sel) =>
               sel?.kind === 'doc' && sel.docId === doc.id
                 ? null
@@ -484,12 +490,12 @@ const HomeView: React.FC = () => {
             setTreeRefreshKey((k) => k + 1)
           } catch (error) {
             console.error('Failed to delete doc:', error)
-            viewMessage(messageKey, 'error', '删除文档失败')
+            viewMessage(messageKey, 'error', t('home.doc.deleteFailed'))
           }
         }
       })
     },
-    [api, viewMessage, loadAll, modal]
+    [api, viewMessage, loadAll, modal, t]
   )
 
   const handleArchived = useCallback(async (): Promise<void> => {
@@ -509,37 +515,41 @@ const HomeView: React.FC = () => {
 
   /* ── 面包屑（仅展示路径，点击首页可回到仪表盘） ── */
   const breadcrumbItems = useMemo((): BreadcrumbItem[] => {
-    const items: BreadcrumbItem[] = [{ label: '首页', onClick: () => setSelection(null) }]
+    const items: BreadcrumbItem[] = [
+      { label: t('home.breadcrumb.home'), onClick: () => setSelection(null) }
+    ]
     if (!selection) return items
     if (selection.kind === 'doc') {
       const doc = allDocs.find((d) => d.id === selection.docId)
       if (selection.source) {
         const wiki = wikis.find((w) => w.id === selection.source?.wikiId)
-        items.push({ label: wiki?.title ?? '知识库' })
+        items.push({ label: wiki?.title ?? t('home.term.wiki') })
         if (selection.source.dirId != null) {
-          items.push({ label: selection.source.dirName ?? '目录' })
+          items.push({ label: selection.source.dirName ?? t('home.term.directory') })
         }
       } else {
-        items.push({ label: '文档库' })
+        items.push({ label: t('home.term.docLibrary') })
       }
-      items.push({ label: doc?.title ?? `文档 ${selection.docId}` })
+      items.push({ label: doc?.title ?? t('home.breadcrumb.docWithId', { id: selection.docId }) })
     } else if (selection.kind === 'wiki-graph') {
       const wiki = wikis.find((w) => w.id === selection.wikiId)
-      items.push({ label: wiki?.title ?? '知识库' })
-      items.push({ label: '知识图谱' })
+      items.push({ label: wiki?.title ?? t('home.term.wiki') })
+      items.push({ label: t('home.term.graph') })
     } else if (selection.kind === 'doc-graph') {
       const wiki = wikis.find((w) => w.id === selection.wikiId)
       const doc = allDocs.find((d) => d.id === selection.docId)
-      items.push({ label: wiki?.title ?? '知识库' })
-      items.push({ label: doc?.title ?? `文档 ${selection.docId}` })
-      items.push({ label: '知识图谱' })
+      items.push({ label: wiki?.title ?? t('home.term.wiki') })
+      items.push({ label: doc?.title ?? t('home.breadcrumb.docWithId', { id: selection.docId }) })
+      items.push({ label: t('home.term.graph') })
     } else {
       const todo = todos.find((t) => t.id === selection.todoId)
-      items.push({ label: '待办' })
-      items.push({ label: todo?.title ?? `待办 ${selection.todoId}` })
+      items.push({ label: t('home.term.todo') })
+      items.push({
+        label: todo?.title ?? t('home.breadcrumb.todoWithId', { id: selection.todoId })
+      })
     }
     return items
-  }, [selection, allDocs, todos, wikis])
+  }, [selection, allDocs, todos, wikis, t])
 
   /* ── 中间主区内容 ── */
   const renderCenter = (): React.ReactNode => {
@@ -598,7 +608,7 @@ const HomeView: React.FC = () => {
             }}
           >
             <span style={{ color: token.colorTextTertiary, fontSize: 13 }}>
-              知识库不存在或已被删除
+              {t('home.wiki.notFound')}
             </span>
           </div>
         )

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import type { TFunction } from 'i18next'
 import {
   theme,
   App,
@@ -15,6 +16,7 @@ import {
   Popconfirm,
   Space,
   Tooltip,
+  Radio,
   Checkbox,
   Collapse,
   type TreeDataNode
@@ -36,6 +38,7 @@ import {
   MinusSquareOutlined
 } from '@ant-design/icons'
 import { useMessage } from '@renderer/hooks/useMessage'
+import { useTranslation, Trans } from '@renderer/i18n'
 import { Window } from '../../../../resource/types/window'
 import {
   type LlmProviderConfig,
@@ -46,10 +49,16 @@ import {
 import {
   CAPABILITY_OPTIONS,
   CAPABILITY_BADGES,
-  MODEL_TYPE_LABELS,
+  CONTEXT_WINDOW_PRESETS,
+  DEFAULT_MAX_TOOL_ROUNDS,
+  MAX_OUTPUT_PRESETS,
+  SAMPLING_PARAM_SPECS,
+  THINKING_MODE_OPTIONS,
+  formatTokenCount,
   getCapabilities,
   getProviderDisplayName,
-  isEmbeddingProvider
+  isEmbeddingProvider,
+  supportsThinkingControl
 } from '@renderer/utils/providerMeta'
 import { SettingsPageHeader, SettingsSection } from './SettingsUI'
 import ProviderMark from '@renderer/components/provider/provider-mark'
@@ -75,35 +84,120 @@ const PROVIDER_TYPES = [
   { value: 'moonshot', label: 'Moonshot Kimi', baseURL: 'https://api.moonshot.cn/v1' },
   {
     value: 'zhipu',
-    label: '智谱 GLM',
+    label: 'Zhipu GLM',
     baseURL: 'https://open.bigmodel.cn/api/paas/v4'
   },
   {
     value: 'aliyun',
-    label: '阿里云百炼',
+    label: 'Alibaba Cloud Bailian',
     baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1'
   },
-  { value: 'qianfan', label: '百度千帆', baseURL: 'https://qianfan.baidubce.com/v2' },
+  { value: 'qianfan', label: 'Baidu Qianfan', baseURL: 'https://qianfan.baidubce.com/v2' },
   {
     value: 'volcengine',
-    label: '火山方舟',
+    label: 'Volcano Engine Ark',
     baseURL: 'https://ark.cn-beijing.volces.com/api/v3'
   },
   {
     value: 'tencent',
-    label: '腾讯混元',
+    label: 'Tencent Hunyuan',
     baseURL: 'https://api.hunyuan.cloud.tencent.com/v1'
   },
-  { value: 'siliconflow', label: '硅基流动', baseURL: 'https://api.siliconflow.cn/v1' },
+  { value: 'siliconflow', label: 'SiliconFlow', baseURL: 'https://api.siliconflow.cn/v1' },
   { value: 'groq', label: 'Groq', baseURL: 'https://api.groq.com/openai/v1' },
   { value: 'perplexity', label: 'Perplexity', baseURL: 'https://api.perplexity.ai' },
   { value: 'together', label: 'Together AI', baseURL: 'https://api.together.xyz/v1' },
   { value: 'lmstudio', label: 'LM Studio', baseURL: 'http://localhost:1234/v1' },
-  { value: 'custom', label: '自定义', baseURL: '' }
+  { value: 'custom', label: 'Custom', baseURL: '' }
 ]
 
 const getProviderConfig = (provider: string): (typeof PROVIDER_TYPES)[number] | undefined =>
-  PROVIDER_TYPES.find((t) => t.value === provider)
+  PROVIDER_TYPES.find((preset) => preset.value === provider)
+
+/** 供应商展示名：预设表里多数厂商本就是拉丁品牌名，只有国内厂商与「自定义」需要按语言取词条 */
+type ProviderLabelKey =
+  | 'modelSettings.provider.zhipu'
+  | 'modelSettings.provider.aliyun'
+  | 'modelSettings.provider.qianfan'
+  | 'modelSettings.provider.volcengine'
+  | 'modelSettings.provider.tencent'
+  | 'modelSettings.provider.siliconflow'
+
+const PROVIDER_LABEL_KEYS: Partial<Record<string, ProviderLabelKey>> = {
+  zhipu: 'modelSettings.provider.zhipu',
+  aliyun: 'modelSettings.provider.aliyun',
+  qianfan: 'modelSettings.provider.qianfan',
+  volcengine: 'modelSettings.provider.volcengine',
+  tencent: 'modelSettings.provider.tencent',
+  siliconflow: 'modelSettings.provider.siliconflow'
+}
+
+const getProviderLabel = (t: TFunction, providerType: string, fallback: string): string => {
+  if (providerType === 'custom') return t('common.state.custom')
+  const key = PROVIDER_LABEL_KEYS[providerType]
+  return key ? t(key) : fallback
+}
+
+/**
+ * 共享常量（providerMeta / model-params）里的标签是中文字面量，而这些模块不持有 t。
+ * 下面几张表把「数据键 → 本页词条键」的映射留在本页，由组件用 t() 求值。
+ * i18next 的键受资源类型约束，所以键要在类型上收窄成字面量；
+ * 表里未收录的取值（如档案里自定义的模型类型）由调用方回退成原始字符串。
+ */
+type ModelTypeLabelKey =
+  | 'modelSettings.modelType.textGeneration'
+  | 'modelSettings.modelType.imageGeneration'
+  | 'modelSettings.modelType.audioGeneration'
+  | 'modelSettings.modelType.videoGeneration'
+  | 'modelSettings.modelType.embedding'
+  | 'modelSettings.modelType.rerank'
+  | 'modelSettings.modelType.other'
+
+type CapabilityBadgeKey =
+  | 'modelSettings.capabilityBadge.imageInput'
+  | 'modelSettings.capabilityBadge.functionCalling'
+  | 'modelSettings.capabilityBadge.thinking'
+  | 'modelSettings.capabilityBadge.streaming'
+  | 'modelSettings.capabilityBadge.embeddings'
+
+const MODEL_TYPE_LABEL_KEYS: Partial<Record<string, ModelTypeLabelKey>> = {
+  'text-generation': 'modelSettings.modelType.textGeneration',
+  'image-generation': 'modelSettings.modelType.imageGeneration',
+  'audio-generation': 'modelSettings.modelType.audioGeneration',
+  'video-generation': 'modelSettings.modelType.videoGeneration',
+  embedding: 'modelSettings.modelType.embedding',
+  rerank: 'modelSettings.modelType.rerank',
+  other: 'modelSettings.modelType.other'
+}
+
+const CAPABILITY_BADGE_KEYS: Partial<Record<string, CapabilityBadgeKey>> = {
+  supports_image_input: 'modelSettings.capabilityBadge.imageInput',
+  supports_function_calling: 'modelSettings.capabilityBadge.functionCalling',
+  supports_thinking: 'modelSettings.capabilityBadge.thinking',
+  supports_streaming: 'modelSettings.capabilityBadge.streaming',
+  supports_embeddings: 'modelSettings.capabilityBadge.embeddings'
+}
+
+/** 思考模式（ThinkingMode）→ 本页词条键 */
+const THINKING_MODE_KEYS = {
+  auto: 'modelSettings.thinkingMode.auto',
+  on: 'modelSettings.thinkingMode.on',
+  off: 'modelSettings.thinkingMode.off'
+} as const
+
+/** 采样参数名 → 占位提示词条键 */
+const SAMPLING_PLACEHOLDER_KEYS = {
+  temperature: 'modelSettings.params.temperaturePlaceholder',
+  top_p: 'modelSettings.params.topPPlaceholder',
+  top_k: 'modelSettings.params.topKPlaceholder'
+} as const
+
+/**
+ * 等宽字体栈（与路由骨架屏/编辑器同源）。
+ * **只用于拉丁与数字**：等宽族缺中文字形时，Chromium 会回退到宋体/NSimSun 这类
+ * 等宽中文字体，和页面其它中文（系统 UI 字体）明显不是一套字，看起来就是「字体坏了」。
+ */
+const MONO_FONT = "'JetBrains Mono', 'Cascadia Code', Consolas, 'Courier New', monospace"
 
 // provider → @ant-design/icons 映射，无对应图标则为 null（降级为文字首字母）
 const providerIconMap: Record<string, React.ComponentType<{ style?: React.CSSProperties }> | null> =
@@ -133,25 +227,34 @@ const MetaSummary: React.FC<{ metadata: ModelMetadata | null; maxBadges?: number
   metadata,
   maxBadges
 }) => {
+  const { t } = useTranslation()
   const {
     token: { colorTextTertiary }
   } = theme.useToken()
   if (!metadata) {
-    return <span style={{ color: colorTextTertiary, fontSize: 12 }}>未填写</span>
+    return (
+      <span style={{ color: colorTextTertiary, fontSize: 12 }}>
+        {t('modelSettings.list.unfilled')}
+      </span>
+    )
   }
   const caps = getCapabilities(metadata)
-  const typeLabel = metadata.type ? (MODEL_TYPE_LABELS[metadata.type] ?? metadata.type) : null
+  const typeKey = metadata.type ? MODEL_TYPE_LABEL_KEYS[metadata.type] : undefined
+  const typeLabel = typeKey ? t(typeKey) : (metadata.type ?? null)
   const badges = CAPABILITY_BADGES.filter((b) => caps[b.key] === true)
   const shown = maxBadges != null && badges.length > maxBadges ? badges.slice(0, maxBadges) : badges
   const hidden = badges.length - shown.length
   return (
     <Space size={4} wrap>
       {typeLabel ? <Tag style={{ margin: 0, fontSize: 11 }}>{typeLabel}</Tag> : null}
-      {shown.map((b) => (
-        <Tag key={b.key} style={{ margin: 0, fontSize: 11 }} color="blue">
-          {b.label}
-        </Tag>
-      ))}
+      {shown.map((b) => {
+        const badgeKey = CAPABILITY_BADGE_KEYS[b.key]
+        return (
+          <Tag key={b.key} style={{ margin: 0, fontSize: 11 }} color="blue">
+            {badgeKey ? t(badgeKey) : b.key}
+          </Tag>
+        )
+      })}
       {hidden > 0 ? (
         <Tag style={{ margin: 0, fontSize: 11 }} color="blue">
           +{hidden}
@@ -161,10 +264,101 @@ const MetaSummary: React.FC<{ metadata: ModelMetadata | null; maxBadges?: number
   )
 }
 
+/* ── 弹窗表单原语 ──────────────────────────────────────────────────────────
+   编辑弹窗里原本散落着十几处「Form.Item + label + Space + 硬编码 width」的重复写法。
+   这里收敛成一套小组件：纯文本分组标签 + 参数行 + 档位胶囊，
+   所有行共用同一套排版，新增参数只需要写一行。 */
+
+const MODAL_FORM_CSS = `
+.ms-group { margin: 14px 0 4px; font-size: 13px; color: var(--ms-text); }
+.ms-group:first-child { margin-top: 0; }
+.ms-hint { font-size: 12px; color: var(--ms-tertiary); white-space: nowrap; }
+.ms-row { display: flex; align-items: center; gap: 10px; padding: 5px 0; }
+.ms-label { width: 96px; flex: none; font-size: 13.5px; color: var(--ms-secondary); }
+.ms-control { flex: 1; min-width: 0; }
+.ms-chips { display: flex; gap: 4px; flex: none; }
+/* 等宽仅用于拉丁与数字（中文落进等宽族会回退成宋体，与页面其它中文不是一套字） */
+.ms-chip { font-family: var(--ms-mono); font-size: 11.5px; line-height: 19px; padding: 0 8px; border-radius: 10px; border: 1px solid var(--ms-hairline); background: transparent; color: var(--ms-tertiary); cursor: pointer; transition: color .15s, border-color .15s, background .15s; }
+.ms-chip:hover { color: var(--ms-accent); border-color: var(--ms-accent); }
+.ms-chip[data-active='true'] { color: var(--ms-accent); border-color: var(--ms-accent); background: var(--ms-accent-soft); }
+.ms-switches { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; margin: 10px 0 2px; }
+.ms-switch { display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--ms-secondary); }
+.ms-advanced-head { display: flex; align-items: center; gap: 8px; width: 100%; }
+.ms-advanced-hint { margin-left: auto; font-family: var(--ms-mono); font-size: 11.5px; letter-spacing: .04em; text-transform: uppercase; color: var(--ms-tertiary); }
+`
+
+/**
+ * 参数分组小标题：纯文本（对齐设计稿「上下文窗口（Token）」「采样参数」的写法）。
+ * 不做圆点 + 发丝线那套装饰——分组本身不携带信息时，装饰只是噪声。
+ */
+const GroupLabel: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <div className="ms-group">{children}</div>
+)
+
+/** 参数行：标签 + 控件 +（可选）右侧胶囊/说明；控件自身用 Form.Item noStyle 绑定 */
+const ParamRow: React.FC<{
+  label: string
+  hint?: React.ReactNode
+  extra?: React.ReactNode
+  children: React.ReactNode
+}> = ({ label, hint, extra, children }) => (
+  <div className="ms-row">
+    <span className="ms-label">{label}</span>
+    <div className="ms-control">{children}</div>
+    {extra}
+    {hint ? <span className="ms-hint">{hint}</span> : null}
+  </div>
+)
+
+/** 数值档位胶囊：点一下即填入（当前值命中档位时高亮） */
+const PresetChips: React.FC<{
+  value: number | null | undefined
+  presets: readonly number[]
+  onPick: (value: number) => void
+}> = ({ value, presets, onPick }) => (
+  <div className="ms-chips">
+    {presets.map((preset) => (
+      <button
+        key={preset}
+        type="button"
+        className="ms-chip"
+        data-active={value === preset}
+        onClick={() => onPick(preset)}
+      >
+        {formatTokenCount(preset)}
+      </button>
+    ))}
+  </div>
+)
+
+/**
+ * 「支持图片输入」单选：直接读写 metadata_capabilities 数组。
+ * 面板只暴露这一个能力开关，档案里其余能力（工具调用/思考/嵌入…）原样保留，不被覆盖。
+ */
+const ImageInputRadio: React.FC<{
+  value?: string[]
+  onChange?: (value: string[]) => void
+}> = ({ value, onChange }) => {
+  const { t } = useTranslation()
+  const caps = value ?? []
+  const supported = caps.includes('supports_image_input')
+  const setSupported = (next: boolean): void => {
+    const rest = caps.filter((key) => key !== 'supports_image_input')
+    if (next) rest.push('supports_image_input')
+    onChange?.(rest)
+  }
+  return (
+    <Radio.Group value={supported} onChange={(e) => setSupported(Boolean(e.target.value))}>
+      <Radio value={true}>{t('modelSettings.form.imageInputSupported')}</Radio>
+      <Radio value={false}>{t('modelSettings.form.imageInputUnsupported')}</Radio>
+    </Radio.Group>
+  )
+}
+
 const ModelSettings: React.FC = () => {
-  const {
-    token: { colorTextSecondary, colorTextTertiary, colorSplit }
-  } = theme.useToken()
+  const { t } = useTranslation()
+  const { token } = theme.useToken()
+  const { colorTextSecondary, colorTextTertiary, colorSplit } = token
 
   const { modal } = App.useApp()
   const { viewMessage } = useMessage()
@@ -192,13 +386,70 @@ const ModelSettings: React.FC = () => {
   const [checkedKeys, setCheckedKeys] = useState<React.Key[]>([])
   const [deletingBatch, setDeletingBatch] = useState(false)
 
-  const watchedCaps: string[] = (Form.useWatch('metadata_capabilities', form) as string[]) || []
+  // 能力项来自档案自动填充与「支持图片输入」单选；用 useMemo 固定引用，避免每次渲染换新数组
+  const watchedCapsRaw = Form.useWatch('metadata_capabilities', form) as string[] | undefined
+  const watchedCaps = useMemo<string[]>(() => watchedCapsRaw ?? [], [watchedCapsRaw])
   const watchedType: string | undefined = Form.useWatch('metadata_type', form)
   const watchedProviderType: string | undefined = Form.useWatch('provider', form)
   const watchedModel: string | undefined = Form.useWatch('model', form)
+  const watchedApiFormat: string | undefined = Form.useWatch('api_format', form)
+  // 高级配置摘要与提示所需的实时值
+  const watchedContext: number | null | undefined = Form.useWatch('metadata_context_window', form)
+  const watchedMaxOutput: number | null | undefined = Form.useWatch(
+    'metadata_max_output_tokens',
+    form
+  )
+  const watchedToolRounds: number | null | undefined = Form.useWatch('max_tool_rounds', form)
+  const watchedTemperature: number | null | undefined = Form.useWatch('temperature', form)
+  const watchedTopP: number | null | undefined = Form.useWatch('top_p', form)
+  const watchedTopK: number | null | undefined = Form.useWatch('top_k', form)
+  /** 当前接口协议（含自定义端点的兼容协议）是否会被下发思考参数 */
+  const thinkingControllable = supportsThinkingControl(
+    watchedProviderType ?? '',
+    watchedApiFormat === 'anthropic'
+  )
   // 表单中是否将模型配置为嵌入模型（用于禁用“设为默认”）
   const isEmbeddingInForm =
     watchedType === 'embedding' || watchedCaps.includes('supports_embeddings')
+
+  /**
+   * 高级配置折叠标题上的一行摘要：只显示真正有值的项。
+   * 用拉丁缩写而不是中文——等宽字体族里中文会回退成宋体，跟页面其它中文不是一套字。
+   */
+  const advancedSummary = useMemo(() => {
+    const parts: string[] = []
+    if (watchedContext != null) parts.push(`in ${formatTokenCount(watchedContext)}`)
+    if (watchedMaxOutput != null) parts.push(`out ${formatTokenCount(watchedMaxOutput)}`)
+    if (watchedToolRounds != null) parts.push(`tools ${watchedToolRounds}`)
+    if (watchedTemperature != null) parts.push(`t ${watchedTemperature}`)
+    if (watchedTopP != null) parts.push(`p ${watchedTopP}`)
+    if (watchedTopK != null) parts.push(`k ${watchedTopK}`)
+    return parts.length > 0 ? parts.join(' · ') : 'defaults'
+  }, [
+    watchedContext,
+    watchedMaxOutput,
+    watchedToolRounds,
+    watchedTemperature,
+    watchedTopP,
+    watchedTopK
+  ])
+
+  /** 快捷档位：写入数值并标记「已触碰」，避免切换模型 ID 时被档案自动填充重置 */
+  const pickAdvancedNumber = (name: string, value: number): void => {
+    form.setFields([{ name, value, touched: true }])
+  }
+
+  /** 弹窗内的主题变量：表单原语共用一套色板（发丝线/等宽字/强调色） */
+  const modalVars = {
+    '--ms-accent': token.colorPrimary,
+    '--ms-accent-soft': token.colorFillQuaternary,
+    '--ms-hairline': token.colorBorderSecondary,
+    '--ms-surface': token.colorFillQuaternary,
+    '--ms-text': token.colorText,
+    '--ms-secondary': token.colorTextSecondary,
+    '--ms-tertiary': token.colorTextTertiary,
+    '--ms-mono': MONO_FONT
+  } as React.CSSProperties
 
   // 接口协议：单选 Select + 输入任意协议标识。
   // 输入内容不匹配任何预置平台时，实时注入「自定义协议」选项供提交（未知协议按 OpenAI 兼容调用）。
@@ -206,15 +457,15 @@ const ModelSettings: React.FC = () => {
   const protocolOptions = useMemo(() => {
     const raw = protocolSearch.trim()
     const search = raw.toLowerCase()
-    const presets = PROVIDER_TYPES.map((t) => ({
-      value: t.value,
-      label: `${t.label} (${t.value})`
+    const presets = PROVIDER_TYPES.map((preset) => ({
+      value: preset.value,
+      label: `${getProviderLabel(t, preset.value, preset.label)} (${preset.value})`
     }))
     const matchesPreset = presets.some((o) => o.label.toLowerCase().includes(search))
     return raw && !matchesPreset
-      ? [{ value: raw, label: `${raw}（自定义协议）` }, ...presets]
+      ? [{ value: raw, label: t('modelSettings.protocol.customOption', { name: raw }) }, ...presets]
       : presets
-  }, [protocolSearch])
+  }, [protocolSearch, t])
 
   // ── 模型档案自动填充（仅「新增」流程）：输入模型 ID 命中 models-profile 即自动补齐元数据 ──
   // 命中状态：idle 未查询 / matched 已命中 / missing 已查询未收录
@@ -235,7 +486,7 @@ const ModelSettings: React.FC = () => {
     const empty: Record<string, unknown> = {}
     for (const key of prev.keys) {
       if (form.isFieldTouched(key)) continue
-      if (key === 'name' || key === 'metadata_vendor') empty[key] = ''
+      if (key === 'name') empty[key] = ''
       else if (key === 'metadata_type') empty[key] = undefined
       else if (key === 'metadata_capabilities') empty[key] = []
       else empty[key] = null
@@ -265,9 +516,6 @@ const ModelSettings: React.FC = () => {
         }
         if (typeof profile.display_name === 'string' && profile.display_name.trim()) {
           fillIfEmpty('name', profile.display_name.trim())
-        }
-        if (typeof profile.vendor === 'string' && profile.vendor.trim()) {
-          fillIfEmpty('metadata_vendor', profile.vendor.trim())
         }
         if (typeof profile.type === 'string' && profile.type.trim()) {
           fillIfEmpty('metadata_type', profile.type.trim())
@@ -351,11 +599,15 @@ const ModelSettings: React.FC = () => {
       const result = await (window as unknown as Window).api.providers.getAll()
       setProviders(result)
     } catch (error) {
-      viewMessage(msgKey, 'error', `加载失败: ${error}`)
+      viewMessage(
+        msgKey,
+        'error',
+        t('common.message.loadFailedWithReason', { reason: String(error) })
+      )
     } finally {
       setLoading(false)
     }
-  }, [viewMessage])
+  }, [viewMessage, t])
 
   useEffect(() => {
     loadProviders().then()
@@ -368,11 +620,16 @@ const ModelSettings: React.FC = () => {
     form.resetFields()
     form.setFieldsValue({
       provider: 'deepseek',
-      temperature: 0.7,
       api_format: 'openai',
+      // 采样/思考全部留空 = 使用供应商最佳默认值；工具调用轮数给默认上限
+      temperature: null,
+      top_p: null,
+      top_k: null,
+      thinking_mode: 'auto',
+      max_tool_rounds: DEFAULT_MAX_TOOL_ROUNDS,
       metadata_capabilities: [],
       is_enabled: true,
-      sort_order: 0
+      pinned: false
     })
     setModalOpen(true)
   }
@@ -391,20 +648,23 @@ const ModelSettings: React.FC = () => {
       // 密钥永不发送到渲染进程：编辑时恒为空，留空保持原密钥，重新输入才替换
       api_key: '',
       model: record.model,
+      // 上下文窗口 → 输出：旧的独立「最大 Token」列作为回退读取，两者在保存时收敛为同一个值
+      metadata_context_window: typeof meta.context_window === 'number' ? meta.context_window : null,
+      metadata_max_output_tokens:
+        typeof meta.max_output_tokens === 'number' ? meta.max_output_tokens : record.max_tokens,
       temperature: record.temperature,
-      max_tokens: record.max_tokens,
+      top_p: record.top_p,
+      top_k: record.top_k,
+      thinking_mode: record.thinking_mode ?? 'auto',
+      max_tool_rounds: record.max_tool_rounds ?? DEFAULT_MAX_TOOL_ROUNDS,
       api_format:
         record.extra_config && typeof record.extra_config.api_format === 'string'
           ? record.extra_config.api_format
           : 'openai',
-      metadata_vendor: typeof meta.vendor === 'string' ? meta.vendor : '',
       metadata_type: typeof meta.type === 'string' ? meta.type : undefined,
       metadata_capabilities: CAPABILITY_OPTIONS.filter((o) => caps[o.key]).map((o) => o.key),
-      metadata_context_window: typeof meta.context_window === 'number' ? meta.context_window : null,
-      metadata_max_output_tokens:
-        typeof meta.max_output_tokens === 'number' ? meta.max_output_tokens : null,
       is_enabled: record.is_enabled,
-      sort_order: record.sort_order
+      pinned: record.is_pinned
     })
     setModalOpen(true)
   }
@@ -418,7 +678,10 @@ const ModelSettings: React.FC = () => {
     setProtocolSearch('')
   }
 
-  /** 由表单字段组装元数据对象：保留已有档案字段，覆盖用户编辑项；全空时返回 null */
+  /**
+   * 由表单字段组装元数据对象：保留已有档案字段，覆盖用户编辑项。
+   * 厂商 ID 不再手填——按接口协议推导（自定义端点用其自定义 ID，即 provider 值）。
+   */
   const buildMetadata = (
     values: Record<string, unknown>,
     existing: ModelMetadata | null
@@ -429,13 +692,11 @@ const ModelSettings: React.FC = () => {
         ? (existing.capabilities as Record<string, boolean>)
         : {})
     }
+    // 面板只暴露「支持图片输入」一个开关，其余能力按档案原样保留
     const selectedCaps = ((values.metadata_capabilities as string[]) ?? []).filter(Boolean)
-    for (const opt of CAPABILITY_OPTIONS) {
-      const key = opt.key as string
-      currentCaps[key] = selectedCaps.includes(key)
-    }
+    currentCaps.supports_image_input = selectedCaps.includes('supports_image_input')
 
-    const vendor = typeof values.metadata_vendor === 'string' ? values.metadata_vendor.trim() : ''
+    const vendor = typeof values.provider === 'string' ? values.provider.trim() : ''
     const type = typeof values.metadata_type === 'string' ? values.metadata_type.trim() : ''
     const ctx = values.metadata_context_window as number | null | undefined
     const maxOut = values.metadata_max_output_tokens as number | null | undefined
@@ -486,17 +747,25 @@ const ModelSettings: React.FC = () => {
           'supports_embeddings'
         )
       if (values.is_default === true && embeddingInForm) {
-        viewMessage(msgKey, 'warning', '嵌入（Embedding）模型不能设为默认聊天模型')
+        viewMessage(msgKey, 'warning', t('modelSettings.messages.embeddingNotDefaultChat'))
         return
       }
 
+      const outputTokens = values.metadata_max_output_tokens as number | null | undefined
       const input: LlmProviderInput = {
         name,
         provider: values.provider as string,
         base_url: rawBaseUrl || defaultBaseUrl,
         model: modelId,
-        temperature: values.temperature as number | undefined,
-        max_tokens: values.max_tokens as number | null | undefined,
+        // 采样/思考留空即不下发（null），由供应商走最佳默认值
+        temperature: (values.temperature as number | null | undefined) ?? null,
+        // 请求输出上限与「上下文窗口 → 输出」是同一个值：一处填写，两处同步
+        max_tokens: outputTokens != null && outputTokens > 0 ? outputTokens : null,
+        top_p: (values.top_p as number | null | undefined) ?? null,
+        top_k: (values.top_k as number | null | undefined) ?? null,
+        thinking_mode: (values.thinking_mode as LlmProviderInput['thinking_mode']) ?? 'auto',
+        max_tool_rounds:
+          (values.max_tool_rounds as number | null | undefined) ?? DEFAULT_MAX_TOOL_ROUNDS,
         // 兼容协议仅对「自定义」类型生效，存入 extra_config.api_format；其余类型保留原 extra_config
         extra_config:
           (values.provider as string) === 'custom'
@@ -510,40 +779,49 @@ const ModelSettings: React.FC = () => {
         metadata: buildMetadata(values, editingProvider?.metadata ?? null),
         is_enabled: values.is_enabled as boolean | undefined,
         is_default: values.is_default as boolean | undefined,
-        sort_order: values.sort_order as number | undefined
+        // 置顶由主进程用 SQL 取 max(sort_order)+1，前端只传开关
+        pinned: values.pinned === true
       }
 
       if (editingProvider) {
         if (values.api_key) {
           input.api_key = values.api_key as string
         }
-        viewMessage(msgKey, 'loading', '正在更新模型...')
+        viewMessage(msgKey, 'loading', t('modelSettings.messages.updating'))
         await (window as unknown as Window).api.providers.update(editingProvider.id, input)
-        viewMessage(msgKey, 'success', '模型已更新', 2)
+        viewMessage(msgKey, 'success', t('modelSettings.messages.updated'), 2)
       } else {
         input.api_key = (values.api_key as string) || null
-        viewMessage(msgKey, 'loading', '正在创建模型...')
+        viewMessage(msgKey, 'loading', t('modelSettings.messages.creating'))
         await (window as unknown as Window).api.providers.create(input)
-        viewMessage(msgKey, 'success', '模型已创建', 2)
+        viewMessage(msgKey, 'success', t('modelSettings.messages.created'), 2)
       }
 
       closeModal()
       await loadProviders()
     } catch (error) {
       if (error && typeof error === 'object' && 'errorFields' in error) return
-      viewMessage(msgKey, 'error', `操作失败: ${error}`)
+      viewMessage(
+        msgKey,
+        'error',
+        t('common.message.operationFailedWithReason', { reason: String(error) })
+      )
     }
   }
 
   const handleDelete = async (id: number): Promise<void> => {
     const msgKey = 'provider-delete'
     try {
-      viewMessage(msgKey, 'loading', '正在删除...')
+      viewMessage(msgKey, 'loading', t('common.action.deleting'))
       await (window as unknown as Window).api.providers.delete(id)
-      viewMessage(msgKey, 'success', '已删除', 2)
+      viewMessage(msgKey, 'success', t('common.action.deleteSuccess'), 2)
       await loadProviders()
     } catch (error) {
-      viewMessage(msgKey, 'error', `删除失败: ${error}`)
+      viewMessage(
+        msgKey,
+        'error',
+        t('common.message.deleteFailedWithReason', { reason: String(error) })
+      )
     }
   }
 
@@ -552,15 +830,19 @@ const ModelSettings: React.FC = () => {
     try {
       const provider = providers.find((p) => p.id === id)
       if (provider && isEmbeddingModel(provider)) {
-        viewMessage(msgKey, 'error', '向量（Embedding）模型不能设为默认聊天模型')
+        viewMessage(msgKey, 'error', t('modelSettings.messages.vectorNotDefaultChat'))
         return
       }
-      viewMessage(msgKey, 'loading', '正在设置默认模型...')
+      viewMessage(msgKey, 'loading', t('modelSettings.messages.settingDefault'))
       await (window as unknown as Window).api.providers.setDefault(id)
-      viewMessage(msgKey, 'success', '默认模型已更新', 2)
+      viewMessage(msgKey, 'success', t('modelSettings.messages.defaultUpdated'), 2)
       await loadProviders()
     } catch (error) {
-      viewMessage(msgKey, 'error', `设置失败: ${error}`)
+      viewMessage(
+        msgKey,
+        'error',
+        t('modelSettings.messages.setDefaultFailed', { reason: String(error) })
+      )
     }
   }
 
@@ -582,7 +864,11 @@ const ModelSettings: React.FC = () => {
       // 默认全选新拉取到的模型，用户可在列表中取消勾选后再一键添加
       setCheckedModels(newModels.map((m) => m.id))
     } catch (error) {
-      viewMessage('fetch-models', 'error', `拉取失败: ${error}`)
+      viewMessage(
+        'fetch-models',
+        'error',
+        t('modelSettings.messages.fetchFailed', { reason: String(error) })
+      )
     } finally {
       setFetchLoading(false)
     }
@@ -590,7 +876,7 @@ const ModelSettings: React.FC = () => {
 
   const handleProviderTypeChangeForFetch = (type: string): void => {
     setFetchProviderType(type)
-    const config = PROVIDER_TYPES.find((t) => t.value === type)
+    const config = PROVIDER_TYPES.find((preset) => preset.value === type)
     if (config?.baseURL) {
       setFetchBaseUrl(config.baseURL)
       setFetchApiKey('')
@@ -605,14 +891,14 @@ const ModelSettings: React.FC = () => {
   const handleBatchAdd = async (): Promise<void> => {
     const msgKey = 'batch-add'
     if (checkedModels.length === 0) {
-      viewMessage(msgKey, 'warning', '请至少选择一个模型')
+      viewMessage(msgKey, 'warning', t('modelSettings.messages.selectAtLeastOne'))
       return
     }
     // 自定义类型必须填写供应商 ID（全英文小写，仅可包含数字与 -）
     if (fetchProviderType === 'custom') {
       const pid = fetchCustomProviderId.trim()
       if (!/^[a-z0-9-]+$/.test(pid)) {
-        viewMessage(msgKey, 'warning', '请填写有效的供应商 ID：全英文小写，仅可包含数字与 -')
+        viewMessage(msgKey, 'warning', t('modelSettings.messages.invalidProviderId'))
         return
       }
     }
@@ -636,14 +922,21 @@ const ModelSettings: React.FC = () => {
         msgKey,
         'success',
         result.skipped > 0
-          ? `成功添加 ${result.created} 个模型（跳过 ${result.skipped} 个已存在或无效）`
-          : `成功添加 ${result.created} 个模型`,
+          ? t('modelSettings.messages.batchAddSuccessWithSkipped', {
+              count: result.created,
+              skipped: result.skipped
+            })
+          : t('modelSettings.messages.batchAddSuccess', { count: result.created }),
         3
       )
       setFetchModalOpen(false)
       await loadProviders()
     } catch (error) {
-      viewMessage(msgKey, 'error', `批量添加失败: ${error}`)
+      viewMessage(
+        msgKey,
+        'error',
+        t('modelSettings.messages.batchAddFailed', { reason: String(error) })
+      )
     } finally {
       setAddingModels(false)
     }
@@ -654,7 +947,10 @@ const ModelSettings: React.FC = () => {
   /** 分组归属：按模型供应商（接口协议）分组，如 OpenAI / DeepSeek / 智谱 GLM / 自定义 */
   const groupOf = (p: LlmProviderConfig): { key: string; label: string } => {
     const cfg = getProviderConfig(p.provider)
-    return { key: `provider:${p.provider}`, label: cfg?.label ?? p.provider }
+    return {
+      key: `provider:${p.provider}`,
+      label: cfg ? getProviderLabel(t, cfg.value, cfg.label) : p.provider
+    }
   }
 
   interface ProviderTreeNode extends TreeDataNode {
@@ -683,7 +979,7 @@ const ModelSettings: React.FC = () => {
         disableCheckbox: p.is_default
       }))
     }))
-  }, [providers])
+  }, [providers, t])
 
   /** 当前勾选中的模型 id（模型节点 key 为纯数字 id；分组节点 key 含冒号前缀） */
   const selectedIds = useMemo(
@@ -717,8 +1013,13 @@ const ModelSettings: React.FC = () => {
       return (
         <span className="inline-flex items-center" style={{ gap: 6 }}>
           <span style={{ fontWeight: 600 }}>{String(node.title)}</span>
-          <span style={{ color: colorTextTertiary, fontSize: 12, fontFamily: 'monospace' }}>
-            {count} 个模型
+          <span style={{ color: colorTextTertiary, fontSize: 12 }}>
+            {/* 数字走等宽、中文走默认 UI 字体（见文件顶部字体规则） */}
+            <Trans
+              i18nKey="modelSettings.list.groupCount"
+              count={count}
+              components={{ mono: <span style={{ fontFamily: MONO_FONT }} /> }}
+            />
           </span>
         </span>
       )
@@ -733,7 +1034,12 @@ const ModelSettings: React.FC = () => {
         <span style={{ whiteSpace: 'nowrap' }}>{getProviderDisplayName(record)}</span>
         {record.is_default && (
           <Tag color="gold" style={{ margin: 0, fontSize: 11 }}>
-            默认
+            {t('common.state.default')}
+          </Tag>
+        )}
+        {record.is_pinned && (
+          <Tag style={{ margin: 0, fontSize: 11, color: colorTextTertiary }}>
+            {t('modelSettings.list.pinned')}
           </Tag>
         )}
         {record.provider === 'custom' && (
@@ -741,7 +1047,6 @@ const ModelSettings: React.FC = () => {
             style={{
               color: colorTextTertiary,
               fontSize: 12,
-              fontFamily: 'monospace',
               whiteSpace: 'nowrap',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
@@ -749,34 +1054,41 @@ const ModelSettings: React.FC = () => {
               minWidth: 0
             }}
           >
-            {record.base_url || '（未填地址）'} (
-            {record.extra_config && record.extra_config.api_format === 'anthropic'
-              ? 'Anthropic'
-              : 'OpenAI'}
-            )
+            {record.base_url ? (
+              <span style={{ fontFamily: MONO_FONT }}>{record.base_url}</span>
+            ) : (
+              t('modelSettings.list.noBaseUrl')
+            )}{' '}
+            <span style={{ fontFamily: MONO_FONT }}>
+              (
+              {record.extra_config && record.extra_config.api_format === 'anthropic'
+                ? 'Anthropic'
+                : 'OpenAI'}
+              )
+            </span>
           </span>
         )}
         <MetaSummary metadata={record.metadata} maxBadges={2} />
         <span className="flex-1" />
         <Space size={2} onClick={(e) => e.stopPropagation()}>
           {record.is_default ? (
-            <Tooltip title="当前已是默认">
+            <Tooltip title={t('modelSettings.list.alreadyDefault')}>
               <StarFilled style={{ color: '#faad14', fontSize: 14, padding: '0 6px' }} />
             </Tooltip>
           ) : isEmbeddingModel(record) ? null : (
-            <Tooltip title="设为默认">
+            <Tooltip title={t('modelSettings.list.setDefaultTooltip')}>
               <Popconfirm
-                title="设为默认模型？"
-                description="对话框将默认选中该模型进行问答"
+                title={t('modelSettings.list.setDefaultTitle')}
+                description={t('modelSettings.list.setDefaultDescription')}
                 onConfirm={() => handleSetDefault(record.id)}
-                okText="确定"
-                cancelText="取消"
+                okText={t('common.action.confirm')}
+                cancelText={t('common.action.cancel')}
               >
                 <Button type="text" size="small" icon={<StarOutlined />} />
               </Popconfirm>
             </Tooltip>
           )}
-          <Tooltip title="编辑">
+          <Tooltip title={t('common.action.edit')}>
             <Button
               type="text"
               size="small"
@@ -785,7 +1097,7 @@ const ModelSettings: React.FC = () => {
             />
           </Tooltip>
           {!record.is_default && (
-            <Tooltip title="删除">
+            <Tooltip title={t('common.action.delete')}>
               <Button
                 type="text"
                 size="small"
@@ -793,10 +1105,12 @@ const ModelSettings: React.FC = () => {
                 icon={<DeleteOutlined />}
                 onClick={() => {
                   modal.confirm({
-                    title: '确定删除此模型？',
-                    content: `删除后「${record.name}」将不再可用，此操作不可撤销。`,
-                    okText: '删除',
-                    cancelText: '取消',
+                    title: t('modelSettings.messages.deleteConfirmTitle'),
+                    content: t('modelSettings.messages.deleteConfirmContent', {
+                      name: record.name
+                    }),
+                    okText: t('common.action.delete'),
+                    cancelText: t('common.action.cancel'),
                     okButtonProps: { danger: true },
                     onOk: () => handleDelete(record.id)
                   })
@@ -815,24 +1129,37 @@ const ModelSettings: React.FC = () => {
     if (selectedIds.length === 0) return
     const targets = providers.filter((p) => selectedIds.includes(p.id))
     const names = targets.map((p) => getProviderDisplayName(p))
+    const separator = t('modelSettings.messages.nameSeparator')
     modal.confirm({
-      title: `确定删除选中的 ${targets.length} 个模型？`,
+      title: t('modelSettings.messages.batchDeleteTitle', { count: targets.length }),
       content:
         targets.length > 3
-          ? `将删除：${names.slice(0, 3).join('、')} 等 ${targets.length} 个，此操作不可撤销。`
-          : `将删除：${names.join('、')}，此操作不可撤销。`,
-      okText: '批量删除',
-      cancelText: '取消',
+          ? t('modelSettings.messages.batchDeleteDetailMore', {
+              names: names.slice(0, 3).join(separator),
+              count: targets.length
+            })
+          : t('modelSettings.messages.batchDeleteDetail', { names: names.join(separator) }),
+      okText: t('modelSettings.actions.batchDelete'),
+      cancelText: t('common.action.cancel'),
       okButtonProps: { danger: true },
       onOk: async () => {
         setDeletingBatch(true)
         try {
           const count = await (window as unknown as Window).api.providers.deleteBatch(selectedIds)
-          viewMessage(msgKey, 'success', `已删除 ${count} 个模型`, 2)
+          viewMessage(
+            msgKey,
+            'success',
+            t('modelSettings.messages.batchDeleteSuccess', { count }),
+            2
+          )
           setCheckedKeys([])
           await loadProviders()
         } catch (error) {
-          viewMessage(msgKey, 'error', `批量删除失败: ${error}`)
+          viewMessage(
+            msgKey,
+            'error',
+            t('modelSettings.messages.batchDeleteFailed', { reason: String(error) })
+          )
         } finally {
           setDeletingBatch(false)
         }
@@ -842,19 +1169,23 @@ const ModelSettings: React.FC = () => {
 
   // 拉取列表中是否已全选（checkedModels 恒为 fetchModels 的子集，数量相等即全选）
   const fetchAllChecked = fetchModels.length > 0 && checkedModels.length === fetchModels.length
+  /** 全选/取消全选按钮的提示与 aria 文案 */
+  const fetchAllLabel = fetchAllChecked
+    ? t('modelSettings.fetch.deselectAll')
+    : t('modelSettings.fetch.selectAll')
 
   return (
     <div>
       <SettingsPageHeader
-        title="大模型供应商"
-        description="管理 AI 聊天和知识图谱使用的模型供应商配置"
+        title={t('modelSettings.pageTitle')}
+        description={t('modelSettings.pageDescription')}
         extra={
           <div className="flex items-center" style={{ gap: 8 }}>
             <Button icon={<DownloadOutlined />} onClick={() => setFetchModalOpen(true)}>
-              拉取模型
+              {t('modelSettings.actions.fetchModels')}
             </Button>
             <Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>
-              添加模型
+              {t('modelSettings.actions.addModel')}
             </Button>
           </div>
         }
@@ -866,13 +1197,21 @@ const ModelSettings: React.FC = () => {
           className="flex items-center justify-between px-4 py-2"
           style={{ borderBottom: `1px solid ${colorSplit}` }}
         >
-          <span style={{ color: colorTextSecondary, fontSize: 12, fontFamily: 'monospace' }}>
-            共 {providers.length} 个模型
+          <span style={{ color: colorTextSecondary, fontSize: 12 }}>
+            <Trans
+              i18nKey="modelSettings.list.total"
+              count={providers.length}
+              components={{ mono: <span style={{ fontFamily: MONO_FONT }} /> }}
+            />
           </span>
           {selectedIds.length > 0 && (
             <Space size={8}>
-              <span style={{ color: colorTextSecondary, fontSize: 12, fontFamily: 'monospace' }}>
-                已选 {selectedIds.length} 个
+              <span style={{ color: colorTextSecondary, fontSize: 12 }}>
+                <Trans
+                  i18nKey="modelSettings.list.selected"
+                  count={selectedIds.length}
+                  components={{ mono: <span style={{ fontFamily: MONO_FONT }} /> }}
+                />
               </span>
               <Button
                 danger
@@ -881,10 +1220,10 @@ const ModelSettings: React.FC = () => {
                 loading={deletingBatch}
                 onClick={handleBatchDelete}
               >
-                批量删除
+                {t('modelSettings.actions.batchDelete')}
               </Button>
               <Button type="text" size="small" onClick={() => setCheckedKeys([])}>
-                取消选择
+                {t('modelSettings.actions.clearSelection')}
               </Button>
             </Space>
           )}
@@ -892,7 +1231,7 @@ const ModelSettings: React.FC = () => {
         <Spin spinning={loading}>
           {providers.length === 0 ? (
             <div className="py-12 text-center" style={{ color: colorTextSecondary }}>
-              暂无模型，点击右上角按钮添加
+              {t('modelSettings.empty.noModels')}
             </div>
           ) : (
             <Tree
@@ -914,41 +1253,56 @@ const ModelSettings: React.FC = () => {
       </SettingsSection>
 
       <Modal
-        title={editingProvider ? `编辑模型 — ${getProviderDisplayName(editingProvider)}` : '添加模型'}
+        title={
+          editingProvider
+            ? t('modelSettings.form.editTitle', { name: getProviderDisplayName(editingProvider) })
+            : t('modelSettings.actions.addModel')
+        }
         open={modalOpen}
         onCancel={closeModal}
         onOk={handleSubmit}
-        okText="保存"
-        cancelText="取消"
-        width={520}
-        styles={{ body: { maxHeight: 560, padding: 12, overflowY: 'auto' } }}
+        okText={t('common.action.save')}
+        cancelText={t('common.action.cancel')}
+        width={560}
+        styles={{ body: { maxHeight: 560, padding: 16, overflowY: 'auto' } }}
         classNames={{ body: 'custom-scrollbar' }}
       >
         <Form
           form={form}
           layout="vertical"
-          className="mt-4"
+          style={modalVars}
           initialValues={{
             provider: 'deepseek',
-            temperature: 0.7,
             api_format: 'openai',
+            temperature: null,
+            top_p: null,
+            top_k: null,
+            thinking_mode: 'auto',
+            max_tool_rounds: DEFAULT_MAX_TOOL_ROUNDS,
             metadata_capabilities: [],
             is_enabled: true,
-            sort_order: 0
+            pinned: false
           }}
           onValuesChange={handleFormValuesChange}
         >
-          {/* ── 基础连接：只保留每次真正要填的项；模型档案与参数收进下方折叠区 ── */}
+          <style>{MODAL_FORM_CSS}</style>
+
+          {/* ── 连接：每次真正要填的项 ── */}
           <Form.Item
             name="provider"
-            label="接口协议"
-            rules={[{ required: true, message: '请输入接口协议' }]}
-            tooltip="可下拉选择常用平台，也可输入任意协议标识（如 openai、zhipu、xproxy）后从「自定义协议」项提交；未知协议按 OpenAI 兼容方式调用"
+            label={t('modelSettings.form.protocol')}
+            rules={[{ required: true, message: t('modelSettings.form.protocolRequired') }]}
+            tooltip={
+              editingProvider
+                ? t('modelSettings.form.protocolTooltipEditing')
+                : t('modelSettings.form.protocolTooltip')
+            }
           >
             <Select
               showSearch
               allowClear
-              placeholder="选择或输入接口协议"
+              disabled={Boolean(editingProvider)}
+              placeholder={t('modelSettings.form.protocolPlaceholder')}
               optionFilterProp="label"
               options={protocolOptions}
               onChange={handleProviderTypeChange}
@@ -957,215 +1311,256 @@ const ModelSettings: React.FC = () => {
           </Form.Item>
 
           {watchedProviderType === 'custom' && (
-            <Space size="middle" className="w-full">
+            <>
               <Form.Item
                 name="base_url"
-                label="API 地址"
-                style={{ width: 270 }}
-                tooltip="自定义服务商必须填写 OpenAI 兼容或 Anthropic 兼容的 API 端点"
+                label={t('modelSettings.form.baseUrl')}
+                tooltip={t('modelSettings.form.baseUrlTooltip')}
               >
                 <Input placeholder="https://api.example.com/v1" allowClear />
               </Form.Item>
               <Form.Item
                 name="api_format"
-                label="兼容协议"
-                style={{ width: 180 }}
-                tooltip="自定义端点的调用协议：OpenAI 兼容或 Anthropic 兼容"
+                label={t('modelSettings.form.apiFormat')}
+                tooltip={t('modelSettings.form.apiFormatTooltip')}
               >
                 <Select
                   options={[
-                    { value: 'openai', label: 'OpenAI 兼容' },
-                    { value: 'anthropic', label: 'Anthropic 兼容' }
+                    { value: 'openai', label: t('modelSettings.form.apiFormatOpenAI') },
+                    { value: 'anthropic', label: t('modelSettings.form.apiFormatAnthropic') }
                   ]}
                 />
               </Form.Item>
-            </Space>
+            </>
           )}
 
+          {/* ── 模型：ID / API Key / 名称（模型 ID 在编辑态锁定，厂商按接口协议推导） ── */}
           <Form.Item
-            name="api_key"
-            label="API Key"
-            rules={editingProvider ? undefined : [{ required: true, message: '请输入 API Key' }]}
-            tooltip={editingProvider ? '留空则保持原有密钥不变' : '密钥将使用本机唯一私钥加密存储'}
+            name="model"
+            label={t('modelSettings.form.modelId')}
+            rules={[
+              {
+                required: true,
+                whitespace: true,
+                message: t('modelSettings.form.modelIdRequired')
+              }
+            ]}
+            tooltip={
+              editingProvider
+                ? t('modelSettings.form.modelIdTooltipEditing')
+                : t('modelSettings.form.modelIdTooltip')
+            }
           >
-            <Input.Password
-              placeholder={editingProvider ? '留空保持原密钥' : 'sk-xxxxxxxx'}
+            <Input
+              disabled={Boolean(editingProvider)}
+              placeholder={t('modelSettings.form.modelIdPlaceholder')}
               allowClear
             />
           </Form.Item>
 
           <Form.Item
-            name="model"
-            label="模型ID"
-            rules={[{ required: true, whitespace: true, message: '请输入模型ID' }]}
-            tooltip="必填。输入后自动匹配 models-profile 官方档案，命中则自动填充下方「模型档案」（未收录的模型可自行补充）"
+            name="api_key"
+            label={t('modelSettings.form.apiKey')}
+            rules={
+              editingProvider
+                ? undefined
+                : [{ required: true, message: t('modelSettings.form.apiKeyRequired') }]
+            }
+            tooltip={
+              editingProvider
+                ? t('modelSettings.form.apiKeyTooltipEditing')
+                : t('modelSettings.form.apiKeyTooltip')
+            }
           >
-            <Input placeholder="例如：gpt-4o、deepseek-v4-flash、llama3.1" allowClear />
+            <Input.Password
+              placeholder={
+                editingProvider ? t('modelSettings.form.apiKeyPlaceholderEditing') : 'sk-xxxxxxxx'
+              }
+              allowClear
+            />
           </Form.Item>
 
           <Form.Item
             name="name"
-            label="名称"
-            tooltip="目录与选择器中展示的名称；留空默认使用模型 ID。官方档案收录的模型会自动填入官方名称，可修改"
+            label={t('modelSettings.form.name')}
+            tooltip={t('modelSettings.form.nameTooltip')}
           >
-            <Input placeholder="留空默认使用模型 ID" allowClear />
+            <Input placeholder={t('modelSettings.form.namePlaceholder')} allowClear />
           </Form.Item>
 
-          {!editingProvider && !providers.some((p) => p.is_default) && (
-            <Form.Item
-              name="is_default"
-              label="设为默认"
-              valuePropName="checked"
-              tooltip={
-                isEmbeddingInForm
-                  ? '嵌入（Embedding）模型不能设为默认聊天模型'
-                  : '当前还没有默认模型，勾选后新模型即默认聊天模型'
-              }
-            >
-              <Switch disabled={isEmbeddingInForm} />
-            </Form.Item>
+          {/* 模型类型由档案自动填充并保留（面板不暴露，避免与能力重复） */}
+          <Form.Item name="metadata_type" hidden>
+            <Input />
+          </Form.Item>
+
+          {profileStatus === 'missing' && !editingProvider && Boolean(watchedModel?.trim()) && (
+            <div style={{ color: colorTextTertiary, fontSize: 12, marginTop: 8, lineHeight: 1.6 }}>
+              {t('modelSettings.form.profileMissing', { model: String(watchedModel).trim() })}
+            </div>
           )}
 
+          {/* ── 唯一的高级配置：对齐设计稿（上下文窗口 / 工具调用轮数 / 图片输入 / 思考模式 / 采样参数） ── */}
           <Collapse
             size="small"
-            className="mt-2"
-            defaultActiveKey={[]}
+            className="mt-4"
+            defaultActiveKey={['advanced']}
             items={[
               {
-                key: 'archive',
+                key: 'advanced',
                 forceRender: true,
                 label: (
-                  <span className="inline-flex items-center" style={{ gap: 6 }}>
-                    <span>模型档案</span>
-                    {profileStatus === 'matched' && (
-                      <Tag style={{ margin: 0, fontSize: 11 }} color="blue">
-                        已自动填充官方档案
-                      </Tag>
-                    )}
+                  <span className="ms-advanced-head">
+                    <span>{t('modelSettings.form.advanced')}</span>
+                    <span className="ms-advanced-hint">{advancedSummary}</span>
                   </span>
                 ),
                 children: (
                   <div>
-                    {profileStatus === 'matched' && (
-                      <div style={{ color: colorTextTertiary, fontSize: 12, marginBottom: 8 }}>
-                        已匹配 models-profile 官方档案并填充，可按需修改
-                      </div>
-                    )}
-                    {profileStatus === 'missing' &&
-                      !editingProvider &&
-                      Boolean(watchedModel?.trim()) && (
-                        <div style={{ color: colorTextTertiary, fontSize: 12, marginBottom: 8 }}>
-                          models-profile 未收录「{String(watchedModel).trim()}」，可手动补充；能力用于工具调用
-                          / 视觉等判断与嵌入模型识别
-                        </div>
-                      )}
-                    <Space size="middle" className="w-full">
-                      <Form.Item name="metadata_vendor" label="厂商" style={{ width: 200 }}>
-                        <Input placeholder="例如：OpenAI" allowClear />
+                    <GroupLabel>{t('modelSettings.form.contextWindow')}</GroupLabel>
+                    <ParamRow
+                      label={t('modelSettings.form.input')}
+                      extra={
+                        <PresetChips
+                          value={watchedContext}
+                          presets={CONTEXT_WINDOW_PRESETS}
+                          onPick={(value) => pickAdvancedNumber('metadata_context_window', value)}
+                        />
+                      }
+                    >
+                      <Form.Item name="metadata_context_window" noStyle>
+                        <InputNumber
+                          min={1000}
+                          step={1000}
+                          style={{ width: '100%' }}
+                          placeholder={t('modelSettings.form.numberPlaceholder')}
+                        />
                       </Form.Item>
-                      <Form.Item name="metadata_type" label="模型类型" style={{ width: 200 }}>
-                        <Select
-                          allowClear
-                          placeholder="选择类型"
-                          options={Object.entries(MODEL_TYPE_LABELS).map(([value, label]) => ({
-                            value,
-                            label
+                    </ParamRow>
+                    <ParamRow
+                      label={t('modelSettings.form.output')}
+                      extra={
+                        <PresetChips
+                          value={watchedMaxOutput}
+                          presets={MAX_OUTPUT_PRESETS}
+                          onPick={(value) =>
+                            pickAdvancedNumber('metadata_max_output_tokens', value)
+                          }
+                        />
+                      }
+                    >
+                      <Form.Item name="metadata_max_output_tokens" noStyle>
+                        <InputNumber
+                          min={1}
+                          step={100}
+                          style={{ width: '100%' }}
+                          placeholder={t('modelSettings.form.numberPlaceholder')}
+                        />
+                      </Form.Item>
+                    </ParamRow>
+
+                    <ParamRow
+                      label={t('modelSettings.form.maxToolRounds')}
+                      hint={t('modelSettings.form.maxToolRoundsHint')}
+                    >
+                      <Form.Item name="max_tool_rounds" noStyle>
+                        <InputNumber
+                          min={1}
+                          max={5000}
+                          step={10}
+                          style={{ width: '100%' }}
+                          placeholder={t('modelSettings.form.maxToolRoundsPlaceholder', {
+                            value: DEFAULT_MAX_TOOL_ROUNDS
+                          })}
+                        />
+                      </Form.Item>
+                    </ParamRow>
+
+                    <ParamRow label={t('modelSettings.form.imageInput')}>
+                      <Form.Item name="metadata_capabilities" noStyle>
+                        <ImageInputRadio />
+                      </Form.Item>
+                    </ParamRow>
+
+                    <ParamRow
+                      label={t('modelSettings.form.thinkingMode')}
+                      hint={
+                        thinkingControllable ? undefined : t('modelSettings.form.thinkingModeHint')
+                      }
+                    >
+                      <Form.Item name="thinking_mode" noStyle>
+                        <Radio.Group
+                          options={THINKING_MODE_OPTIONS.map((option) => ({
+                            value: option.value,
+                            label: t(THINKING_MODE_KEYS[option.value])
                           }))}
                         />
                       </Form.Item>
-                    </Space>
-                    <Space size="middle" className="w-full">
-                      <Form.Item
-                        name="metadata_context_window"
-                        label="上下文 (tokens)"
-                        style={{ width: 200 }}
-                        tooltip="档案展示用：模型最大上下文窗口"
-                      >
-                        <InputNumber
-                          min={0}
-                          step={1000}
-                          style={{ width: '100%' }}
-                          placeholder="未知"
-                        />
-                      </Form.Item>
-                      <Form.Item
-                        name="metadata_max_output_tokens"
-                        label="最大输出 (tokens)"
-                        style={{ width: 200 }}
-                        tooltip="档案展示用：模型单次最大输出能力；与「高级参数」里的最大 Token（请求上限）是不同维度"
-                      >
-                        <InputNumber min={1} style={{ width: '100%' }} placeholder="未知" />
-                      </Form.Item>
-                    </Space>
-                    <Form.Item
-                      name="metadata_capabilities"
-                      label="能力"
-                      tooltip="来自 models-profile 档案；未收录的模型可自行勾选。标记「嵌入能力」的模型不能设为默认聊天模型"
-                    >
-                      <Select
-                        mode="multiple"
-                        placeholder="选择模型能力"
-                        options={CAPABILITY_OPTIONS.map((o) => ({ value: o.key, label: o.label }))}
-                        optionFilterProp="label"
-                      />
-                    </Form.Item>
-                  </div>
-                )
-              },
-              {
-                key: 'advanced',
-                forceRender: true,
-                label: '高级参数',
-                children: (
-                  <div>
-                    <Space size="middle" className="w-full">
-                      <Form.Item name="temperature" label="温度" style={{ width: 140 }}>
-                        <InputNumber min={0} max={2} step={0.1} style={{ width: '100%' }} />
-                      </Form.Item>
-                      <Form.Item
-                        name="max_tokens"
-                        label="最大 Token"
-                        style={{ width: 180 }}
-                        tooltip="单次请求的生成上限（不含思考过程），留空不限制"
-                      >
-                        <InputNumber min={1} placeholder="不限制" style={{ width: '100%' }} />
-                      </Form.Item>
-                    </Space>
-                    <Space size="middle" className="w-full" align="start">
-                      <Form.Item
-                        name="sort_order"
-                        label="排序"
-                        style={{ width: 140 }}
-                        tooltip="目录中数值越小越靠前"
-                      >
-                        <InputNumber min={0} style={{ width: '100%' }} />
-                      </Form.Item>
-                      <Form.Item
-                        name="is_enabled"
-                        label="启用"
-                        valuePropName="checked"
-                        tooltip="关闭后该模型不会出现在可选列表中"
-                        style={{ width: 200, marginBottom: 0 }}
-                      >
-                        <Switch />
-                      </Form.Item>
-                    </Space>
+                    </ParamRow>
+
+                    <GroupLabel>{t('modelSettings.form.samplingParams')}</GroupLabel>
+                    {SAMPLING_PARAM_SPECS.map((spec) => (
+                      <ParamRow key={spec.name} label={spec.label}>
+                        <Form.Item name={spec.name} noStyle>
+                          <InputNumber
+                            min={spec.min}
+                            max={spec.max}
+                            step={spec.step}
+                            style={{ width: '100%' }}
+                            placeholder={t(SAMPLING_PLACEHOLDER_KEYS[spec.name])}
+                          />
+                        </Form.Item>
+                      </ParamRow>
+                    ))}
                   </div>
                 )
               }
             ]}
           />
+
+          {/* ── 状态开关：置于高级配置之下 ── */}
+          <div className="ms-switches">
+            <span className="ms-switch">
+              {t('modelSettings.form.enabled')}
+              <Form.Item name="is_enabled" valuePropName="checked" noStyle>
+                <Switch size="small" />
+              </Form.Item>
+            </span>
+            {!editingProvider && !providers.some((p) => p.is_default) && (
+              <Tooltip
+                title={
+                  isEmbeddingInForm
+                    ? t('modelSettings.messages.embeddingNotDefaultChat')
+                    : t('modelSettings.form.setDefaultTooltipNoDefault')
+                }
+              >
+                <span className="ms-switch">
+                  {t('modelSettings.form.setDefault')}
+                  <Form.Item name="is_default" valuePropName="checked" noStyle>
+                    <Switch size="small" disabled={isEmbeddingInForm} />
+                  </Form.Item>
+                </span>
+              </Tooltip>
+            )}
+            <Tooltip title={t('modelSettings.form.pinnedTooltip')}>
+              <span className="ms-switch">
+                {t('modelSettings.form.pinned')}
+                <Form.Item name="pinned" valuePropName="checked" noStyle>
+                  <Switch size="small" />
+                </Form.Item>
+              </span>
+            </Tooltip>
+          </div>
         </Form>
       </Modal>
 
       {/* 拉取模型模态框 */}
       <Modal
-        title="拉取模型列表"
+        title={t('modelSettings.fetch.title')}
         open={fetchModalOpen}
         onCancel={() => setFetchModalOpen(false)}
         footer={[
           <Button key="cancel" onClick={() => setFetchModalOpen(false)}>
-            取消
+            {t('common.action.cancel')}
           </Button>,
           <Button
             key="add"
@@ -1174,7 +1569,7 @@ const ModelSettings: React.FC = () => {
             disabled={checkedModels.length === 0}
             onClick={handleBatchAdd}
           >
-            一键添加 ({checkedModels.length})
+            {t('modelSettings.fetch.addSelected', { count: checkedModels.length })}
           </Button>
         ]}
         width={520}
@@ -1186,15 +1581,20 @@ const ModelSettings: React.FC = () => {
           <div className="flex w-full" style={{ gap: 8 }}>
             <Select
               value={fetchProviderType}
-              options={PROVIDER_TYPES}
+              options={PROVIDER_TYPES.map((preset) => ({
+                value: preset.value,
+                label: getProviderLabel(t, preset.value, preset.label)
+              }))}
               onChange={handleProviderTypeChangeForFetch}
               style={{ flex: '1 1 0%', minWidth: 80 }}
-              placeholder="选择供应商类型"
+              placeholder={t('modelSettings.fetch.providerTypePlaceholder')}
             />
             {(fetchProviderType === 'custom' || fetchProviderType === 'ollama') && (
               <Input
                 placeholder={
-                  fetchProviderType === 'custom' ? '自定义 API 地址（必填）' : 'Ollama API 地址'
+                  fetchProviderType === 'custom'
+                    ? t('modelSettings.fetch.customBaseUrlPlaceholder')
+                    : t('modelSettings.fetch.ollamaBaseUrlPlaceholder')
                 }
                 value={fetchBaseUrl}
                 onChange={(e) => setFetchBaseUrl(e.target.value)}
@@ -1205,7 +1605,7 @@ const ModelSettings: React.FC = () => {
           </div>
           {fetchProviderType !== 'ollama' && (
             <Input.Password
-              placeholder="API Key"
+              placeholder={t('modelSettings.form.apiKey')}
               value={fetchApiKey}
               onChange={(e) => setFetchApiKey(e.target.value)}
               allowClear
@@ -1214,7 +1614,7 @@ const ModelSettings: React.FC = () => {
           {fetchProviderType === 'custom' && (
             <>
               <Input
-                placeholder="供应商 ID（必填，如 opencode）"
+                placeholder={t('modelSettings.fetch.customProviderIdPlaceholder')}
                 value={fetchCustomProviderId}
                 onChange={(e) => setFetchCustomProviderId(e.target.value.toLowerCase())}
                 status={
@@ -1225,8 +1625,7 @@ const ModelSettings: React.FC = () => {
                 allowClear
               />
               <div style={{ color: colorTextSecondary, fontSize: 12 }}>
-                供应商 ID 全英文小写，仅可包含数字与 - ｜ 列表拉取仅支持 OpenAI 兼容端点（GET
-                /v1/models）
+                {t('modelSettings.fetch.customProviderIdHint')}
               </div>
             </>
           )}
@@ -1238,20 +1637,20 @@ const ModelSettings: React.FC = () => {
             onClick={handleFetchModels}
             block
           >
-            获取模型列表
+            {t('modelSettings.fetch.fetchList')}
           </Button>
 
           {fetchModels.length > 0 && (
             <div>
               <div className="flex items-center justify-between mb-2">
                 <span style={{ color: colorTextSecondary, fontSize: 13 }}>
-                  共 {fetchModels.length} 个模型
+                  {t('modelSettings.fetch.total', { count: fetchModels.length })}
                 </span>
-                <Tooltip title={fetchAllChecked ? '不全选' : '全选'}>
+                <Tooltip title={fetchAllLabel}>
                   <Button
                     type="text"
                     size="small"
-                    aria-label={fetchAllChecked ? '不全选' : '全选'}
+                    aria-label={fetchAllLabel}
                     icon={fetchAllChecked ? <MinusSquareOutlined /> : <CheckSquareOutlined />}
                     onClick={() =>
                       setCheckedModels(fetchAllChecked ? [] : fetchModels.map((m) => m.id))
@@ -1293,7 +1692,7 @@ const ModelSettings: React.FC = () => {
                           <MetaSummary metadata={m.metadata} />
                         ) : (
                           <span style={{ color: colorTextSecondary, fontSize: 12 }}>
-                            暂无元数据（添加后可编辑填写）
+                            {t('modelSettings.fetch.noMetadata')}
                           </span>
                         )}
                       </span>
@@ -1306,7 +1705,7 @@ const ModelSettings: React.FC = () => {
 
           {!fetchLoading && fetchModels.length === 0 && (
             <div className="text-center py-6" style={{ color: colorTextSecondary }}>
-              暂无新模型（已存在的模型自动跳过）
+              {t('modelSettings.fetch.empty')}
             </div>
           )}
         </Space>

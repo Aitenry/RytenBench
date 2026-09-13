@@ -3,6 +3,7 @@ import { join } from 'path'
 import * as fs from 'fs'
 import logger from 'electron-log'
 import mermaidPreviewHtmlPath from '../resource/mermaid-preview.html?asset'
+import { mainMessages } from '../i18n'
 
 let mermaidPreviewWin: BrowserWindow | null = null
 let cachedHtml: string | null = null
@@ -40,7 +41,7 @@ export function registerMermaidPreviewIpc(): void {
       frame: false,
       transparent: true,
       backgroundColor: '#00000000',
-      title: 'Mermaid 预览',
+      title: mainMessages().window.mermaidPreview,
       autoHideMenuBar: true,
       webPreferences: {
         preload: join(__dirname, '../preload/index.js'),

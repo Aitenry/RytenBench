@@ -1,6 +1,7 @@
 import React from 'react'
 import { Modal, Divider, theme } from 'antd'
 import dayjs from 'dayjs'
+import { useTranslation } from '@renderer/i18n'
 import type { TodoItem } from '@renderer/types/models'
 
 /* ──────────── Types ──────────── */
@@ -24,20 +25,28 @@ const PRIORITY_COLORS: Record<number, string> = {
   7: '#722ed1'
 }
 
-const STATUS_MAP: Record<number, { label: string; color: string }> = {
-  0: { label: '待办', color: '#1677ff' },
-  1: { label: '进行中', color: '#fa8c16' },
-  2: { label: '已完成', color: '#52c41a' }
+/** 状态 → 词条键 / 配色（词条键在组件内 t() 求值，模块级常量表不调 hook） */
+type TodoStatusKey =
+  'home.status.pending' | 'home.status.doing' | 'home.status.done' | 'common.state.unknown'
+
+const STATUS_MAP: Record<number, { labelKey: TodoStatusKey; color: string }> = {
+  0: { labelKey: 'home.status.pending', color: '#1677ff' },
+  1: { labelKey: 'home.status.doing', color: '#fa8c16' },
+  2: { labelKey: 'home.status.done', color: '#52c41a' }
 }
 
 /* ──────────── Component ──────────── */
 
 const TodoPreviewModal: React.FC<TodoPreviewModalProps> = ({ open, todo, onClose }) => {
   const { token } = theme.useToken()
+  const { t } = useTranslation()
 
   if (!todo) return null
 
-  const status = STATUS_MAP[todo.status ?? 0] ?? { label: '未知', color: token.colorTextTertiary }
+  const status: { labelKey: TodoStatusKey; color: string } = STATUS_MAP[todo.status ?? 0] ?? {
+    labelKey: 'common.state.unknown',
+    color: token.colorTextTertiary
+  }
   const priorityColor = PRIORITY_COLORS[todo.priority ?? 0] ?? token.colorTextTertiary
 
   const dot = (color: string): React.ReactNode => (
@@ -82,11 +91,11 @@ const TodoPreviewModal: React.FC<TodoPreviewModalProps> = ({ open, todo, onClose
       >
         <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           {dot(priorityColor)}
-          优先级 P{todo.priority}
+          {t('home.todo.priority', { level: todo.priority })}
         </span>
         <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           {dot(status.color)}
-          {status.label}
+          {t(status.labelKey)}
         </span>
         {todo.category && (
           <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -108,31 +117,31 @@ const TodoPreviewModal: React.FC<TodoPreviewModalProps> = ({ open, todo, onClose
       >
         <MetaItem
           token={token}
-          label="截止日期"
-          value={todo.due_date ? dayjs(todo.due_date).format('YYYY-MM-DD') : '无'}
+          label={t('home.field.dueDate')}
+          value={todo.due_date ? dayjs(todo.due_date).format('YYYY-MM-DD') : t('common.state.none')}
         />
         {todo.started_at && (
           <MetaItem
             token={token}
-            label="开始时间"
+            label={t('home.field.startTime')}
             value={dayjs(todo.started_at).format('YYYY-MM-DD HH:mm')}
           />
         )}
         {todo.completed_at && (
           <MetaItem
             token={token}
-            label="完成时间"
+            label={t('home.field.completedTime')}
             value={dayjs(todo.completed_at).format('YYYY-MM-DD HH:mm')}
           />
         )}
         <MetaItem
           token={token}
-          label="创建时间"
+          label={t('home.field.createdTime')}
           value={dayjs(todo.created_at).format('YYYY-MM-DD HH:mm')}
         />
         <MetaItem
           token={token}
-          label="更新时间"
+          label={t('home.field.updatedTime')}
           value={dayjs(todo.updated_at).format('YYYY-MM-DD HH:mm')}
         />
       </div>

@@ -23,6 +23,8 @@ import {
 // 流式记录转换独立模块（可被测试脚本直接验证）：此处导入并兼容性重导出
 import { pushMessageRecords, pushRecord, type StreamMessageLike } from './stream-records'
 import { extractUsageMetadata, type ModelUsageRecord } from './usage'
+import { mainFormat } from '../../i18n'
+import { getAgentToolTexts } from '../../i18n/tool-results-agent'
 
 export { pushMessageRecords, pushRecord }
 
@@ -81,6 +83,8 @@ export interface BuildGraphOptions {
   spill?: SpillStore
   /** 用量采集：每次模型调用成功后就地推入一条真实 usage_metadata（未回传则不推） */
   usageSink?: { push(record: ModelUsageRecord): void }
+  /** 工具调用总次数上限（模型级「工具调用轮数」；缺省用工程默认值 MAX_TOOL_CALLS） */
+  maxToolCalls?: number
 }
 
 /** 安全绑定工具：不支持工具调用的模型退化为纯对话（组件降级而非报错） */
@@ -96,16 +100,16 @@ function bindToolsSafely(model: BaseChatModel, tools: StructuredToolInterface[])
 }
 
 /**
- * 工程内部工具调用总次数护栏（不暴露为设置项）：
- * 工具调用次数不设用户可见上限（体验上「无限」），由本护栏 + 防循环护栏兜底，
- * 用户可随时通过「停止」按钮终止。200 次 ≈ 100+ 轮模型往返，正常任务远达不到，
- * 仅拦截真正失控的循环（如换着参数反复调用）；接近上限时先温和引导收尾，避免
- * 合法长任务被生硬截断。
+ * 工程内部工具调用总次数护栏的默认值（模型「高级配置 → 工具调用轮数」可覆盖）：
+ * 用户可随时通过「停止」按钮终止；接近上限时先温和引导收尾，避免合法长任务被生硬截断。
  */
 export const MAX_TOOL_CALLS = 200
 
-/** 渐进提醒阈值：累计调用达到该次数时引导模型收尾一次（不拦截，仅提示一次） */
-export const SOFT_TOOL_CALL_WARN = 150
+/** 兜底下限：模型设置里填了过小的值也不至于一步都跑不完 */
+export const MIN_TOOL_CALLS = 10
+
+/** 渐进提醒阈值：累计调用达到上限的 75% 时引导模型收尾一次（不拦截，仅提示一次） */
+export const SOFT_TOOL_CALL_WARN_RATIO = 0.75
 
 /** 工具调用去重键：名称 + 规范化参数（用于防循环护栏） */
 function toolCallKey(name: string, args: unknown): string {
@@ -130,16 +134,20 @@ function createToolRunner(
   tools: StructuredToolInterface[],
   queue?: QueueRef,
   subagentCtx?: SubAgentToolContext,
-  spill?: SpillStore
+  spill?: SpillStore,
+  /** 工具调用总次数上限（模型级「工具调用轮数」，缺省用工程默认值） */
+  maxToolCalls: number = MAX_TOOL_CALLS
 ) {
   const toolsByName = new Map(tools.map((t) => [t.name, t]))
+  const callLimit = Math.max(MIN_TOOL_CALLS, Math.floor(maxToolCalls))
+  const softWarnAt = Math.max(1, Math.floor(callLimit * SOFT_TOOL_CALL_WARN_RATIO))
 
   // 防循环护栏状态（每次图执行为一个实例，无跨请求泄漏）：
   // - 同一 (工具, 参数) 累计调用 >= 3 次，或连续重复 >= 2 次 → 拦截并提示模型收尾，
   //   避免模型卡死在重复调用中烧光递归预算（GraphRecursionError）。
   const callCounts = new Map<string, number>()
   let prevCallKey: string | undefined
-  // 总调用次数护栏：累计达到 SOFT_TOOL_CALL_WARN 时温和提醒一次；超过 MAX_TOOL_CALLS 后一律拦截
+  // 总调用次数护栏：累计达到渐进阈值时温和提醒一次；超过 callLimit 后一律拦截
   let totalCalls = 0
   let warnedSoft = false
 
@@ -169,9 +177,9 @@ function createToolRunner(
 
       // 渐进提醒：接近上限时引导收尾一次（不拦截后续调用，避免合法长任务被生硬截断）
       totalCalls++
-      if (!warnedSoft && totalCalls >= SOFT_TOOL_CALL_WARN) {
+      if (!warnedSoft && totalCalls >= softWarnAt) {
         warnedSoft = true
-        const msg = `本次对话已执行 ${totalCalls} 次工具调用，任务较长。如非必要，请尽快基于已有信息给出最终回答。`
+        const msg = `You have used ${totalCalls} tool calls in this conversation, which is a long task. If not essential, wrap up now and answer with the information you already have.`
         outputs.push(new ToolMessage({ content: msg, tool_call_id: callId }))
         if (push) {
           const record: ToolCallRecord = {
@@ -186,9 +194,9 @@ function createToolRunner(
         continue
       }
 
-      // 总次数护栏：累计调用超过工程上限后一律拦截，指示模型直接回答
-      if (totalCalls > MAX_TOOL_CALLS) {
-        const msg = `本次对话的工具调用总数已达到 ${MAX_TOOL_CALLS} 次（工程安全上限）。请立即停止调用工具，直接基于已有信息给出最终回答。`
+      // 总次数护栏：累计调用超过限额后一律拦截，指示模型直接回答
+      if (totalCalls > callLimit) {
+        const msg = `This conversation has reached its total limit of ${callLimit} tool calls (the tool call round cap). Stop calling tools now and answer directly with the information you already have.`
         outputs.push(new ToolMessage({ content: msg, tool_call_id: callId }))
         if (push) {
           const record: ToolCallRecord = {
@@ -210,7 +218,7 @@ function createToolRunner(
       const isLoop = key === prevCallKey ? count >= 2 : count >= 3
       prevCallKey = key
       if (isLoop) {
-        const msg = `工具 "${name}" 已被重复调用 ${count} 次且参数完全相同。请停止重复调用，直接基于已有信息给出最终回答。`
+        const msg = `The tool "${name}" has already been called ${count} times with exactly the same arguments. Stop repeating this call and answer directly with the information you already have.`
         outputs.push(new ToolMessage({ content: msg, tool_call_id: callId }))
         if (push) {
           const record: ToolCallRecord = {
@@ -226,7 +234,7 @@ function createToolRunner(
       }
 
       if (!tool) {
-        const msg = `工具 "${name}" 不存在或未启用。可用工具：${[...toolsByName.keys()].join(', ')}`
+        const msg = `The tool "${name}" does not exist or is not enabled. Available tools: ${[...toolsByName.keys()].join(', ')}`
         outputs.push(new ToolMessage({ content: msg, tool_call_id: callId }))
         if (push) {
           const record: ToolCallRecord = {
@@ -255,7 +263,7 @@ function createToolRunner(
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err)
           logger.warn(`[Agent] 工具 ${name} 执行失败:`, err)
-          return `工具执行失败: ${message}`
+          return mainFormat(getAgentToolTexts().agent.toolFailed, { message })
         }
       })()
 
@@ -293,7 +301,7 @@ export function buildAgentGraph(
 
   // 可变模型绑定：自动重试耗尽后用户可在提问弹窗里切换模型，切换后绑定同一批工具继续
   let modelWithTools = bindToolsSafely(model, tools)
-  const runTools = createToolRunner(tools, queue, subagentCtx, spill)
+  const runTools = createToolRunner(tools, queue, subagentCtx, spill, options.maxToolCalls)
 
   async function callModel(
     state: { messages: BaseMessage[] },

@@ -3,6 +3,7 @@ import { join } from 'path'
 import * as fs from 'fs'
 import logger from 'electron-log'
 import { isSenderAlive, safeSend } from '../safe-send'
+import { mainMessages } from '../i18n'
 import { settingsStore, streamAbortControllers, activeHarnessStreams } from '../context'
 import { HarnessService, buildTools } from '../harness'
 import type {
@@ -186,7 +187,9 @@ async function runHarnessTurn(
   }
 
   // 按模型上下文窗口换算历史上下文字符预算（默认 20,000 token；1 token ≈ 1 字符的保守换算）
+  // 同时取出该模型的「工具调用轮数」上限，注入本轮运行时护栏
   let contextBudget: number | undefined
+  let maxToolRounds: number | undefined
   try {
     const providerConfig = await getProviderService().getConfig(options?.providerId)
     const windowTokens =
@@ -194,8 +197,9 @@ async function runHarnessTurn(
         ? providerConfig.metadata.context_window
         : 0
     contextBudget = Math.max(20_000, windowTokens)
+    maxToolRounds = providerConfig.max_tool_rounds
     logger.info(
-      `[Harness] Model context window=${windowTokens} tokens → history budget=${contextBudget} chars`
+      `[Harness] Model context window=${windowTokens} tokens → history budget=${contextBudget} chars, maxToolRounds=${maxToolRounds}`
     )
   } catch (err) {
     logger.warn('[Harness] 读取模型上下文窗口失败，使用默认历史预算 20000:', err)
@@ -247,7 +251,8 @@ async function runHarnessTurn(
       effectiveSkills,
       harnessSettings?.workspacePath || undefined,
       harnessSettings?.memoryPath || undefined,
-      harnessSettings?.activeWorkspaceId ?? 0
+      harnessSettings?.activeWorkspaceId ?? 0,
+      maxToolRounds
     )
   } catch (err) {
     // HarnessService 初始化（含子智能体定义加载）失败：清理本轮资源并通知前端，
@@ -741,6 +746,14 @@ export function registerHarnessIpc(): void {
       // 技能优先级：harnessSettings.enabledSkills > mainAgent.skills
       const effectiveSkills = harnessSettings?.enabledSkills ?? mainAgentDefaults?.skills
 
+      // 该模型的「工具调用轮数」上限（取不到则用工程默认值，由 HarnessService 兜底）
+      let maxToolRounds: number | undefined
+      try {
+        maxToolRounds = (await getProviderService().getConfig(options?.providerId)).max_tool_rounds
+      } catch (err) {
+        logger.warn('[Harness] 读取模型工具调用轮数失败，使用默认值:', err)
+      }
+
       const harnessService = new HarnessService(
         model,
         tools,
@@ -750,7 +763,8 @@ export function registerHarnessIpc(): void {
         effectiveSkills,
         harnessSettings?.workspacePath || undefined,
         harnessSettings?.memoryPath || undefined,
-        harnessSettings?.activeWorkspaceId ?? 0
+        harnessSettings?.activeWorkspaceId ?? 0,
+        maxToolRounds
       )
       return await harnessService.sendMessage(question, options)
     }
@@ -932,7 +946,7 @@ export function registerHarnessIpc(): void {
   ipcMain.handle('harness-select-memory-directory', async () => {
     const result = await dialog.showOpenDialog({
       properties: ['openDirectory', 'createDirectory'],
-      title: '选择记忆存储目录'
+      title: mainMessages().dialog.selectMemoryDir
     })
     if (result.canceled || result.filePaths.length === 0) return null
     return result.filePaths[0]
@@ -942,7 +956,7 @@ export function registerHarnessIpc(): void {
   ipcMain.handle('harness-select-skills-directory', async () => {
     const result = await dialog.showOpenDialog({
       properties: ['openDirectory', 'createDirectory'],
-      title: '选择技能存储目录'
+      title: mainMessages().dialog.selectSkillsDir
     })
     if (result.canceled || result.filePaths.length === 0) return null
     return result.filePaths[0]
@@ -952,7 +966,7 @@ export function registerHarnessIpc(): void {
   ipcMain.handle('harness-select-workspace', async () => {
     const result = await dialog.showOpenDialog({
       properties: ['openDirectory', 'createDirectory'],
-      title: '选择 AI 工作区目录'
+      title: mainMessages().dialog.selectWorkspaceDir
     })
     if (result.canceled || result.filePaths.length === 0) return null
     return result.filePaths[0]

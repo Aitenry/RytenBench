@@ -9,6 +9,7 @@ import {
   RiHistoryLine,
   RiHeartLine
 } from '@remixicon/react'
+import { useTranslation } from '@renderer/i18n'
 import type { MusicFolder } from '../../../types/music'
 import type { MusicSidebarProps } from '@renderer/types/components'
 
@@ -24,6 +25,7 @@ const MusicSidebar: React.FC<MusicSidebarProps> = ({
   colorBgContainer,
   borderRadiusLG
 }) => {
+  const { t } = useTranslation()
   const {
     token: { colorTextSecondary, colorTextTertiary, colorBorderSecondary }
   } = theme.useToken()
@@ -31,18 +33,18 @@ const MusicSidebar: React.FC<MusicSidebarProps> = ({
   const getMenuItems = (folder: MusicFolder): MenuProps['items'] => [
     {
       key: 'add',
-      label: '添加歌曲',
+      label: t('music.playlist.menuAddTracks'),
       onClick: () => onAddTracks(folder.id)
     },
     {
       key: 'edit',
-      label: '编辑歌单',
+      label: t('music.playlist.menuEdit'),
       onClick: () => onEditFolder(folder)
     },
     { type: 'divider' },
     {
       key: 'delete',
-      label: '删除歌单',
+      label: t('music.playlist.menuDelete'),
       danger: true,
       onClick: () => onDeleteFolder(folder.id)
     }
@@ -102,9 +104,9 @@ const MusicSidebar: React.FC<MusicSidebarProps> = ({
       <div className="py-1.5 px-3 border-b" style={{ borderColor: colorBorderSecondary }}>
         <div className="flex items-center justify-between">
           <span className="text-sm font-medium" style={{ color: colorTextSecondary }}>
-            歌单
+            {t('music.playlist.sectionTitle')}
           </span>
-          <Tooltip title="新建歌单">
+          <Tooltip title={t('music.playlist.createTooltip')}>
             <Button
               type="text"
               size="small"
@@ -122,7 +124,7 @@ const MusicSidebar: React.FC<MusicSidebarProps> = ({
             style={{ color: colorTextTertiary }}
           >
             <RiPlayListLine size={40} />
-            <p className="mt-2 text-xs text-center">点击右上角 + 创建歌单</p>
+            <p className="mt-2 text-xs text-center">{t('music.playlist.empty')}</p>
           </div>
         )}
         {specialFolders.map((folder) => renderFolderItem(folder, true))}

@@ -3,6 +3,7 @@ import { Modal, Input, Button, Space, Typography, Tag as AntTag } from 'antd'
 import { Window } from '../../../resource/types/window'
 import type { WikiEditModalProps } from '@renderer/types/components'
 import { getTagsArray } from '@renderer/utils/document'
+import { useTranslation } from '@renderer/i18n'
 
 const { Text } = Typography
 
@@ -18,6 +19,7 @@ const WikiEditModal: React.FC<WikiEditModalProps> = ({
   onSave,
   onCancel
 }) => {
+  const { t } = useTranslation()
   const [title, setTitle] = useState(initialTitle)
   const [summary, setSummary] = useState(initialSummary)
   const [editTags, setEditTags] = useState<string[]>([])
@@ -82,27 +84,31 @@ const WikiEditModal: React.FC<WikiEditModalProps> = ({
 
   return (
     <Modal
-      title={isNew ? '新建知识库' : '编辑知识库'}
+      title={isNew ? t('home.wiki.create') : t('home.wiki.edit')}
       open={open}
       onOk={handleSave}
       onCancel={onCancel}
-      okText="保存"
-      cancelText="取消"
+      okText={t('common.action.save')}
+      cancelText={t('common.action.cancel')}
       confirmLoading={saving}
       styles={{ body: { maxHeight: 'calc(100vh - 300px)', padding: '0 6px', overflowY: 'auto' } }}
       classNames={{ body: 'custom-scrollbar' }}
     >
       <Space vertical style={{ width: '100%' }}>
-        <Text strong>标题</Text>
-        <Input placeholder="知识库标题" value={title} onChange={(e) => setTitle(e.target.value)} />
-        <Text strong>摘要</Text>
+        <Text strong>{t('home.field.title')}</Text>
+        <Input
+          placeholder={t('home.wiki.titlePlaceholder')}
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+        />
+        <Text strong>{t('home.field.summary')}</Text>
         <Input.TextArea
-          placeholder="知识库摘要"
+          placeholder={t('home.wiki.summaryPlaceholder')}
           value={summary}
           onChange={(e) => setSummary(e.target.value)}
           rows={4}
         />
-        <Text strong>标签</Text>
+        <Text strong>{t('home.field.tags')}</Text>
         {editTags.length > 0 && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
             {editTags.map((tag, index) => (
@@ -113,20 +119,20 @@ const WikiEditModal: React.FC<WikiEditModalProps> = ({
           </div>
         )}
         <Input
-          placeholder="输入标签后按回车添加"
+          placeholder={t('home.field.tagPlaceholder')}
           value={tagInput}
           onChange={(e) => setTagInput(e.target.value)}
           onKeyDown={handleAddTag}
           allowClear
         />
-        <Text strong>封面图片</Text>
+        <Text strong>{t('home.field.coverImage')}</Text>
         <Space>
           <Button type="default" onClick={handleSelectImage}>
-            选择图片
+            {t('home.field.selectImage')}
           </Button>
           {image && (
             <Button type="default" danger onClick={() => setImage(null)}>
-              移除图片
+              {t('home.field.removeImage')}
             </Button>
           )}
         </Space>
@@ -134,7 +140,7 @@ const WikiEditModal: React.FC<WikiEditModalProps> = ({
           <div style={{ maxHeight: 300, overflow: 'hidden', borderRadius: 8 }}>
             <img
               src={image}
-              alt="封面"
+              alt={t('home.field.coverAlt')}
               style={{ width: '100%', height: '100%', objectFit: 'cover' }}
             />
           </div>

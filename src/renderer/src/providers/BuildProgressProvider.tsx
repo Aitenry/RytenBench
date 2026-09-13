@@ -3,6 +3,8 @@ import { Window } from '../../resource/types/window'
 import BuildProgress from '@renderer/components/graph/BuildProgress'
 import { BuildProgressContext } from './BuildProgressContext'
 import { useNotification } from '@renderer/contexts/useNotification'
+import { useTranslation } from '@renderer/i18n'
+import type { TFunction } from 'i18next'
 import type { BuildProgressState } from '@renderer/types/build-progress'
 import type { BuildProgressNotification } from '@renderer/types/notification'
 import type { BuildProgressProviderProps } from '@renderer/types/components'
@@ -10,10 +12,47 @@ import type { BuildProgressProviderProps } from '@renderer/types/components'
 /** 全局事件：请求打开某知识库的图谱视图（首页 HomeView 监听并切换选中） */
 export const OPEN_WIKI_GRAPH_EVENT = 'open-wiki-graph'
 
+/** 构建进度通知的文案组装：普通函数，t 由调用方注入（内部不调 hook） */
+const buildStateToNotification = (
+  t: TFunction,
+  id: string,
+  state: BuildProgressState,
+  onClick: () => void
+): BuildProgressNotification => ({
+  id,
+  type: 'build_progress',
+  title: state.wikiTitle,
+  description: state.completed
+    ? t('shell.build.completedSummary', {
+        count: state.entityCount,
+        entityCount: state.entityCount,
+        relationCount: state.relationCount
+      })
+    : t('shell.build.progressSummary', {
+        phase: state.phaseLabel,
+        percent: state.overallProgress,
+        message: state.message
+      }),
+  timestamp: Date.now(),
+  read: false,
+  onClick,
+  wikiId: state.wikiId,
+  wikiTitle: state.wikiTitle,
+  phaseLabel: state.phaseLabel,
+  phaseProgress: state.phaseProgress,
+  overallProgress: state.overallProgress,
+  entityCount: state.entityCount,
+  relationCount: state.relationCount,
+  message: state.message,
+  completed: state.completed,
+  minimized: state.minimized
+})
+
 export const BuildProgressProvider: React.FC<BuildProgressProviderProps> = ({ children }) => {
   const [buildMap, setBuildMap] = useState<Map<number, BuildProgressState>>(new Map())
   const refreshCallbacks = useRef<Map<number, Set<() => void>>>(new Map())
   const { addNotification, updateNotification, removeNotification } = useNotification()
+  const { t } = useTranslation()
 
   const subscribeToRefresh = (wikiId: number, callback: () => void): (() => void) => {
     const callbacks = refreshCallbacks.current.get(wikiId) || new Set()
@@ -32,7 +71,7 @@ export const BuildProgressProvider: React.FC<BuildProgressProviderProps> = ({ ch
       wikiId,
       wikiTitle,
       phase: '',
-      phaseLabel: '初始化',
+      phaseLabel: t('shell.build.initializing'),
       phaseProgress: 0,
       overallProgress: 0,
       processedDocs: 0,
@@ -41,7 +80,7 @@ export const BuildProgressProvider: React.FC<BuildProgressProviderProps> = ({ ch
       totalChunks: 0,
       entityCount: 0,
       relationCount: 0,
-      message: '初始化...',
+      message: t('shell.build.initializingMessage'),
       minimized: false,
       completed: false
     }
@@ -53,34 +92,8 @@ export const BuildProgressProvider: React.FC<BuildProgressProviderProps> = ({ ch
     })
 
     const notifId = `build-${wikiId}`
-    addNotification(buildStateToNotification(notifId, state, () => restoreBuild(wikiId)))
+    addNotification(buildStateToNotification(t, notifId, state, () => restoreBuild(wikiId)))
   }
-
-  const buildStateToNotification = (
-    id: string,
-    state: BuildProgressState,
-    onClick: () => void
-  ): BuildProgressNotification => ({
-    id,
-    type: 'build_progress',
-    title: state.wikiTitle,
-    description: state.completed
-      ? `${state.entityCount} 实体, ${state.relationCount} 关系`
-      : `${state.phaseLabel} ${state.overallProgress}% — ${state.message}`,
-    timestamp: Date.now(),
-    read: false,
-    onClick,
-    wikiId: state.wikiId,
-    wikiTitle: state.wikiTitle,
-    phaseLabel: state.phaseLabel,
-    phaseProgress: state.phaseProgress,
-    overallProgress: state.overallProgress,
-    entityCount: state.entityCount,
-    relationCount: state.relationCount,
-    message: state.message,
-    completed: state.completed,
-    minimized: state.minimized
-  })
 
   const restoreBuild = useCallback((wikiId: number): void => {
     setBuildMap((prev) => {
@@ -141,7 +154,7 @@ export const BuildProgressProvider: React.FC<BuildProgressProviderProps> = ({ ch
       const existing = next.get(progress.wikiId)
       const updated: BuildProgressState = {
         wikiId: progress.wikiId,
-        wikiTitle: existing?.wikiTitle || `知识库 #${progress.wikiId}`,
+        wikiTitle: existing?.wikiTitle || t('shell.build.unknownWiki', { id: progress.wikiId }),
         phase: progress.phase,
         phaseLabel: progress.phaseLabel,
         phaseProgress: progress.phaseProgress,
@@ -218,12 +231,12 @@ export const BuildProgressProvider: React.FC<BuildProgressProviderProps> = ({ ch
       // 且通知永不清理——完成态改为直达该知识库图谱（navigateToGraph 会移除通知与状态）
       updateNotification(
         notifId,
-        buildStateToNotification(notifId, state, () =>
+        buildStateToNotification(t, notifId, state, () =>
           state.completed ? navigateToGraph(wikiId) : restoreBuild(wikiId)
         )
       )
     })
-  }, [buildMap, updateNotification, restoreBuild, navigateToGraph])
+  }, [buildMap, updateNotification, restoreBuild, navigateToGraph, t])
 
   const activeBuilds = Array.from(buildMap.values())
 

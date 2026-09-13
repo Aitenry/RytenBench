@@ -27,8 +27,15 @@ import {
 import { buildMarkdownEditorExtensions, getMarkdownSafe } from './markdownExtensions'
 import { buildSlashMenuExtension } from './slash-menu'
 import type { SlashMenuTheme } from './slash-menu'
+import { useTranslation, Trans } from '@renderer/i18n'
 import 'katex/dist/katex.min.css'
 import './tiptap-content.css'
+
+/**
+ * 等宽字体栈（只用于数字/拉丁字符，与路由骨架屏、模型设置页同源）。
+ * 等宽族缺中文字形，中文落进去会被 Chromium 回退成宋体，因此不包裹中文。
+ */
+const MONO_FONT = "'JetBrains Mono', 'Cascadia Code', Consolas, 'Courier New', monospace"
 
 export interface TipTapMarkdownEditorProps {
   /** Markdown 源文本（外部更新时同步进编辑器） */
@@ -129,7 +136,7 @@ const TipTapMarkdownEditor: React.FC<TipTapMarkdownEditorProps> = ({
   value = '',
   onChange,
   onSave,
-  placeholder = '输入内容，支持 Markdown 语法（# 标题、**加粗**、- 列表、``` 代码块…）',
+  placeholder,
   readOnly = false,
   onReady,
   scrollRef,
@@ -137,9 +144,16 @@ const TipTapMarkdownEditor: React.FC<TipTapMarkdownEditorProps> = ({
   showToolbar = true,
   className
 }) => {
+  const { t } = useTranslation()
   const { token } = theme.useToken()
   const editorRef = useRef<Editor | null>(null)
   const lastMdRef = useRef(value)
+
+  /* 默认占位符走词条；editor 只在挂载时创建（deps 为空），
+     语言切换后不重建实例，故用 ref 保存「当前语言下的占位符」，
+     NodeView 需要读取时一并从 ref 拿（避免 NodeView 文案停留在旧语言）。 */
+  const placeholderRef = useRef('')
+  placeholderRef.current = placeholder ?? t('markdown.editor.placeholder')
 
   /* Slash 菜单主题（弹层挂载在 body，需把 token 注入 ref 供其读取） */
   const slashThemeRef = useRef<SlashMenuTheme>({
@@ -185,7 +199,7 @@ const TipTapMarkdownEditor: React.FC<TipTapMarkdownEditorProps> = ({
 
   const editor = useEditor({
     extensions: [
-      ...buildMarkdownEditorExtensions(placeholder),
+      ...buildMarkdownEditorExtensions(placeholderRef.current),
       ...(readOnly ? [] : [buildSlashMenuExtension(slashThemeRef)])
     ],
     content: value,
@@ -388,7 +402,7 @@ const TipTapMarkdownEditor: React.FC<TipTapMarkdownEditorProps> = ({
             ref={linkInputRef}
             autoFocus
             defaultValue={linkPop.value}
-            placeholder="粘贴链接地址（留空则移除链接）"
+            placeholder={t('markdown.editor.linkPlaceholder')}
             onKeyDown={(e) => {
               if (e.key === 'Enter') applyLink(e.currentTarget.value)
               if (e.key === 'Escape') setLinkPop(null)
@@ -401,14 +415,14 @@ const TipTapMarkdownEditor: React.FC<TipTapMarkdownEditorProps> = ({
               if (linkInputRef.current) applyLink(linkInputRef.current.value)
             }}
           >
-            确定
+            {t('common.action.confirm')}
           </button>
           <button
             className="link-cancel"
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => setLinkPop(null)}
           >
-            取消
+            {t('common.action.cancel')}
           </button>
         </div>
       )}
@@ -424,7 +438,16 @@ interface EditorToolbarProps {
   onLinkClick: () => void
 }
 
+/** 工具栏标题下拉的文案键（i18next 键受资源类型约束，须收窄成字面量） */
+type ToolbarHeadingLabelKey =
+  | 'markdown.toolbar.paragraph'
+  | 'markdown.toolbar.heading1'
+  | 'markdown.toolbar.heading2'
+  | 'markdown.toolbar.heading3'
+  | 'markdown.toolbar.heading4'
+
 const EditorToolbar: React.FC<EditorToolbarProps> = ({ editor, onLinkClick }) => {
+  const { t } = useTranslation()
   const state = useEditorState({
     editor,
     selector: ({ editor: ed }) =>
@@ -473,25 +496,33 @@ const EditorToolbar: React.FC<EditorToolbarProps> = ({ editor, onLinkClick }) =>
     </Tooltip>
   )
 
-  const headingItems = [
-    { key: 'p', label: '正文' },
-    { key: 'h1', label: '标题 1' },
-    { key: 'h2', label: '标题 2' },
-    { key: 'h3', label: '标题 3' },
-    { key: 'h4', label: '标题 4' }
+  const headingItems: { key: string; label: string }[] = [
+    { key: 'p', label: t('markdown.toolbar.paragraph') },
+    { key: 'h1', label: t('markdown.toolbar.heading1') },
+    { key: 'h2', label: t('markdown.toolbar.heading2') },
+    { key: 'h3', label: t('markdown.toolbar.heading3') },
+    { key: 'h4', label: t('markdown.toolbar.heading4') }
   ]
+
+  /* 标题下拉当前项文案：与下拉选项同源，避免两处口径漂移 */
+  const headingLabelKeys: Record<number, ToolbarHeadingLabelKey> = {
+    1: 'markdown.toolbar.heading1',
+    2: 'markdown.toolbar.heading2',
+    3: 'markdown.toolbar.heading3',
+    4: 'markdown.toolbar.heading4'
+  }
 
   return (
     <div className="tiptap-toolbar">
       {btn(
-        '撤销',
+        t('markdown.toolbar.undo'),
         <RiArrowGoBackLine size={15} />,
         () => editor.chain().focus().undo().run(),
         false,
         !state.canUndo
       )}
       {btn(
-        '重做',
+        t('markdown.toolbar.redo'),
         <RiArrowGoForwardLine size={15} />,
         () => editor.chain().focus().redo().run(),
         false,
@@ -518,88 +549,95 @@ const EditorToolbar: React.FC<EditorToolbarProps> = ({ editor, onLinkClick }) =>
         }}
       >
         <button className="tiptap-toolbar-btn" onMouseDown={prevent}>
-          {state.heading ? `H${state.heading}` : '正文'}
+          {state.heading ? t(headingLabelKeys[state.heading]) : t('markdown.toolbar.paragraph')}
           <RiArrowDropDownLine size={14} style={{ marginLeft: 1 }} />
         </button>
       </Dropdown>
       <div className="tiptap-toolbar-divider" />
       {btn(
-        '加粗 Ctrl+B',
+        t('markdown.toolbar.bold'),
         <RiBold size={15} />,
         () => editor.chain().focus().toggleBold().run(),
         state.bold
       )}
       {btn(
-        '斜体 Ctrl+I',
+        t('markdown.toolbar.italic'),
         <RiItalic size={15} />,
         () => editor.chain().focus().toggleItalic().run(),
         state.italic
       )}
       {btn(
-        '下划线 Ctrl+U',
+        t('markdown.toolbar.underline'),
         <RiUnderline size={15} />,
         () => editor.chain().focus().toggleUnderline().run(),
         state.underline
       )}
       {btn(
-        '删除线',
+        t('markdown.toolbar.strike'),
         <RiStrikethrough size={15} />,
         () => editor.chain().focus().toggleStrike().run(),
         state.strike
       )}
       {btn(
-        '行内代码',
+        t('markdown.toolbar.inlineCode'),
         <RiCodeLine size={15} />,
         () => editor.chain().focus().toggleCode().run(),
         state.code
       )}
       {btn(
-        '高亮',
+        t('markdown.toolbar.highlight'),
         <RiMarkPenLine size={15} />,
         () => editor.chain().focus().toggleHighlight().run(),
         state.highlight
       )}
       <div className="tiptap-toolbar-divider" />
-      {btn('链接 Ctrl+K', <RiLink size={15} />, onLinkClick, state.link)}
+      {btn(t('markdown.toolbar.link'), <RiLink size={15} />, onLinkClick, state.link)}
       {state.link &&
-        btn('移除链接', <RiLinkUnlinkM size={15} />, () =>
+        btn(t('markdown.toolbar.unlink'), <RiLinkUnlinkM size={15} />, () =>
           editor.chain().focus().extendMarkRange('link').unsetLink().run()
         )}
       {btn(
-        '引用',
+        t('markdown.toolbar.blockquote'),
         <RiDoubleQuotesL size={15} />,
         () => editor.chain().focus().toggleBlockquote().run(),
         state.blockquote
       )}
       {btn(
-        '无序列表',
+        t('markdown.toolbar.bulletList'),
         <RiListUnordered size={15} />,
         () => editor.chain().focus().toggleBulletList().run(),
         state.bulletList
       )}
       {btn(
-        '有序列表',
+        t('markdown.toolbar.orderedList'),
         <RiListOrdered size={15} />,
         () => editor.chain().focus().toggleOrderedList().run(),
         state.orderedList
       )}
       {btn(
-        '任务列表',
+        t('markdown.toolbar.taskList'),
         <RiCheckboxLine size={15} />,
         () => editor.chain().focus().toggleTaskList().run(),
         state.taskList
       )}
       {btn(
-        '代码块',
+        t('markdown.toolbar.codeBlock'),
         <RiCodeBoxLine size={15} />,
         () => editor.chain().focus().toggleCodeBlock().run(),
         state.codeBlock
       )}
-      {btn('分割线', <RiSeparator size={15} />, () =>
+      {btn(t('markdown.toolbar.horizontalRule'), <RiSeparator size={15} />, () =>
         editor.chain().focus().setHorizontalRule().run()
       )}
       <div className="tiptap-toolbar-spacer" />
-      <span className="tiptap-toolbar-label">{state.chars} 字</span>
+      <span className="tiptap-toolbar-label">
+        {/* 数字走等宽、中文走默认 UI 字体（见文件顶部字体规则） */}
+        <Trans
+          i18nKey="markdown.editor.charCount"
+          count={state.chars}
+          components={{ mono: <span style={{ fontFamily: MONO_FONT }} /> }}
+        />
+      </span>
     </div>
   )
 }
@@ -612,6 +650,7 @@ interface BubbleButtonsProps {
 }
 
 const BubbleButtons: React.FC<BubbleButtonsProps> = ({ editor, onLinkClick }) => {
+  const { t } = useTranslation()
   const state = useEditorState({
     editor,
     selector: ({ editor: ed }) =>
@@ -651,43 +690,43 @@ const BubbleButtons: React.FC<BubbleButtonsProps> = ({ editor, onLinkClick }) =>
   return (
     <>
       {btn(
-        '加粗',
+        t('markdown.toolbar.boldShort'),
         <RiBold size={14} />,
         () => editor.chain().focus().toggleBold().run(),
         state.bold
       )}
       {btn(
-        '斜体',
+        t('markdown.toolbar.italicShort'),
         <RiItalic size={14} />,
         () => editor.chain().focus().toggleItalic().run(),
         state.italic
       )}
       {btn(
-        '下划线',
+        t('markdown.toolbar.underlineShort'),
         <RiUnderline size={14} />,
         () => editor.chain().focus().toggleUnderline().run(),
         state.underline
       )}
       {btn(
-        '删除线',
+        t('markdown.toolbar.strike'),
         <RiStrikethrough size={14} />,
         () => editor.chain().focus().toggleStrike().run(),
         state.strike
       )}
       {btn(
-        '行内代码',
+        t('markdown.toolbar.inlineCode'),
         <RiCodeLine size={14} />,
         () => editor.chain().focus().toggleCode().run(),
         state.code
       )}
       {btn(
-        '高亮',
+        t('markdown.toolbar.highlight'),
         <RiMarkPenLine size={14} />,
         () => editor.chain().focus().toggleHighlight().run(),
         state.highlight
       )}
-      {btn('链接', <RiLink size={14} />, onLinkClick, state.link)}
-      {btn('清除格式', <RiFormatClear size={14} />, () =>
+      {btn(t('markdown.toolbar.link'), <RiLink size={14} />, onLinkClick, state.link)}
+      {btn(t('markdown.toolbar.clearFormat'), <RiFormatClear size={14} />, () =>
         editor.chain().focus().unsetAllMarks().clearNodes().run()
       )}
     </>

@@ -2,6 +2,8 @@ import * as fs from 'fs'
 import * as path from 'path'
 import { randomUUID } from 'crypto'
 import logger from 'electron-log'
+import { mainFormat } from '../../i18n'
+import { getFsToolTexts } from '../../i18n/tool-results-fs'
 
 /**
  * 工具结果溢出存储（spill）— 对应 deepseek-harness 的 spill 体系
@@ -74,6 +76,8 @@ export class SpillStore {
 
   /** 保存完整文本到溢出文件，返回模型可见的预览 + 检索指引 */
   private saveAndPreview(text: string): string {
+    // 返回文案跟随界面语言（会渲染在工具调用卡片上），函数体内取当前语言
+    const tr = getFsToolTexts()
     fs.mkdirSync(this.dir!, { recursive: true })
 
     const fileName = `spill-${randomUUID()}.txt`
@@ -85,9 +89,16 @@ export class SpillStore {
     const omitted = text.length - PREVIEW_HEAD_CHARS - PREVIEW_TAIL_CHARS
     const head = text.slice(0, PREVIEW_HEAD_CHARS)
     const tail = text.slice(-PREVIEW_TAIL_CHARS)
-    const middle = omitted > 0 ? `\n……（中间 ${omitted.toLocaleString()} 字符已省略）……\n` : '\n'
+    const middle =
+      omitted > 0
+        ? `\n${mainFormat(tr.spill.middleOmitted, { omitted: omitted.toLocaleString() })}\n`
+        : '\n'
     // 检索指引（对齐 dsh-spill-policy 的 retrievalHint 语义：read 带 offset/limit + grep 检索）
-    return `${head}${middle}${tail}\n\n（输出共 ${text.length.toLocaleString()} 字符，超出内联上限，完整结果已保存至 ${virtualPath}。可用 read_file 加 offset/limit 按行读取该文件的片段，或用 grep 在 / 下检索关键字定位具体内容。）`
+    const locator = mainFormat(tr.spill.locator, {
+      total: text.length.toLocaleString(),
+      virtualPath
+    })
+    return `${head}${middle}${tail}\n\n${locator}`
   }
 
   /** 删除最旧溢出文件，保证每个话题文件数不超过上限 */

@@ -14,6 +14,7 @@ import {
 import dayjs from 'dayjs'
 import { Window } from '../../../../../resource/types/window'
 import { useMessage } from '@renderer/hooks/useMessage'
+import { useTranslation } from '@renderer/i18n'
 import type { Message } from '@renderer/types/harness'
 import type { HarnessDialogueUsageRow } from '../../../../../../main/database/mapper/harness'
 import UsagePanel from './UsagePanel'
@@ -79,6 +80,7 @@ const MessageActions: React.FC<MessageActionsProps> = ({
   const api = (window as unknown as Window).api
   const { viewMessage } = useMessage()
   const { modal } = App.useApp()
+  const { t } = useTranslation()
 
   const feedbackKey = `${topicId ?? 0}:${message.timestamp}`
   const [feedback, setFeedback] = useState<Feedback>(() => readFeedback(feedbackKey))
@@ -104,21 +106,21 @@ const MessageActions: React.FC<MessageActionsProps> = ({
         'msg-feedback',
         'success',
         value === 'up'
-          ? '已记录：好的回答'
+          ? t('harness.messageActions.feedbackUpRecorded')
           : value === 'down'
-            ? '已记录：有问题的回答'
-            : '已取消评价',
+            ? t('harness.messageActions.feedbackDownRecorded')
+            : t('harness.messageActions.feedbackCanceled'),
         1.5
       )
     },
-    [feedback, feedbackKey, viewMessage]
+    [feedback, feedbackKey, viewMessage, t]
   )
 
   /** 存入 Mnemon 热记忆（MEMORY） */
   const handleSaveToMemory = useCallback(async (): Promise<void> => {
     const text = (message.content ?? '').trim()
     if (!text) {
-      viewMessage('msg-memory', 'warning', '这条回答没有可保存的正文', 2)
+      viewMessage('msg-memory', 'warning', t('harness.messageActions.saveToMemoryEmpty'), 2)
       return
     }
     const content = text.length > MEMORY_MAX_CHARS ? `${text.slice(0, MEMORY_MAX_CHARS)}…` : text
@@ -133,11 +135,11 @@ const MessageActions: React.FC<MessageActionsProps> = ({
       viewMessage('msg-memory', result.success ? 'success' : 'warning', result.message, 3)
     } catch (error) {
       console.error('Failed to save answer to memory:', error)
-      viewMessage('msg-memory', 'error', '存入记忆失败', 2)
+      viewMessage('msg-memory', 'error', t('harness.messageActions.saveToMemoryFailed'), 2)
     } finally {
       setSavingMemory(false)
     }
-  }, [api, message.content, viewMessage])
+  }, [api, message.content, viewMessage, t])
 
   /** 分支：建话题、复制消息、刷新列表、切换视图都在 hooks 里，这里只负责按钮态 */
   const handleBranch = useCallback(async (): Promise<void> => {
@@ -162,10 +164,14 @@ const MessageActions: React.FC<MessageActionsProps> = ({
   /** 用时文案：秒级以下给一位小数，分钟级给「x分y秒」 */
   const elapsedText = ((): string => {
     if (elapsedMs <= 0) return ''
-    if (elapsedMs < 60_000) return `${(elapsedMs / 1000).toFixed(1)}秒`
+    if (elapsedMs < 60_000) {
+      return t('harness.messageActions.elapsedSeconds', {
+        seconds: (elapsedMs / 1000).toFixed(1)
+      })
+    }
     const minutes = Math.floor(elapsedMs / 60_000)
     const seconds = Math.round((elapsedMs % 60_000) / 1000)
-    return `${minutes}分${seconds}秒`
+    return t('harness.messageActions.elapsedMinutes', { minutes, seconds })
   })()
 
   /** 用量：只显示模型真实回传的 token（没回传就不显示，绝不估算） */
@@ -175,7 +181,10 @@ const MessageActions: React.FC<MessageActionsProps> = ({
       : value >= 1000
         ? `${(value / 1000).toFixed(1)}k`
         : String(value)
-  const usageText = usage?.total_tokens != null ? `${formatTokens(usage.total_tokens)} tok` : ''
+  const usageText =
+    usage?.total_tokens != null
+      ? t('harness.usagePanel.tokensValue', { value: formatTokens(usage.total_tokens) })
+      : ''
   /** 悬停用量徽标时弹出的「本轮用量」面板（缓存命中/推理等明细在 usage_metadata 里） */
   const usageDetails = useMemo(() => buildUsageDetails(usage), [usage])
 
@@ -253,24 +262,30 @@ const MessageActions: React.FC<MessageActionsProps> = ({
     <div className="flex items-center gap-1 mt-2 flex-wrap">
       {iconButton(
         isCopied ? <RiCheckLine size={16} /> : <RiFileCopyLine size={16} />,
-        isCopied ? '已复制' : '复制',
+        isCopied ? t('harness.messageActions.copied') : t('harness.messageActions.copy'),
         () => onCopy(copyText, message.id)
       )}
       {iconButton(
         <RiThumbUpLine size={16} />,
-        feedback === 'up' ? '已标记：好的回答' : '好的回答',
+        feedback === 'up'
+          ? t('harness.messageActions.feedbackUpMarked')
+          : t('harness.messageActions.feedbackUp'),
         () => handleFeedback('up'),
         { active: feedback === 'up' }
       )}
       {iconButton(
         <RiThumbDownLine size={16} />,
-        feedback === 'down' ? '已标记：有问题的回答' : '有问题的回答',
+        feedback === 'down'
+          ? t('harness.messageActions.feedbackDownMarked')
+          : t('harness.messageActions.feedbackDown'),
         () => handleFeedback('down'),
         { active: feedback === 'down' }
       )}
       {iconButton(
         <RiBrainLine size={16} />,
-        savingMemory ? '正在存入记忆…' : '存入记忆',
+        savingMemory
+          ? t('harness.messageActions.savingToMemory')
+          : t('harness.messageActions.saveToMemory'),
         () => {
           void handleSaveToMemory()
         },
@@ -278,7 +293,7 @@ const MessageActions: React.FC<MessageActionsProps> = ({
       )}
       {iconButton(
         <RiGitBranchLine size={16} />,
-        branching ? '正在创建分支…' : '在新对话中分支',
+        branching ? t('harness.messageActions.branching') : t('harness.messageActions.branch'),
         () => {
           void handleBranch()
         },
@@ -286,13 +301,13 @@ const MessageActions: React.FC<MessageActionsProps> = ({
       )}
       {iconButton(
         <RiDeleteBin6Line size={16} />,
-        '删除此轮对话',
+        t('harness.messageActions.deleteTurn'),
         () =>
           modal.confirm({
-            title: '确认删除',
-            content: '将删除这一轮对话，删除后不可恢复。',
-            okText: '删除',
-            cancelText: '取消',
+            title: t('harness.messageActions.deleteConfirmTitle'),
+            content: t('harness.messageActions.deleteConfirmContent'),
+            okText: t('common.action.delete'),
+            cancelText: t('common.action.cancel'),
             okButtonProps: { danger: true },
             onOk: () => onDelete(index)
           }),
@@ -317,7 +332,7 @@ const MessageActions: React.FC<MessageActionsProps> = ({
           onMouseEnter={() => setUsageOpen(true)}
           onMouseLeave={() => setUsageOpen(false)}
         >
-          {chip(<RiDatabase2Line size={12} />, usageText)}
+          {chip(<RiDatabase2Line size={12} />, usageText, t('harness.messageActions.usageTooltip'))}
           {usageOpen && (
             <span
               style={{
@@ -334,7 +349,11 @@ const MessageActions: React.FC<MessageActionsProps> = ({
         </span>
       )}
       {elapsedText &&
-        chip(<RiTimerLine size={12} />, `用时 ${elapsedText}`, '本轮提问到回答结束的耗时')}
+        chip(
+          <RiTimerLine size={12} />,
+          t('harness.messageActions.elapsed', { elapsed: elapsedText }),
+          t('harness.messageActions.elapsedTooltip')
+        )}
 
       <span style={{ flex: 1 }} />
 

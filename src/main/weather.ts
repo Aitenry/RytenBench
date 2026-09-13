@@ -2,11 +2,11 @@ import { ipcMain } from 'electron'
 import logger from 'electron-log'
 import { fetchWeatherApi } from 'openmeteo'
 import { safeSend } from './safe-send'
+import { mainMessages } from './i18n'
 import { settingsStore } from './context'
 import { getMainWindow } from './windows/window-manager'
 import { getIp } from './address'
-import { weatherCodeMap, formatDate, weekdayLabel } from './shared/weather-utils'
-
+import { formatDate } from './shared/weather-utils'
 const DEFAULT_REFRESH_MIN = 60
 /** 请求超时上限（open-meteo 无 AbortSignal 支持，用竞速兜底，防 IPC invoke 永久悬挂） */
 const FETCH_TIMEOUT_MS = 15_000
@@ -55,7 +55,6 @@ async function fetchWeatherData(
     result.current = {
       temp: current.variables(0)!.value().toFixed(2),
       weatherCode: Math.round(current.variables(1)!.value()),
-      weatherDesc: weatherCodeMap[Math.round(current.variables(1)!.value())] ?? '未知',
       windSpeed: current.variables(2)!.value().toFixed(2),
       humidity: Math.round(current.variables(4)!.value()),
       apparentTemp: current.variables(5)!.value().toFixed(2)
@@ -69,14 +68,14 @@ async function fetchWeatherData(
     const pProb = daily.variables(3)!.valuesArray()!
     const startTime = Number(daily.time())
     const dayInterval = daily.interval()
-    const todayStr = formatDate(new Date())
 
     for (let i = 0; i < wc.length; i++) {
       const dayTime = new Date((startTime + i * dayInterval) * 1000)
       const dateStr = formatDate(dayTime)
       ;(result.daily as Record<string, unknown>[]).push({
-        label: dateStr === todayStr ? '今天' : weekdayLabel(dayTime),
-        weatherDesc: weatherCodeMap[Math.round(wc[i])] ?? '未知',
+        // 只存结构化数据（日期 + 天气码），文案由 localizeWeather 在下发前按语言渲染
+        date: dateStr,
+        weatherCode: Math.round(wc[i]),
         tempMax: tMax[i].toFixed(0),
         tempMin: tMin[i].toFixed(0),
         precipProb: pProb[i] ?? 0
@@ -87,6 +86,50 @@ async function fetchWeatherData(
   settingsStore.set('weatherLastFetched', Date.now())
   settingsStore.set('weatherData', result)
   return result
+}
+
+/** 星期索引 → 词条键（Date.getDay()：0 = 周日） */
+const WEEKDAY_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const
+
+/**
+ * 下发前按当前语言渲染天气文案。
+ *
+ * 缓存里只存**结构化数据**（天气码 + 日期）：把文案写死在缓存里的话，切语言后要等
+ * 下一次刷新（默认 60 分钟）才会更新。旧缓存里的 label/weatherDesc 作为兜底保留。
+ */
+export function localizeWeather(data: Record<string, unknown>): Record<string, unknown> {
+  const w = mainMessages().weather
+  const codes = w.codes as Record<string, string>
+  const codeText = (code: unknown, fallback: unknown): unknown =>
+    typeof code === 'number'
+      ? (codes[`code${code}`] ?? fallback ?? w.unknown)
+      : (fallback ?? w.unknown)
+  const dayLabel = (date: unknown, fallback: unknown): unknown => {
+    if (typeof date !== 'string') return fallback
+    const [y, m, d] = date.split('-').map(Number)
+    if (!y || !m || !d) return fallback
+    const local = new Date(y, m - 1, d)
+    if (formatDate(local) !== formatDate(new Date())) {
+      return w.weekdays[WEEKDAY_KEYS[local.getDay()]]
+    }
+    return w.today
+  }
+
+  const current = data.current as Record<string, unknown> | undefined
+  const daily = data.daily as Record<string, unknown>[] | undefined
+  return {
+    ...data,
+    current: current
+      ? { ...current, weatherDesc: codeText(current.weatherCode, current.weatherDesc) }
+      : current,
+    daily: Array.isArray(daily)
+      ? daily.map((day) => ({
+          ...day,
+          label: dayLabel(day.date, day.label),
+          weatherDesc: codeText(day.weatherCode, day.weatherDesc)
+        }))
+      : daily
+  }
 }
 
 /** 天气自动刷新（创建主窗口后调用） */
@@ -106,7 +149,7 @@ export function startWeatherAutoRefresh(): void {
   const cached = settingsStore.get('weatherData') as Record<string, unknown> | undefined
   const mainWindow = getMainWindow()
   if (cached && mainWindow && !mainWindow.isDestroyed()) {
-    safeSend(mainWindow.webContents, 'weather-update', cached)
+    safeSend(mainWindow.webContents, 'weather-update', localizeWeather(cached))
   }
 
   let fetching = false
@@ -118,7 +161,7 @@ export function startWeatherAutoRefresh(): void {
       const data = await fetchWeatherData(lat, lon, city)
       const win = getMainWindow()
       if (win && !win.isDestroyed()) {
-        safeSend(win.webContents, 'weather-update', data)
+        safeSend(win.webContents, 'weather-update', localizeWeather(data))
       }
     } catch (err) {
       logger.error('Weather auto-refresh failed:', err)
@@ -145,7 +188,7 @@ export function registerWeatherIpc(): void {
     async (_event, force?: boolean): Promise<Record<string, unknown>> => {
       if (!force) {
         const cached = settingsStore.get('weatherData') as Record<string, unknown> | undefined
-        if (cached) return cached
+        if (cached) return localizeWeather(cached)
       }
 
       let ip = settingsStore.get('ip') as Record<string, unknown> | undefined
@@ -167,7 +210,7 @@ export function registerWeatherIpc(): void {
       // 现场取到 IP 后补建自动刷新定时器（修复：冷启动时 ip 未就绪，
       // startWeatherAutoRefresh 提前 return，定时器本会话永不建立）
       startWeatherAutoRefresh()
-      return data
+      return localizeWeather(data)
     }
   )
 }

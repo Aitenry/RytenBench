@@ -8,6 +8,8 @@ import {
   FileTextOutlined,
   ReloadOutlined
 } from '@ant-design/icons'
+import type { TFunction } from 'i18next'
+import { useTranslation } from '@renderer/i18n'
 import { useMessage } from '@renderer/hooks/useMessage'
 import { Window } from '../../../../../resource/types/window'
 import type { SystemSettings, HarnessSettings } from '@renderer/types/settings'
@@ -32,10 +34,18 @@ const IMPORTANCE_DOT: Record<string, string> = {
   normal: '#1677ff',
   low: '#bfbfbf'
 }
-const IMPORTANCE_LABEL: Record<string, string> = {
-  critical: '重要',
-  normal: '普通',
-  low: '次要'
+/** 重要性文案：把 t 作为参数传入，普通函数内不调用 hook */
+function getImportanceLabel(t: TFunction, importance: string): string {
+  switch (importance) {
+    case 'critical':
+      return t('memorySettings.importance.critical')
+    case 'normal':
+      return t('memorySettings.importance.normal')
+    case 'low':
+      return t('memorySettings.importance.low')
+    default:
+      return importance
+  }
 }
 
 /** 目标选择卡片（选中：强调色左条 + 浅色底 + 强调描边） */
@@ -161,11 +171,12 @@ const CapacityBar: React.FC<{
   limit: number
 }> = ({ used, limit }) => {
   const t = useThemeTokens()
+  const { t: translate } = useTranslation()
   const percent = Math.min(100, Math.round((used / limit) * 100))
   const nearFull = percent >= 85
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-      <Tooltip title={`${used} / ${limit} 字节`}>
+      <Tooltip title={translate('memorySettings.runtime.bytes', { used, limit })}>
         <div
           style={{
             width: 110,
@@ -200,6 +211,7 @@ const RuntimeEntryRow: React.FC<{
   onRemoveTitle: string
 }> = ({ entry, onRemove, onRemoveTitle }) => {
   const t = useThemeTokens()
+  const { t: translate } = useTranslation()
   return (
     <div
       className="group flex items-start gap-2.5 px-3 py-2.5 transition-colors"
@@ -228,11 +240,16 @@ const RuntimeEntryRow: React.FC<{
             marginTop: 1
           }}
         >
-          {IMPORTANCE_LABEL[entry.importance] ?? entry.importance}
+          {getImportanceLabel(translate, entry.importance)}
           {entry.updated_at ? ` · ${entry.updated_at.slice(0, 10)}` : ''}
         </div>
       </div>
-      <Popconfirm title={onRemoveTitle} onConfirm={onRemove} okText="删除" cancelText="取消">
+      <Popconfirm
+        title={onRemoveTitle}
+        onConfirm={onRemove}
+        okText={translate('common.action.delete')}
+        cancelText={translate('common.action.cancel')}
+      >
         <Button
           type="text"
           size="small"
@@ -255,6 +272,7 @@ const RuntimeGroupCard: React.FC<{
   onRemove: (entry: { content: string }) => void
 }> = ({ title, accent, entries, usage, emptyText, onRemove }) => {
   const t = useThemeTokens()
+  const { t: translate } = useTranslation()
   return (
     <div
       style={{
@@ -272,7 +290,7 @@ const RuntimeGroupCard: React.FC<{
           <span style={{ width: 3, height: 14, borderRadius: 1.5, background: accent }} />
           {title}
           <span style={{ fontSize: 12, fontWeight: 400, color: t.textTertiary }}>
-            {entries.length} 条
+            {translate('memorySettings.runtime.count', { count: entries.length })}
           </span>
         </span>
         <CapacityBar used={usage.used} limit={usage.limit} />
@@ -287,7 +305,7 @@ const RuntimeGroupCard: React.FC<{
             <RuntimeEntryRow
               key={i}
               entry={entry}
-              onRemoveTitle="删除这条记忆？"
+              onRemoveTitle={translate('memorySettings.runtime.removeConfirm')}
               onRemove={() => onRemove(entry)}
             />
           ))}
@@ -298,6 +316,7 @@ const RuntimeGroupCard: React.FC<{
 }
 
 const MemorySettings: React.FC = () => {
+  const { t: translate } = useTranslation()
   const { viewMessage } = useMessage()
   const t = useThemeTokens()
 
@@ -332,9 +351,13 @@ const MemorySettings: React.FC = () => {
       setSettings(result)
       setMemoryPath(result.harness?.memoryPath ?? '')
     } catch (error) {
-      viewMessage(msgKey, 'error', `加载失败: ${error}`)
+      viewMessage(
+        msgKey,
+        'error',
+        translate('common.message.loadFailedWithReason', { reason: String(error) })
+      )
     }
-  }, [viewMessage])
+  }, [viewMessage, translate])
 
   const loadSnapshot = useCallback(async () => {
     setLoadingSnapshot(true)
@@ -342,11 +365,15 @@ const MemorySettings: React.FC = () => {
       const snap = await (window as unknown as Window).api.harness.mnemonSnapshot()
       setSnapshot(snap)
     } catch (error) {
-      viewMessage('mnemon-snapshot', 'error', `加载记忆快照失败: ${error}`)
+      viewMessage(
+        'mnemon-snapshot',
+        'error',
+        translate('memorySettings.manage.snapshotFailed', { reason: String(error) })
+      )
     } finally {
       setLoadingSnapshot(false)
     }
-  }, [viewMessage])
+  }, [viewMessage, translate])
 
   useEffect(() => {
     loadSettings().then()
@@ -374,7 +401,11 @@ const MemorySettings: React.FC = () => {
       const path = await (window as unknown as Window).api.harness.selectMemoryDirectory()
       if (path) setMemoryPath(path)
     } catch (error) {
-      viewMessage('memory-path', 'error', `选择目录失败: ${error}`)
+      viewMessage(
+        'memory-path',
+        'error',
+        translate('memorySettings.storage.selectFailed', { reason: String(error) })
+      )
     }
   }
 
@@ -390,14 +421,21 @@ const MemorySettings: React.FC = () => {
       await (window as unknown as Window).api.systemSettings.update({ harness: nextHarness })
       setSettings((prev) => (prev ? { ...prev, harness: nextHarness } : prev))
       setMemoryPath(trimmed)
-      viewMessage(msgKey, 'success', trimmed ? '记忆目录已保存' : '已清空记忆目录', 2)
+      const savedMessage = trimmed
+        ? translate('memorySettings.storage.saved')
+        : translate('memorySettings.storage.cleared')
+      viewMessage(msgKey, 'success', savedMessage, 2)
       if (trimmed) {
         loadSnapshot().then()
       } else {
         setSnapshot(null)
       }
     } catch (error) {
-      viewMessage(msgKey, 'error', `保存失败: ${error}`)
+      viewMessage(
+        msgKey,
+        'error',
+        translate('common.message.saveFailedWithReason', { reason: String(error) })
+      )
     } finally {
       setSavingPath(false)
     }
@@ -408,7 +446,7 @@ const MemorySettings: React.FC = () => {
     const msgKey = 'mnemon-runtime-add'
     const content = addContent.trim()
     if (!content) {
-      viewMessage(msgKey, 'warning', '请输入记忆内容', 2)
+      viewMessage(msgKey, 'warning', translate('memorySettings.runtime.contentRequired'), 2)
       return
     }
     setAdding(true)
@@ -445,7 +483,11 @@ const MemorySettings: React.FC = () => {
       viewMessage(msgKey, result.success ? 'success' : 'warning', result.message, 3)
       loadSnapshot().then()
     } catch (error) {
-      viewMessage(msgKey, 'error', `删除失败: ${error}`)
+      viewMessage(
+        msgKey,
+        'error',
+        translate('common.message.deleteFailedWithReason', { reason: String(error) })
+      )
     }
   }
 
@@ -459,7 +501,11 @@ const MemorySettings: React.FC = () => {
       viewMessage(msgKey, result.success ? 'success' : 'warning', result.message ?? '', 2)
       loadSnapshot().then()
     } catch (error) {
-      viewMessage(msgKey, 'error', `更新失败: ${error}`)
+      viewMessage(
+        msgKey,
+        'error',
+        translate('common.message.updateFailedWithReason', { reason: String(error) })
+      )
     }
   }
 
@@ -467,7 +513,7 @@ const MemorySettings: React.FC = () => {
   const handleCreateBody = async (): Promise<void> => {
     const msgKey = 'mnemon-body-create'
     if (!createName.trim()) {
-      viewMessage(msgKey, 'warning', '请输入空间名称', 2)
+      viewMessage(msgKey, 'warning', translate('memorySettings.bodies.nameRequired'), 2)
       return
     }
     setCreatingBody(true)
@@ -476,12 +522,10 @@ const MemorySettings: React.FC = () => {
         createName.trim(),
         createDescription.trim()
       )
-      viewMessage(
-        msgKey,
-        result.success ? 'success' : 'warning',
-        result.success ? `已创建「${result.body?.name}」` : (result.message ?? ''),
-        3
-      )
+      const createdMessage = result.success
+        ? translate('memorySettings.bodies.created', { name: result.body?.name })
+        : (result.message ?? '')
+      viewMessage(msgKey, result.success ? 'success' : 'warning', createdMessage, 3)
       if (result.success) {
         setCreateName('')
         setCreateDescription('')
@@ -528,14 +572,14 @@ const MemorySettings: React.FC = () => {
         {/* 目标选择卡片 */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
           <TargetCard
-            label="用户画像"
-            desc="身份 · 偏好 · 沟通风格"
+            label={translate('memorySettings.targets.userLabel')}
+            desc={translate('memorySettings.targets.userDesc')}
             selected={addTarget === 'user'}
             onClick={() => setAddTarget('user')}
           />
           <TargetCard
-            label="项目记忆"
-            desc="决策 · 约定 · 可复用经验"
+            label={translate('memorySettings.targets.memoryLabel')}
+            desc={translate('memorySettings.targets.memoryDesc')}
             selected={addTarget === 'memory'}
             onClick={() => setAddTarget('memory')}
           />
@@ -557,8 +601,8 @@ const MemorySettings: React.FC = () => {
             onChange={(e) => setAddContent(e.target.value)}
             placeholder={
               addTarget === 'user'
-                ? '输入要记住的用户信息，如：偏好深色主题、喜欢编辑部风格设计'
-                : '输入要记住的项目信息，如：重构方案已定稿，底层用 LangChain'
+                ? translate('memorySettings.targets.userPlaceholder')
+                : translate('memorySettings.targets.memoryPlaceholder')
             }
             autoSize={{ minRows: 1, maxRows: 3 }}
             style={{
@@ -579,22 +623,24 @@ const MemorySettings: React.FC = () => {
           style={{ marginTop: 10 }}
         >
           <div className="flex items-center gap-2 flex-wrap">
-            <span style={{ fontSize: 12, color: t.textTertiary }}>重要性</span>
+            <span style={{ fontSize: 12, color: t.textTertiary }}>
+              {translate('memorySettings.importance.label')}
+            </span>
             <ImportancePill
               color="#d4380d"
-              label="重要"
+              label={translate('memorySettings.importance.critical')}
               selected={addImportance === 'critical'}
               onClick={() => setAddImportance('critical')}
             />
             <ImportancePill
               color="#1677ff"
-              label="普通"
+              label={translate('memorySettings.importance.normal')}
               selected={addImportance === 'normal'}
               onClick={() => setAddImportance('normal')}
             />
             <ImportancePill
               color="#bfbfbf"
-              label="次要"
+              label={translate('memorySettings.importance.low')}
               selected={addImportance === 'low'}
               onClick={() => setAddImportance('low')}
             />
@@ -605,37 +651,37 @@ const MemorySettings: React.FC = () => {
             loading={adding}
             onClick={handleAddRuntime}
           >
-            记住
+            {translate('memorySettings.runtime.add')}
           </Button>
         </div>
 
         {/* 目标说明（随选择切换） */}
         <div style={{ fontSize: 11, color: t.textTertiary, marginTop: 10, lineHeight: '16px' }}>
           {addTarget === 'user' ? (
-            <>用户画像容量 4 KiB；重要度高的条目整理时优先保留。</>
+            <>{translate('memorySettings.targets.userHint')}</>
           ) : (
-            <>项目记忆容量 10 KiB，写满后低优先级条目自动归档到长期空间。</>
+            <>{translate('memorySettings.targets.memoryHint')}</>
           )}
         </div>
       </div>
 
       {/* 用户画像 */}
       <RuntimeGroupCard
-        title="用户画像"
+        title={translate('memorySettings.targets.userLabel')}
         accent="#1677ff"
         entries={userEntries}
         usage={runtime ? runtime.targets.user : { used: 0, limit: 4096 }}
-        emptyText="暂无用户画像记忆"
+        emptyText={translate('memorySettings.runtime.emptyUser')}
         onRemove={(entry) => handleRemoveRuntime({ content: entry.content, target: 'user' })}
       />
 
       {/* 项目记忆 */}
       <RuntimeGroupCard
-        title="项目记忆"
+        title={translate('memorySettings.targets.memoryLabel')}
         accent="#52c41a"
         entries={memoryEntries}
         usage={runtime ? runtime.targets.memory : { used: 0, limit: 10240 }}
-        emptyText="暂无项目记忆"
+        emptyText={translate('memorySettings.runtime.emptyMemory')}
         onRemove={(entry) => handleRemoveRuntime({ content: entry.content, target: 'memory' })}
       />
     </div>
@@ -656,13 +702,13 @@ const MemorySettings: React.FC = () => {
         <Input
           value={createName}
           onChange={(e) => setCreateName(e.target.value)}
-          placeholder="空间名称，如：Blog 项目"
+          placeholder={translate('memorySettings.bodies.namePlaceholder')}
           style={{ width: 170 }}
         />
         <Input
           value={createDescription}
           onChange={(e) => setCreateDescription(e.target.value)}
-          placeholder="路由描述：什么内容属于这里、何时召回"
+          placeholder={translate('memorySettings.bodies.descriptionPlaceholder')}
           style={{ flex: 1, minWidth: 220 }}
           onPressEnter={handleCreateBody}
         />
@@ -672,13 +718,13 @@ const MemorySettings: React.FC = () => {
           loading={creatingBody}
           onClick={handleCreateBody}
         >
-          创建空间
+          {translate('memorySettings.bodies.create')}
         </Button>
       </div>
 
       {bodies.length === 0 ? (
         <Empty
-          description="暂无记忆空间。模型对话中可通过 mnemon_memory_body_create 工具创建，或在这里手动创建。"
+          description={translate('memorySettings.bodies.empty')}
           style={{ padding: '32px 0' }}
         />
       ) : (
@@ -711,14 +757,16 @@ const MemorySettings: React.FC = () => {
                   <span style={{ fontSize: 13.5, fontWeight: 600 }}>{body.name}</span>
                   {body.active ? (
                     <Tag color="green" style={{ marginRight: 0, fontSize: 11, lineHeight: '18px' }}>
-                      激活
+                      {translate('memorySettings.bodies.active')}
                     </Tag>
                   ) : (
-                    <Tag style={{ marginRight: 0, fontSize: 11, lineHeight: '18px' }}>未激活</Tag>
+                    <Tag style={{ marginRight: 0, fontSize: 11, lineHeight: '18px' }}>
+                      {translate('memorySettings.bodies.inactive')}
+                    </Tag>
                   )}
                   {!body.healthy && (
                     <Tag color="red" style={{ marginRight: 0, fontSize: 11 }}>
-                      异常
+                      {translate('memorySettings.bodies.unhealthy')}
                     </Tag>
                   )}
                 </div>
@@ -735,8 +783,11 @@ const MemorySettings: React.FC = () => {
                   </div>
                 )}
                 <div style={{ fontSize: 11, color: t.textTertiary, marginTop: 4 }}>
-                  洞察 {body.stats?.totalInsights ?? 0} · 关系 {body.stats?.edgeCount ?? 0} · 已删{' '}
-                  {body.stats?.deletedInsights ?? 0}
+                  {translate('memorySettings.bodies.stats', {
+                    insights: body.stats?.totalInsights ?? 0,
+                    edges: body.stats?.edgeCount ?? 0,
+                    deleted: body.stats?.deletedInsights ?? 0
+                  })}
                 </div>
               </div>
               <div className="flex items-center gap-1 shrink-0" style={{ marginTop: 2 }}>
@@ -746,9 +797,15 @@ const MemorySettings: React.FC = () => {
                   disabled={!body.healthy}
                   onClick={() => handleBrowseBody({ id: body.id, name: body.name })}
                 >
-                  内容
+                  {translate('memorySettings.bodies.content')}
                 </Button>
-                <Tooltip title={body.active ? '参与召回' : '不参与召回'}>
+                <Tooltip
+                  title={
+                    body.active
+                      ? translate('memorySettings.bodies.participatesInRecall')
+                      : translate('memorySettings.bodies.excludedFromRecall')
+                  }
+                >
                   <Switch
                     checked={body.active}
                     size="small"
@@ -764,15 +821,18 @@ const MemorySettings: React.FC = () => {
       {/* 空间内容浏览 */}
       <Modal
         open={browsingBody !== null}
-        title={`「${browsingBody?.name}」内容`}
+        title={translate('memorySettings.insights.title', { name: browsingBody?.name })}
         footer={null}
         onCancel={() => setBrowsingBody(null)}
         width={640}
       >
         {browsingLoading ? (
-          <Empty description="加载中…" style={{ padding: '24px 0' }} />
+          <Empty description={translate('common.state.loading')} style={{ padding: '24px 0' }} />
         ) : bodyInsights.length === 0 ? (
-          <Empty description="空间内暂无内容" style={{ padding: '24px 0' }} />
+          <Empty
+            description={translate('memorySettings.insights.empty')}
+            style={{ padding: '24px 0' }}
+          />
         ) : (
           <div className="custom-scrollbar" style={{ maxHeight: 420, overflowY: 'auto' }}>
             {bodyInsights.map((item) => (
@@ -792,8 +852,11 @@ const MemorySettings: React.FC = () => {
                   {item.content}
                 </div>
                 <div style={{ fontSize: 11, color: t.textTertiary, marginTop: 2 }}>
-                  {item.category ?? 'general'} · 重要度 {item.importance ?? 3} ·{' '}
-                  {item.createdAt?.slice(0, 10)}
+                  {translate('memorySettings.insights.meta', {
+                    category: item.category ?? 'general',
+                    importance: item.importance ?? 3,
+                    date: item.createdAt?.slice(0, 10)
+                  })}
                 </div>
               </div>
             ))}
@@ -807,7 +870,7 @@ const MemorySettings: React.FC = () => {
     <div>
       {!documents || documents.total === 0 ? (
         <Empty
-          description="暂无项目档案。模型对话中可通过 mnemon_document_manage 工具创建设计 / 流程 / 交接文档。"
+          description={translate('memorySettings.documents.empty')}
           style={{ padding: '32px 0' }}
         />
       ) : (
@@ -857,7 +920,10 @@ const MemorySettings: React.FC = () => {
                   </div>
                 )}
                 <div style={{ fontSize: 11, color: t.textTertiary, marginTop: 4 }}>
-                  更新于 {doc.updatedAt.slice(0, 16).replace('T', ' ')} · revision {doc.revision}
+                  {translate('memorySettings.documents.updatedAt', {
+                    time: doc.updatedAt.slice(0, 16).replace('T', ' '),
+                    revision: doc.revision
+                  })}
                 </div>
               </div>
             </div>
@@ -870,28 +936,32 @@ const MemorySettings: React.FC = () => {
   return (
     <div>
       <SettingsPageHeader
-        title="记忆（Mnemon）"
-        description="三层记忆：热记忆（每轮注入）· 长期记忆空间（按需召回）· 项目档案（完整文档）。存储于记忆根目录下，并按工作区目录隔离（每个工作区一套独立记忆，互不串扰）。"
+        title={translate('memorySettings.page.title')}
+        description={translate('memorySettings.page.description')}
       />
 
       {/* 目录选择 */}
-      <SettingsSection title="记忆存储目录" icon={<FolderOutlined size={14} />} bodyPadding={16}>
+      <SettingsSection
+        title={translate('memorySettings.storage.sectionTitle')}
+        icon={<FolderOutlined size={14} />}
+        bodyPadding={16}
+      >
         <div style={{ display: 'flex', gap: 8, maxWidth: 720, flexWrap: 'wrap' }}>
           <Input
             value={memoryPath}
             onChange={(e) => setMemoryPath(e.target.value)}
-            placeholder="例如：E:\RytenBench\Memory（留空不启用）"
+            placeholder={translate('memorySettings.storage.placeholder')}
             allowClear
             style={{ flex: 1, minWidth: 320 }}
           />
-          <Button onClick={handleBrowsePath}>浏览…</Button>
+          <Button onClick={handleBrowsePath}>{translate('memorySettings.storage.browse')}</Button>
           <Button
             type="primary"
             loading={savingPath}
             disabled={memoryPath.trim() === (settings?.harness?.memoryPath ?? '')}
             onClick={handleSavePath}
           >
-            保存
+            {translate('common.action.save')}
           </Button>
         </div>
         {settings?.harness?.memoryPath && (
@@ -903,28 +973,34 @@ const MemorySettings: React.FC = () => {
               wordBreak: 'break-all'
             }}
           >
-            当前已生效：{settings.harness.memoryPath}
+            {translate('memorySettings.storage.activePath', {
+              path: settings.harness.memoryPath
+            })}
           </p>
         )}
       </SettingsSection>
 
       {/* 未配置引导 / 三层记忆管理 */}
       {!configured ? (
-        <SettingsSection title="启用记忆" icon={<DatabaseOutlined size={14} />} bodyPadding={24}>
+        <SettingsSection
+          title={translate('memorySettings.enable.sectionTitle')}
+          icon={<DatabaseOutlined size={14} />}
+          bodyPadding={24}
+        >
           <Empty
             styles={{ image: { height: 56 } }}
             description={
               <span style={{ fontSize: 13 }}>
-                未配置记忆目录，模型将没有持久记忆。
+                {translate('memorySettings.enable.empty')}
                 <br />
-                在上方选择一个目录（如 E:\RytenBench\Memory）并保存即可启用三层记忆。
+                {translate('memorySettings.enable.emptyHint')}
               </span>
             }
           />
         </SettingsSection>
       ) : (
         <SettingsSection
-          title="记忆管理"
+          title={translate('memorySettings.manage.sectionTitle')}
           icon={<DatabaseOutlined size={14} />}
           bodyPadding={12}
           extra={
@@ -938,24 +1014,28 @@ const MemorySettings: React.FC = () => {
           }
         >
           {loadingSnapshot && !snapshot ? (
-            <Empty description="加载中…" style={{ padding: '24px 0' }} />
+            <Empty description={translate('common.state.loading')} style={{ padding: '24px 0' }} />
           ) : (
             <Tabs
               size="small"
               items={[
                 {
                   key: 'runtime',
-                  label: `热记忆（${userEntries.length + memoryEntries.length}）`,
+                  label: translate('memorySettings.tabs.runtime', {
+                    count: userEntries.length + memoryEntries.length
+                  }),
                   children: renderRuntimeTab()
                 },
                 {
                   key: 'bodies',
-                  label: `长期空间（${bodies.length}）`,
+                  label: translate('memorySettings.tabs.bodies', { count: bodies.length }),
                   children: renderBodiesTab()
                 },
                 {
                   key: 'documents',
-                  label: `档案（${documents?.total ?? 0}）`,
+                  label: translate('memorySettings.tabs.documents', {
+                    count: documents?.total ?? 0
+                  }),
                   children: renderDocumentsTab()
                 }
               ]}
@@ -965,20 +1045,20 @@ const MemorySettings: React.FC = () => {
       )}
 
       {/* 机制说明 */}
-      <SettingsSection title="记忆机制说明" bodyPadding={16}>
+      <SettingsSection title={translate('memorySettings.mechanism.sectionTitle')} bodyPadding={16}>
         <SettingRow
-          title="热记忆"
-          description="USER 用户画像（4 KiB）+ MEMORY 项目记忆（10 KiB），每轮自动注入；模型用 mnemon_runtime_memory 工具维护；MEMORY 写满自动归档到长期空间。"
+          title={translate('memorySettings.mechanism.runtimeTitle')}
+          description={translate('memorySettings.mechanism.runtimeDesc')}
           control={<span />}
         />
         <SettingRow
-          title="长期记忆空间"
-          description="跨会话稳定洞察，每空间独立数据库 + 四类关系；mnemon_recall 召回、mnemon_remember 沉淀；激活状态控制是否参与召回。"
+          title={translate('memorySettings.mechanism.bodiesTitle')}
+          description={translate('memorySettings.mechanism.bodiesDesc')}
           control={<span />}
         />
         <SettingRow
-          title="项目档案"
-          description="完整 Markdown 文档（设计/流程/交接），active 参与搜索、archived 冷层；mnemon_document_manage 创建，mnemon_document_search 检索。"
+          title={translate('memorySettings.mechanism.documentsTitle')}
+          description={translate('memorySettings.mechanism.documentsDesc')}
           control={<span />}
         />
       </SettingsSection>

@@ -1,6 +1,7 @@
 import React from 'react'
 import { Modal, Progress, Typography, Space, Tag, Button, Row, Col } from 'antd'
 import { LoadingOutlined, MinusOutlined, DatabaseOutlined, LinkOutlined } from '@ant-design/icons'
+import { useTranslation } from '@renderer/i18n'
 import type { BuildProgressProps } from '@renderer/types/components'
 
 const { Text } = Typography
@@ -20,6 +21,7 @@ const BuildProgress: React.FC<BuildProgressProps> = ({
   message,
   onMinimize
 }) => {
+  const { t } = useTranslation()
   return (
     <Modal
       title={
@@ -41,7 +43,7 @@ const BuildProgress: React.FC<BuildProgressProps> = ({
         <div style={{ marginBottom: 16 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
             <Text type="secondary" style={{ fontSize: 13 }}>
-              整体进度
+              {t('graph.progress.overallProgress')}
             </Text>
             <Text style={{ fontSize: 13, fontWeight: 500 }}>{overallProgress}%</Text>
           </div>
@@ -77,7 +79,7 @@ const BuildProgress: React.FC<BuildProgressProps> = ({
             <Space>
               <DatabaseOutlined style={{ color: '#1677ff' }} />
               <Text type="secondary" style={{ fontSize: 12 }}>
-                实体: <Text strong>{entityCount}</Text>
+                {t('graph.progress.entityLabel')}: <Text strong>{entityCount}</Text>
               </Text>
             </Space>
           </Col>
@@ -85,7 +87,7 @@ const BuildProgress: React.FC<BuildProgressProps> = ({
             <Space>
               <LinkOutlined style={{ color: '#52c41a' }} />
               <Text type="secondary" style={{ fontSize: 12 }}>
-                关系: <Text strong>{relationCount}</Text>
+                {t('graph.progress.relationLabel')}: <Text strong>{relationCount}</Text>
               </Text>
             </Space>
           </Col>
@@ -94,7 +96,10 @@ const BuildProgress: React.FC<BuildProgressProps> = ({
         {totalDocs > 0 && (
           <div style={{ marginBottom: 8 }}>
             <Text type="secondary" style={{ fontSize: 12 }}>
-              已处理 {processedDocs}/{totalDocs} 篇文档
+              {t('graph.progress.documentsProcessed', {
+                processed: processedDocs,
+                total: totalDocs
+              })}
             </Text>
           </div>
         )}
@@ -102,7 +107,10 @@ const BuildProgress: React.FC<BuildProgressProps> = ({
         {totalChunks > 0 && (
           <div>
             <Text type="secondary" style={{ fontSize: 12 }}>
-              已处理 {processedChunks}/{totalChunks} 个文本块
+              {t('graph.progress.chunksProcessed', {
+                processed: processedChunks,
+                total: totalChunks
+              })}
             </Text>
           </div>
         )}

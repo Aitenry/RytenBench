@@ -14,6 +14,7 @@ import TipTapMarkdownEditor from '@renderer/components/markdown/TipTapMarkdownEd
 import DocPropertiesModal from './DocPropertiesModal'
 import { getTagsArray } from '@renderer/utils/document'
 import { useMessage } from '@renderer/hooks/useMessage'
+import { useTranslation } from '@renderer/i18n'
 import dayjs from 'dayjs'
 
 interface DocEditorPaneProps {
@@ -51,6 +52,7 @@ const DocEditorPane: React.FC<DocEditorPaneProps> = ({
 }) => {
   const { token } = theme.useToken()
   const { viewMessage } = useMessage()
+  const { t } = useTranslation()
   const api = (window as unknown as Window).api
 
   const [loading, setLoading] = useState(true)
@@ -151,7 +153,10 @@ const DocEditorPane: React.FC<DocEditorPaneProps> = ({
         const curContent = contentRef.current
         if (last && (curTitle !== last.title || curContent !== last.content)) {
           try {
-            await api.docs.update(docId, { title: curTitle || '未命名文档', content: curContent })
+            await api.docs.update(docId, {
+              title: curTitle || t('home.doc.untitled'),
+              content: curContent
+            })
           } catch (err) {
             console.error('Failed to flush doc on unmount:', err)
           }
@@ -197,10 +202,10 @@ const DocEditorPane: React.FC<DocEditorPaneProps> = ({
   /* ── 保存 ── */
   const doSave = useCallback(async (): Promise<void> => {
     const id = docIdRef.current
-    const t = titleRef.current
+    const nextTitle = titleRef.current
     const c = contentRef.current
     const last = lastSavedRef.current
-    if (last && t === last.title && c === last.content) {
+    if (last && nextTitle === last.title && c === last.content) {
       setSaveState('saved')
       return
     }
@@ -208,11 +213,11 @@ const DocEditorPane: React.FC<DocEditorPaneProps> = ({
     savingRef.current = true
     setSaveState('saving')
     try {
-      await api.docs.update(id, { title: t || '未命名文档', content: c })
-      lastSavedRef.current = { title: t, content: c }
+      await api.docs.update(id, { title: nextTitle || t('home.doc.untitled'), content: c })
+      lastSavedRef.current = { title: nextTitle, content: c }
       setSaveState('saved')
       setLastSavedAt(new Date())
-      onSavedRef.current(id, t || '未命名文档')
+      onSavedRef.current(id, nextTitle || t('home.doc.untitled'))
       metaRef.current = metaRef.current
         ? {
             ...metaRef.current,
@@ -238,7 +243,7 @@ const DocEditorPane: React.FC<DocEditorPaneProps> = ({
         }, AUTO_SAVE_DELAY)
       }
     }
-  }, [api])
+  }, [api, t])
 
   /* 内容/标题变化 → 标记未保存并启动自动保存 */
   const markChanged = useCallback(() => {
@@ -306,14 +311,14 @@ const DocEditorPane: React.FC<DocEditorPaneProps> = ({
           ? { ...metaRef.current, tags: data.tags }
           : metaRef.current
         if (metaRef.current) onMetaChangeRef.current(metaRef.current)
-        onSavedRef.current(docIdRef.current, titleRef.current || '未命名文档')
-        viewMessage(messageKey, 'success', '文档属性已保存', 2)
+        onSavedRef.current(docIdRef.current, titleRef.current || t('home.doc.untitled'))
+        viewMessage(messageKey, 'success', t('home.doc.propsSaved'), 2)
       } catch (error) {
         console.error('Failed to save doc properties:', error)
-        viewMessage(messageKey, 'error', '保存文档属性失败')
+        viewMessage(messageKey, 'error', t('home.doc.propsSaveFailed'))
       }
     },
-    [api, viewMessage]
+    [api, viewMessage, t]
   )
 
   /* 卸载时清理 onEditorReady */
@@ -343,7 +348,7 @@ const DocEditorPane: React.FC<DocEditorPaneProps> = ({
   if (notFound) {
     return (
       <PaneShell>
-        <Empty description="文档不存在或已被删除" style={{ marginTop: 120 }} />
+        <Empty description={t('home.doc.notFound')} style={{ marginTop: 120 }} />
       </PaneShell>
     )
   }
@@ -354,21 +359,21 @@ const DocEditorPane: React.FC<DocEditorPaneProps> = ({
         return (
           <>
             <RiLoader2Line size={13} className="spin-anim" style={{ color: token.colorPrimary }} />
-            <span style={{ color: token.colorTextSecondary }}>保存中…</span>
+            <span style={{ color: token.colorTextSecondary }}>{t('home.editor.saving')}</span>
           </>
         )
       case 'dirty':
         return (
           <>
             <RiEditLine size={13} style={{ color: token.colorTextTertiary }} />
-            <span style={{ color: token.colorTextTertiary }}>未保存</span>
+            <span style={{ color: token.colorTextTertiary }}>{t('home.editor.unsaved')}</span>
           </>
         )
       case 'error':
         return (
           <>
             <RiErrorWarningLine size={13} style={{ color: token.colorError }} />
-            <span style={{ color: token.colorError }}>保存失败</span>
+            <span style={{ color: token.colorError }}>{t('common.action.saveFailed')}</span>
           </>
         )
       default:
@@ -376,7 +381,9 @@ const DocEditorPane: React.FC<DocEditorPaneProps> = ({
           <>
             <RiCheckLine size={13} style={{ color: token.colorSuccess }} />
             <span style={{ color: token.colorTextTertiary }}>
-              已保存{lastSavedAt ? ` ${dayjs(lastSavedAt).format('HH:mm:ss')}` : ''}
+              {lastSavedAt
+                ? t('home.editor.savedWithTime', { time: dayjs(lastSavedAt).format('HH:mm:ss') })
+                : t('home.editor.saved')}
             </span>
           </>
         )
@@ -403,7 +410,7 @@ const DocEditorPane: React.FC<DocEditorPaneProps> = ({
             variant="borderless"
             value={title}
             onChange={handleTitleChange}
-            placeholder="未命名文档"
+            placeholder={t('home.doc.untitled')}
             maxLength={120}
             style={{
               fontSize: 24,
@@ -423,7 +430,11 @@ const DocEditorPane: React.FC<DocEditorPaneProps> = ({
               flexWrap: 'wrap'
             }}
           >
-            {createdAt && <span>创建于 {dayjs(createdAt).format('YYYY-MM-DD')}</span>}
+            {createdAt && (
+              <span>
+                {t('home.doc.createdAt', { date: dayjs(createdAt).format('YYYY-MM-DD') })}
+              </span>
+            )}
             {tags.length > 0 && (
               <span style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                 {tags.map((tag) => (
@@ -468,7 +479,7 @@ const DocEditorPane: React.FC<DocEditorPaneProps> = ({
               }}
             >
               <RiSettings3Line size={12} />
-              属性
+              {t('home.term.properties')}
             </span>
           </div>
         </div>
@@ -511,7 +522,7 @@ const DocEditorPane: React.FC<DocEditorPaneProps> = ({
           {saveIndicator}
           <span style={{ flex: 1 }} />
           <span style={{ color: token.colorTextQuaternary, fontSize: 11 }}>
-            Ctrl+S 立即保存 · 编辑后自动保存
+            {t('home.editor.hint')}
           </span>
         </div>
       </div>

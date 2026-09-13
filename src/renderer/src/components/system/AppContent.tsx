@@ -7,9 +7,11 @@ import CryptoJS from 'crypto-js'
 import { Window } from '../../../resource/types/window'
 import { MessageProvider } from '@renderer/providers/MessageProvider'
 import { useMessage } from '@renderer/hooks/useMessage'
+import { useTranslation } from '@renderer/i18n'
 
 const AppContent: React.FC = () => {
   const { viewMessage } = useMessage()
+  const { t } = useTranslation()
   const location = useLocation()
   const [current, setCurrent] = useState('home')
   const [isLocked, setIsLocked] = useState(false)
@@ -58,13 +60,13 @@ const AppContent: React.FC = () => {
 
       if (isValid) {
         updateLockStatus(false)
-        viewMessage('unlock-success', 'success', '解锁成功')
+        viewMessage('unlock-success', 'success', t('shell.unlock.success'))
       } else {
-        viewMessage('unlock-error', 'error', '解锁密码错误')
+        viewMessage('unlock-error', 'error', t('shell.unlock.failed'))
       }
     } catch (error) {
       console.error('Unlock verification failed:', error)
-      viewMessage('unlock-error', 'error', '解锁验证失败')
+      viewMessage('unlock-error', 'error', t('shell.unlock.verifyFailed'))
     }
   }
 

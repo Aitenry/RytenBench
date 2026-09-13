@@ -10,6 +10,7 @@ import { setDatabaseInstance, setInitializationPromise } from '../database/insta
 import { initKeystore } from '../crypto/provider-key'
 import { settingsStore } from '../context'
 import { safeSend } from '../safe-send'
+import { getMainLanguage, mainMessages } from '../i18n'
 import { GraphSettings, HarnessSettings, TraySettings } from '../types/settings'
 import { getIp } from '../address'
 import { startWeatherAutoRefresh } from '../weather'
@@ -115,29 +116,31 @@ async function loadConfig(): Promise<void> {
 async function performInitializationTasks(): Promise<void> {
   // 扁平化初始化步骤：配置 / 密钥库 / 连接数据库 / 执行数据库迁移 / 工作区迁移。
   // 进度条按步骤均匀推进，逐步增长，避免整任务一步跳到 25%。
+  // 步骤名是启动页上可见的文案，随界面语言（这里取一次即可，启动期间语言不会变）。
+  const m = mainMessages()
   let database: Database | null = null
   const steps: { name: string; execute: () => Promise<void> | void }[] = [
-    { name: '加载配置', execute: async () => await loadConfig() },
+    { name: m.splash.stepLoadConfig, execute: async () => await loadConfig() },
     {
-      name: '初始化密钥库',
+      name: m.splash.stepInitKeystore,
       execute: async () => {
         initKeystore()
       }
     },
     {
-      name: '连接数据库',
+      name: m.splash.stepConnectDatabase,
       execute: async () => {
         database = await createDatabase()
       }
     },
     {
-      name: '执行数据库迁移',
+      name: m.splash.stepRunMigrations,
       execute: async () => {
         await runMigrations(database!.getDatabase())
       }
     },
     {
-      name: '初始化工作区',
+      name: m.splash.stepInitWorkspace,
       execute: async () => {
         const result = await migrateWorkspaceData(database!.getDatabase(), () => {
           const harness = settingsStore.get('harness') as HarnessSettings | undefined
@@ -179,7 +182,7 @@ async function performInitializationTasks(): Promise<void> {
   setDatabaseInstance(database)
 
   // 全部步骤完成
-  sendInitProgress('初始化完成', 100, steps.length, steps.length)
+  sendInitProgress(m.splash.stepCompleted, 100, steps.length, steps.length)
 }
 
 export async function createLoadingWindow(): Promise<void> {
@@ -204,10 +207,16 @@ export async function createLoadingWindow(): Promise<void> {
 
   loadingWindow.setMenu(null)
 
+  // 启动页自身的静态文案在渲染侧按 ?lang= 选择，避免首帧显示错语言
+  const lang = getMainLanguage()
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
-    await loadingWindow.loadURL(`${process.env['ELECTRON_RENDERER_URL']}/resource/loading.html`)
+    await loadingWindow.loadURL(
+      `${process.env['ELECTRON_RENDERER_URL']}/resource/loading.html?lang=${lang}`
+    )
   } else {
-    await loadingWindow.loadFile(join(__dirname, '../renderer/resource/loading.html'))
+    await loadingWindow.loadFile(join(__dirname, '../renderer/resource/loading.html'), {
+      query: { lang }
+    })
   }
   logger.info('[Window] Loading window ready')
 

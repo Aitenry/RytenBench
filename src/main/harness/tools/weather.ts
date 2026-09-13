@@ -2,12 +2,14 @@ import { tool } from '@langchain/core/tools'
 import type { StructuredToolInterface } from '@langchain/core/tools'
 import { fetchWeatherApi } from 'openmeteo'
 import * as z from 'zod/v4'
+import { mainFormat } from '../../i18n'
 import {
-  weatherCodeMap,
-  windDirectionLabel,
   geocodeLocation,
   formatDate,
-  weekdayLabel
+  getWeatherTexts,
+  weatherCodeLabel,
+  windDirectionLabelFor,
+  weekdayLabelFor
 } from '../../shared/weather-utils'
 
 // ============================================================================
@@ -15,12 +17,13 @@ import {
 // ============================================================================
 
 async function fetchWeather(location: string, forecastDays: number): Promise<string> {
+  const tw = getWeatherTexts()
   const results = await geocodeLocation(location)
-  if (!results.length) return `未找到地点 "${location}" 的天气信息。`
+  if (!results.length) return mainFormat(tw.notFound, { location })
   const geo = results[0]
   const locationName = geo.admin1
-    ? `${geo.name}，${geo.admin1}（${geo.country}）`
-    : `${geo.name}（${geo.country}）`
+    ? mainFormat(tw.locationWithAdmin, { name: geo.name, admin1: geo.admin1, country: geo.country })
+    : mainFormat(tw.location, { name: geo.name, country: geo.country })
 
   const params = {
     latitude: [geo.lat],
@@ -45,11 +48,13 @@ async function fetchWeather(location: string, forecastDays: number): Promise<str
     const wDir = current.variables(3)!.value()
     const humidity = current.variables(4)!.value()
     const apparent = current.variables(5)!.value()
-    parts.push('**当前实况**')
-    parts.push(`  天气：${weatherCodeMap[code] ?? `天气码 ${code}`}`)
-    parts.push(`  气温：${temp.toFixed(1)}°C（体感 ${apparent.toFixed(1)}°C）`)
-    parts.push(`  湿度：${humidity}%`)
-    parts.push(`  风速：${wSpeed.toFixed(1)} km/h ${windDirectionLabel(wDir)}`)
+    parts.push(tw.currentHeader)
+    parts.push(mainFormat(tw.condition, { condition: weatherCodeLabel(code, tw) }))
+    parts.push(mainFormat(tw.temperature, { temp: temp.toFixed(1), apparent: apparent.toFixed(1) }))
+    parts.push(mainFormat(tw.humidity, { humidity }))
+    parts.push(
+      mainFormat(tw.wind, { speed: wSpeed.toFixed(1), direction: windDirectionLabelFor(wDir, tw) })
+    )
     parts.push('')
   }
   const daily = response.daily()
@@ -66,23 +71,40 @@ async function fetchWeather(location: string, forecastDays: number): Promise<str
     const startTime = Number(daily.time())
     const interval = daily.interval()
     const todayStr = formatDate(new Date())
-    parts.push(`**未来 ${wc.length} 天预报**\n`)
+    parts.push(mainFormat(tw.forecastHeader, { days: wc.length }))
     for (let i = 0; i < wc.length; i++) {
       const dayTime = new Date((startTime + i * interval + utcOffset) * 1000)
       const dateStr = formatDate(dayTime)
-      const label = dateStr === todayStr ? '今天' : weekdayLabel(dayTime)
-      const desc = weatherCodeMap[Math.round(wc[i])] ?? `天气码 ${Math.round(wc[i])}`
+      const label = dateStr === todayStr ? tw.today : weekdayLabelFor(dayTime, tw)
       parts.push(
-        `  **${dateStr} ${label}**：${desc}，${tMin[i].toFixed(0)}～${tMax[i].toFixed(0)}°C（体感 ${aMin[i].toFixed(0)}～${aMax[i].toFixed(0)}°C），降水量 ${precip[i].toFixed(1)}mm（概率 ${pProb[i] ?? 0}%），风速 ${wMax[i].toFixed(1)}km/h ${windDirectionLabel(wDir[i])}`
+        mainFormat(tw.daily, {
+          date: dateStr,
+          label,
+          condition: weatherCodeLabel(Math.round(wc[i]), tw),
+          min: tMin[i].toFixed(0),
+          max: tMax[i].toFixed(0),
+          feelsMin: aMin[i].toFixed(0),
+          feelsMax: aMax[i].toFixed(0),
+          precip: precip[i].toFixed(1),
+          prob: pProb[i] ?? 0,
+          speed: wMax[i].toFixed(1),
+          direction: windDirectionLabelFor(wDir[i], tw)
+        })
       )
     }
   }
   if (results.length > 1) {
-    parts.push('\n**其他匹配地点：**')
+    parts.push(tw.otherLocations)
     for (let i = 1; i < results.length; i++) {
       const r = results[i]
       parts.push(
-        `  - ${r.admin1 ? `${r.name}, ${r.admin1}, ${r.country}` : `${r.name}, ${r.country}`}`
+        r.admin1
+          ? mainFormat(tw.otherLocationWithAdmin, {
+              name: r.name,
+              admin1: r.admin1,
+              country: r.country
+            })
+          : mainFormat(tw.otherLocation, { name: r.name, country: r.country })
       )
     }
   }
@@ -97,11 +119,13 @@ export function buildGetWeatherTool(): StructuredToolInterface {
   return tool(async ({ location, forecast_days }) => fetchWeather(location, forecast_days ?? 3), {
     name: 'get_weather',
     description:
-      '查询指定地点的当前天气和未来每日天气预报。返回当前实况（温度、体感温度、湿度、风速风向、天气状况）和每日预报。支持城市名、区县名，如 "Beijing"、"广州天河区"、"Tokyo"。',
+      'Get the current weather and the daily forecast for a location. Returns current conditions (temperature, apparent temperature, humidity, wind speed and direction, weather condition) and the daily forecast. Accepts city and district names, e.g. "Beijing", "Guangzhou Tianhe District", "Tokyo".',
     schema: z.object({
       location: z
         .string()
-        .describe('地点名称。支持中英文城市名、区县名，如 "Beijing"、"广州"、"Tokyo"'),
+        .describe(
+          'Location name. Accepts city and district names in any language, e.g. "Beijing", "Guangzhou", "Tokyo"'
+        ),
       forecast_days: z
         .number()
         .int()
@@ -109,7 +133,9 @@ export function buildGetWeatherTool(): StructuredToolInterface {
         .max(16)
         .optional()
         .default(3)
-        .describe('预报天数（1-16），默认 3 天。问"今天"或"当前"=1，"明天"=2，"这周"=7')
+        .describe(
+          'Number of forecast days (1-16), default 3. For "today" or "now" use 1, "tomorrow" 2, "this week" 7'
+        )
     })
   })
 }

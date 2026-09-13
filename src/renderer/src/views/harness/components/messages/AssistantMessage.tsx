@@ -20,6 +20,7 @@ import {
 } from '@remixicon/react'
 import MarkdownLoad from '@renderer/components/markdown/MarkdownLoad'
 import { ShinyText, ShinyIcon } from '@renderer/components/effects/ShinyText'
+import { useTranslation, Trans } from '@renderer/i18n'
 import LoadingMessage from './LoadingMessage'
 import type { Message, MessageBlock, ToolCall } from '@renderer/types/harness'
 import {
@@ -47,6 +48,9 @@ const TOOL_IN_PROGRESS_ICONS: Record<
   write_todos: RiListCheck,
   read_todos: RiListCheck
 }
+
+/** 数字等宽字体：计数里的数字用等宽字形，避免位数变化时整行抖动 */
+const MONO_FONT = "'JetBrains Mono', 'Cascadia Code', Consolas, 'Courier New', monospace"
 
 /** 定制化卡片工具集：进行中/完成态共用同款卡片外形（光泽只在进行中扫过，完成后静止） */
 const CARD_TOOLS = new Set([
@@ -164,6 +168,7 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
     onCopy,
     onDelete
   }) => {
+    const { t } = useTranslation()
     const isCopied = copiedId === message.id
 
     // 复制文本：优先拼接 blocks 中的正文（修复：此前只取 message.content,
@@ -329,7 +334,7 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                   fontWeight: 500
                 }}
               >
-                待办清单
+                {t('harness.assistantMessage.todoList')}
               </span>
             ) : (
               <span
@@ -339,7 +344,11 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                   fontWeight: 500
                 }}
               >
-                {completedCount}/{total} 已完成
+                <Trans
+                  i18nKey="harness.assistantMessage.todoCompleted"
+                  values={{ completed: completedCount, total }}
+                  components={{ mono: <span style={{ fontFamily: MONO_FONT }} /> }}
+                />
               </span>
             )}
             {inProgressCount > 0 && !allCompleted ? (
@@ -349,13 +358,17 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                   fontSize: isNested ? '11px' : '12px'
                 }}
               >
-                · {inProgressCount} 进行中
+                <Trans
+                  i18nKey="harness.assistantMessage.todoInProgress"
+                  count={inProgressCount}
+                  components={{ mono: <span style={{ fontFamily: MONO_FONT }} /> }}
+                />
               </span>
             ) : null}
           </div>
           {total === 0 ? (
             <div style={{ color: colorTextTertiary, fontSize: isNested ? '12px' : '13px' }}>
-              暂无待办，可先让模型用 write_todos 制定任务计划
+              {t('harness.assistantMessage.todoEmpty')}
             </div>
           ) : (
             <div className="flex flex-col gap-1">
@@ -369,7 +382,7 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                   (todo.title as string) ||
                   (todo.text as string) ||
                   (todo.name as string) ||
-                  `待办 ${i + 1}`
+                  t('harness.assistantMessage.todoFallback', { index: i + 1 })
 
                 return (
                   <div key={i} className="flex items-start gap-2">
@@ -500,12 +513,15 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
             summary = typeof input.command === 'string' ? input.command : ''
             break
         }
-        const status = progress === 'preparing' ? ' · 参数构建中…' : ' · 执行中…'
+        const status =
+          progress === 'preparing'
+            ? ` · ${t('harness.assistantMessage.toolPreparing')}`
+            : ` · ${t('harness.assistantMessage.toolExecuting')}`
         const Icon = TOOL_IN_PROGRESS_ICONS[tool.name] || RiTerminalBoxLine
         return renderRow(
           <ShinyIcon icon={Icon} size={size} baseColor={colorTextSecondary} />,
           <TruncatedTooltipText
-            text={`${summary || tool.name || '工具调用'}${status}`}
+            text={`${summary || tool.name || t('harness.assistantMessage.toolCallFallback')}${status}`}
             shinyBaseColor={colorTextSecondary}
             style={{ color: colorText, fontSize, flex: 1 }}
           />
@@ -539,7 +555,11 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
             card.path || '/',
             card.count !== undefined ? (
               <span style={{ color: colorTextTertiary, fontSize, flexShrink: 0 }}>
-                {card.count} 项
+                <Trans
+                  i18nKey="harness.assistantMessage.itemCount"
+                  count={card.count}
+                  components={{ mono: <span style={{ fontFamily: MONO_FONT }} /> }}
+                />
               </span>
             ) : undefined
           )
@@ -549,7 +569,11 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
             card.pattern || '',
             card.count !== undefined ? (
               <span style={{ color: colorTextTertiary, fontSize, flexShrink: 0 }}>
-                {card.count} 项
+                <Trans
+                  i18nKey="harness.assistantMessage.itemCount"
+                  count={card.count}
+                  components={{ mono: <span style={{ fontFamily: MONO_FONT }} /> }}
+                />
               </span>
             ) : undefined
           )
@@ -559,7 +583,11 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
             card.pattern || '',
             card.count !== undefined ? (
               <span style={{ color: colorTextTertiary, fontSize, flexShrink: 0 }}>
-                {card.count} 条
+                <Trans
+                  i18nKey="harness.assistantMessage.matchCount"
+                  count={card.count}
+                  components={{ mono: <span style={{ fontFamily: MONO_FONT }} /> }}
+                />
               </span>
             ) : undefined
           )
@@ -595,14 +623,14 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
       'mnemon_memory_body_update',
       'mnemon_memory_body_merge'
     ]
-    /** 工具中文标签（卡片标题） */
-    const MEMORY_TOOL_TITLES: Record<string, string> = {
-      mnemon_status: '记忆状态',
-      mnemon_memory_bodies: '记忆空间',
-      mnemon_recall: '记忆召回',
-      mnemon_document_search: '档案搜索',
-      mnemon_related: '关联记忆'
-    }
+    /** 工具中文标签（卡片标题）：只存词条键，求值处用组件内的 t */
+    const MEMORY_TOOL_TITLES = {
+      mnemon_status: 'harness.assistantMessage.memoryStatus',
+      mnemon_memory_bodies: 'harness.assistantMessage.memorySpaces',
+      mnemon_recall: 'harness.assistantMessage.memoryRecall',
+      mnemon_document_search: 'harness.assistantMessage.memoryDocumentSearch',
+      mnemon_related: 'harness.assistantMessage.memoryRelated'
+    } as const
 
     /** 截断长文本（记忆条目/摘要展示用） */
     const clampText = (text: string, max = 300): string =>
@@ -719,14 +747,27 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
         const activeSpaces = asList(parsed?.active_spaces)
         const rows: [string, string][] = [
           [
-            '记忆空间',
-            `${parsed?.memory_bodies_active ?? 0}/${parsed?.memory_bodies_total ?? 0} 激活`
+            t('harness.assistantMessage.memorySpaces'),
+            t('harness.assistantMessage.memoryBodyActivate', {
+              active: parsed?.memory_bodies_active ?? 0,
+              total: parsed?.memory_bodies_total ?? 0
+            })
           ],
-          ['热记忆', parsed?.runtime_memory_configured ? '已配置' : '未配置'],
-          ['项目档案', parsed?.documents_configured ? '已配置' : '未配置']
+          [
+            t('harness.assistantMessage.memoryBodyHot'),
+            parsed?.runtime_memory_configured
+              ? t('common.state.configured')
+              : t('common.state.notConfigured')
+          ],
+          [
+            t('harness.assistantMessage.memoryBodyDocuments'),
+            parsed?.documents_configured
+              ? t('common.state.configured')
+              : t('common.state.notConfigured')
+          ]
         ]
         return shell(
-          MEMORY_TOOL_TITLES.mnemon_status,
+          t(MEMORY_TOOL_TITLES.mnemon_status),
           null,
           <div>
             {parsed ? (
@@ -755,14 +796,23 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                           fontSize: isNested ? '10px' : '11px'
                         }}
                       >
-                        {String(s.name ?? `空间 ${i + 1}`)} · {Number(s.totalInsights ?? 0)} 条
+                        {String(
+                          s.name ??
+                            t('harness.assistantMessage.memoryBodySpaceFallback', {
+                              index: i + 1
+                            })
+                        )}{' '}
+                        ·{' '}
+                        {t('harness.assistantMessage.memoryBodyInsights', {
+                          count: Number(s.totalInsights ?? 0)
+                        })}
                       </span>
                     ))}
                   </div>
                 ) : null}
               </>
             ) : (
-              empty('无法解析状态输出')
+              empty(t('harness.assistantMessage.statusParseFailed'))
             )}
           </div>
         )
@@ -772,14 +822,21 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
       if (tool.name === 'mnemon_memory_bodies') {
         const bodies = asList(parsed?.bodies)
         return shell(
-          MEMORY_TOOL_TITLES.mnemon_memory_bodies,
+          t(MEMORY_TOOL_TITLES.mnemon_memory_bodies),
           parsed ? (
             <span style={{ color: colorTextTertiary, fontSize: smallFont, flexShrink: 0 }}>
-              共 {Number(parsed.total ?? 0)} 个 · {Number(parsed.activeCount ?? 0)} 激活
+              <Trans
+                i18nKey="harness.assistantMessage.memoryBodyTotalActive"
+                values={{
+                  total: Number(parsed.total ?? 0),
+                  active: Number(parsed.activeCount ?? 0)
+                }}
+                components={{ mono: <span style={{ fontFamily: MONO_FONT }} /> }}
+              />
             </span>
           ) : null,
           bodies.length === 0 ? (
-            empty('暂无记忆空间，可在对话中让模型创建')
+            empty(t('harness.assistantMessage.memoryBodyEmpty'))
           ) : (
             <div>
               {bodies.map((b, i) => (
@@ -797,7 +854,7 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                         className="truncate"
                         title={String(b.name ?? '')}
                       >
-                        {String(b.name ?? '未命名空间')}
+                        {String(b.name ?? t('harness.assistantMessage.memoryBodyUnnamed'))}
                       </span>
                       <span
                         className="shrink-0 rounded px-1.5 py-px"
@@ -807,7 +864,9 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                           fontSize: isNested ? '10px' : '11px'
                         }}
                       >
-                        {b.active ? '已激活' : '未激活'}
+                        {b.active
+                          ? t('harness.assistantMessage.memoryBodyActive')
+                          : t('harness.assistantMessage.memoryBodyInactive')}
                       </span>
                     </div>
                     {b.description ? (
@@ -827,7 +886,11 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                       flexShrink: 0
                     }}
                   >
-                    {Number(b.totalInsights ?? 0)} 条洞察
+                    <Trans
+                      i18nKey="harness.assistantMessage.memoryBodyInsights"
+                      count={Number(b.totalInsights ?? 0)}
+                      components={{ mono: <span style={{ fontFamily: MONO_FONT }} /> }}
+                    />
                   </span>
                 </div>
               ))}
@@ -840,21 +903,37 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
       if (tool.name === 'mnemon_recall') {
         const results = asList(parsed?.results)
         return shell(
-          MEMORY_TOOL_TITLES.mnemon_recall,
+          t(MEMORY_TOOL_TITLES.mnemon_recall),
           results.length > 0 ? (
             <span style={{ color: colorTextTertiary, fontSize: smallFont, flexShrink: 0 }}>
-              {results.length} 条
+              <Trans
+                i18nKey="harness.assistantMessage.memoryBodyCount"
+                count={results.length}
+                components={{ mono: <span style={{ fontFamily: MONO_FONT }} /> }}
+              />
             </span>
           ) : null,
           results.length === 0 ? (
-            empty(typeof parsed?.hint === 'string' ? String(parsed.hint) : '未召回相关记忆')
+            empty(
+              typeof parsed?.hint === 'string'
+                ? String(parsed.hint)
+                : t('harness.assistantMessage.memoryRecallEmpty')
+            )
           ) : (
             <div>
               {results.map((item, i) => {
                 const primary = String(item.content ?? '')
                 const meta = [
-                  typeof item.memory_body_name === 'string' ? `来源：${item.memory_body_name}` : '',
-                  typeof item.score === 'number' ? `相关度 ${item.score.toFixed(2)}` : ''
+                  typeof item.memory_body_name === 'string'
+                    ? t('harness.assistantMessage.memoryEntrySource', {
+                        name: item.memory_body_name
+                      })
+                    : '',
+                  typeof item.score === 'number'
+                    ? t('harness.assistantMessage.memoryEntryScore', {
+                        score: item.score.toFixed(2)
+                      })
+                    : ''
                 ]
                   .filter(Boolean)
                   .join(' · ')
@@ -876,14 +955,18 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
       if (tool.name === 'mnemon_document_search') {
         const results = asList(parsed?.results)
         return shell(
-          MEMORY_TOOL_TITLES.mnemon_document_search,
+          t(MEMORY_TOOL_TITLES.mnemon_document_search),
           results.length > 0 ? (
             <span style={{ color: colorTextTertiary, fontSize: smallFont, flexShrink: 0 }}>
-              {results.length} 份
+              <Trans
+                i18nKey="harness.assistantMessage.memoryDocumentCount"
+                count={results.length}
+                components={{ mono: <span style={{ fontFamily: MONO_FONT }} /> }}
+              />
             </span>
           ) : null,
           results.length === 0 ? (
-            empty('未找到匹配的档案')
+            empty(t('harness.assistantMessage.memoryDocumentEmpty'))
           ) : (
             <div>
               {results.map((item, i) => {
@@ -919,9 +1002,9 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                           }}
                         >
                           {item.status === 'active'
-                            ? '已激活'
+                            ? t('harness.assistantMessage.memoryDocumentActive')
                             : item.status === 'archived'
-                              ? '已归档'
+                              ? t('harness.assistantMessage.memoryDocumentArchived')
                               : String(item.status)}
                         </span>
                       ) : null}
@@ -946,21 +1029,27 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
       if (tool.name === 'mnemon_related') {
         const results = asList(parsed?.results)
         return shell(
-          MEMORY_TOOL_TITLES.mnemon_related,
+          t(MEMORY_TOOL_TITLES.mnemon_related),
           results.length > 0 ? (
             <span style={{ color: colorTextTertiary, fontSize: smallFont, flexShrink: 0 }}>
-              {results.length} 条
+              <Trans
+                i18nKey="harness.assistantMessage.memoryBodyCount"
+                count={results.length}
+                components={{ mono: <span style={{ fontFamily: MONO_FONT }} /> }}
+              />
             </span>
           ) : null,
           results.length === 0 ? (
-            empty('未找到关联记忆')
+            empty(t('harness.assistantMessage.memoryRelatedEmpty'))
           ) : (
             <div>
               {results.map((item, i) => {
                 const primary = String(item.content ?? '')
                 const meta = [
                   typeof item.edge_type === 'string' ? item.edge_type : '',
-                  typeof item.depth === 'number' ? `深度 ${item.depth}` : ''
+                  typeof item.depth === 'number'
+                    ? t('harness.assistantMessage.memoryEntryDepth', { depth: item.depth })
+                    : ''
                 ]
                   .filter(Boolean)
                   .join(' · ')
@@ -975,13 +1064,22 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
       const writeBody = (): React.ReactNode => {
         // mnemon_remember：JSON 输出，展示沉淀目标
         if (tool.name === 'mnemon_remember' && parsed) {
-          const category = typeof parsed.category === 'string' ? `类别：${parsed.category}` : ''
+          const category =
+            typeof parsed.category === 'string'
+              ? t('harness.assistantMessage.memoryCategory', { category: parsed.category })
+              : ''
           const importance =
-            typeof parsed.importance === 'number' ? `重要度 ${parsed.importance}` : ''
+            typeof parsed.importance === 'number'
+              ? t('harness.assistantMessage.memoryImportance', { importance: parsed.importance })
+              : ''
           return (
             <div>
               <div style={{ color: colorText, fontSize }}>
-                已沉淀到「{String(parsed.memory_body_name ?? '记忆空间')}」
+                {t('harness.assistantMessage.memoryRemembered', {
+                  name: String(
+                    parsed.memory_body_name ?? t('harness.assistantMessage.memorySpaces')
+                  )
+                })}
               </div>
               {category || importance ? (
                 <div className="mt-0.5" style={{ color: colorTextTertiary, fontSize: smallFont }}>
@@ -997,14 +1095,12 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
           </div>
         )
       }
-      return shell(
-        '记忆写入',
-        null,
-        parsed === null && tool.name === 'mnemon_remember' ? empty('无法解析工具输出') : writeBody()
-      )
+      // 注意：mnemon_remember 的返回值是**纯文本**（不是 JSON），所以不能因为没有
+      // 解析出 JSON 就显示「无法解析」——writeBody 内部已按「JSON 优先、否则原样展示」兜底
+      return shell(t('harness.assistantMessage.memoryWrite'), null, writeBody())
     }
 
-    /** mnemon 记忆工具进行中卡片：大脑图标 + 中文标题 + 状态后缀，光泽扫过（完成后仍是专属结果卡） */
+    /** mnemon 记忆工具进行中卡片：大脑图标 + 标题 + 状态后缀，光泽扫过（完成后仍是专属结果卡） */
     const renderMemoryInProgressCard = (
       tool: ToolCall,
       key: string | number,
@@ -1013,10 +1109,15 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
     ): React.ReactNode => {
       const size = isNested ? 14 : 16
       const fontSize = isNested ? '12px' : '13px'
-      const title =
-        MEMORY_TOOL_TITLES[tool.name] ??
-        (MEMORY_WRITE_TOOLS.includes(tool.name) ? '记忆写入' : '记忆工具')
-      const status = progress === 'preparing' ? ' · 参数构建中…' : ' · 执行中…'
+      const title = MEMORY_TOOL_TITLES[tool.name]
+        ? t(MEMORY_TOOL_TITLES[tool.name])
+        : MEMORY_WRITE_TOOLS.includes(tool.name)
+          ? t('harness.assistantMessage.memoryWrite')
+          : t('harness.assistantMessage.memoryTool')
+      const status =
+        progress === 'preparing'
+          ? ` · ${t('harness.assistantMessage.toolPreparing')}`
+          : ` · ${t('harness.assistantMessage.toolExecuting')}`
       return (
         <div
           key={key}
@@ -1095,7 +1196,7 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
             >
               <ShinyIcon icon={RiRefreshLine} size={16} baseColor={colorTextSecondary} />
               <TruncatedTooltipText
-                text={`正在重试（第 ${attempt}/${retries} 次）…`}
+                text={t('harness.assistantMessage.retrying', { attempt, retries })}
                 shinyBaseColor={colorTextSecondary}
                 style={{ color: colorText, fontSize: '13px', flex: 1 }}
               />
@@ -1120,7 +1221,7 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
             >
               <ShinyIcon icon={RiPictureInPicture2Line} size={16} baseColor={colorTextSecondary} />
               <TruncatedTooltipText
-                text="正在压缩早期对话…"
+                text={t('harness.assistantMessage.compacting')}
                 shinyBaseColor={colorTextSecondary}
                 style={{ color: colorText, fontSize: '13px', flex: 1 }}
               />
@@ -1149,11 +1250,15 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                 style={{ color: colorTextSecondary, flexShrink: 0 }}
               />
               <TruncatedTooltipText
-                text="早期对话已压缩"
+                text={t('harness.assistantMessage.compacted')}
                 style={{ color: colorText, fontSize: '13px', flex: 1 }}
               />
               <span style={{ color: colorTextTertiary, fontSize: '13px', flexShrink: 0 }}>
-                {c.compressedCount} 条 → 保留 {c.retainedCount} 条
+                <Trans
+                  i18nKey="harness.assistantMessage.compactedCounts"
+                  values={{ compressed: c.compressedCount, retained: c.retainedCount }}
+                  components={{ mono: <span style={{ fontFamily: MONO_FONT }} /> }}
+                />
               </span>
             </div>
           )
@@ -1172,11 +1277,25 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                     <span className="flex items-center gap-2">
                       <RiBrain4Line size={14} style={{ color: colorTextSecondary }} />
                       <span style={{ color: colorTextSecondary }}>
-                        注入记忆 · {total} 条
+                        <Trans
+                          i18nKey="harness.assistantMessage.memoryInjected"
+                          count={total}
+                          components={{ mono: <span style={{ fontFamily: MONO_FONT }} /> }}
+                        />
                         <span style={{ color: colorTextTertiary }}>
-                          {mem.user.length > 0
-                            ? `（用户画像 ${mem.user.length} · 项目记忆 ${mem.memory.length}）`
-                            : `（项目记忆 ${mem.memory.length}）`}
+                          {mem.user.length > 0 ? (
+                            <Trans
+                              i18nKey="harness.assistantMessage.memoryInjectedUser"
+                              values={{ user: mem.user.length, memory: mem.memory.length }}
+                              components={{ mono: <span style={{ fontFamily: MONO_FONT }} /> }}
+                            />
+                          ) : (
+                            <Trans
+                              i18nKey="harness.assistantMessage.memoryInjectedProject"
+                              values={{ count: mem.memory.length }}
+                              components={{ mono: <span style={{ fontFamily: MONO_FONT }} /> }}
+                            />
+                          )}
                         </span>
                       </span>
                     </span>
@@ -1187,7 +1306,11 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                       {mem.user.length > 0 ? (
                         <>
                           <div style={{ color: colorTextSecondary }} className="font-medium mb-1">
-                            用户画像 USER（{mem.usage.user} 字节）
+                            <Trans
+                              i18nKey="harness.assistantMessage.userProfileBytes"
+                              values={{ bytes: mem.usage.user }}
+                              components={{ mono: <span style={{ fontFamily: MONO_FONT }} /> }}
+                            />
                           </div>
                           <ul className="list-disc pl-4 mb-2" style={{ color: colorText }}>
                             {mem.user.map((entry, i) => (
@@ -1201,7 +1324,11 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                       {mem.memory.length > 0 ? (
                         <>
                           <div style={{ color: colorTextSecondary }} className="font-medium mb-1">
-                            项目记忆 MEMORY（{mem.usage.memory} 字节）
+                            <Trans
+                              i18nKey="harness.assistantMessage.projectMemoryBytes"
+                              values={{ bytes: mem.usage.memory }}
+                              components={{ mono: <span style={{ fontFamily: MONO_FONT }} /> }}
+                            />
                           </div>
                           <ul className="list-disc pl-4" style={{ color: colorText }}>
                             {mem.memory.map((entry, i) => (
@@ -1229,7 +1356,9 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
             .slice(blockIndex + 1)
             .some((b) => b.type !== 'reasoning')
           const thinkingDone = hasContentAfter || !message.loading
-          const thinkingLabel = thinkingDone ? '思考过程' : '思考中…'
+          const thinkingLabel = thinkingDone
+            ? t('harness.assistantMessage.thinkingDone')
+            : t('harness.assistantMessage.thinkingInProgress')
           const thinkingLabelNode = (
             <span style={{ color: colorTextTertiary }} className="text-xs">
               {thinkingDone ? (
@@ -1304,7 +1433,7 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
               ? 'preparing'
               : 'executing'
             : undefined
-          const toolName = block.tool.name || '工具调用'
+          const toolName = block.tool.name || t('harness.assistantMessage.toolCallFallback')
           // Mnemon 记忆工具：进行中 = 同款光泽状态卡；完成后 = 专属结果卡
           if (
             toolName.startsWith('mnemon_') &&
@@ -1323,7 +1452,7 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
             }
           }
           // 其余工具（含无卡片数据的异常完成态）：通用折叠，进行中光泽头 + 输入/输出详情
-          const toolLabel = getToolStatusLabel(toolName, phase)
+          const toolLabel = getToolStatusLabel(t, toolName, phase)
           // 进行中折叠头展示该工具完成后的定制卡片同款图标；mnemon 记忆工具用大脑图标；其余不显示
           const inProgressIcon =
             inProgress &&
@@ -1347,7 +1476,7 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                       className="max-h-64 overflow-y-auto harness-scrollbar px-1.5"
                     >
                       <div style={{ color: colorTextSecondary }} className="font-medium mb-1">
-                        输入：
+                        {t('harness.assistantMessage.toolInput')}
                       </div>
                       <pre
                         style={{ background: codeBg }}
@@ -1356,7 +1485,7 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                         {JSON.stringify(block.tool.input, null, 2)}
                       </pre>
                       <div style={{ color: colorTextSecondary }} className="font-medium mt-2 mb-1">
-                        输出：
+                        {t('harness.assistantMessage.toolOutput')}
                       </div>
                       <pre
                         style={{ background: codeBg }}
@@ -1407,7 +1536,7 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                   {sa.name}
                 </span>
                 <span style={{ color: colorTextSecondary, fontSize: 13, flexShrink: 0 }}>
-                  已派发后台任务
+                  {t('harness.assistantMessage.dispatched')}
                 </span>
                 {sa.taskDescription ? (
                   <TruncatedTooltipText
@@ -1436,10 +1565,10 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
           const isActive = sa.status === 'started' || sa.status === 'running'
           const isError = sa.status === 'error'
           const saLabel = isActive
-            ? `${sa.name} · 执行中…`
+            ? t('harness.assistantMessage.subAgentRunning', { name: sa.name })
             : isError
-              ? `${sa.name} · 出错`
-              : `${sa.name} · 已完成`
+              ? t('harness.assistantMessage.subAgentError', { name: sa.name })
+              : t('harness.assistantMessage.subAgentCompleted', { name: sa.name })
           const saIconColor = isError ? '#ef4444' : isActive ? '#1677ff' : '#52c41a'
           // 折叠受控（key = causeId 唯一标识，缺省按位置回退）
           const saPanelKey = sa.causeId ?? `sa-${blockIndex}`
@@ -1484,7 +1613,7 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                         key: ci,
                         label: (
                           <span style={{ color: colorTextTertiary }} className="text-xs">
-                            思考过程
+                            {t('harness.assistantMessage.thinkingDone')}
                           </span>
                         ),
                         children: (
@@ -1536,7 +1665,7 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                     ? 'preparing'
                     : 'executing'
                   : undefined
-                const toolName = child.tool.name || '工具调用'
+                const toolName = child.tool.name || t('harness.assistantMessage.toolCallFallback')
                 // Mnemon 记忆工具（嵌套）：进行中 = 光泽状态卡；完成后 = 专属结果卡
                 if (
                   toolName.startsWith('mnemon_') &&
@@ -1555,7 +1684,7 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                   }
                 }
                 // 其余工具（含无卡片数据的异常完成态）：通用折叠，进行中光泽头 + 输入/输出详情
-                const toolLabel = getToolStatusLabel(toolName, phase)
+                const toolLabel = getToolStatusLabel(t, toolName, phase)
                 // 进行中折叠头展示该工具完成后的定制卡片同款图标；mnemon 记忆工具用大脑图标；其余不显示
                 const inProgressIcon =
                   inProgress &&
@@ -1586,7 +1715,7 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                               style={{ color: colorTextSecondary }}
                               className="font-medium mb-1 text-xs"
                             >
-                              输入：
+                              {t('harness.assistantMessage.toolInput')}
                             </div>
                             <pre
                               style={{ background: codeBg }}
@@ -1600,7 +1729,7 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                                   style={{ color: colorTextSecondary }}
                                   className="font-medium mt-2 mb-1 text-xs"
                                 >
-                                  输出：
+                                  {t('harness.assistantMessage.toolOutput')}
                                 </div>
                                 <pre
                                   style={{ background: codeBg }}
@@ -1639,10 +1768,10 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                 const childIsActive = childSa.status === 'started' || childSa.status === 'running'
                 const childIsError = childSa.status === 'error'
                 const childSaLabel = childIsActive
-                  ? `${childSa.name} · 执行中…`
+                  ? t('harness.assistantMessage.subAgentRunning', { name: childSa.name })
                   : childIsError
-                    ? `${childSa.name} · 出错`
-                    : `${childSa.name} · 已完成`
+                    ? t('harness.assistantMessage.subAgentError', { name: childSa.name })
+                    : t('harness.assistantMessage.subAgentCompleted', { name: childSa.name })
                 const childSaIconColor = childIsError
                   ? '#ef4444'
                   : childIsActive
@@ -1708,7 +1837,9 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                                       baseColor={colorTextSecondary}
                                     />
                                     <ShinyText baseColor={colorTextSecondary}>
-                                      <span style={{ fontSize: 12 }}>正在生成…</span>
+                                      <span style={{ fontSize: 12 }}>
+                                        {t('harness.assistantMessage.silentGenerating')}
+                                      </span>
                                     </ShinyText>
                                   </div>
                                 ) : null}
@@ -1796,14 +1927,16 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                                 baseColor={colorTextSecondary}
                               />
                               <ShinyText baseColor={colorTextSecondary}>
-                                <span style={{ fontSize: 12 }}>正在生成…</span>
+                                <span style={{ fontSize: 12 }}>
+                                  {t('harness.assistantMessage.silentGenerating')}
+                                </span>
                               </ShinyText>
                             </div>
                           ) : null}
                         </>
                       ) : isActive ? (
                         <div style={{ color: colorTextTertiary }} className="text-sm italic">
-                          智能体正在执行中…
+                          {t('harness.assistantMessage.subAgentExecuting')}
                         </div>
                       ) : sa.error ? (
                         <div style={{ color: '#ef4444' }} className="text-sm">
@@ -1843,7 +1976,9 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
             <div className="flex items-center gap-2 mt-1" style={{ color: colorTextSecondary }}>
               <ShinyIcon icon={RiSparkling2Line} size={14} baseColor={colorTextSecondary} />
               <ShinyText baseColor={colorTextSecondary}>
-                <span style={{ fontSize: 13 }}>正在生成…</span>
+                <span style={{ fontSize: 13 }}>
+                  {t('harness.assistantMessage.silentGenerating')}
+                </span>
               </ShinyText>
             </div>
           ) : null}
@@ -1858,7 +1993,9 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
             <div className="flex items-center gap-2 mt-1" style={{ color: colorTextSecondary }}>
               <ShinyIcon icon={RiSparkling2Line} size={14} baseColor={colorTextSecondary} />
               <ShinyText baseColor={colorTextSecondary}>
-                <span style={{ fontSize: 13 }}>正在生成…</span>
+                <span style={{ fontSize: 13 }}>
+                  {t('harness.assistantMessage.silentGenerating')}
+                </span>
               </ShinyText>
             </div>
           ) : null}

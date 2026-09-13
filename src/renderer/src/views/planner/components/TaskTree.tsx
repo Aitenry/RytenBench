@@ -8,6 +8,7 @@ import {
   RiEditLine
 } from '@remixicon/react'
 import { type PlannerTreeNode, PRIORITY_MAP } from '@renderer/types/planner'
+import { useTranslation } from '@renderer/i18n'
 
 interface Props {
   tree: PlannerTreeNode[]
@@ -33,6 +34,7 @@ const TaskTree: React.FC<Props> = ({
   onEditTask
 }) => {
   const [hoveredId, setHoveredId] = useState<number | null>(null)
+  const { t } = useTranslation()
   const { token } = theme.useToken()
   const { modal } = App.useApp()
 
@@ -136,7 +138,7 @@ const TaskTree: React.FC<Props> = ({
               onClick={(e) => e.stopPropagation()}
             >
               {canAddChild && (
-                <Tooltip title="添加子任务">
+                <Tooltip title={t('planner.action.addChild')}>
                   <Button
                     type="text"
                     size="small"
@@ -146,7 +148,7 @@ const TaskTree: React.FC<Props> = ({
                   />
                 </Tooltip>
               )}
-              <Tooltip title="编辑">
+              <Tooltip title={t('common.action.edit')}>
                 <Button
                   type="text"
                   size="small"
@@ -155,7 +157,7 @@ const TaskTree: React.FC<Props> = ({
                   onClick={() => onEditTask(node)}
                 />
               </Tooltip>
-              <Tooltip title="删除">
+              <Tooltip title={t('common.action.delete')}>
                 <Button
                   type="text"
                   size="small"
@@ -164,10 +166,10 @@ const TaskTree: React.FC<Props> = ({
                   style={{ width: 20, height: 20, padding: 0 }}
                   onClick={() => {
                     modal.confirm({
-                      title: '删除任务',
-                      content: `确定删除「${node.title}」及其所有子任务吗？`,
-                      okText: '删除',
-                      cancelText: '取消',
+                      title: t('planner.confirm.deleteTitle'),
+                      content: t('planner.confirm.deleteWithChildren', { name: node.title }),
+                      okText: t('common.action.delete'),
+                      cancelText: t('common.action.cancel'),
                       okButtonProps: { danger: true },
                       onOk: () => onDeleteTask(node.id)
                     })
@@ -198,6 +200,7 @@ const TaskTree: React.FC<Props> = ({
       selectedId,
       hoveredId,
       token,
+      t,
       modal,
       onSelect,
       onToggleCollapse,
@@ -239,9 +242,9 @@ const TaskTree: React.FC<Props> = ({
         <span className="shrink-0" style={{ textAlign: 'right' }}>
           #
         </span>
-        <span style={{ flex: '0 0 120px' }}>任务名称</span>
+        <span style={{ flex: '0 0 120px' }}>{t('planner.tree.colName')}</span>
         <span className="ml-auto mr-2" style={{ width: 48, textAlign: 'right' }}>
-          工时
+          {t('planner.tree.colWorkHours')}
         </span>
       </div>
 
@@ -252,9 +255,9 @@ const TaskTree: React.FC<Props> = ({
             className="flex flex-col items-center justify-center h-full gap-2"
             style={{ color: token.colorTextTertiary }}
           >
-            <span className="text-sm">暂无项目</span>
+            <span className="text-sm">{t('planner.empty.noProjects')}</span>
             <Button type="link" size="small" onClick={() => onAddTask(null)}>
-              创建第一个项目
+              {t('planner.action.createFirstProject')}
             </Button>
           </div>
         ) : (

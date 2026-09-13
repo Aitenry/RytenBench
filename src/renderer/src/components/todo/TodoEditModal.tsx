@@ -1,19 +1,25 @@
 import React, { useEffect } from 'react'
 import { Modal, Form, Input, DatePicker, Select } from 'antd'
+import type { TFunction } from 'i18next'
 import dayjs from 'dayjs'
+import { useTranslation } from '@renderer/i18n'
 import type { TodoItem } from '@renderer/types/models'
 
-const getStatusOptions = (currentStatus: number): { value: number; label: string }[] => {
+/* 模块级普通函数：不调 hook，译文函数由调用方以参数传入 */
+const getStatusOptions = (
+  t: TFunction,
+  currentStatus: number
+): { value: number; label: string }[] => {
   if (currentStatus === 1) {
     return [
-      { value: 1, label: '进行中' },
-      { value: 2, label: '已完成' }
+      { value: 1, label: t('home.status.doing') },
+      { value: 2, label: t('home.status.done') }
     ]
   }
   return [
-    { value: 0, label: '待办' },
-    { value: 1, label: '进行中' },
-    { value: 2, label: '已完成' }
+    { value: 0, label: t('home.status.pending') },
+    { value: 1, label: t('home.status.doing') },
+    { value: 2, label: t('home.status.done') }
   ]
 }
 
@@ -49,6 +55,7 @@ const TodoEditModal: React.FC<TodoEditModalProps> = ({
   onAddClose,
   onAddSave
 }) => {
+  const { t } = useTranslation()
   const [editForm] = Form.useForm<TodoFormValues>()
   const [addForm] = Form.useForm<Omit<TodoFormValues, 'status'>>()
 
@@ -114,13 +121,13 @@ const TodoEditModal: React.FC<TodoEditModalProps> = ({
     <>
       {/* Edit / Preview Modal */}
       <Modal
-        title="待办事项详情"
+        title={t('home.todo.editTitle')}
         open={editModalOpen}
         onOk={handleEditOk}
         onCancel={handleEditCancel}
         width={600}
-        okText="保存"
-        cancelText="取消"
+        okText={t('common.action.save')}
+        cancelText={t('common.action.cancel')}
       >
         <Form
           key={currentTodo?.id ?? 'edit-form-empty'}
@@ -142,23 +149,32 @@ const TodoEditModal: React.FC<TodoEditModalProps> = ({
             <>
               <Form.Item
                 name="title"
-                label="标题"
-                rules={[{ required: true, message: '请输入标题' }]}
+                label={t('home.field.title')}
+                rules={[
+                  {
+                    required: true,
+                    message: t('common.message.pleaseInput', { field: t('home.field.title') })
+                  }
+                ]}
               >
-                <Input placeholder="请输入待办事项标题" />
+                <Input placeholder={t('home.todo.titlePlaceholder')} />
               </Form.Item>
 
-              <Form.Item name="due_date" label="截止日期">
+              <Form.Item name="due_date" label={t('home.field.dueDate')}>
                 <DatePicker
                   style={{ width: '100%' }}
-                  placeholder="请选择截止日期"
+                  placeholder={t('common.message.pleaseSelect', { field: t('home.field.dueDate') })}
                   format="YYYY-MM-DD"
                 />
               </Form.Item>
 
               <div className="grid grid-cols-3 gap-4">
-                <Form.Item name="priority" label="优先级" className="mb-0">
-                  <Select placeholder="请选择优先级">
+                <Form.Item name="priority" label={t('home.field.priority')} className="mb-0">
+                  <Select
+                    placeholder={t('common.message.pleaseSelect', {
+                      field: t('home.field.priority')
+                    })}
+                  >
                     {[0, 1, 2, 3, 4, 5, 6, 7].map((p) => (
                       <Select.Option key={p} value={p}>
                         P{p}
@@ -167,9 +183,13 @@ const TodoEditModal: React.FC<TodoEditModalProps> = ({
                   </Select>
                 </Form.Item>
 
-                <Form.Item name="status" label="状态" className="mb-0">
-                  <Select placeholder="请选择状态">
-                    {getStatusOptions(currentTodo.status ?? 0).map((option) => (
+                <Form.Item name="status" label={t('home.field.status')} className="mb-0">
+                  <Select
+                    placeholder={t('common.message.pleaseSelect', {
+                      field: t('home.field.status')
+                    })}
+                  >
+                    {getStatusOptions(t, currentTodo.status ?? 0).map((option) => (
                       <Select.Option key={option.value} value={option.value}>
                         {option.label}
                       </Select.Option>
@@ -177,8 +197,8 @@ const TodoEditModal: React.FC<TodoEditModalProps> = ({
                   </Select>
                 </Form.Item>
 
-                <Form.Item name="category" label="分类" className="mb-0">
-                  <Input placeholder="请输入分类" />
+                <Form.Item name="category" label={t('home.field.category')} className="mb-0">
+                  <Input placeholder={t('home.todo.categoryPlaceholder')} />
                 </Form.Item>
               </div>
             </>
@@ -188,29 +208,40 @@ const TodoEditModal: React.FC<TodoEditModalProps> = ({
 
       {/* Add Modal */}
       <Modal
-        title="添加待办事项"
+        title={t('home.todo.addTitle')}
         open={addModalOpen}
         onOk={handleAddOk}
         onCancel={handleAddCancel}
         width={600}
-        okText="添加"
-        cancelText="取消"
+        okText={t('common.action.add')}
+        cancelText={t('common.action.cancel')}
       >
         <Form form={addForm} layout="vertical">
-          <Form.Item name="title" label="标题" rules={[{ required: true, message: '请输入标题' }]}>
-            <Input placeholder="请输入待办事项标题" />
+          <Form.Item
+            name="title"
+            label={t('home.field.title')}
+            rules={[
+              {
+                required: true,
+                message: t('common.message.pleaseInput', { field: t('home.field.title') })
+              }
+            ]}
+          >
+            <Input placeholder={t('home.todo.titlePlaceholder')} />
           </Form.Item>
 
-          <Form.Item name="due_date" label="截止日期">
+          <Form.Item name="due_date" label={t('home.field.dueDate')}>
             <DatePicker
               style={{ width: '100%' }}
-              placeholder="请选择截止日期"
+              placeholder={t('common.message.pleaseSelect', { field: t('home.field.dueDate') })}
               format="YYYY-MM-DD"
             />
           </Form.Item>
 
-          <Form.Item name="priority" label="优先级">
-            <Select placeholder="请选择优先级">
+          <Form.Item name="priority" label={t('home.field.priority')}>
+            <Select
+              placeholder={t('common.message.pleaseSelect', { field: t('home.field.priority') })}
+            >
               {[0, 1, 2, 3, 4, 5, 6, 7].map((p) => (
                 <Select.Option key={p} value={p}>
                   P{p}
@@ -219,8 +250,8 @@ const TodoEditModal: React.FC<TodoEditModalProps> = ({
             </Select>
           </Form.Item>
 
-          <Form.Item name="category" label="分类">
-            <Input placeholder="请输入分类" />
+          <Form.Item name="category" label={t('home.field.category')}>
+            <Input placeholder={t('home.todo.categoryPlaceholder')} />
           </Form.Item>
         </Form>
       </Modal>

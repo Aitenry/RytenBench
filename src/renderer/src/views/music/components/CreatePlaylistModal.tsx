@@ -1,9 +1,11 @@
 import React, { useState } from 'react'
 import { theme, Modal, Input, Form } from 'antd'
 import { RiMusic2Line, RiCameraLine } from '@remixicon/react'
+import { useTranslation } from '@renderer/i18n'
 import type { CreatePlaylistModalProps } from '@renderer/types/components'
 
 const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({ open, onClose, onCreated }) => {
+  const { t } = useTranslation()
   const {
     token: { colorFillAlter, colorTextTertiary }
   } = theme.useToken()
@@ -49,12 +51,12 @@ const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({ open, onClose
 
   return (
     <Modal
-      title="新建歌单"
+      title={t('music.playlist.createTitle')}
       open={open}
       onCancel={handleCancel}
       onOk={handleOk}
-      okText="创建"
-      cancelText="取消"
+      okText={t('common.action.create')}
+      cancelText={t('common.action.cancel')}
       confirmLoading={creating}
     >
       {/* 封面 — 点击上传，hover 显示遮罩 */}
@@ -74,7 +76,9 @@ const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({ open, onClose
           {/* hover 遮罩 */}
           <div className="absolute inset-0 bg-black/40 flex flex-col items-center justify-center gap-1 opacity-0 group-hover/cover:opacity-100 transition-opacity">
             <RiCameraLine size={22} className="text-white" />
-            <span className="text-xs text-white">{coverDataUrl ? '更换封面' : '添加封面'}</span>
+            <span className="text-xs text-white">
+              {t(coverDataUrl ? 'music.playlist.coverChange' : 'music.playlist.coverAdd')}
+            </span>
           </div>
         </div>
       </div>
@@ -82,13 +86,18 @@ const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({ open, onClose
       <Form form={form} layout="vertical">
         <Form.Item
           name="name"
-          label="歌单名称"
-          rules={[{ required: true, message: '请输入歌单名称' }]}
+          label={t('music.playlist.nameLabel')}
+          rules={[
+            {
+              required: true,
+              message: t('common.message.pleaseInput', { field: t('music.playlist.nameLabel') })
+            }
+          ]}
         >
-          <Input placeholder="输入歌单名称" />
+          <Input placeholder={t('music.playlist.namePlaceholder')} />
         </Form.Item>
-        <Form.Item name="description" label="描述">
-          <Input.TextArea placeholder="歌单描述（可选）" rows={3} />
+        <Form.Item name="description" label={t('music.playlist.descriptionLabel')}>
+          <Input.TextArea placeholder={t('music.playlist.descriptionPlaceholder')} rows={3} />
         </Form.Item>
       </Form>
     </Modal>

@@ -1,6 +1,7 @@
 import type { PGlite } from '@electric-sql/pglite'
 import * as path from 'path'
 import logger from 'electron-log'
+import { mainFormat, mainToolMessages } from '../../../i18n'
 import {
   forgetInsight,
   linkInsights,
@@ -100,6 +101,7 @@ export class MnemonService {
   async search(
     request: SearchRequest
   ): Promise<{ query: string; mode: string; results: Insight[]; hint?: string }> {
+    const tm = mainToolMessages().mnemon
     const targets = this.resolveTargets(request.memoryBodyIds)
     const mode = request.mode ?? 'smart'
     const perSpaceLimit = Math.min(request.limit ?? 10, 12)
@@ -127,7 +129,7 @@ export class MnemonService {
       query: request.query,
       mode,
       results,
-      hint: results.length === 0 ? '未在已激活记忆空间中找到匹配内容' : undefined
+      hint: results.length === 0 ? tm.hint.noMatchInActiveSpaces : undefined
     }
   }
 
@@ -174,12 +176,15 @@ export class MnemonService {
   /** 沉淀一条洞察；未指定空间时使用第一个激活空间 */
   async remember(request: RememberRequest): Promise<Insight> {
     this.validateWrite()
+    const tm = mainToolMessages().mnemon
     const target = this.resolveWriteTarget(request.memoryBodyId)
     if (request.category && !MNEMON_CATEGORIES.includes(request.category)) {
-      throw new Error(`类别必须为 ${MNEMON_CATEGORIES.join(' / ')}`)
+      throw new Error(
+        mainFormat(tm.errors.categoryInvalid, { values: MNEMON_CATEGORIES.join(' / ') })
+      )
     }
     if (request.source && !MNEMON_SOURCES.includes(request.source)) {
-      throw new Error(`来源必须为 ${MNEMON_SOURCES.join(' / ')}`)
+      throw new Error(mainFormat(tm.errors.sourceInvalid, { values: MNEMON_SOURCES.join(' / ') }))
     }
     const db = await this.openDb(target.id)
     const insight = await rememberInsight(db, request, target.id, target.name)
@@ -210,7 +215,7 @@ export class MnemonService {
     const db = await this.openDb(target.id)
     const removed = await forgetInsight(db, id)
     if (!removed) {
-      throw new Error(`未找到记忆 ${id}（可能已删除）`)
+      throw new Error(mainFormat(mainToolMessages().mnemon.errors.insightNotFound, { id }))
     }
     return true
   }
@@ -264,6 +269,7 @@ export class MnemonService {
   }
 
   private resolveTargets(memoryBodyIds?: string[]): MemoryBody[] {
+    const tm = mainToolMessages().mnemon
     if (memoryBodyIds && memoryBodyIds.length > 0) {
       const targets = memoryBodyIds
         .map((id) => this.registry.get(id))
@@ -273,22 +279,23 @@ export class MnemonService {
         return !body || !body.active
       })
       if (inactive.length > 0) {
-        throw new Error(`以下记忆空间未激活或不存在，不能读取: ${inactive.join(', ')}`)
+        throw new Error(mainFormat(tm.errors.spaceNotActivated, { spaces: inactive.join(', ') }))
       }
       return targets
     }
     const active = this.registry.active()
     if (active.length === 0) {
-      throw new Error('没有已激活的记忆空间，请先创建或激活一个记忆空间')
+      throw new Error(tm.errors.noActiveSpace)
     }
     return active
   }
 
   /** 写入目标：指定 ID（未激活则自动激活）或第一个激活空间 */
   private resolveWriteTarget(memoryBodyId?: string): MemoryBody {
+    const tm = mainToolMessages().mnemon
     if (memoryBodyId) {
       const body = this.registry.get(memoryBodyId)
-      if (!body) throw new Error(`记忆空间不存在: ${memoryBodyId}`)
+      if (!body) throw new Error(mainFormat(tm.errors.spaceNotFound, { id: memoryBodyId }))
       if (!body.active) {
         // 对未激活目标写入成功后自动激活（对应 dsh-mnemon 行为）
         this.registry.update(memoryBodyId, { active: true })
@@ -297,7 +304,7 @@ export class MnemonService {
     }
     const active = this.registry.active()
     if (active.length === 0) {
-      throw new Error('没有已激活的记忆空间，请先创建或激活一个记忆空间')
+      throw new Error(tm.errors.noActiveSpace)
     }
     return active[0]
   }
@@ -307,7 +314,9 @@ export class MnemonService {
     const cached = this.openDbs.get(bodyId)
     if (cached) return cached
     const body = this.registry.get(bodyId)
-    if (!body) throw new Error(`记忆空间不存在: ${bodyId}`)
+    if (!body) {
+      throw new Error(mainFormat(mainToolMessages().mnemon.errors.spaceNotFound, { id: bodyId }))
+    }
     const db = await openSpaceDatabase(body.dbPath)
     this.openDbs.set(bodyId, db)
     return db

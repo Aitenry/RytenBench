@@ -2,6 +2,7 @@ import { ipcMain } from 'electron'
 import { join, resolve, isAbsolute, sep } from 'path'
 import * as fs from 'fs'
 import logger from 'electron-log'
+import { mainMessages } from '../i18n'
 import { settingsStore } from '../context'
 
 /**
@@ -11,18 +12,19 @@ import { settingsStore } from '../context'
  * 返回规范化后的绝对路径。
  */
 function assertInsideWorkspace(inputPath: string): string {
+  const m = mainMessages().error
   if (typeof inputPath !== 'string' || !isAbsolute(inputPath)) {
-    throw new Error('路径无效：必须传入 AI 工作区内的绝对路径')
+    throw new Error(m.invalidPathAbsolute)
   }
   const harnessSettings = settingsStore.get('harness') as { workspacePath?: string } | undefined
   const root = harnessSettings?.workspacePath
   if (!root) {
-    throw new Error('未配置 AI 工作区目录，拒绝文件访问')
+    throw new Error(m.workspaceDirNotConfigured)
   }
   const normalizedRoot = resolve(root)
   const target = resolve(inputPath)
   if (target !== normalizedRoot && !target.startsWith(normalizedRoot + sep)) {
-    throw new Error('路径不在 AI 工作区内，已拒绝访问')
+    throw new Error(m.pathOutsideWorkspace)
   }
   return target
 }

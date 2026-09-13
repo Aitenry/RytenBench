@@ -1,6 +1,7 @@
 import * as fs from 'fs'
 import * as path from 'path'
 import logger from 'electron-log'
+import { mainFormat, mainToolMessages } from '../../../i18n'
 import { hashOf } from './runtime-memory'
 import {
   DOCUMENTS_ACTIVE_LIMIT_BYTES,
@@ -158,6 +159,7 @@ export class DocumentController {
   /** 创建 / 更新文档 */
   async mutate(request: DocumentMutation): Promise<DocumentMutationResult> {
     const run = async (): Promise<DocumentMutationResult> => {
+      const tm = mainToolMessages().mnemon
       const index = this.readIndex()
       const now = new Date().toISOString()
 
@@ -165,7 +167,7 @@ export class DocumentController {
         const content = request.content
         const sizeBytes = Buffer.byteLength(content, 'utf-8')
         if (sizeBytes > DOCUMENT_MAX_BYTES) {
-          throw new Error(`单份文档超过上限 ${DOCUMENT_MAX_BYTES} 字节`)
+          throw new Error(mainFormat(tm.errors.documentTooLarge, { limit: DOCUMENT_MAX_BYTES }))
         }
         // 容量规划：active 总量 10 MiB
         const activeBytes = index.documents
@@ -173,7 +175,11 @@ export class DocumentController {
           .reduce((sum, d) => sum + d.sizeBytes, 0)
         if (activeBytes + sizeBytes > this.limitBytes) {
           throw new Error(
-            `文档容量不足：active 总量上限 ${this.limitBytes} 字节（当前 ${activeBytes}，需 ${sizeBytes}）。请先归档部分文档。`
+            mainFormat(tm.errors.documentCapacityExceeded, {
+              limit: this.limitBytes,
+              current: activeBytes,
+              needed: sizeBytes
+            })
           )
         }
 
@@ -202,22 +208,22 @@ export class DocumentController {
 
       // update
       const record = index.documents.find((d) => d.id === request.id)
-      if (!record) throw new Error(`文档不存在: ${request.id}`)
+      if (!record) throw new Error(mainFormat(tm.errors.documentNotFound, { id: request.id }))
       if (record.status !== 'active') {
-        throw new Error(`文档 ${request.id} 已归档，不能更新（可先重建）`)
+        throw new Error(mainFormat(tm.errors.documentArchived, { id: request.id }))
       }
       if (request.title !== undefined) record.title = request.title.trim()
       if (request.description !== undefined) record.description = request.description.trim()
       if (request.content !== undefined) {
         const sizeBytes = Buffer.byteLength(request.content, 'utf-8')
         if (sizeBytes > DOCUMENT_MAX_BYTES) {
-          throw new Error(`单份文档超过上限 ${DOCUMENT_MAX_BYTES} 字节`)
+          throw new Error(mainFormat(tm.errors.documentTooLarge, { limit: DOCUMENT_MAX_BYTES }))
         }
         const activeBytes = index.documents
           .filter((d) => d.status === 'active' && d.id !== record.id)
           .reduce((sum, d) => sum + d.sizeBytes, 0)
         if (activeBytes + sizeBytes > this.limitBytes) {
-          throw new Error('文档容量不足：更新后超出 active 总量上限，请先归档部分文档')
+          throw new Error(tm.errors.documentCapacityExceededOnUpdate)
         }
         record.contentHash = hashOf(request.content)
         record.sizeBytes = sizeBytes
@@ -234,10 +240,13 @@ export class DocumentController {
   /** 归档：把 active 文档移入 archived（先写长期层冷引用，再迁移原文） */
   async archive(id: string, details: ArchiveOptions): Promise<DocumentMutationResult> {
     const run = async (): Promise<DocumentMutationResult> => {
+      const tm = mainToolMessages().mnemon
       const index = this.readIndex()
       const record = index.documents.find((d) => d.id === id)
-      if (!record) throw new Error(`文档不存在: ${id}`)
-      if (record.status !== 'active') throw new Error(`文档 ${id} 不是 active 状态`)
+      if (!record) throw new Error(mainFormat(tm.errors.documentNotFound, { id }))
+      if (record.status !== 'active') {
+        throw new Error(mainFormat(tm.errors.documentNotActive, { id }))
+      }
 
       const now = new Date().toISOString()
       record.status = 'archived'

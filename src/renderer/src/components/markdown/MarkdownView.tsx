@@ -32,6 +32,7 @@ import {
 } from '@remixicon/react'
 import { extractTextFromChildren } from '@renderer/utils/markdown'
 import { useMessage } from '@renderer/hooks/useMessage'
+import { useTranslation } from '@renderer/i18n'
 import './markdown-body.css'
 import type {
   HeadingItem,
@@ -72,6 +73,7 @@ const CopyButton = ({
   text: string
   isDarkMode?: boolean
 }): React.ReactNode => {
+  const { t } = useTranslation()
   const [copied, setCopied] = useState(false)
 
   const handleCopy = async (): Promise<void> => {
@@ -92,7 +94,7 @@ const CopyButton = ({
           ? 'bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-white'
           : 'bg-gray-200 hover:bg-gray-300 text-gray-600 hover:text-gray-900'
       }`}
-      title={copied ? '已复制' : '复制代码'}
+      title={copied ? t('markdown.copy.copied') : t('markdown.copy.code')}
     >
       {copied ? <RiCheckLine size={16} /> : <RiFileCopyLine size={16} />}
     </button>
@@ -107,6 +109,7 @@ export const InlineCodeCopy = ({
   children: React.ReactNode
   isDarkMode?: boolean
 }): React.ReactNode => {
+  const { t } = useTranslation()
   const [copied, setCopied] = useState(false)
 
   const { viewMessage } = useMessage()
@@ -114,7 +117,7 @@ export const InlineCodeCopy = ({
     e.stopPropagation()
     try {
       await navigator.clipboard.writeText(text)
-      viewMessage('copy-code', 'success', '已复制！')
+      viewMessage('copy-code', 'success', t('common.action.copySuccess'))
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     } catch (err) {
@@ -126,7 +129,7 @@ export const InlineCodeCopy = ({
     <span
       onClick={handleCopy}
       className={`inline-flex items-center gap-1 cursor-pointer transition-all max-w-full min-w-0`}
-      title={copied ? '已复制' : '点击复制'}
+      title={copied ? t('markdown.copy.copied') : t('markdown.copy.clickToCopy')}
     >
       {children}
     </span>
@@ -245,6 +248,7 @@ const TableOfContents = ({
   isDarkMode,
   onNavigate
 }: TableOfContentsProps): React.ReactNode => {
+  const { t } = useTranslation()
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
 
   useEffect(() => {
@@ -291,7 +295,7 @@ const TableOfContents = ({
           isDarkMode ? 'border-gray-700 text-gray-200' : 'border-gray-200 text-gray-700'
         }`}
       >
-        目录
+        {t('markdown.toc.title')}
       </div>
       <div className="p-2 overflow-y-auto custom-container-scrollbar flex-1 min-h-0">
         {headings.map((item) => (
@@ -311,6 +315,7 @@ const TableOfContents = ({
 
 const MarkdownView = React.memo(
   ({ content, isDarkMode = false }: MarkdownViewProps): React.ReactNode => {
+    const { t } = useTranslation()
     const contentRef = useRef<HTMLDivElement>(null)
     const headings = useMemo(() => parseHeadings(content), [content])
 
@@ -586,7 +591,7 @@ const MarkdownView = React.memo(
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 onKeyDown={handleSearchKeyDown}
-                placeholder="搜索..."
+                placeholder={t('markdown.search.placeholder')}
                 className={`flex-1 bg-transparent outline-none text-sm ${
                   isDarkMode
                     ? 'text-gray-200 placeholder-gray-500'

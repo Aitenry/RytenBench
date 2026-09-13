@@ -1,8 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { theme } from 'antd'
 import { RiListCheck2, RiArrowDownSLine, RiCheckboxCircleFill } from '@remixicon/react'
+import { Trans } from '@renderer/i18n'
 import { Window } from '../../../../resource/types/window'
 import type { TodoItem } from '../../../../../main/harness/runtime/todo'
+
+/** 数字等宽字体：计数里的数字用等宽字形，避免位数变化时整行抖动 */
+const MONO_FONT = "'JetBrains Mono', 'Cascadia Code', Consolas, 'Courier New', monospace"
 
 /**
  * 进行中任务卡片 — 输入框上方展示「模型在对话中制定的计划」
@@ -105,10 +109,20 @@ const TaskProgressCard: React.FC<{ currentTopicId: number | null }> = ({ current
       >
         <RiListCheck2 size={15} style={{ color: colorTextSecondary, flexShrink: 0 }} />
         <span style={{ fontSize: 13, fontWeight: 600, color: colorText }}>
-          {completedCount}/{todos.length} 已完成
+          <Trans
+            i18nKey="harness.taskCard.completed"
+            values={{ done: completedCount, total: todos.length }}
+            components={{ mono: <span style={{ fontFamily: MONO_FONT }} /> }}
+          />
         </span>
         {inProgressCount > 0 && (
-          <span style={{ fontSize: 12, color: colorTextTertiary }}>· {inProgressCount} 进行中</span>
+          <span style={{ fontSize: 12, color: colorTextTertiary }}>
+            <Trans
+              i18nKey="harness.taskCard.inProgress"
+              count={inProgressCount}
+              components={{ mono: <span style={{ fontFamily: MONO_FONT }} /> }}
+            />
+          </span>
         )}
         <RiArrowDownSLine
           size={16}

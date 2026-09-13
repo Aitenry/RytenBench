@@ -4,6 +4,7 @@ import type MarkdownIt from 'markdown-it'
 import type StateBlock from 'markdown-it/lib/rules_block/state_block'
 import type StateInline from 'markdown-it/lib/rules_inline/state_inline'
 import katex from 'katex'
+import { i18n } from '@renderer/i18n'
 
 /* ════════════════════════════════════════════════════════════
    KaTeX 数学公式适配（$...$ 行内 / $$...$$ 块级）
@@ -187,7 +188,7 @@ function createMathNodeView(displayMode: boolean) {
       textarea.value = tex
       textarea.rows = displayMode ? 2 : 1
       textarea.spellcheck = false
-      textarea.placeholder = '输入 LaTeX 公式，回车完成'
+      textarea.placeholder = i18n.t('markdown.math.placeholder')
       textarea.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') {
           e.preventDefault()

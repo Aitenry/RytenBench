@@ -1,5 +1,6 @@
 import React from 'react'
 import { RiCollapseDiagonal2Line, RiExpandDiagonal2Line, RiShutDownLine } from '@remixicon/react'
+import { useTranslation } from '@renderer/i18n'
 import logo from '@renderer/assets/logo.png'
 
 interface TitleBarProps {
@@ -23,6 +24,7 @@ const TitleBar: React.FC<TitleBarProps> = ({
   colorText,
   colorTextSecondary
 }) => {
+  const { t } = useTranslation()
   return (
     <div className="frame-titlebar">
       <div className="frame-titlebar-left">
@@ -36,7 +38,11 @@ const TitleBar: React.FC<TitleBarProps> = ({
       </div>
 
       <div className="frame-titlebar-controls" style={{ color: colorText }}>
-        <button className="frame-titlebar-btn" onClick={onMinimize} title="最小化">
+        <button
+          className="frame-titlebar-btn"
+          onClick={onMinimize}
+          title={t('shell.titleBar.minimize')}
+        >
           <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 18 18">
             <line x1="3" y1="9" x2="15" y2="9" stroke="currentColor" />
           </svg>
@@ -44,7 +50,7 @@ const TitleBar: React.FC<TitleBarProps> = ({
         <button
           className="frame-titlebar-btn"
           onClick={onMaximize}
-          title={isMaximized ? '还原' : '最大化'}
+          title={isMaximized ? t('shell.titleBar.restore') : t('shell.titleBar.maximize')}
         >
           {isMaximized ? (
             <RiCollapseDiagonal2Line size={16} />
@@ -55,7 +61,7 @@ const TitleBar: React.FC<TitleBarProps> = ({
         <button
           className="frame-titlebar-btn frame-titlebar-btn-close"
           onClick={onClose}
-          title="关闭"
+          title={t('shell.titleBar.close')}
         >
           <RiShutDownLine size={16} />
         </button>

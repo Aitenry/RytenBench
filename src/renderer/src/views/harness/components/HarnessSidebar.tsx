@@ -21,6 +21,8 @@ import {
 } from '@remixicon/react'
 import ChaseDots from './ChaseDots'
 import { useMessage } from '@renderer/hooks/useMessage'
+import { useTranslation } from '@renderer/i18n'
+import type { TFunction } from 'i18next'
 import type { HarnessTopicRow, WorkspaceRow } from '../../../../../main/database/mapper/harness'
 import { Window } from '../../../../resource/types/window'
 
@@ -69,8 +71,9 @@ interface MnemonSidebarSnapshot {
 /** 会话分页大小（与 useHarnessHandlers 的 TOPICS_PAGE_SIZE 保持一致） */
 const TOPICS_PAGE_SIZE = 20
 
-/** 会话相对时间：刚刚 / 12分钟 / 3小时 / 1天 / 09月10日（值为 null 时不着色显示） */
-function formatRelativeTime(value: string | null): string {
+/** 会话相对时间：刚刚 / 12分钟 / 3小时 / 1天 / 09月10日（值为 null 时不着色显示）
+ *  非组件函数：译文由调用方传入 t */
+function formatRelativeTime(t: TFunction, value: string | null): string {
   if (!value) return ''
   const then = new Date(value).getTime()
   if (!Number.isFinite(then)) return ''
@@ -80,18 +83,18 @@ function formatRelativeTime(value: string | null): string {
   const hour = 60 * minute
   const day = 24 * hour
 
-  if (diff < minute) return '刚刚'
-  if (diff < hour) return `${Math.floor(diff / minute)}分钟`
-  if (diff < day) return `${Math.floor(diff / hour)}小时`
-  if (diff < 7 * day) return `${Math.floor(diff / day)}天`
+  if (diff < minute) return t('harness.sidebar.timeJustNow')
+  if (diff < hour) return t('harness.sidebar.timeMinutes', { count: Math.floor(diff / minute) })
+  if (diff < day) return t('harness.sidebar.timeHours', { count: Math.floor(diff / hour) })
+  if (diff < 7 * day) return t('harness.sidebar.timeDays', { count: Math.floor(diff / day) })
 
   const d = new Date(then)
   const nowDate = new Date(now)
   const mm = String(d.getMonth() + 1).padStart(2, '0')
   const dd = String(d.getDate()).padStart(2, '0')
   return d.getFullYear() === nowDate.getFullYear()
-    ? `${mm}月${dd}日`
-    : `${d.getFullYear()}/${mm}/${dd}`
+    ? t('harness.sidebar.timeDate', { month: mm, day: dd })
+    : t('harness.sidebar.timeFullDate', { year: d.getFullYear(), month: mm, day: dd })
 }
 
 const HarnessSidebar: React.FC<HarnessSidebarProps> = ({
@@ -116,6 +119,7 @@ const HarnessSidebar: React.FC<HarnessSidebarProps> = ({
   const { token } = theme.useToken()
   const { viewMessage } = useMessage()
   const { modal } = App.useApp()
+  const { t } = useTranslation()
 
   const scrollRef = useRef<HTMLDivElement>(null)
 
@@ -348,7 +352,7 @@ const HarnessSidebar: React.FC<HarnessSidebarProps> = ({
         dir
           .replace(/[/\\]$/, '')
           .split(/[/\\]/)
-          .pop() || '工作区'
+          .pop() || t('harness.sidebar.defaultWorkspaceName')
       const id = await win.api.harness.createWorkspace(name, dir)
       await win.api.systemSettings.update({
         harness: {
@@ -364,16 +368,16 @@ const HarnessSidebar: React.FC<HarnessSidebarProps> = ({
     } catch (err) {
       console.error('Failed to create workspace:', err)
     }
-  }, [loadWorkspaces, onNewHarness])
+  }, [loadWorkspaces, onNewHarness, t])
 
   const handleDeleteWorkspace = useCallback(
     (ws: WorkspaceRow): void => {
       modal.confirm({
-        title: '删除工作区',
-        content: `确定要删除「${ws.name}」吗？该工作区下的所有会话与记忆也将被删除。`,
-        okText: '删除',
+        title: t('harness.sidebar.workspaceDeleteConfirmTitle'),
+        content: t('harness.sidebar.workspaceDeleteConfirmContent', { name: ws.name }),
+        okText: t('common.action.delete'),
         okType: 'danger',
-        cancelText: '取消',
+        cancelText: t('common.action.cancel'),
         onOk: async () => {
           try {
             const win = window as unknown as Window
@@ -416,7 +420,7 @@ const HarnessSidebar: React.FC<HarnessSidebarProps> = ({
         }
       })
     },
-    [activeWorkspaceId, modal, loadWorkspaces, onNewHarness]
+    [activeWorkspaceId, modal, loadWorkspaces, onNewHarness, t]
   )
 
   /* 打开重命名弹窗 */
@@ -430,7 +434,7 @@ const HarnessSidebar: React.FC<HarnessSidebarProps> = ({
   const handleRenameSave = useCallback(async (): Promise<void> => {
     const name = renameName.trim()
     if (!name || !renameTarget) {
-      viewMessage('ws-rename-validate', 'warning', '请输入工作区名称')
+      viewMessage('ws-rename-validate', 'warning', t('harness.sidebar.workspaceNameRequired'))
       return
     }
     try {
@@ -439,14 +443,14 @@ const HarnessSidebar: React.FC<HarnessSidebarProps> = ({
       await win.api.harness.updateWorkspace(renameTarget.id, { name })
       setRenameOpen(false)
       await loadWorkspaces()
-      viewMessage('ws-rename-done', 'success', '工作区已重命名', 2)
+      viewMessage('ws-rename-done', 'success', t('harness.sidebar.renameSuccess'), 2)
     } catch (err) {
       console.error('Failed to rename workspace:', err)
-      viewMessage('ws-rename-error', 'error', '重命名失败')
+      viewMessage('ws-rename-error', 'error', t('harness.sidebar.renameFailed'))
     } finally {
       setRenameSaving(false)
     }
-  }, [renameName, renameTarget, viewMessage, loadWorkspaces])
+  }, [renameName, renameTarget, viewMessage, loadWorkspaces, t])
 
   const handleScroll = useCallback(() => {
     const el = scrollRef.current
@@ -552,7 +556,7 @@ const HarnessSidebar: React.FC<HarnessSidebarProps> = ({
             className="shrink-0 group-hover:hidden"
             style={{ fontSize: 11, color: colorTextTertiary }}
           >
-            {formatRelativeTime(topic.updated_at)}
+            {formatRelativeTime(t, topic.updated_at)}
           </span>
         )}
         <Dropdown
@@ -561,7 +565,9 @@ const HarnessSidebar: React.FC<HarnessSidebarProps> = ({
               {
                 key: 'delete',
                 // 会话生成中禁止删除（含后台仍在流式输出的话题）
-                label: isTopicLoading ? '进行中，无法删除' : '删除会话',
+                label: isTopicLoading
+                  ? t('harness.sidebar.topicDeleteBlocked')
+                  : t('harness.sidebar.topicDelete'),
                 danger: true,
                 disabled: isTopicLoading,
                 icon: <RiDeleteBin6Line size={14} />,
@@ -581,7 +587,9 @@ const HarnessSidebar: React.FC<HarnessSidebarProps> = ({
         >
           <button
             onClick={(e) => e.stopPropagation()}
-            title={isTopicLoading ? '会话进行中' : '会话操作'}
+            title={
+              isTopicLoading ? t('harness.sidebar.topicRunning') : t('harness.sidebar.topicActions')
+            }
             className="hidden group-hover:flex items-center justify-center shrink-0 rounded"
             style={{ width: 20, height: 20, color: colorTextTertiary, background: 'transparent' }}
             onMouseEnter={(e) => (e.currentTarget.style.background = token.colorFillSecondary)}
@@ -648,14 +656,16 @@ const HarnessSidebar: React.FC<HarnessSidebarProps> = ({
                 items: [
                   {
                     key: 'rename',
-                    label: '重命名',
+                    label: t('common.action.rename'),
                     icon: <RiEditLine size={14} />,
                     onClick: () => openRename(ws)
                   },
                   {
                     key: 'delete',
                     // 该工作区下有会话正在生成时禁止删除（避免连坐删掉进行中的会话）
-                    label: hasRunningTopic ? '有会话进行中' : '删除工作区',
+                    label: hasRunningTopic
+                      ? t('harness.sidebar.workspaceHasRunning')
+                      : t('harness.sidebar.workspaceDelete'),
                     danger: true as const,
                     disabled: hasRunningTopic,
                     icon: <RiDeleteBin6Line size={14} />,
@@ -671,7 +681,11 @@ const HarnessSidebar: React.FC<HarnessSidebarProps> = ({
             >
               <button
                 onClick={(e) => e.stopPropagation()}
-                title={hasRunningTopic ? '有会话进行中' : '工作区操作'}
+                title={
+                  hasRunningTopic
+                    ? t('harness.sidebar.workspaceHasRunning')
+                    : t('harness.sidebar.workspaceActions')
+                }
                 className="flex items-center justify-center rounded transition-opacity"
                 style={{
                   width: 22,
@@ -692,7 +706,7 @@ const HarnessSidebar: React.FC<HarnessSidebarProps> = ({
                 e.stopPropagation()
                 handleCreateSession(ws)
               }}
-              title="新建会话"
+              title={t('harness.sidebar.newSession')}
               className="flex items-center justify-center rounded transition-opacity"
               style={{
                 width: 22,
@@ -720,7 +734,7 @@ const HarnessSidebar: React.FC<HarnessSidebarProps> = ({
               /* 空态与上面的 loading 一样在整栏居中：不能再加左侧缩进，
                  否则 text-center 只在「缩进剩下的」区域里居中，看起来整体偏右 */
               <p className="text-center py-3" style={{ fontSize: 12, color: colorTextTertiary }}>
-                {query ? '无匹配会话' : '暂无会话'}
+                {query ? t('harness.sidebar.noMatchTopic') : t('harness.sidebar.emptyTopics')}
               </p>
             ) : (
               <>
@@ -759,14 +773,14 @@ const HarnessSidebar: React.FC<HarnessSidebarProps> = ({
               size="small"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="搜索工作区与会话"
+              placeholder={t('harness.sidebar.searchPlaceholder')}
               allowClear
               variant="borderless"
               prefix={<RiSearchLine size={14} style={{ color: colorTextTertiary }} />}
               style={{ flex: 1, background: 'transparent', padding: '0 3px' }}
             />
             {iconBtn(
-              '退出搜索',
+              t('harness.sidebar.exitSearch'),
               () => {
                 setSearchMode(false)
                 setSearchQuery('')
@@ -780,12 +794,16 @@ const HarnessSidebar: React.FC<HarnessSidebarProps> = ({
               className="select-none"
               style={{ fontSize: 13, fontWeight: 500, color: colorTextSecondary }}
             >
-              工作区
+              {t('harness.sidebar.title')}
             </span>
             <span className="flex-1" />
-            {iconBtn('搜索工作区与会话', () => setSearchMode(true), <RiSearchLine size={16} />)}
             {iconBtn(
-              '助手设置',
+              t('harness.sidebar.searchTooltip'),
+              () => setSearchMode(true),
+              <RiSearchLine size={16} />
+            )}
+            {iconBtn(
+              t('harness.sidebar.assistantSettings'),
               // 聚焦模式：设置弹窗只显示助手相关页签（智能体 / 模型 / 技能 / 记忆）
               () =>
                 window.dispatchEvent(
@@ -795,7 +813,11 @@ const HarnessSidebar: React.FC<HarnessSidebarProps> = ({
                 ),
               <RiEqualizerLine size={16} />
             )}
-            {iconBtn('新建工作区', handleBrowseFolder, <RiFoldersLine size={16} />)}
+            {iconBtn(
+              t('harness.sidebar.newWorkspace'),
+              handleBrowseFolder,
+              <RiFoldersLine size={16} />
+            )}
           </>
         )}
       </div>
@@ -808,7 +830,7 @@ const HarnessSidebar: React.FC<HarnessSidebarProps> = ({
       >
         {visibleWorkspaces.length === 0 ? (
           <p className="text-xs text-center py-8" style={{ color: colorTextTertiary }}>
-            {query ? '无匹配结果' : '尚未配置工作区'}
+            {query ? t('harness.sidebar.noMatchResult') : t('harness.sidebar.noWorkspace')}
           </p>
         ) : (
           visibleWorkspaces.map((ws) => renderWorkspace(ws))
@@ -826,7 +848,7 @@ const HarnessSidebar: React.FC<HarnessSidebarProps> = ({
         >
           <span className="flex items-center gap-2 text-sm font-medium">
             <RiBrain4Line size={16} />
-            记忆
+            {t('harness.sidebar.memory')}
           </span>
           <span className="flex items-center gap-2">
             {memoryExpanded ? <RiArrowDownSLine size={16} /> : <RiArrowRightSLine size={16} />}
@@ -842,7 +864,7 @@ const HarnessSidebar: React.FC<HarnessSidebarProps> = ({
             ) : !memorySnap?.configured ? (
               <div className="pt-2">
                 <p className="text-xs text-center py-3" style={{ color: colorTextTertiary }}>
-                  未配置记忆目录，模型将没有持久记忆。
+                  {t('harness.sidebar.memoryNotConfigured')}
                 </p>
                 <button
                   onClick={handleOpenMemorySettings}
@@ -850,7 +872,7 @@ const HarnessSidebar: React.FC<HarnessSidebarProps> = ({
                   style={{ color: '#1677ff', background: colorFillAlter }}
                 >
                   <RiSettings4Line size={13} />
-                  前往设置配置记忆
+                  {t('harness.sidebar.memoryGoSettings')}
                 </button>
               </div>
             ) : (
@@ -867,10 +889,10 @@ const HarnessSidebar: React.FC<HarnessSidebarProps> = ({
                           className="rounded-sm"
                           style={{ width: 3, height: 12, background: '#1677ff' }}
                         />
-                        用户画像
+                        {t('harness.sidebar.memoryUserProfile')}
                       </span>
                       <span style={{ color: colorTextTertiary, fontWeight: 400 }}>
-                        {userEntries.length} 条
+                        {t('harness.sidebar.memoryCount', { count: userEntries.length })}
                       </span>
                     </div>
                   </div>
@@ -888,10 +910,10 @@ const HarnessSidebar: React.FC<HarnessSidebarProps> = ({
                           className="rounded-sm"
                           style={{ width: 3, height: 12, background: '#52c41a' }}
                         />
-                        项目记忆
+                        {t('harness.sidebar.memoryProject')}
                       </span>
                       <span style={{ color: colorTextTertiary, fontWeight: 400 }}>
-                        {memoryEntries.length} 条
+                        {t('harness.sidebar.memoryCount', { count: memoryEntries.length })}
                       </span>
                     </div>
                   </div>
@@ -900,7 +922,7 @@ const HarnessSidebar: React.FC<HarnessSidebarProps> = ({
                 {!memorySnap.runtime ||
                   (memorySnap.runtime.entries.length === 0 && (
                     <p className="text-xs text-center py-3" style={{ color: colorTextTertiary }}>
-                      暂无热记忆，对话时可直接告诉模型要记住的内容
+                      {t('harness.sidebar.memoryEmpty')}
                     </p>
                   ))}
 
@@ -915,16 +937,23 @@ const HarnessSidebar: React.FC<HarnessSidebarProps> = ({
                   <span className="flex items-center gap-1.5">
                     <RiBrain4Line size={13} />
                     {memorySnap.runtime
-                      ? `${memorySnap.runtime.entries.length} 条热记忆`
-                      : '热记忆 -'}
+                      ? t('harness.sidebar.memoryHotCount', {
+                          count: memorySnap.runtime.entries.length
+                        })
+                      : t('harness.sidebar.memoryHotEmpty')}
                   </span>
                   <span className="flex items-center gap-1.5">
                     <RiDatabase2Line size={13} />
-                    空间 {memorySnap.bodies?.activeCount ?? 0}/{memorySnap.bodies?.total ?? 0} 激活
+                    {t('harness.sidebar.memorySpaces', {
+                      active: memorySnap.bodies?.activeCount ?? 0,
+                      total: memorySnap.bodies?.total ?? 0
+                    })}
                   </span>
                   <span className="flex items-center gap-1.5">
                     <RiFileTextLine size={13} />
-                    档案 {memorySnap.documents?.total ?? 0}
+                    {t('harness.sidebar.memoryDocuments', {
+                      count: memorySnap.documents?.total ?? 0
+                    })}
                   </span>
                 </div>
 
@@ -935,7 +964,7 @@ const HarnessSidebar: React.FC<HarnessSidebarProps> = ({
                   style={{ color: '#1677ff', background: colorFillAlter }}
                 >
                   <RiSettings4Line size={13} />
-                  管理记忆
+                  {t('harness.sidebar.memoryManage')}
                 </button>
               </div>
             )}
@@ -945,21 +974,21 @@ const HarnessSidebar: React.FC<HarnessSidebarProps> = ({
 
       {/* 重命名工作区弹窗 */}
       <Modal
-        title="重命名工作区"
+        title={t('harness.sidebar.renameWorkspace')}
         open={renameOpen}
         onCancel={() => {
           setRenameOpen(false)
           setRenameTarget(null)
         }}
         onOk={handleRenameSave}
-        okText="保存"
-        cancelText="取消"
+        okText={t('common.action.save')}
+        cancelText={t('common.action.cancel')}
         confirmLoading={renameSaving}
         width={380}
       >
         <Input
           autoFocus
-          placeholder="工作区名称"
+          placeholder={t('harness.sidebar.workspaceNamePlaceholder')}
           value={renameName}
           onChange={(e) => setRenameName(e.target.value)}
           onPressEnter={handleRenameSave}

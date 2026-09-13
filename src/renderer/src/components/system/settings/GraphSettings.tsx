@@ -5,10 +5,12 @@ import { Window } from '../../../../resource/types/window'
 import type { SystemSettings, GraphSettings as GraphSettingsType } from '@renderer/types/settings'
 import type { ProviderOption } from '@renderer/types/components'
 import { isEmbeddingProvider, getProviderDisplayName } from '@renderer/utils/providerMeta'
+import { useTranslation } from '@renderer/i18n'
 import { SettingsPageHeader, SettingsSection, SettingRow } from './SettingsUI'
 
 const GraphSettings: React.FC = () => {
   const { viewMessage } = useMessage()
+  const { t } = useTranslation()
 
   const [settings, setSettings] = useState<SystemSettings | null>(null)
   const [providers, setProviders] = useState<ProviderOption[]>([])
@@ -26,9 +28,13 @@ const GraphSettings: React.FC = () => {
       setProviders(allProviders.filter((p) => !isEmbeddingProvider(p)))
       setEmbeddingProviders(allProviders.filter((p) => isEmbeddingProvider(p)))
     } catch (error) {
-      viewMessage(msgKey, 'error', `加载失败: ${error}`)
+      viewMessage(
+        msgKey,
+        'error',
+        t('common.message.loadFailedWithReason', { reason: String(error) })
+      )
     }
-  }, [viewMessage])
+  }, [viewMessage, t])
 
   useEffect(() => {
     loadSettings().then()
@@ -37,12 +43,16 @@ const GraphSettings: React.FC = () => {
   const updateSettings = async (updates: Partial<SystemSettings>): Promise<void> => {
     const msgKey = 'graph-settings-save'
     try {
-      viewMessage(msgKey, 'loading', '正在保存...')
+      viewMessage(msgKey, 'loading', t('common.action.saving'))
       await (window as unknown as Window).api.systemSettings.update(updates)
-      viewMessage(msgKey, 'success', '保存成功', 2)
+      viewMessage(msgKey, 'success', t('common.action.saveSuccess'), 2)
       await loadSettings()
     } catch (error) {
-      viewMessage(msgKey, 'error', `保存失败: ${error}`)
+      viewMessage(
+        msgKey,
+        'error',
+        t('common.message.saveFailedWithReason', { reason: String(error) })
+      )
     }
   }
 
@@ -61,13 +71,16 @@ const GraphSettings: React.FC = () => {
 
   return (
     <div>
-      <SettingsPageHeader title="图谱构建设置" description="管理知识图谱构建参数与默认模型配置" />
+      <SettingsPageHeader
+        title={t('graphSettings.pageTitle')}
+        description={t('graphSettings.pageDescription')}
+      />
 
       {/* 图谱构建参数 */}
-      <SettingsSection title="构建参数" bodyPadding={0}>
+      <SettingsSection title={t('graphSettings.build.sectionTitle')} bodyPadding={0}>
         <SettingRow
-          title="最大并发 LLM 调用数"
-          description="构建知识图谱时同时进行的 LLM 请求数量，值越大构建越快但对 API 压力也越大"
+          title={t('graphSettings.build.maxConcurrencyTitle')}
+          description={t('graphSettings.build.maxConcurrencyDescription')}
           control={
             <InputNumber
               min={1}
@@ -79,8 +92,8 @@ const GraphSettings: React.FC = () => {
           }
         />
         <SettingRow
-          title="Gleaning 二次扫描"
-          description="实体抽取后再扫描一次，确保遗漏的实体也被发现"
+          title={t('graphSettings.build.gleaningTitle')}
+          description={t('graphSettings.build.gleaningDescription')}
           control={
             <Switch
               checked={settings?.graph.enableGleaning}
@@ -89,8 +102,8 @@ const GraphSettings: React.FC = () => {
           }
         />
         <SettingRow
-          title="Gleaning 文档数阈值"
-          description="仅当知识库文档总数不超过此阈值时才执行 Gleaning，超出则跳过以节省时间"
+          title={t('graphSettings.build.gleaningThresholdTitle')}
+          description={t('graphSettings.build.gleaningThresholdDescription')}
           control={
             <InputNumber
               min={0}
@@ -103,8 +116,8 @@ const GraphSettings: React.FC = () => {
           }
         />
         <SettingRow
-          title="文本分块大小"
-          description="Markdown 文本按标题层级分块时每块的最大字符数"
+          title={t('graphSettings.build.chunkSizeTitle')}
+          description={t('graphSettings.build.chunkSizeDescription')}
           control={
             <InputNumber
               min={500}
@@ -119,13 +132,13 @@ const GraphSettings: React.FC = () => {
       </SettingsSection>
 
       {/* 默认模型 */}
-      <SettingsSection title="默认模型">
+      <SettingsSection title={t('graphSettings.model.sectionTitle')}>
         <SettingRow
-          title="图谱构建使用模型"
-          description="构建知识图谱时默认使用的大模型，留空则使用供应商默认设置"
+          title={t('graphSettings.model.graphModelTitle')}
+          description={t('graphSettings.model.graphModelDescription')}
           control={
             <Select
-              placeholder="使用供应商默认设置"
+              placeholder={t('graphSettings.model.graphModelPlaceholder')}
               value={settings?.defaultModelId}
               onChange={handleDefaultModelChange}
               allowClear
@@ -138,11 +151,11 @@ const GraphSettings: React.FC = () => {
           }
         />
         <SettingRow
-          title="Embedding 模型"
-          description="用于文本向量化嵌入的模型，仅显示标记为嵌入标签的供应商"
+          title={t('graphSettings.model.embeddingTitle')}
+          description={t('graphSettings.model.embeddingDescription')}
           control={
             <Select
-              placeholder="未设置 Embedding 模型"
+              placeholder={t('graphSettings.model.embeddingPlaceholder')}
               value={settings?.defaultEmbeddingModelId}
               onChange={handleEmbeddingModelChange}
               allowClear
@@ -152,7 +165,7 @@ const GraphSettings: React.FC = () => {
               }))}
               notFoundContent={
                 <span style={{ color: 'inherit', opacity: 0.6 }}>
-                  暂无 Embedding 模型，请先在模型设置中添加
+                  {t('graphSettings.model.embeddingEmpty')}
                 </span>
               }
               style={{ width: 260 }}

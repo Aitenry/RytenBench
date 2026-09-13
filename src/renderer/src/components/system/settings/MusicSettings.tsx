@@ -4,10 +4,12 @@ import { FolderOutlined } from '@ant-design/icons'
 import { useMessage } from '@renderer/hooks/useMessage'
 import { Window } from '../../../../resource/types/window'
 import type { SystemSettings } from '@renderer/types/settings'
+import { useTranslation } from '@renderer/i18n'
 import { SettingsPageHeader, SettingsSection } from './SettingsUI'
 
 const MusicSettings: React.FC = () => {
   const { viewMessage } = useMessage()
+  const { t } = useTranslation()
 
   const [settings, setSettings] = useState<SystemSettings | null>(null)
   const [musicDir, setMusicDir] = useState('')
@@ -20,9 +22,13 @@ const MusicSettings: React.FC = () => {
       setSettings(result)
       setMusicDir(result.musicDirectory || '')
     } catch (error) {
-      viewMessage(msgKey, 'error', `加载失败: ${error}`)
+      viewMessage(
+        msgKey,
+        'error',
+        t('common.message.loadFailedWithReason', { reason: String(error) })
+      )
     }
-  }, [viewMessage])
+  }, [viewMessage, t])
 
   useEffect(() => {
     loadSettings().then()
@@ -35,7 +41,7 @@ const MusicSettings: React.FC = () => {
         setMusicDir(dir)
       }
     } catch (error) {
-      viewMessage('music-dir', 'error', `选择目录失败: ${error}`)
+      viewMessage('music-dir', 'error', t('musicSettings.selectFailed', { reason: String(error) }))
     }
   }
 
@@ -48,9 +54,18 @@ const MusicSettings: React.FC = () => {
         musicDirectory: trimmed || undefined
       })
       setSettings((prev) => (prev ? { ...prev, musicDirectory: trimmed } : prev))
-      viewMessage(msgKey, 'success', trimmed ? '音乐目录已保存' : '已清空音乐目录', 2)
+      viewMessage(
+        msgKey,
+        'success',
+        trimmed ? t('musicSettings.saved') : t('musicSettings.cleared'),
+        2
+      )
     } catch (error) {
-      viewMessage(msgKey, 'error', `保存失败: ${error}`)
+      viewMessage(
+        msgKey,
+        'error',
+        t('common.message.saveFailedWithReason', { reason: String(error) })
+      )
     } finally {
       setSaving(false)
     }
@@ -59,31 +74,31 @@ const MusicSettings: React.FC = () => {
   return (
     <div>
       <SettingsPageHeader
-        title="音乐设置"
-        description="设置音乐文件根目录，子文件夹将作为歌单加载"
+        title={t('musicSettings.pageTitle')}
+        description={t('musicSettings.pageDescription')}
       />
 
       <SettingsSection
-        title="音乐存储目录"
+        title={t('musicSettings.sectionTitle')}
         icon={<FolderOutlined size={14} />}
-        description="设置后子文件夹将自动作为歌单识别"
+        description={t('musicSettings.sectionDescription')}
         bodyPadding={16}
       >
         <Space.Compact style={{ width: '100%', maxWidth: 520 }}>
           <Input
             value={musicDir}
             onChange={(e) => setMusicDir(e.target.value)}
-            placeholder="未设置"
+            placeholder={t('musicSettings.placeholder')}
             allowClear
           />
-          <Button onClick={handleBrowseDirectory}>浏览…</Button>
+          <Button onClick={handleBrowseDirectory}>{t('musicSettings.browse')}</Button>
           <Button
             type="primary"
             loading={saving}
             disabled={musicDir.trim() === (settings?.musicDirectory || '')}
             onClick={handleSaveDirectory}
           >
-            保存
+            {t('common.action.save')}
           </Button>
         </Space.Compact>
         {settings?.musicDirectory && (
@@ -96,7 +111,7 @@ const MusicSettings: React.FC = () => {
               wordBreak: 'break-all'
             }}
           >
-            当前已生效：{settings.musicDirectory}
+            {t('musicSettings.current', { path: settings.musicDirectory })}
           </p>
         )}
       </SettingsSection>

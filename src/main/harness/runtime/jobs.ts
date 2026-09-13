@@ -1,6 +1,8 @@
 import { tool, type StructuredToolInterface } from '@langchain/core/tools'
 import { z } from 'zod'
 import logger from 'electron-log'
+import { mainFormat } from '../../i18n'
+import { getAgentToolTexts } from '../../i18n/tool-results-agent'
 
 /**
  * 后台任务系统（jobs）— 对应 deepseek-harness 的 dsh-jobs / dsh-tool-jobs 体系
@@ -140,7 +142,10 @@ export class JobsRegistry {
   read(id: string, topicId: number): { text: string; job: JobSnapshot | undefined } {
     const record = this.jobs.get(id)
     if (!record || record.topicId !== topicId) {
-      return { text: `任务 ${id} 不存在或不属于当前话题。`, job: undefined }
+      return {
+        text: mainFormat(getAgentToolTexts().jobs.notFoundInTopic, { id }),
+        job: undefined
+      }
     }
     const frames = record.outputFrames.slice(record.cursor)
     record.cursor = record.outputFrames.length
@@ -148,7 +153,11 @@ export class JobsRegistry {
     const terminal = record.status !== 'running' && record.status !== 'stopping'
     if (terminal && !record.reported) {
       record.reported = true
-      if (!text) text = record.detail ?? `（任务已${record.status}）`
+      if (!text) {
+        text =
+          record.detail ??
+          mainFormat(getAgentToolTexts().jobs.terminalNoOutput, { status: record.status })
+      }
     }
     return { text, job: this.snapshot(record) }
   }
@@ -160,7 +169,13 @@ export class JobsRegistry {
     signal?: AbortSignal
   ): Promise<{ text: string; job: JobSnapshot | undefined; timedOut: boolean }> {
     const record = this.jobs.get(id)
-    if (!record) return { text: `任务 ${id} 不存在。`, job: undefined, timedOut: false }
+    if (!record) {
+      return {
+        text: mainFormat(getAgentToolTexts().jobs.notFound, { id }),
+        job: undefined,
+        timedOut: false
+      }
+    }
     const terminal = (r: JobRecord): boolean => r.status !== 'running' && r.status !== 'stopping'
     if (terminal(record)) return { ...this.read(id, record.topicId), timedOut: false }
     const deadline = Date.now() + timeoutMs
@@ -196,7 +211,7 @@ export class JobsRegistry {
     const terminal = record.status !== 'running' && record.status !== 'stopping'
     if (terminal) return { outcome: 'already-finished', job: this.snapshot(record) }
     record.status = 'stopping'
-    record.detail = reason || '（用户请求终止）'
+    record.detail = reason || getAgentToolTexts().jobs.userKillReason
     record.cancelFn?.(reason)
     // 运行者应在 cancel 后自行 settle(killed)；兜底：5 秒后仍未结算则强制 killed
     setTimeout(() => {
@@ -218,7 +233,7 @@ export class JobsRegistry {
     for (const record of [...this.jobs.values()]) {
       if (record.topicId !== topicId) continue
       if (record.status === 'running' || record.status === 'stopping') {
-        record.cancelFn?.('话题已删除')
+        record.cancelFn?.(getAgentToolTexts().jobs.topicDeletedReason)
         record.status = 'killed'
         record.finishedAt = Date.now()
       }
@@ -274,10 +289,11 @@ export function buildJobTools(registry: JobsRegistry, topicId: number): Structur
   return [
     tool(
       async ({ job_id, wait, timeout_ms }, config) => {
+        const m = getAgentToolTexts()
         if (wait) {
           const timeout = Math.min(JOB_WAIT_MAX_MS, Math.max(1, timeout_ms ?? JOB_WAIT_DEFAULT_MS))
           const result = await registry.wait(job_id, timeout, config?.signal ?? undefined)
-          const text = result.text || `（任务 ${job_id} 暂无新输出）`
+          const text = result.text || mainFormat(m.jobs.noNewOutput, { id: job_id })
           const statusLine = result.timedOut
             ? '\n[status: running]'
             : `\n[status: ${result.job?.status ?? 'unknown'}]`
@@ -285,19 +301,21 @@ export function buildJobTools(registry: JobsRegistry, topicId: number): Structur
         }
         const { text, job } = registry.read(job_id, topicId)
         const statusLine = job ? `\n[status: ${job.status}]` : ''
-        return `${text || `（任务 ${job_id} 暂无新输出）`}${statusLine}`
+        return `${text || mainFormat(m.jobs.noNewOutput, { id: job_id })}${statusLine}`
       },
       {
         name: 'job_output',
         description:
-          '读取后台任务的最新输出（自上次读取以来的增量）。wait=true 时阻塞等待任务进入终态或超时（超时不取消任务，返回当前快照并标注 [status: running]）。',
+          'Read new output from a background job (incremental since the previous read). With wait=true it blocks until the job reaches a terminal state or the timeout expires; a timeout does not cancel the job and marks [status: running].',
         schema: z.object({
-          job_id: z.string().describe('任务 ID（由启动任务的工具返回，如 subagent-1）'),
+          job_id: z
+            .string()
+            .describe('Job ID (returned by the tool that started the job, e.g. subagent-1)'),
           wait: z
             .boolean()
             .optional()
             .describe(
-              `是否等待任务完成（默认 false 立即返回；等待上限 ${JOB_WAIT_MAX_MS / 1000} 秒）`
+              `Whether to wait for the job to finish (default false: return immediately; wait cap ${JOB_WAIT_MAX_MS / 1000} s)`
             ),
           timeout_ms: z
             .number()
@@ -305,7 +323,7 @@ export function buildJobTools(registry: JobsRegistry, topicId: number): Structur
             .positive()
             .optional()
             .describe(
-              `wait=true 时的等待毫秒数（默认 ${JOB_WAIT_DEFAULT_MS}，上限 ${JOB_WAIT_MAX_MS}）`
+              `Milliseconds to wait when wait=true (default ${JOB_WAIT_DEFAULT_MS}, cap ${JOB_WAIT_MAX_MS})`
             )
         })
       }
@@ -316,7 +334,8 @@ export function buildJobTools(registry: JobsRegistry, topicId: number): Structur
       },
       {
         name: 'job_list',
-        description: '列出当前话题的全部后台任务（含运行中与已终态）及其状态。',
+        description:
+          'List all background jobs owned by this topic (running and terminal) and their statuses.',
         schema: z.object({})
       }
     ),
@@ -327,10 +346,11 @@ export function buildJobTools(registry: JobsRegistry, topicId: number): Structur
       },
       {
         name: 'job_kill',
-        description: '终止一个后台任务（请求取消；任务可能已完成则返回 already-finished）。',
+        description:
+          'Terminate a background job by requesting cancellation; if the job already finished, returns already-finished.',
         schema: z.object({
-          job_id: z.string().describe('要终止的任务 ID'),
-          reason: z.string().optional().describe('终止原因（可选）')
+          job_id: z.string().describe('Job ID to terminate'),
+          reason: z.string().optional().describe('Reason for termination (optional)')
         })
       }
     )

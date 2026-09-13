@@ -1,4 +1,5 @@
 import React from 'react'
+import { useTranslation } from '@renderer/i18n'
 import { useTypewriter, useCyclingTypewriter } from '../hooks/useTypewriter'
 
 interface WelcomeIntroProps {
@@ -6,13 +7,14 @@ interface WelcomeIntroProps {
   colorTextSecondary: string
 }
 
-const TITLE_TEXT = '你好，我是 Rita～'
-const SUBTITLE_TEXTS = [
-  '今天天气怎么样？要是还不错，我帮你把明天的日程也排了～',
-  '我可以帮你分析文档，提取关键信息，理清它们之间的关系。',
-  '有什么重要的事尽管说，我帮你记着，并形成代办事项。',
-  '我可以帮你整理零散的文档，构建相应的知识库。'
-]
+/** 欢迎语词条键：文案随语言切换，故只在模块级保存键名 */
+const TITLE_KEY = 'harness.welcome.title' as const
+const SUBTITLE_KEYS = [
+  'harness.welcome.subtitleWeather',
+  'harness.welcome.subtitleDocument',
+  'harness.welcome.subtitleTodo',
+  'harness.welcome.subtitleKnowledge'
+] as const
 
 /**
  * 空白会话欢迎语。
@@ -22,13 +24,18 @@ const SUBTITLE_TEXTS = [
  * （消息区 / 输入框 / 侧边栏 / 搜索框）会被每秒重渲染约 25 次，永不停止。
  */
 const WelcomeIntro: React.FC<WelcomeIntroProps> = ({ colorText, colorTextSecondary }) => {
-  const { displayedText: titleDisplayed, isDone: titleDone } = useTypewriter(TITLE_TEXT, 100)
+  const { t } = useTranslation()
+
+  const titleText = t(TITLE_KEY)
+  const subtitleTexts = SUBTITLE_KEYS.map((key) => t(key))
+
+  const { displayedText: titleDisplayed, isDone: titleDone } = useTypewriter(titleText, 100)
   const { displayedText: subtitleDisplayed, isDone: subtitleDone } = useCyclingTypewriter(
-    SUBTITLE_TEXTS,
+    subtitleTexts,
     60,
     40,
     2000,
-    TITLE_TEXT.length * 100
+    titleText.length * 100
   )
 
   return (

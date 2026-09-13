@@ -1,4 +1,5 @@
 import React, { useLayoutEffect } from 'react'
+import { useTranslation } from '@renderer/i18n'
 
 interface ChaseDotsProps {
   /** 图标尺寸（px），默认 16 */
@@ -45,6 +46,8 @@ let chaseCssInjected = false
 
 /** 方块追逐加载图标：8 个方块依次闪烁，形成旋转追逐效果 */
 const ChaseDots: React.FC<ChaseDotsProps> = ({ size = 16, color = 'currentColor', className }) => {
+  const { t } = useTranslation()
+
   useLayoutEffect(() => {
     if (chaseCssInjected) return
     chaseCssInjected = true
@@ -62,7 +65,7 @@ const ChaseDots: React.FC<ChaseDotsProps> = ({ size = 16, color = 'currentColor'
       className={className}
       style={{ color, flex: 'none' }}
       role="status"
-      aria-label="加载中"
+      aria-label={t('common.state.loading')}
     >
       {DOT_POSITIONS.map(([x, y], index) => (
         <rect

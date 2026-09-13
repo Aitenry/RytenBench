@@ -16,6 +16,7 @@ import {
   RiFunctionAddLine,
   RiFlowChart
 } from '@remixicon/react'
+import { i18n } from '@renderer/i18n'
 import SlashMenuList from './SlashMenuList'
 import type { SlashMenuListHandle, SlashMenuListProps } from './SlashMenuList'
 
@@ -31,10 +32,50 @@ export interface SlashMenuTheme {
   hoverBg: string
 }
 
+/**
+ * 斜杠菜单条目的文案键。本模块是非组件模块（不持有 t），
+ * 因此 title / description 存**词条键**而不是中文文案，由渲染组件
+ * SlashMenuList 用 t() 求值；查询过滤（filterItems）用全局 i18n 解析。
+ * i18next 的键受资源类型约束，故在此收窄成字面量联合类型。
+ */
+type SlashItemNameKey =
+  | 'markdown.slash.paragraph'
+  | 'markdown.slash.heading1'
+  | 'markdown.slash.heading2'
+  | 'markdown.slash.heading3'
+  | 'markdown.slash.bulletList'
+  | 'markdown.slash.orderedList'
+  | 'markdown.slash.taskList'
+  | 'markdown.slash.blockquote'
+  | 'markdown.slash.codeBlock'
+  | 'markdown.slash.inlineMath'
+  | 'markdown.slash.blockMath'
+  | 'markdown.slash.mermaid'
+  | 'markdown.slash.table'
+  | 'markdown.slash.horizontalRule'
+
+type SlashItemDescKey =
+  | 'markdown.slash.paragraphDescription'
+  | 'markdown.slash.heading1Description'
+  | 'markdown.slash.heading2Description'
+  | 'markdown.slash.heading3Description'
+  | 'markdown.slash.bulletListDescription'
+  | 'markdown.slash.orderedListDescription'
+  | 'markdown.slash.taskListDescription'
+  | 'markdown.slash.blockquoteDescription'
+  | 'markdown.slash.codeBlockDescription'
+  | 'markdown.slash.inlineMathDescription'
+  | 'markdown.slash.blockMathDescription'
+  | 'markdown.slash.mermaidDescription'
+  | 'markdown.slash.tableDescription'
+  | 'markdown.slash.horizontalRuleDescription'
+
 export interface SlashMenuItemDef {
   key: string
-  title: string
-  description?: string
+  /** 词条键（由渲染层 t() 求值），不是可直接展示的文案 */
+  title: SlashItemNameKey
+  /** 词条键（由渲染层 t() 求值），不是可直接展示的文案 */
+  description?: SlashItemDescKey
   keywords?: string[]
   /** 文字图标（如 H1），优先于 Icon 渲染 */
   iconText?: string
@@ -44,101 +85,102 @@ export interface SlashMenuItemDef {
 }
 
 /* ──────────── 菜单项定义 ──────────── */
+/* keywords 保留原有中文检索词（输入 '/' 后按中文筛选），并补英文检索词 */
 
 export const SLASH_ITEMS: SlashMenuItemDef[] = [
   {
     key: 'paragraph',
-    title: '正文',
-    description: '普通文本段落',
+    title: 'markdown.slash.paragraph',
+    description: 'markdown.slash.paragraphDescription',
     keywords: ['正文', '文本', 'text', 'paragraph'],
     Icon: RiText,
     run: (editor) => editor.chain().focus().setParagraph().run()
   },
   {
     key: 'h1',
-    title: '标题 1',
-    description: '一级标题',
-    keywords: ['标题1', '标题一', 'h1', 'heading'],
+    title: 'markdown.slash.heading1',
+    description: 'markdown.slash.heading1Description',
+    keywords: ['标题1', '标题一', 'h1', 'heading', 'heading1', 'title'],
     iconText: 'H1',
     run: (editor) => editor.chain().focus().setHeading({ level: 1 }).run()
   },
   {
     key: 'h2',
-    title: '标题 2',
-    description: '二级标题',
-    keywords: ['标题2', '标题二', 'h2', 'heading'],
+    title: 'markdown.slash.heading2',
+    description: 'markdown.slash.heading2Description',
+    keywords: ['标题2', '标题二', 'h2', 'heading', 'heading2', 'title'],
     iconText: 'H2',
     run: (editor) => editor.chain().focus().setHeading({ level: 2 }).run()
   },
   {
     key: 'h3',
-    title: '标题 3',
-    description: '三级标题',
-    keywords: ['标题3', '标题三', 'h3', 'heading'],
+    title: 'markdown.slash.heading3',
+    description: 'markdown.slash.heading3Description',
+    keywords: ['标题3', '标题三', 'h3', 'heading', 'heading3', 'title'],
     iconText: 'H3',
     run: (editor) => editor.chain().focus().setHeading({ level: 3 }).run()
   },
   {
     key: 'bulletList',
-    title: '无序列表',
-    description: '• 项目符号列表',
-    keywords: ['列表', '无序', 'ul', 'bullet', 'list'],
+    title: 'markdown.slash.bulletList',
+    description: 'markdown.slash.bulletListDescription',
+    keywords: ['列表', '无序', 'ul', 'bullet', 'list', 'unordered', 'point'],
     Icon: RiListUnordered,
     run: (editor) => editor.chain().focus().toggleBulletList().run()
   },
   {
     key: 'orderedList',
-    title: '有序列表',
-    description: '1. 编号列表',
-    keywords: ['列表', '有序', 'ol', 'ordered', 'list'],
+    title: 'markdown.slash.orderedList',
+    description: 'markdown.slash.orderedListDescription',
+    keywords: ['列表', '有序', 'ol', 'ordered', 'list', 'numbered', 'number'],
     Icon: RiListOrdered,
     run: (editor) => editor.chain().focus().toggleOrderedList().run()
   },
   {
     key: 'taskList',
-    title: '任务列表',
-    description: '☑ 待办复选框',
-    keywords: ['任务', '待办', 'todo', 'task', 'check'],
+    title: 'markdown.slash.taskList',
+    description: 'markdown.slash.taskListDescription',
+    keywords: ['任务', '待办', 'todo', 'task', 'check', 'checkbox', 'checklist'],
     Icon: RiCheckboxLine,
     run: (editor) => editor.chain().focus().toggleTaskList().run()
   },
   {
     key: 'blockquote',
-    title: '引用',
-    description: '> 引用块',
-    keywords: ['引用', 'quote', 'blockquote'],
+    title: 'markdown.slash.blockquote',
+    description: 'markdown.slash.blockquoteDescription',
+    keywords: ['引用', 'quote', 'blockquote', 'quotation'],
     Icon: RiDoubleQuotesL,
     run: (editor) => editor.chain().focus().toggleBlockquote().run()
   },
   {
     key: 'codeBlock',
-    title: '代码块',
-    description: '``` 语法高亮代码',
-    keywords: ['代码', 'code', 'block', '代码块'],
+    title: 'markdown.slash.codeBlock',
+    description: 'markdown.slash.codeBlockDescription',
+    keywords: ['代码', 'code', 'block', '代码块', 'snippet', 'fence'],
     Icon: RiCodeBoxLine,
     run: (editor) => editor.chain().focus().toggleCodeBlock().run()
   },
   {
     key: 'inlineMath',
-    title: '公式',
-    description: '$…$ 行内 LaTeX 公式',
-    keywords: ['公式', '数学', '行内', 'math', 'latex', 'katex'],
+    title: 'markdown.slash.inlineMath',
+    description: 'markdown.slash.inlineMathDescription',
+    keywords: ['公式', '数学', '行内', 'math', 'latex', 'katex', 'formula', 'inline'],
     Icon: RiFunctionLine,
     run: (editor) => editor.chain().focus().insertContent({ type: 'mathInline' }).run()
   },
   {
     key: 'blockMath',
-    title: '块级公式',
-    description: '$$…$$ 独立 LaTeX 公式块',
-    keywords: ['公式', '数学', '块级', 'math', 'latex', 'katex'],
+    title: 'markdown.slash.blockMath',
+    description: 'markdown.slash.blockMathDescription',
+    keywords: ['公式', '数学', '块级', 'math', 'latex', 'katex', 'formula', 'equation'],
     Icon: RiFunctionAddLine,
     run: (editor) => editor.chain().focus().insertContent({ type: 'mathBlock' }).run()
   },
   {
     key: 'mermaid',
-    title: '图表',
-    description: 'Mermaid 流程图 / 时序图 / 甘特图',
-    keywords: ['图表', '图', '流程图', 'mermaid', 'diagram', 'flow'],
+    title: 'markdown.slash.mermaid',
+    description: 'markdown.slash.mermaidDescription',
+    keywords: ['图表', '图', '流程图', 'mermaid', 'diagram', 'flow', 'chart', 'sequence', 'gantt'],
     Icon: RiFlowChart,
     run: (editor) =>
       editor
@@ -146,24 +188,24 @@ export const SLASH_ITEMS: SlashMenuItemDef[] = [
         .focus()
         .insertContent({
           type: 'mermaid',
-          attrs: { code: 'graph TD\n  A[开始] --> B[结束]' }
+          attrs: { code: i18n.t('markdown.slash.mermaidTemplate') }
         })
         .run()
   },
   {
     key: 'table',
-    title: '表格',
-    description: '3×3 表格（含表头）',
-    keywords: ['表格', 'table'],
+    title: 'markdown.slash.table',
+    description: 'markdown.slash.tableDescription',
+    keywords: ['表格', 'table', 'grid', 'cell'],
     Icon: RiTable2,
     run: (editor) =>
       editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()
   },
   {
     key: 'hr',
-    title: '分割线',
-    description: '--- 水平分割线',
-    keywords: ['分割线', '水平线', 'hr', 'divider'],
+    title: 'markdown.slash.horizontalRule',
+    description: 'markdown.slash.horizontalRuleDescription',
+    keywords: ['分割线', '水平线', 'hr', 'divider', 'rule', 'separator'],
     Icon: RiSeparator,
     run: (editor) => editor.chain().focus().setHorizontalRule().run()
   }
@@ -177,7 +219,12 @@ const filterItems = (query: string): SlashMenuItemDef[] => {
   const q = normalize(query)
   if (!q) return SLASH_ITEMS
   return SLASH_ITEMS.filter((item) => {
-    const haystack = [item.title, item.description ?? '', ...(item.keywords ?? [])]
+    /* 文案键在过滤时按当前语言解析：用户按界面上看到的词搜索 */
+    const haystack = [
+      i18n.t(item.title),
+      item.description ? i18n.t(item.description) : '',
+      ...(item.keywords ?? [])
+    ]
       .map(normalize)
       .join(' ')
     return haystack.includes(q)

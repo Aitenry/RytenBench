@@ -1,6 +1,7 @@
 import * as fs from 'fs'
 import * as path from 'path'
 import logger from 'electron-log'
+import { mainFormat, mainPlural, mainToolMessages } from '../../../i18n'
 import {
   RUNTIME_ENTRY_DELIMITER,
   RUNTIME_ENTRY_MAX_BYTES,
@@ -101,6 +102,7 @@ export class RuntimeMemoryController {
   /** 变更热记忆（add / replace / remove），队列串行化；MEMORY 溢出时异步归档后重试 */
   async mutate(request: RuntimeMemoryMutation): Promise<RuntimeMemoryMutationResult> {
     const run = async (): Promise<RuntimeMemoryMutationResult> => {
+      const tm = mainToolMessages().mnemon
       let result = this.mutateLocked(request)
       // MEMORY 溢出标记：执行异步归档后重试
       if (!result.success && result.message === '__NEEDS_ASYNC_ARCHIVE__') {
@@ -108,14 +110,16 @@ export class RuntimeMemoryController {
         if (!archived.ok) {
           return {
             success: false,
-            message: `MEMORY 热记忆容量不足，且长期归档失败：${archived.message}`
+            message: mainFormat(tm.runtimeMemory.archiveFailed, { message: archived.message })
           }
         }
         result = this.mutateLocked(request)
         if (result.success && result.added) {
           result = {
             ...result,
-            message: `已添加记忆（触发长期归档 ${archived.count} 条）`
+            message: mainFormat(tm.runtimeMemory.addedWithArchive, {
+              entryCount: mainPlural(tm.entryCount_one, tm.entryCount_other, archived.count)
+            })
           }
         }
       }
@@ -128,8 +132,9 @@ export class RuntimeMemoryController {
   private async runArchive(): Promise<
     { ok: true; count: number } | { ok: false; message: string }
   > {
+    const tm = mainToolMessages().mnemon
     if (!this.hooks.archiveEntries) {
-      return { ok: false, message: '未配置归档钩子' }
+      return { ok: false, message: tm.errors.archiveHookMissing }
     }
     const data = this.readSource()
     const memoryItems = data.entries
@@ -148,7 +153,7 @@ export class RuntimeMemoryController {
       selected.push(...normals.slice(0, need))
     }
     if (selected.length === 0) {
-      return { ok: false, message: '没有可归档的记忆条目' }
+      return { ok: false, message: tm.errors.nothingToArchive }
     }
 
     try {
@@ -165,7 +170,7 @@ export class RuntimeMemoryController {
       )
       const remaining = selected.filter((x) => !removeSet.has(x.index))
       if (remaining.length === selected.length) {
-        return { ok: false, message: '归档钩子未归档任何条目' }
+        return { ok: false, message: tm.errors.hookArchivedNothing }
       }
       data.entries = data.entries.filter((_, i) => !removeSet.has(i))
       this.persist(data)
@@ -191,19 +196,23 @@ export class RuntimeMemoryController {
   }
 
   private mutateLocked(request: RuntimeMemoryMutation): RuntimeMemoryMutationResult {
+    const tm = mainToolMessages().mnemon
     const data = this.readSource()
     const { target } = request
 
     if (request.action === 'add') {
       const content = request.content?.trim()
-      if (!content) return { success: false, message: '内容不能为空' }
+      if (!content) return { success: false, message: tm.errors.contentRequired }
       if (Buffer.byteLength(content, 'utf-8') > RUNTIME_ENTRY_MAX_BYTES) {
-        return { success: false, message: `单条记忆超过上限 ${RUNTIME_ENTRY_MAX_BYTES} 字节` }
+        return {
+          success: false,
+          message: mainFormat(tm.errors.entryTooLarge, { limit: RUNTIME_ENTRY_MAX_BYTES })
+        }
       }
       // 完全相同内容不重复添加
       const duplicate = data.entries.some((e) => e.target === target && e.content === content)
       if (duplicate) {
-        return { success: false, message: '该记忆已存在（内容完全相同），无需重复添加' }
+        return { success: false, message: tm.errors.entryExists }
       }
 
       // 容量检查：add 溢出时触发维护
@@ -218,7 +227,7 @@ export class RuntimeMemoryController {
       this.repairProjections(data.entries)
       return {
         success: true,
-        message: '已添加记忆',
+        message: tm.runtimeMemory.added,
         target,
         entryCount: data.entries.length,
         usage: this.usageOf(data.entries, target),
@@ -228,17 +237,17 @@ export class RuntimeMemoryController {
 
     if (request.action === 'remove' || request.action === 'replace') {
       const oldText = request.oldText?.trim()
-      if (!oldText) return { success: false, message: 'old_text 不能为空' }
+      if (!oldText) return { success: false, message: tm.errors.keyRequired }
       const indexes = data.entries
         .map((e, i) => (e.content.includes(oldText) ? i : -1))
         .filter((i) => i >= 0)
       if (indexes.length === 0) {
-        return { success: false, message: `未找到包含 "${oldText}" 的记忆条目` }
+        return { success: false, message: mainFormat(tm.errors.keyNotFound, { oldText }) }
       }
       if (indexes.length > 1) {
         return {
           success: false,
-          message: `"${oldText}" 匹配到 ${indexes.length} 条记忆，请提供更长的唯一子串`
+          message: mainFormat(tm.errors.keyAmbiguous, { oldText, count: indexes.length })
         }
       }
 
@@ -251,7 +260,7 @@ export class RuntimeMemoryController {
         this.repairProjections(data.entries)
         return {
           success: true,
-          message: '已移除记忆',
+          message: tm.runtimeMemory.removed,
           target,
           entryCount: data.entries.length,
           usage: this.usageOf(data.entries, target),
@@ -261,7 +270,7 @@ export class RuntimeMemoryController {
 
       // replace
       const content = request.content?.trim()
-      if (!content) return { success: false, message: '新内容不能为空' }
+      if (!content) return { success: false, message: tm.errors.newContentRequired }
       const replaced = { from: existing.content, to: content }
       // replace 溢出直接报错（调用方应先显式整理），与 dsh-mnemon 一致
       const usage = this.usageOf(data.entries, target)
@@ -272,7 +281,9 @@ export class RuntimeMemoryController {
       if (projected > RUNTIME_MEMORY_LIMITS[target]) {
         return {
           success: false,
-          message: `替换后超出容量上限（${RUNTIME_MEMORY_LIMITS[target]} 字节），请先移除或合并部分条目`
+          message: mainFormat(tm.errors.replaceOverLimit, {
+            limit: RUNTIME_MEMORY_LIMITS[target]
+          })
         }
       }
       data.entries[index] = {
@@ -285,7 +296,7 @@ export class RuntimeMemoryController {
       this.repairProjections(data.entries)
       return {
         success: true,
-        message: '已替换记忆',
+        message: tm.runtimeMemory.replaced,
         target,
         entryCount: data.entries.length,
         usage: this.usageOf(data.entries, target),
@@ -293,7 +304,10 @@ export class RuntimeMemoryController {
       }
     }
 
-    return { success: false, message: `未知操作: ${request.action}` }
+    return {
+      success: false,
+      message: mainFormat(tm.errors.unknownAction, { action: request.action })
+    }
   }
 
   /** add 溢出：USER 本地压缩（同步）或 MEMORY 归档（异步，经 enqueue 后重试） */
@@ -303,6 +317,7 @@ export class RuntimeMemoryController {
     content: string,
     importance?: RuntimeMemoryImportance
   ): RuntimeMemoryMutationResult {
+    const tm = mainToolMessages().mnemon
     if (target === 'user') {
       // USER 本地保守压缩：删除互为子串的 low 条目（保留较长者）
       const lowIndexes = data.entries
@@ -334,7 +349,7 @@ export class RuntimeMemoryController {
       }
       return {
         success: false,
-        message: `USER 热记忆容量不足（上限 ${RUNTIME_MEMORY_LIMITS.user} 字节），且没有可合并的低优先级条目。请先移除或合并部分记忆。`
+        message: mainFormat(tm.errors.userOverLimit, { limit: RUNTIME_MEMORY_LIMITS.user })
       }
     }
 

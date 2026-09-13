@@ -1,14 +1,21 @@
-import { and, asc, eq, sql } from 'drizzle-orm'
-import type { PgUpdateSetSource } from 'drizzle-orm/pg-core'
+import { and, asc, desc, eq, sql } from 'drizzle-orm'
+import type { PgInsertValue, PgUpdateSetSource } from 'drizzle-orm/pg-core'
 import logger from 'electron-log'
 import { encryptApiKey, decryptApiKey } from '../../crypto/provider-key'
 import { withOrm } from '../orm'
 import { llm_providers } from '../schema'
+import { DEFAULT_MAX_TOOL_ROUNDS, type ThinkingMode } from '../../../shared/model-params'
 
 // --- 类型定义 ---
 
 /** 数据库原始行（字段由 schema 推导） */
 export type LlmProviderRow = typeof llm_providers.$inferSelect
+
+/**
+ * 置顶排序值：由数据库取「当前最大值 + 1」，前端不再手填排序号。
+ * 列表排序恒为 sort_order 倒序 → 置顶(>0)在前、未置顶(0)在后。
+ */
+const NEXT_PIN_ORDER = sql`(select coalesce(max(sort_order), 0) + 1 from ${llm_providers})`
 
 /** 供应商配置（api_key 仅运行时路径解密；列表视图恒为 null，密钥不发送到渲染进程） */
 export interface LlmProviderConfig {
@@ -18,13 +25,21 @@ export interface LlmProviderConfig {
   base_url: string | null
   api_key: string | null
   model: string
-  temperature: number
+  /** 采样温度：null = 未设置，使用供应商最佳默认值 */
+  temperature: number | null
   max_tokens: number | null
+  top_p: number | null
+  top_k: number | null
+  thinking_mode: ThinkingMode
+  max_tool_rounds: number
   extra_config: Record<string, unknown> | null
   metadata: Record<string, unknown> | null
   is_default: boolean
   is_enabled: boolean
+  /** 置顶排序值（>0 即置顶，来自 SQL 的 max+1）；仅供列表排序，不在表单里手填 */
   sort_order: number
+  /** 是否置顶（sort_order > 0 的投影，界面开关直接读它） */
+  is_pinned: boolean
 }
 
 /** 创建/更新时的输入（不含自动生成的字段） */
@@ -34,13 +49,19 @@ export interface LlmProviderInput {
   base_url?: string | null
   api_key?: string | null // 明文输入，mapper内部加密
   model: string
-  temperature?: number
+  /** 采样参数：留空(undefined/null) = 不下发，使用供应商最佳默认值 */
+  temperature?: number | null
   max_tokens?: number | null
+  top_p?: number | null
+  top_k?: number | null
+  thinking_mode?: ThinkingMode
+  max_tool_rounds?: number
   extra_config?: Record<string, unknown> | null
   metadata?: Record<string, unknown> | null
   is_default?: boolean
   is_enabled?: boolean
-  sort_order?: number
+  /** 是否置顶：true → sort_order 由 SQL 取 max+1，false → 归零 */
+  pinned?: boolean
 }
 
 // --- 内部工具 ---
@@ -50,7 +71,8 @@ export interface LlmProviderInput {
  * 解密后的密钥绝不离开主进程）；运行时取数路径（getProviderById、
  * getEnabledProviders、getDefaultProvider）必须传 true 供拉取调用使用。
  *
- * 库列可空，缺值时按建表默认值补齐（temperature 0.7 / is_default false / is_enabled true / sort_order 0）。
+ * 库列可空，缺值时按建表默认值补齐（top_p、top_k、temperature 留空不下发 /
+ * thinking_mode auto / max_tool_rounds 500 / is_default false / is_enabled true / sort_order 0）。
  */
 function rowToConfig(row: LlmProviderRow, includeKey = true): LlmProviderConfig {
   return {
@@ -60,13 +82,18 @@ function rowToConfig(row: LlmProviderRow, includeKey = true): LlmProviderConfig 
     base_url: row.base_url,
     api_key: includeKey && row.api_key_encrypted ? decryptApiKey(row.api_key_encrypted) : null,
     model: row.model,
-    temperature: row.temperature ?? 0.7,
+    temperature: row.temperature,
     max_tokens: row.max_tokens,
+    top_p: row.top_p,
+    top_k: row.top_k,
+    thinking_mode: (row.thinking_mode as ThinkingMode | null) ?? 'auto',
+    max_tool_rounds: row.max_tool_rounds ?? DEFAULT_MAX_TOOL_ROUNDS,
     extra_config: row.extra_config ? JSON.parse(row.extra_config) : null,
     metadata: row.metadata ? JSON.parse(row.metadata) : null,
     is_default: row.is_default ?? false,
     is_enabled: row.is_enabled ?? true,
-    sort_order: row.sort_order ?? 0
+    sort_order: row.sort_order ?? 0,
+    is_pinned: (row.sort_order ?? 0) > 0
   }
 }
 
@@ -82,7 +109,8 @@ async function getAllProviderList(): Promise<LlmProviderConfig[]> {
     const rows = await db
       .select()
       .from(llm_providers)
-      .orderBy(asc(llm_providers.sort_order), asc(llm_providers.id))
+      // 置顶(>0)在前，未置顶(0)按创建顺序在后
+      .orderBy(desc(llm_providers.sort_order), asc(llm_providers.id))
     logger.info(`Query for all providers returned ${rows.length} rows.`)
     return rows.map((row) => rowToConfig(row, false))
   })
@@ -115,7 +143,7 @@ async function getDefaultProvider(): Promise<LlmProviderConfig | null> {
         .select()
         .from(llm_providers)
         .where(eq(llm_providers.is_enabled, true))
-        .orderBy(asc(llm_providers.sort_order), asc(llm_providers.id))
+        .orderBy(desc(llm_providers.sort_order), asc(llm_providers.id))
         .limit(1)
       if (fallback.length === 0) return null
       return rowToConfig(fallback[0])
@@ -133,26 +161,31 @@ async function getEnabledProviders(): Promise<LlmProviderConfig[]> {
       .select()
       .from(llm_providers)
       .where(eq(llm_providers.is_enabled, true))
-      .orderBy(asc(llm_providers.sort_order), asc(llm_providers.id))
+      .orderBy(desc(llm_providers.sort_order), asc(llm_providers.id))
     return rows.map((row) => rowToConfig(row))
   })
 }
 
-/** 把输入整理成可直接写库的列值（api_key 加密、JSON 列序列化） */
-function toProviderColumns(input: LlmProviderInput): typeof llm_providers.$inferInsert {
+/** 把输入整理成可直接写库的列值（api_key 加密、JSON 列序列化；置顶时排序值走 SQL 子查询） */
+function toProviderColumns(input: LlmProviderInput): PgInsertValue<typeof llm_providers> {
   return {
     name: input.name,
     provider: input.provider,
     base_url: input.base_url || null,
     api_key_encrypted: input.api_key ? encryptApiKey(input.api_key) : null,
     model: input.model,
-    temperature: input.temperature ?? 0.7,
+    temperature: input.temperature ?? null,
     max_tokens: input.max_tokens || null,
+    top_p: input.top_p ?? null,
+    top_k: input.top_k ?? null,
+    thinking_mode: input.thinking_mode ?? 'auto',
+    max_tool_rounds: input.max_tool_rounds ?? DEFAULT_MAX_TOOL_ROUNDS,
     extra_config: input.extra_config ? JSON.stringify(input.extra_config) : null,
     metadata: input.metadata ? JSON.stringify(input.metadata) : null,
     is_default: input.is_default ?? false,
     is_enabled: input.is_enabled ?? true,
-    sort_order: input.sort_order ?? 0
+    // 置顶的排序值由数据库取 max+1，调用方不传数值
+    sort_order: input.pinned ? NEXT_PIN_ORDER : 0
   }
 }
 
@@ -255,6 +288,10 @@ async function updateProvider(id: number, updates: Partial<LlmProviderInput>): P
     if (updates.model !== undefined) patch.model = updates.model
     if (updates.temperature !== undefined) patch.temperature = updates.temperature
     if (updates.max_tokens !== undefined) patch.max_tokens = updates.max_tokens
+    if (updates.top_p !== undefined) patch.top_p = updates.top_p
+    if (updates.top_k !== undefined) patch.top_k = updates.top_k
+    if (updates.thinking_mode !== undefined) patch.thinking_mode = updates.thinking_mode
+    if (updates.max_tool_rounds !== undefined) patch.max_tool_rounds = updates.max_tool_rounds
     if (updates.extra_config !== undefined) {
       patch.extra_config = updates.extra_config ? JSON.stringify(updates.extra_config) : null
     }
@@ -275,7 +312,8 @@ async function updateProvider(id: number, updates: Partial<LlmProviderInput>): P
       patch.is_default = updates.is_default
     }
     if (updates.is_enabled !== undefined) patch.is_enabled = updates.is_enabled
-    if (updates.sort_order !== undefined) patch.sort_order = updates.sort_order
+    // 置顶开关：开 → 由 SQL 取当前最大排序值 +1（置于最前）；关 → 归零（退回未置顶）
+    if (updates.pinned !== undefined) patch.sort_order = updates.pinned ? NEXT_PIN_ORDER : 0
 
     if (Object.keys(patch).length === 0) {
       logger.warn('No fields to update for provider:', id)

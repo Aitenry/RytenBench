@@ -2,6 +2,7 @@ import React from 'react'
 import { Button, Slider, Space, theme } from 'antd'
 import { RiPlayLine, RiPauseLine, RiSkipLeftLine, RiSkipRightLine } from '@remixicon/react'
 import { useAudioState, useAudioProgress } from '@renderer/contexts/AudioContext'
+import { useTranslation } from '@renderer/i18n'
 import { formatTime } from '@renderer/utils/formatTime'
 
 const ProgressBar: React.FC = React.memo(function ProgressBar() {
@@ -26,11 +27,12 @@ const MusicMiniPlayer: React.FC = () => {
   const {
     token: { colorTextSecondary }
   } = theme.useToken()
+  const { t } = useTranslation()
 
   return (
     <div className="flex flex-col items-center">
       <div className="text-sm1 truncate w-full text-center">
-        {currentTrack?.title || '未在播放'}
+        {currentTrack?.title || t('shell.miniPlayer.idle')}
       </div>
       <div
         className="text-xs mb-2 truncate w-full text-center"

@@ -1,6 +1,8 @@
 import { tool } from '@langchain/core/tools'
 import type { StructuredToolInterface } from '@langchain/core/tools'
 import * as z from 'zod/v4'
+import { mainFormat, mainPlural } from '../../i18n'
+import { getDocsToolTexts } from '../../i18n/tool-results-docs'
 
 // ============================================================================
 // Wiki Handlers — 渐进式披露：列表 → 目录 → 文档
@@ -12,16 +14,19 @@ import * as z from 'zod/v4'
 async function listWikisHandler(): Promise<string> {
   const { getAllWikis } = await import('../../database/mapper/wiki')
   const result = await getAllWikis()
-  if (!result.items.length) return '还没有创建任何知识库。'
-  const lines = [`**知识库列表**（共 ${result.items.length} 个）\n`]
+  const tr = getDocsToolTexts()
+  if (!result.items.length) return tr.wikis.listEmpty
+  const lines = [mainFormat(tr.wikis.listHeader, { count: result.items.length })]
   for (const wiki of result.items) {
     lines.push(`  [${wiki.id}] **${wiki.title}**`)
     if (wiki.tags) {
       const tagList = JSON.parse(wiki.tags) as string[]
-      lines.push(`    标签：${tagList.join('、')}`)
+      lines.push(`    ${mainFormat(tr.wikis.tagsLabel, { tags: tagList.join(tr.listSeparator) })}`)
     }
-    if (wiki.summary) lines.push(`    描述：${wiki.summary}`)
-    lines.push(`    文档数：${wiki.doc_count}`)
+    if (wiki.summary) {
+      lines.push(`    ${mainFormat(tr.wikis.descriptionLabel, { summary: wiki.summary })}`)
+    }
+    lines.push(`    ${mainFormat(tr.wikis.docCountLabel, { count: wiki.doc_count })}`)
     lines.push('')
   }
   return lines.join('\n')
@@ -30,20 +35,32 @@ async function listWikisHandler(): Promise<string> {
 async function getWikiHandler(params: { wikiId: number }): Promise<string> {
   const { getWikiById } = await import('../../database/mapper/wiki')
   const wiki = await getWikiById(params.wikiId)
-  if (!wiki) return `未找到 ID 为 ${params.wikiId} 的知识库。`
-  const tags = wiki.tags ? `\n标签：${JSON.parse(wiki.tags).join('、')}` : ''
-  const summary = wiki.summary ? `\n描述：${wiki.summary}` : ''
-  const image = wiki.image ? '\n有封面图片' : ''
-  return `**${wiki.title}**[${wiki.id}]${tags}${summary}\n文档总数：${wiki.doc_count}${image}\n创建时间：${wiki.created_at}\n更新时间：${wiki.updated_at}`
+  const tr = getDocsToolTexts()
+  if (!wiki) return mainFormat(tr.wikis.notFound, { wikiId: params.wikiId })
+  const tags = wiki.tags
+    ? `\n${mainFormat(tr.wikis.wikiTagsLabel, {
+        tags: (JSON.parse(wiki.tags) as string[]).join(tr.listSeparator)
+      })}`
+    : ''
+  const summary = wiki.summary
+    ? `\n${mainFormat(tr.wikis.wikiDescriptionLabel, { summary: wiki.summary })}`
+    : ''
+  const image = wiki.image ? `\n${tr.wikis.wikiHasImage}` : ''
+  return `**${wiki.title}**[${wiki.id}]${tags}${summary}\n${mainFormat(tr.wikis.docTotalLabel, {
+    count: wiki.doc_count
+  })}${image}\n${mainFormat(tr.wikis.createdAtLabel, {
+    createdAt: wiki.created_at
+  })}\n${mainFormat(tr.wikis.updatedAtLabel, { updatedAt: wiki.updated_at })}`
 }
 
 async function getWikiDirectoriesHandler(params: { wikiId: number }): Promise<string> {
   const { getWikiById, getDirectoriesByWikiId, getDocsByDirectoryId } =
     await import('../../database/mapper/wiki')
   const wiki = await getWikiById(params.wikiId)
-  if (!wiki) return `未找到 ID 为 ${params.wikiId} 的知识库。`
+  const tr = getDocsToolTexts()
+  if (!wiki) return mainFormat(tr.wikis.notFound, { wikiId: params.wikiId })
   const directories = await getDirectoriesByWikiId(params.wikiId)
-  if (!directories.length) return `知识库 "${wiki.title}" 下还没有目录。`
+  if (!directories.length) return mainFormat(tr.wikis.directoriesEmpty, { title: wiki.title })
 
   const docCountMap = new Map<number, number>()
   await Promise.all(
@@ -83,12 +100,24 @@ async function getWikiDirectoriesHandler(params: { wikiId: number }): Promise<st
     }
   }
 
-  const lines = [`**${wiki.title}** 的目录结构（共 ${directories.length} 个）\n`]
+  const lines = [
+    mainFormat(tr.wikis.directoriesHeader, {
+      title: wiki.title,
+      count: mainPlural(
+        tr.wikis.directoryCount_one,
+        tr.wikis.directoryCount_other,
+        directories.length
+      )
+    })
+  ]
 
   function render(node: DirNode, depth: number, isLast: boolean): void {
     const indent = '  '.repeat(depth)
     const branch = depth > 0 ? (isLast ? '  └─ ' : '  ├─ ') : ''
-    const countStr = node.doc_count > 0 ? `（${node.doc_count} 篇）` : '（空）'
+    const countStr =
+      node.doc_count > 0
+        ? mainFormat(tr.wikis.directoryDocCount, { count: node.doc_count })
+        : tr.wikis.directoryEmpty
     lines.push(`${indent}${branch}[${node.id}] ${node.name} ${countStr}`)
     for (let i = 0; i < node.children.length; i++) {
       render(node.children[i], depth + 1, i === node.children.length - 1)
@@ -106,17 +135,22 @@ async function getDirectoryDocsHandler(params: { directoryId: number }): Promise
   const { getDocsByDirectoryId } = await import('../../database/mapper/wiki')
   const { getDocById } = await import('../../database/mapper/document')
   const docRefs = await getDocsByDirectoryId(params.directoryId)
-  if (!docRefs.length) return '该目录下还没有文档。'
+  const tr = getDocsToolTexts()
+  if (!docRefs.length) return tr.wikis.directoryDocsEmpty
   const docs = await Promise.all(docRefs.map((ref) => getDocById(ref.doc_id)))
   const validDocs = docs.filter((d): d is NonNullable<typeof d> => d !== null)
-  const lines = [`**目录文档列表**（共 ${validDocs.length} 篇）\n`]
+  const lines = [mainFormat(tr.wikis.directoryDocsHeader, { count: validDocs.length })]
   for (const doc of validDocs) {
     lines.push(`  [${doc.id}] **${doc.title}**`)
     if (doc.tags) {
       const tagList = JSON.parse(doc.tags) as string[]
-      lines.push(`    标签：${tagList.join('、')}`)
+      lines.push(
+        `    ${mainFormat(tr.wikis.docTagsLabel, { tags: tagList.join(tr.listSeparator) })}`
+      )
     }
-    if (doc.summary) lines.push(`    描述：${doc.summary}`)
+    if (doc.summary) {
+      lines.push(`    ${mainFormat(tr.wikis.docDescriptionLabel, { summary: doc.summary })}`)
+    }
     lines.push('')
   }
   return lines.join('\n')
@@ -136,7 +170,7 @@ async function createWikiHandler(params: {
     tags: params.tags ?? null,
     image: null
   })
-  return `知识库创建成功！ID: ${id}, 标题: "${params.title}"`
+  return mainFormat(getDocsToolTexts().wikis.created, { id, title: params.title })
 }
 
 async function updateWikiHandler(params: {
@@ -147,25 +181,27 @@ async function updateWikiHandler(params: {
 }): Promise<string> {
   const { updateWiki, getWikiById } = await import('../../database/mapper/wiki')
   const wiki = await getWikiById(params.wikiId)
-  if (!wiki) return `未找到 ID 为 ${params.wikiId} 的知识库。`
+  const tr = getDocsToolTexts()
+  if (!wiki) return mainFormat(tr.wikis.notFound, { wikiId: params.wikiId })
 
   const updates: Record<string, string | null> = {}
   if (params.title !== undefined) updates.title = params.title
   if (params.summary !== undefined) updates.summary = params.summary
   if (params.tags !== undefined) updates.tags = params.tags
 
-  if (Object.keys(updates).length === 0) return '没有需要更新的字段。'
+  if (Object.keys(updates).length === 0) return tr.wikis.noFieldsToUpdate
 
   await updateWiki(params.wikiId, updates)
-  return `知识库 [${params.wikiId}] "${wiki.title}" 更新成功。`
+  return mainFormat(tr.wikis.updated, { wikiId: params.wikiId, title: wiki.title })
 }
 
 async function deleteWikiHandler(params: { wikiId: number }): Promise<string> {
   const { deleteWiki, getWikiById } = await import('../../database/mapper/wiki')
   const wiki = await getWikiById(params.wikiId)
-  if (!wiki) return `未找到 ID 为 ${params.wikiId} 的知识库。`
+  const tr = getDocsToolTexts()
+  if (!wiki) return mainFormat(tr.wikis.notFound, { wikiId: params.wikiId })
   await deleteWiki(params.wikiId)
-  return `知识库 [${params.wikiId}] "${wiki.title}" 已删除。`
+  return mainFormat(tr.wikis.deleted, { wikiId: params.wikiId, title: wiki.title })
 }
 
 // ── 目录 CRUD ──
@@ -178,7 +214,8 @@ async function createDirectoryHandler(params: {
   const { getWikiById, addDirectory, getDirectoriesByWikiId } =
     await import('../../database/mapper/wiki')
   const wiki = await getWikiById(params.wikiId)
-  if (!wiki) return `未找到 ID 为 ${params.wikiId} 的知识库。`
+  const tr = getDocsToolTexts()
+  if (!wiki) return mainFormat(tr.wikis.notFound, { wikiId: params.wikiId })
 
   let level = 0
   if (params.parentId) {
@@ -186,7 +223,7 @@ async function createDirectoryHandler(params: {
     const parent = dirs.find((d) => d.id === params.parentId)
     if (!parent) {
       // 修复：父目录不存在/不属于本知识库时,parent_id 仍原值写入会造出跨库/悬空父节点
-      return `父目录不存在或不属于知识库 [${params.wikiId}]，创建已取消。`
+      return mainFormat(tr.wikis.parentNotFound, { wikiId: params.wikiId })
     }
     // level 库列为可空（DEFAULT 0），null 按 0 处理
     level = (parent.level ?? 0) + 1
@@ -199,7 +236,11 @@ async function createDirectoryHandler(params: {
     sort_order: 0,
     level
   })
-  return `目录创建成功！ID: ${id}, 名称: "${params.name}", 所属知识库: "${wiki.title}"`
+  return mainFormat(tr.wikis.directoryCreated, {
+    id,
+    name: params.name,
+    wikiTitle: wiki.title
+  })
 }
 
 async function updateDirectoryHandler(params: {
@@ -208,13 +249,16 @@ async function updateDirectoryHandler(params: {
 }): Promise<string> {
   const { updateDirectory } = await import('../../database/mapper/wiki')
   await updateDirectory(params.directoryId, { name: params.name })
-  return `目录 [${params.directoryId}] 已更新为 "${params.name}"。`
+  return mainFormat(getDocsToolTexts().wikis.directoryUpdated, {
+    directoryId: params.directoryId,
+    name: params.name
+  })
 }
 
 async function deleteDirectoryHandler(params: { directoryId: number }): Promise<string> {
   const { deleteDirectory } = await import('../../database/mapper/wiki')
   await deleteDirectory(params.directoryId)
-  return `目录 [${params.directoryId}] 已删除。`
+  return mainFormat(getDocsToolTexts().wikis.directoryDeleted, { directoryId: params.directoryId })
 }
 
 // ── 文档归档 / 移除 ──
@@ -224,24 +268,32 @@ async function archiveDocsHandler(params: {
   docIds: number[]
 }): Promise<string> {
   const { addDocToDirectory } = await import('../../database/mapper/wiki')
+  const tr = getDocsToolTexts()
   const results: string[] = []
   for (const docId of params.docIds) {
     try {
       await addDocToDirectory(params.directoryId, docId)
-      results.push(`  文档 [${docId}] 归档成功`)
+      results.push(mainFormat(tr.wikis.archivedDoc, { docId }))
     } catch {
-      results.push(`  文档 [${docId}] 归档失败（可能已存在）`)
+      results.push(mainFormat(tr.wikis.archiveFailedDoc, { docId }))
     }
   }
-  return `归档完成：\n${results.join('\n')}`
+  return mainFormat(tr.wikis.archiveDone, { results: results.join('\n') })
 }
 
 async function removeDocHandler(params: { directoryId: number; docId: number }): Promise<string> {
   const { removeDocFromDirectory } = await import('../../database/mapper/wiki')
   const ok = await removeDocFromDirectory(params.directoryId, params.docId)
+  const tr = getDocsToolTexts()
   return ok
-    ? `文档 [${params.docId}] 已从目录 [${params.directoryId}] 移除。`
-    : `移除失败：文档 [${params.docId}] 不在目录 [${params.directoryId}] 中。`
+    ? mainFormat(tr.wikis.docRemoved, {
+        docId: params.docId,
+        directoryId: params.directoryId
+      })
+    : mainFormat(tr.wikis.removeFailed, {
+        docId: params.docId,
+        directoryId: params.directoryId
+      })
 }
 
 // ============================================================================
@@ -291,30 +343,30 @@ export function buildManageWikisTool(): StructuredToolInterface {
         case 'remove_doc':
           return removeDocHandler(params as unknown as Parameters<typeof removeDocHandler>[0])
         default:
-          return `未知命令：${command}。支持：list, get, directories, docs, create, update, delete, create_directory, update_directory, delete_directory, archive, remove_doc`
+          return mainFormat(getDocsToolTexts().wikis.unknownCommand, { command })
       }
     },
     {
       name: 'manage_wikis',
       description:
-        '管理知识库（渐进式浏览 + CRUD）。\n' +
-        '  浏览命令：\n' +
-        '    list - 获取所有知识库信息（id、标题、标签、描述、文档数）\n' +
-        '    get - 获取单个知识库详情，需要 wikiId\n' +
-        '    directories - 获取指定知识库的层级目录树（id、名称、文档数量），需要 wikiId\n' +
-        '    docs - 获取指定目录下的文档列表（id、标题、标签、描述），需要 directoryId\n' +
-        '  知识库 CRUD：\n' +
-        '    create - 创建知识库，需要 title，可选 summary, tags\n' +
-        '    update - 更新知识库，需要 wikiId，可选 title, summary, tags\n' +
-        '    delete - 删除知识库，需要 wikiId\n' +
-        '  目录 CRUD：\n' +
-        '    create_directory - 创建目录，需要 wikiId, name，可选 parentId（父目录ID）\n' +
-        '    update_directory - 重命名目录，需要 directoryId, name\n' +
-        '    delete_directory - 删除目录，需要 directoryId\n' +
-        '  文档管理：\n' +
-        '    archive - 将文档归档到目录，需要 directoryId, docIds（文档ID数组）\n' +
-        '    remove_doc - 从目录移除文档（不删除文档本身），需要 directoryId, docId\n' +
-        '  典型工作流：list → get → directories → docs，获得 docId 后可用 manage_docs 工具阅读文档内容。',
+        'Manage wikis (progressive browsing + CRUD).\n' +
+        '  Browsing commands:\n' +
+        '    list - List all wikis (id, title, tags, description, document count)\n' +
+        '    get - Get the details of one wiki; requires wikiId\n' +
+        '    directories - Get the hierarchical directory tree of a wiki (id, name, document count); requires wikiId\n' +
+        '    docs - List the documents in a directory (id, title, tags, description); requires directoryId\n' +
+        '  Wiki CRUD:\n' +
+        '    create - Create a wiki; requires title, optional summary, tags\n' +
+        '    update - Update a wiki; requires wikiId, optional title, summary, tags\n' +
+        '    delete - Delete a wiki; requires wikiId\n' +
+        '  Directory CRUD:\n' +
+        '    create_directory - Create a directory; requires wikiId, name, optional parentId (parent directory ID)\n' +
+        '    update_directory - Rename a directory; requires directoryId, name\n' +
+        '    delete_directory - Delete a directory; requires directoryId\n' +
+        '  Document management:\n' +
+        '    archive - Archive documents into a directory; requires directoryId, docIds (array of document IDs)\n' +
+        '    remove_doc - Remove a document from a directory (the document itself is kept); requires directoryId, docId\n' +
+        '  Typical workflow: list → get → directories → docs, then use the manage_docs tool with the returned docId to read document content.',
       schema: z.object({
         command: z
           .enum([
@@ -331,25 +383,25 @@ export function buildManageWikisTool(): StructuredToolInterface {
             'archive',
             'remove_doc'
           ])
-          .describe('操作类型'),
-        wikiId: z.number().optional().describe('[get/directories/create_directory] 知识库 ID'),
+          .describe('Operation type'),
+        wikiId: z.number().optional().describe('[get/directories/create_directory] Wiki ID'),
         directoryId: z
           .number()
           .optional()
-          .describe('[docs/archive/remove_doc/update_directory/delete_directory] 目录 ID'),
-        title: z.string().optional().describe('[create/update] 知识库标题'),
-        summary: z.string().optional().describe('[create/update] 知识库描述'),
+          .describe('[docs/archive/remove_doc/update_directory/delete_directory] Directory ID'),
+        title: z.string().optional().describe('[create/update] Wiki title'),
+        summary: z.string().optional().describe('[create/update] Wiki description'),
         tags: z
           .string()
           .optional()
-          .describe('[create/update] 知识库标签（JSON数组字符串，如 \'["标签1","标签2"]\'）'),
-        name: z.string().optional().describe('[create_directory/update_directory] 目录名称'),
+          .describe('[create/update] Wiki tags (JSON array string, e.g. \'["tag1","tag2"]\')'),
+        name: z.string().optional().describe('[create_directory/update_directory] Directory name'),
         parentId: z
           .number()
           .optional()
-          .describe('[create_directory] 父目录 ID（创建子目录时使用）'),
-        docIds: z.array(z.number()).optional().describe('[archive] 要归档的文档 ID 数组'),
-        docId: z.number().optional().describe('[remove_doc] 要移除的文档 ID')
+          .describe('[create_directory] Parent directory ID (used when creating a subdirectory)'),
+        docIds: z.array(z.number()).optional().describe('[archive] Document IDs to archive'),
+        docId: z.number().optional().describe('[remove_doc] Document ID to remove')
       })
     }
   )

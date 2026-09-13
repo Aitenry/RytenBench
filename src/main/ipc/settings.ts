@@ -46,6 +46,7 @@ export function registerSettingsIpc(): void {
         defaultEmbeddingModelId: all.defaultEmbeddingModelId,
         musicDirectory: all.musicDirectory,
         theme: all.theme,
+        language: all.language,
         tray: all.tray,
         weatherRefreshInterval: all.weatherRefreshInterval,
         weatherLastFetched: all.weatherLastFetched,
@@ -70,6 +71,7 @@ export function registerSettingsIpc(): void {
         'defaultEmbeddingModelId',
         'musicDirectory',
         'theme',
+        'language',
         'tray',
         'weatherRefreshInterval',
         'weatherLastFetched',
@@ -90,8 +92,8 @@ export function registerSettingsIpc(): void {
           settingsStore.set(key as keyof SystemSettings, value)
         }
       }
-      // 托盘设置变化时即时同步（关闭行为 / 菜单勾选态）
-      if ('tray' in updates) {
+      // 托盘设置变化时即时同步（关闭行为 / 菜单勾选态）；语言变化时同步托盘提示文案
+      if ('tray' in updates || 'language' in updates) {
         syncTrayState()
       }
       logger.info('System settings updated:', Object.keys(updates).join(', '))

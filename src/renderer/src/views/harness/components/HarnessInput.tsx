@@ -23,6 +23,7 @@ import { TextSelection } from '@tiptap/pm/state'
 import type { EditorView } from '@tiptap/pm/view'
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
 import FileRef from './FileRefNode'
+import { useTranslation } from '@renderer/i18n'
 import type { Attachment } from '@renderer/types/harness'
 import { getProviderColor } from '@renderer/utils/providerMeta'
 import ProviderMark from '@renderer/components/provider/provider-mark'
@@ -115,6 +116,7 @@ const HarnessInput: React.FC<HarnessInputProps> = ({
   // 自定义光标元素（原生光标已隐藏，见 updateCaret）
   const caretRef = useRef<HTMLSpanElement | null>(null)
   const { message } = App.useApp()
+  const { t } = useTranslation()
 
   const selectedProviderType = useMemo(() => {
     if (selectedProviderId == null) return ''
@@ -242,27 +244,31 @@ const HarnessInput: React.FC<HarnessInputProps> = ({
         if (isImage) {
           // 与上传按钮一致：非视觉模型禁止粘贴图片附件
           if (!modelSupportsVision) {
-            message.warning('当前模型不支持视觉识别，无法粘贴图片附件')
+            message.warning(t('harness.input.visionUnsupported'))
             continue
           }
           try {
             const dataUrl = await readFileAsDataUrl(file)
-            added.push({ dataUrl, fileName: file.name || 'paste-image.png', isImage: true })
+            added.push({
+              dataUrl,
+              fileName: file.name || t('harness.input.pasteImageFallbackName'),
+              isImage: true
+            })
           } catch {
-            message.error(`读取图片附件失败：${file.name}`)
+            message.error(t('harness.input.imageReadFailed', { name: file.name }))
           }
         } else {
           const realPath = (window as unknown as Window).api.file.getPathForFile(file)
           if (realPath) {
             added.push({ dataUrl: realPath, fileName: file.name, isImage: false })
           } else {
-            message.warning(`无法获取「${file.name}」的本地路径，请通过拖拽或上传按钮添加`)
+            message.warning(t('harness.input.filePathUnavailable', { name: file.name }))
           }
         }
       }
       if (added.length > 0) onAttachmentsChange([...attachments, ...added])
     },
-    [attachments, onAttachmentsChange, modelSupportsVision, message]
+    [attachments, onAttachmentsChange, modelSupportsVision, message, t]
   )
   // 同上：editor 只创建一次，handlePaste 经 ref 取最新实现
   const handlePasteFilesRef = useRef(handlePasteFiles)
@@ -276,7 +282,7 @@ const HarnessInput: React.FC<HarnessInputProps> = ({
         Text,
         HardBreak,
         History,
-        Placeholder.configure({ placeholder: '给 Rita 发送消息' }),
+        Placeholder.configure({ placeholder: t('harness.input.placeholder') }),
         BaseKeymap,
         FileRef
       ],
@@ -801,7 +807,7 @@ const HarnessInput: React.FC<HarnessInputProps> = ({
       )}
       <div className="flex items-center justify-between px-4 pb-4">
         <div className="flex min-w-0 items-center gap-2">
-          <Tooltip title={'上传附件'}>
+          <Tooltip title={t('harness.input.attachTooltip')}>
             <Button
               type="dashed"
               shape="circle"
@@ -828,7 +834,7 @@ const HarnessInput: React.FC<HarnessInputProps> = ({
             value={selectedProviderId}
             onChange={(value) => onSelectProvider(value)}
             style={{ minWidth: 140, maxWidth: '100%', padding: '5px', borderRadius: '10px' }}
-            placeholder="选择模型"
+            placeholder={t('harness.input.modelPlaceholder')}
             showSearch={{
               filterOption: (input, option) =>
                 (option?.label as string)?.toLowerCase().includes(input.toLowerCase()) ?? false
@@ -869,7 +875,7 @@ const HarnessInput: React.FC<HarnessInputProps> = ({
         </div>
         <div className="flex items-center gap-2">
           {isLoading ? (
-            <Tooltip title="停止生成">
+            <Tooltip title={t('harness.input.stopTooltip')}>
               <Button
                 type="primary"
                 danger

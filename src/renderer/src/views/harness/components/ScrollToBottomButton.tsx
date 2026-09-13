@@ -1,6 +1,7 @@
 import React from 'react'
 import { theme } from 'antd'
 import { RiArrowDownLine } from '@remixicon/react'
+import { useTranslation } from '@renderer/i18n'
 
 interface ScrollToBottomButtonProps {
   visible: boolean
@@ -21,6 +22,9 @@ const ScrollToBottomButton: React.FC<ScrollToBottomButtonProps> = ({
   onClick
 }) => {
   const { token } = theme.useToken()
+  const { t } = useTranslation()
+
+  const label = t('harness.messageArea.scrollToBottom')
 
   return (
     <div
@@ -41,8 +45,8 @@ const ScrollToBottomButton: React.FC<ScrollToBottomButtonProps> = ({
         type="button"
         className="harness-scroll-fab-btn"
         onClick={onClick}
-        title="回到底部"
-        aria-label="回到底部"
+        title={label}
+        aria-label={label}
       >
         <RiArrowDownLine size={16} />
       </button>

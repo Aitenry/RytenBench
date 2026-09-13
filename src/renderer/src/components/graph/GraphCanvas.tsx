@@ -4,6 +4,7 @@ import type { EChartsOption } from 'echarts'
 import { Button, theme } from 'antd'
 import { RiEyeLine, RiEyeOffLine } from '@remixicon/react'
 import { useTheme } from '@renderer/contexts/useTheme'
+import { useTranslation } from '@renderer/i18n'
 import { GraphEntity } from '@renderer/types/knowledge'
 import type { GraphCanvasProps } from '@renderer/types/components'
 
@@ -27,6 +28,7 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({ data, onEntityClick, onEntity
     token: { colorBgContainer }
   } = theme.useToken()
   const { effectiveTheme } = useTheme()
+  const { t } = useTranslation()
   const isDarkMode = effectiveTheme === 'dark'
 
   // Count isolated nodes (no connections) — used by both chart and hint overlay
@@ -153,7 +155,7 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({ data, onEntityClick, onEntity
           }
           if (p.dataType === 'node') {
             const desc = p.data?.original?.description
-            return `<b>${p.data?.name || ''}</b>${desc ? `<br/><div style="margin-top:4px;line-height:1.5;">描述：${desc}</div>` : ''}`
+            return `<b>${p.data?.name || ''}</b>${desc ? `<br/><div style="margin-top:4px;line-height:1.5;">${t('graph.canvas.tooltipDescription', { description: desc })}</div>` : ''}`
           }
           if (p.dataType === 'edge') {
             const sourceId = String(p.data?.source ?? '')
@@ -162,8 +164,12 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({ data, onEntityClick, onEntity
             const targetName = nodeNameMap.get(targetId) || targetId
             const label = p.data?.data?.label || ''
             const desc = p.data?.data?.description
-            const body = `${sourceName}${label}${targetName}`
-            return `<b>${body}</b>${desc ? `<br/><div style="margin-top:4px;line-height:1.5;">描述：${desc}</div>` : ''}`
+            const body = t('graph.canvas.edgeTooltip', {
+              source: sourceName,
+              relation: label,
+              target: targetName
+            })
+            return `<b>${body}</b>${desc ? `<br/><div style="margin-top:4px;line-height:1.5;">${t('graph.canvas.tooltipDescription', { description: desc })}</div>` : ''}`
           }
           return ''
         }
@@ -260,7 +266,8 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({ data, onEntityClick, onEntity
     connectedNodes,
     isDarkMode,
     hiddenCats,
-    hoveredCategory
+    hoveredCategory,
+    t
   ])
 
   // Handle resize
@@ -362,7 +369,11 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({ data, onEntityClick, onEntity
             shape="circle"
             size="small"
             icon={hideIsolated ? <RiEyeOffLine size={14} /> : <RiEyeLine size={14} />}
-            title={hideIsolated ? `显示 ${isolatedCount} 个孤点` : `隐藏 ${isolatedCount} 个孤点`}
+            title={
+              hideIsolated
+                ? t('graph.canvas.showIsolated', { count: isolatedCount })
+                : t('graph.canvas.hideIsolated', { count: isolatedCount })
+            }
             onClick={() => setHideIsolated(!hideIsolated)}
             style={{
               position: 'absolute',
@@ -386,7 +397,7 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({ data, onEntityClick, onEntity
                 zIndex: 10
               }}
             >
-              已隐藏 {isolatedCount} 个孤点
+              {t('graph.canvas.isolatedHidden', { count: isolatedCount })}
             </div>
           )}
         </>

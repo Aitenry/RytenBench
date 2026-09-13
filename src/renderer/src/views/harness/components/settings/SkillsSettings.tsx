@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { theme, Button, Input, Switch, Spin, Pagination } from 'antd'
 import { LoadingOutlined, FolderOutlined } from '@ant-design/icons'
 import { useMessage } from '@renderer/hooks/useMessage'
+import { useTranslation } from '@renderer/i18n'
 import { Window } from '../../../../../resource/types/window'
 import type { SystemSettings, HarnessSettings } from '@renderer/types/settings'
 import {
@@ -22,6 +23,7 @@ const SkillsSettings: React.FC = () => {
   } = theme.useToken()
 
   const { viewMessage } = useMessage()
+  const { t } = useTranslation()
 
   const [settings, setSettings] = useState<SystemSettings | null>(null)
   const [skillsPath, setSkillsPath] = useState('')
@@ -41,9 +43,13 @@ const SkillsSettings: React.FC = () => {
       setSettings(result)
       setSkillsPath(result.harness?.skillsPath ?? '')
     } catch (error) {
-      viewMessage(msgKey, 'error', `加载失败: ${error}`)
+      viewMessage(
+        msgKey,
+        'error',
+        t('common.message.loadFailedWithReason', { reason: String(error) })
+      )
     }
-  }, [viewMessage])
+  }, [viewMessage, t])
 
   useEffect(() => {
     loadSettings().then()
@@ -69,7 +75,11 @@ const SkillsSettings: React.FC = () => {
       const path = await (window as unknown as Window).api.harness.selectSkillsDirectory()
       if (path) setSkillsPath(path)
     } catch (error) {
-      viewMessage('skills-path', 'error', `选择目录失败: ${error}`)
+      viewMessage(
+        'skills-path',
+        'error',
+        t('common.message.operationFailedWithReason', { reason: String(error) })
+      )
     }
   }
 
@@ -86,9 +96,18 @@ const SkillsSettings: React.FC = () => {
       setSettings((prev) => (prev ? { ...prev, harness: nextHarness } : prev))
       setSkillsPath(trimmed)
       setSkillsRefreshKey((k) => k + 1)
-      viewMessage(msgKey, 'success', trimmed ? '技能目录已保存' : '已清空技能目录', 2)
+      viewMessage(
+        msgKey,
+        'success',
+        trimmed ? t('skillsSettings.savedDir') : t('skillsSettings.clearedDir'),
+        2
+      )
     } catch (error) {
-      viewMessage(msgKey, 'error', `保存失败: ${error}`)
+      viewMessage(
+        msgKey,
+        'error',
+        t('common.message.saveFailedWithReason', { reason: String(error) })
+      )
     } finally {
       setSavingPath(false)
     }
@@ -121,7 +140,11 @@ const SkillsSettings: React.FC = () => {
       await (window as unknown as Window).api.systemSettings.update({ harness: nextHarness })
       setSettings((prev) => (prev ? { ...prev, harness: nextHarness } : prev))
     } catch (error) {
-      viewMessage(msgKey, 'error', `切换失败: ${error}`)
+      viewMessage(
+        msgKey,
+        'error',
+        t('common.message.operationFailedWithReason', { reason: String(error) })
+      )
     }
   }
 
@@ -131,33 +154,33 @@ const SkillsSettings: React.FC = () => {
   return (
     <div>
       <SettingsPageHeader
-        title="技能（Skills）"
-        description="配置全局技能存储目录，子文件夹将作为独立技能加载；可单独启停每个技能。留空则不启用。"
+        title={t('skillsSettings.pageTitle')}
+        description={t('skillsSettings.pageDescription')}
       />
 
       {/* 目录选择 */}
       <SettingsSection
-        title="技能存储目录"
+        title={t('skillsSettings.dirSectionTitle')}
         icon={<FolderOutlined size={14} />}
-        description="每个含 SKILL.md 的子目录即为一个技能"
+        description={t('skillsSettings.dirSectionDescription')}
         bodyPadding={16}
       >
         <div style={{ display: 'flex', gap: 8, maxWidth: 560 }}>
           <Input
             value={skillsPath}
             onChange={(e) => setSkillsPath(e.target.value)}
-            placeholder="例如：D:\skills（留空不启用）"
+            placeholder={t('skillsSettings.dirPlaceholder')}
             allowClear
             style={{ flex: 1 }}
           />
-          <Button onClick={handleBrowsePath}>浏览…</Button>
+          <Button onClick={handleBrowsePath}>{t('common.action.browse')}…</Button>
           <Button
             type="primary"
             loading={savingPath}
             disabled={skillsPath.trim() === (settings?.harness?.skillsPath ?? '')}
             onClick={handleSavePath}
           >
-            保存
+            {t('common.action.save')}
           </Button>
         </div>
         {settings?.harness?.skillsPath && (
@@ -169,7 +192,7 @@ const SkillsSettings: React.FC = () => {
               wordBreak: 'break-all'
             }}
           >
-            当前已生效：{settings.harness.skillsPath}
+            {t('skillsSettings.dirCurrent', { path: settings.harness.skillsPath })}
           </p>
         )}
       </SettingsSection>
@@ -182,7 +205,7 @@ const SkillsSettings: React.FC = () => {
           />
         </div>
       ) : skills.length > 0 ? (
-        <SettingsSection title={`已发现的技能（${skills.length}）`}>
+        <SettingsSection title={t('skillsSettings.listTitle', { count: skills.length })}>
           {paginatedSkills.map((skill) => {
             const isEnabled = !enabledSkills || enabledSkills.includes(skill.id)
             return (
@@ -216,7 +239,7 @@ const SkillsSettings: React.FC = () => {
         <div
           style={{ padding: '32px 0', textAlign: 'center', fontSize: 13, color: colorTextTertiary }}
         >
-          此目录中未发现任何技能，请确保子目录中包含 SKILL.md 文件
+          {t('skillsSettings.emptyDescription', { filename: 'SKILL.md' })}
         </div>
       ) : null}
     </div>

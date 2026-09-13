@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { theme } from 'antd'
 import { RiCalendar2Line, RiChatAiLine, RiDashboardLine, RiDiscLine } from '@remixicon/react'
 import { useTheme } from '@renderer/contexts/useTheme'
+import { useTranslation } from '@renderer/i18n'
 import { Window } from '../../../resource/types/window'
 import MainRoutes from '@renderer/route/MainRoutes'
 import { isLazyViewKey, preloadView, scheduleViewPreload } from '@renderer/route/viewPreload'
@@ -33,6 +34,7 @@ const CustomFrame: React.FC<CustomFrameProps> = ({ currentKey, setCurrentKey }) 
   } = theme.useToken()
 
   const { effectiveTheme } = useTheme()
+  const { t } = useTranslation()
 
   const [isMaximized, setIsMaximized] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -73,12 +75,12 @@ const CustomFrame: React.FC<CustomFrameProps> = ({ currentKey, setCurrentKey }) 
 
   const menuItems: MenuItem[] = useMemo(
     () => [
-      { key: 'home', label: '首页', icon: <RiDashboardLine size={16} /> },
-      { key: 'planner', label: '计划', icon: <RiCalendar2Line size={16} /> },
-      { key: 'music', label: '音乐', icon: <RiDiscLine size={16} /> },
-      { key: 'harness', label: '助手', icon: <RiChatAiLine size={16} /> }
+      { key: 'home', label: t('shell.menu.home'), icon: <RiDashboardLine size={16} /> },
+      { key: 'planner', label: t('shell.menu.planner'), icon: <RiCalendar2Line size={16} /> },
+      { key: 'music', label: t('shell.menu.music'), icon: <RiDiscLine size={16} /> },
+      { key: 'harness', label: t('shell.menu.harness'), icon: <RiChatAiLine size={16} /> }
     ],
-    []
+    [t]
   )
 
   const onMenuClick = useCallback(

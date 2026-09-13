@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { theme } from 'antd'
+import type { TFunction } from 'i18next'
+import { useTranslation } from '@renderer/i18n'
 import type { Message } from '@renderer/types/harness'
 
 interface MessageLocatorProps {
@@ -42,12 +44,12 @@ interface Turn {
   answer: string
 }
 
-/** Markdown 摘成一行纯文本：预览卡里不需要语法符号 */
-function plainText(raw: string | null | undefined): string {
+/** Markdown 摘成一行纯文本：预览卡里不需要语法符号（非组件函数：译文由调用方传入 t） */
+function plainText(t: TFunction, raw: string | null | undefined): string {
   return (raw ?? '')
-    .replace(/```[\s\S]*?```/g, ' [代码] ')
+    .replace(/```[\s\S]*?```/g, t('harness.messageLocator.codePlaceholder'))
     .replace(/`([^`]*)`/g, '$1')
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' [图片] ')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, t('harness.messageLocator.imagePlaceholder'))
     .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
     .replace(/^\s{0,3}#{1,6}\s+/gm, '')
     .replace(/\*\*|__/g, '')
@@ -71,6 +73,7 @@ const MessageLocator: React.FC<MessageLocatorProps> = ({
   onJumpTo
 }) => {
   const { token } = theme.useToken()
+  const { t } = useTranslation()
   const [railHeight, setRailHeight] = useState(0)
   const [activeIndex, setActiveIndex] = useState(-1)
   const [hovered, setHovered] = useState<number | null>(null)
@@ -90,10 +93,10 @@ const MessageLocator: React.FC<MessageLocatorProps> = ({
         if (next.role === 'user') break
         if (next.role === 'assistant' && (next.content ?? '').trim()) answer = next.content ?? ''
       }
-      list.push({ index, question: plainText(message.content), answer: plainText(answer) })
+      list.push({ index, question: plainText(t, message.content), answer: plainText(t, answer) })
     })
     return list
-  }, [messages])
+  }, [messages, t])
 
   /** 按滚动位置刷新「当前轮次」 */
   const syncActive = useCallback((): void => {
@@ -231,7 +234,7 @@ const MessageLocator: React.FC<MessageLocatorProps> = ({
           <button
             key={turn.index}
             type="button"
-            aria-label={`跳转到第 ${i + 1} 轮`}
+            aria-label={t('harness.messageLocator.jumpToRound', { round: i + 1 })}
             aria-current={isActive ? 'true' : undefined}
             onMouseEnter={() => {
               cancelClear()
@@ -299,7 +302,7 @@ const MessageLocator: React.FC<MessageLocatorProps> = ({
               overflow: 'hidden'
             }}
           >
-            {hoveredTurn.question || '（空消息）'}
+            {hoveredTurn.question || t('harness.messageLocator.emptyMessage')}
           </div>
           <div style={{ height: 1, background: token.colorBorderSecondary, margin: '8px 0' }} />
           {/* 回答区：固定 3 行高，超出滚动；底部留一层渐隐提示「下面还有」 */}
@@ -315,7 +318,7 @@ const MessageLocator: React.FC<MessageLocatorProps> = ({
                 whiteSpace: 'pre-wrap'
               }}
             >
-              {hoveredTurn.answer || '（暂无回答）'}
+              {hoveredTurn.answer || t('harness.messageLocator.noAnswer')}
             </div>
             <div
               style={{

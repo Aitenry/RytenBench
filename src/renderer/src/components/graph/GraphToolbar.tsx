@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react'
 import { Button, Space, Input, Flex, Typography, Select, Modal, Tag } from 'antd'
 import { SyncOutlined, SearchOutlined } from '@ant-design/icons'
 import { RiApps2AddLine } from '@remixicon/react'
+import { useTranslation } from '@renderer/i18n'
 import type { GraphToolbarProps } from '@renderer/types/components'
 
 const { Text } = Typography
@@ -22,6 +23,7 @@ const GraphToolbar: React.FC<GraphToolbarProps> = ({
   onDocFilterChange,
   onBuildGraph
 }) => {
+  const { t } = useTranslation()
   const [modalOpen, setModalOpen] = useState(false)
   const [selectedDocIds, setSelectedDocIds] = useState<number[]>([])
 
@@ -74,11 +76,11 @@ const GraphToolbar: React.FC<GraphToolbarProps> = ({
 
         <Flex gap={8} align="center">
           <Text type="secondary" style={{ fontSize: 12 }}>
-            实体 {entityCount} | 关系 {relationCount}
+            {t('graph.toolbar.stats', { entityCount, relationCount })}
           </Text>
           <Input
             size="small"
-            placeholder="搜索实体..."
+            placeholder={t('graph.toolbar.searchPlaceholder')}
             prefix={<SearchOutlined />}
             style={{ width: 180 }}
             value={searchQuery}
@@ -91,7 +93,7 @@ const GraphToolbar: React.FC<GraphToolbarProps> = ({
               <Select
                 mode="multiple"
                 size="small"
-                placeholder="全部文档"
+                placeholder={t('graph.toolbar.allDocs')}
                 style={{ minWidth: 130, maxWidth: 200 }}
                 popupStyle={{ minWidth: 270 }}
                 value={docFilter}
@@ -100,7 +102,7 @@ const GraphToolbar: React.FC<GraphToolbarProps> = ({
                 showSearch
                 maxTagCount={1}
                 allowClear
-                notFoundContent="暂无文档"
+                notFoundContent={t('graph.toolbar.noDocs')}
                 maxTagPlaceholder={(omitted) => <span>+{omitted.length}</span>}
                 tagRender={(props) => {
                   const { label, closable, onClose } = props
@@ -154,29 +156,29 @@ const GraphToolbar: React.FC<GraphToolbarProps> = ({
       </div>
 
       <Modal
-        title="选择文档追加到图谱"
+        title={t('graph.toolbar.appendModalTitle')}
         open={modalOpen}
         onOk={handleConfirm}
         onCancel={handleCancel}
-        okText="确认追加"
-        cancelText="取消"
+        okText={t('graph.toolbar.appendConfirm')}
+        cancelText={t('common.action.cancel')}
         okButtonProps={{ disabled: selectedDocIds.length === 0 }}
         destroyOnHidden
       >
         <div style={{ marginBottom: 12 }}>
-          <Text type="secondary">
-            已加入图谱的文档将不会显示在列表中（{addedDocIds.size} 篇已加入）
-          </Text>
+          <Text type="secondary">{t('graph.toolbar.appendHint', { count: addedDocIds.size })}</Text>
         </div>
         <Select
           mode="multiple"
           style={{ width: '100%' }}
-          placeholder="搜索并选择文档..."
+          placeholder={t('graph.toolbar.appendSearchPlaceholder')}
           value={selectedDocIds}
           onChange={setSelectedDocIds}
           options={appendOptions}
           showSearch={{ optionFilterProp: 'label' }}
-          notFoundContent={docs.length === 0 ? '暂无文档' : '所有文档均已加入图谱'}
+          notFoundContent={
+            docs.length === 0 ? t('graph.toolbar.noDocs') : t('graph.toolbar.allDocsAdded')
+          }
           tagRender={(props) => {
             const { label, closable, onClose } = props
             return (

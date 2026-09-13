@@ -8,9 +8,10 @@ import type { GraphViewProps } from '@renderer/types/components'
 import type { GraphChartData, GraphEntity, GraphData } from '@renderer/types/knowledge'
 import {
   ENTITY_TYPE_COLORS,
-  ENTITY_TYPE_LABELS,
-  RELATION_TYPE_LABELS
+  ENTITY_TYPE_LABEL_KEYS,
+  RELATION_TYPE_LABEL_KEYS
 } from '@renderer/types/knowledge'
+import { useTranslation } from '@renderer/i18n'
 import GraphCanvas from './GraphCanvas'
 import EntityDetail from './EntityDetail'
 import GraphToolbar from './GraphToolbar'
@@ -28,6 +29,7 @@ const GraphView: React.FC<GraphViewProps> = ({
 
   const { viewMessage } = useMessage()
   const { startBuild, subscribeToRefresh } = useBuildProgress()
+  const { t } = useTranslation()
   const [modal, contextHolder] = Modal.useModal()
 
   const [graphData, setGraphData] = useState<GraphData | null>(null)
@@ -131,8 +133,9 @@ const GraphView: React.FC<GraphViewProps> = ({
     const typeToIndex = new Map<string, number>()
     const categories = typeList.map((type, i) => {
       typeToIndex.set(type, i)
+      const labelKey = ENTITY_TYPE_LABEL_KEYS[type]
       return {
-        name: ENTITY_TYPE_LABELS[type] || type,
+        name: labelKey ? t(labelKey) : type,
         itemStyle: { color: ENTITY_TYPE_COLORS[type] || ENTITY_TYPE_COLORS.other }
       }
     })
@@ -147,15 +150,18 @@ const GraphView: React.FC<GraphViewProps> = ({
 
     const links = graphData.relations
       .filter((r) => entityMap.has(r.source_id) && entityMap.has(r.target_id))
-      .map((r) => ({
-        source: String(r.source_id),
-        target: String(r.target_id),
-        label: RELATION_TYPE_LABELS[r.relation_type] || r.relation_type,
-        description: r.description
-      }))
+      .map((r) => {
+        const labelKey = RELATION_TYPE_LABEL_KEYS[r.relation_type]
+        return {
+          source: String(r.source_id),
+          target: String(r.target_id),
+          label: labelKey ? t(labelKey) : r.relation_type,
+          description: r.description
+        }
+      })
 
     return { nodes, links, categories }
-  }, [graphData, searchQuery, typeFilter])
+  }, [graphData, searchQuery, typeFilter, t])
 
   useEffect(() => {
     loadDocs(selectedWiki.id).then()
@@ -178,7 +184,10 @@ const GraphView: React.FC<GraphViewProps> = ({
       viewMessage(
         'graph-build',
         'success',
-        `图谱构建完成！实体 ${result.entityCount}，关系 ${result.relationCount}`,
+        t('graph.build.completed', {
+          entityCount: result.entityCount,
+          relationCount: result.relationCount
+        }),
         4
       )
       if (result.wikiId === selectedWiki.id) {
@@ -186,14 +195,14 @@ const GraphView: React.FC<GraphViewProps> = ({
         loadProcessedDocIds(selectedWiki.id).then()
       }
     })
-  }, [selectedWiki.id, loadGraphData, loadProcessedDocIds, viewMessage])
+  }, [selectedWiki.id, loadGraphData, loadProcessedDocIds, viewMessage, t])
 
   useEffect(() => {
     return (window as unknown as Window).api.graph.onBuildError((error) => {
       setIsAppending(false)
-      viewMessage('graph-build-error', 'error', `图谱构建失败: ${error.error}`)
+      viewMessage('graph-build-error', 'error', t('graph.build.failed', { reason: error.error }))
     })
-  }, [viewMessage])
+  }, [viewMessage, t])
 
   const handleEntityClick = useCallback((entity: GraphEntity): void => {
     setSelectedEntity(entity)
@@ -201,22 +210,22 @@ const GraphView: React.FC<GraphViewProps> = ({
 
   const handleBuildGraph = (): void => {
     modal.confirm({
-      title: '确认构建图谱',
-      content: `将为知识库「${selectedWiki.title}」重新构建知识图谱，已有图谱数据将被清除。确定继续吗？`,
-      okText: '确定构建',
-      cancelText: '取消',
+      title: t('graph.build.confirmTitle'),
+      content: t('graph.build.confirmContent', { title: selectedWiki.title }),
+      okText: t('graph.build.confirmOk'),
+      cancelText: t('common.action.cancel'),
       okButtonProps: { danger: true },
       onOk: () => {
         const messageKey = 'graph-build-trigger'
-        viewMessage(messageKey, 'loading', '正在启动图谱构建...')
+        viewMessage(messageKey, 'loading', t('graph.build.starting'))
 
         startBuild(selectedWiki.id, selectedWiki.title)
 
         try {
           ;(window as unknown as Window).api.graph.buildGraph(selectedWiki.id, { force: true })
-          viewMessage(messageKey, 'success', '图谱构建已启动', 2)
+          viewMessage(messageKey, 'success', t('graph.build.started'), 2)
         } catch (error) {
-          viewMessage(messageKey, 'error', `启动构建失败: ${error}`)
+          viewMessage(messageKey, 'error', t('graph.build.startFailed', { reason: String(error) }))
         }
       }
     })
@@ -319,9 +328,9 @@ const GraphView: React.FC<GraphViewProps> = ({
               />
             ) : (
               <Flex vertical align="center" justify="center" style={{ height: '100%' }} gap={16}>
-                <Empty description="该知识库还没有图谱数据" image={Empty.PRESENTED_IMAGE_SIMPLE}>
+                <Empty description={t('graph.empty.noData')} image={Empty.PRESENTED_IMAGE_SIMPLE}>
                   <Button type="primary" icon={<PlayCircleOutlined />} onClick={handleBuildGraph}>
-                    开始构建图谱
+                    {t('graph.empty.startBuild')}
                   </Button>
                 </Empty>
               </Flex>

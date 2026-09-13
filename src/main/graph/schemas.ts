@@ -44,10 +44,13 @@ export const ALLOWED_ENTITY_TYPES: ReadonlySet<string> = new Set(ENTITY_TYPES)
  * 而后续的逐条过滤逻辑永远执行不到）
  */
 export const EntitySchema = z.object({
-  name: z.string().describe('实体规范化全称'),
-  type: z.string().describe('实体类型'),
-  description: z.string().optional().describe('15字以内的简洁描述'),
-  confidence: z.number().optional().describe('置信度 0-1，表示实体抽取的确定程度')
+  name: z.string().describe('canonical full name of the entity'),
+  type: z.string().describe('entity type'),
+  description: z.string().optional().describe('a concise description (≤ 15 words)'),
+  confidence: z
+    .number()
+    .optional()
+    .describe('confidence from 0 to 1, indicating how certain the entity extraction is')
 })
 
 /** 实体数组 —— 实体抽取 & Gleaning 使用 */
@@ -55,18 +58,18 @@ export const EntitiesArraySchema = z.array(EntitySchema)
 
 /** 合并后的实体（含别名等元信息） */
 export const MergedEntitySchema = z.object({
-  name: z.string().describe('规范化名称'),
-  type: z.string().describe('实体类型'),
-  description: z.string().optional().describe('综合描述'),
-  aliases: z.array(z.string()).optional().describe('别名列表'),
-  confidence: z.number().optional().describe('置信度 0-1'),
-  source_doc_ids: z.array(z.number()).optional().describe('来源文档 ID 列表')
+  name: z.string().describe('canonical name'),
+  type: z.string().describe('entity type'),
+  description: z.string().optional().describe('combined description'),
+  aliases: z.array(z.string()).optional().describe('list of aliases'),
+  confidence: z.number().optional().describe('confidence from 0 to 1'),
+  source_doc_ids: z.array(z.number()).optional().describe('list of source document IDs')
 })
 
 /** 实体消歧合并结果 */
 export const EntityMergingResultSchema = z.object({
-  merged: z.array(MergedEntitySchema).describe('合并后的实体列表'),
-  removed_names: z.array(z.string()).describe('被合并掉的名称列表')
+  merged: z.array(MergedEntitySchema).describe('list of merged entities'),
+  removed_names: z.array(z.string()).describe('list of names that were merged away')
 })
 
 /** 关系类型枚举值（按场景分组，覆盖全行业） */
@@ -109,10 +112,10 @@ export const ALLOWED_RELATION_TYPES: ReadonlySet<string> = new Set(RELATION_TYPE
 
 /** 单个关系（宽松化：relation_type 非法值由后处理过滤,不再整块 parse 失败） */
 export const RelationSchema = z.object({
-  source: z.string().describe('源实体名称'),
-  target: z.string().describe('目标实体名称'),
-  relation_type: z.string().describe('关系类型'),
-  description: z.string().optional().describe('15字以内的简短关系描述')
+  source: z.string().describe('source entity name'),
+  target: z.string().describe('target entity name'),
+  relation_type: z.string().describe('relation type'),
+  description: z.string().optional().describe('a short relation description (≤ 15 words)')
 })
 
 /** 关系数组 —— 关系抽取使用 */
@@ -120,8 +123,8 @@ export const RelationsArraySchema = z.array(RelationSchema)
 
 /** 统一抽取结果（实体+关系同时输出） */
 export const UnifiedExtractionSchema = z.object({
-  entities: z.array(EntitySchema).describe('抽取到的实体列表'),
-  relations: z.array(RelationSchema).describe('抽取到的关系列表')
+  entities: z.array(EntitySchema).describe('list of extracted entities'),
+  relations: z.array(RelationSchema).describe('list of extracted relations')
 })
 
 // ========== 类型推导 ==========

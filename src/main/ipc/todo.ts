@@ -1,5 +1,6 @@
 import { ipcMain } from 'electron'
 import logger from 'electron-log'
+import { mainMessages } from '../i18n'
 import { deleteNodePosition } from '../database/mapper/node-position'
 import {
   getTodoItemById,
@@ -57,7 +58,7 @@ export function registerTodoIpc(): void {
       // 兼容布尔（true=已完成=2 / false=未完成=0）与数字两种口径
       const normalized = typeof status === 'boolean' ? (status ? 2 : 0) : status
       if (![0, 1, 2].includes(normalized)) {
-        throw new Error('status 必须为 0（未开始）/ 1（进行中）/ 2（已完成）')
+        throw new Error(mainMessages().error.invalidStatus)
       }
       return await getTodoItemsByStatus(normalized)
     } catch (error) {
@@ -108,7 +109,7 @@ export function registerTodoIpc(): void {
       try {
         // 状态枚举校验（修复：此前可写任意整数,前端只认 0/1/2；null 同样拒绝）
         if (updates.status !== undefined && ![0, 1, 2].includes(updates.status ?? -1)) {
-          throw new Error('status 必须为 0（未开始）/ 1（进行中）/ 2（已完成）')
+          throw new Error(mainMessages().error.invalidStatus)
         }
         return await updateTodoItem(id, updates)
       } catch (error) {

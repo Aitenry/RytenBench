@@ -4,230 +4,229 @@
  */
 
 /** 实体消歧合并 Prompt */
-export const ENTITY_MERGING_PROMPT = `你是一个知识图谱实体消歧助手。以下是多段文本中抽取出的实体列表。请分析并将指向同一真实事物的实体合并。
+export const ENTITY_MERGING_PROMPT = `You are a knowledge graph entity disambiguation assistant. Below is a list of entities extracted from multiple text segments. Analyze them and merge entities that refer to the same real-world thing.
 
-实体类型定义（type 必须严格从以下 20 种中选择，禁止自创）：
-- person: 人物
-- organization: 组织（公司、团队、机构、帮派、宗族、团体）
-- concept: 概念/理论
-- event: 事件
-- location: 地点
-- technology: 技术/工具
-- product: 产品/项目
-- system: 体系/平台/系统（管理体系、IT系统、业务平台）
-- document: 文档/证照（合同、许可证、证书、报告）
-- standard: 标准/法规/政策（技术标准、行业规范、法律法规）
-- facility: 设施/装备（核设施、生产设备、建筑、基础设施）
-- substance: 物质/材料（化学物质、放射性核素、原材料、药品）
-- process: 流程/工序/方法
-- role: 角色/职位/岗位
-- skill: 技能/能力
-- measure: 指标/度量/参数（KPI、技术指标、监测数据）
-- artifact: 物品/装备
-- creature: 生物/物种
-- realm: 等级/位阶
-- other: 其他
+Entity type definitions (type must be exactly one of the following 20 values; inventing new types is forbidden):
+- person: a person
+- organization: an organization (company, team, institution, gang, clan, group)
+- concept: a concept or theory
+- event: an event
+- location: a location
+- technology: a technology or tool
+- product: a product or project
+- system: a system (management system, IT system, business platform)
+- document: a document (contract, license, certificate, report)
+- standard: a standard, regulation, or policy (technical standard, industry code, law)
+- facility: a facility or equipment (nuclear facility, production equipment, building, infrastructure)
+- substance: a substance or material (chemical, radionuclide, raw material, drug)
+- process: a process or method
+- role: a role or position
+- skill: a skill or ability
+- measure: a measure, metric, or parameter (KPI, technical indicator, monitoring data)
+- artifact: an item or equipment
+- creature: a creature or species
+- realm: a rank or tier
+- other: other
 
-合并规则：
-1. 名称完全相同 → 直接合并（调用方已处理，此处不需重复合并）
-2. 名称不同但明确指代同一实体 → 选择最规范/最常用的名称作为主名，其余作为别名
-   - "React" 和 "React.js" → 合并为 "React"，别名 ["React.js"]
-   - "Kubernetes" 和 "K8s" → 合并为 "Kubernetes"，别名 ["K8s"]
-   - "大语言模型" 和 "LLM" → 合并为 "大语言模型"，别名 ["LLM"]
-   - "VS Code" 和 "Visual Studio Code" → 合并为 "Visual Studio Code"，别名 ["VS Code"]
-3. 中文/英文名称指代同一事物 → 选择最常用的表达作为主名
-4. 如果无法确定是否同一实体 → 保留各自独立
-5. 合并后的 description 保留最详细的描述
-6. 合并后的 confidence 取最大值
-7. 合并后的 type 取合并前实体的 type 之一，必须从上述 20 种中选择
+Merging rules:
+1. Identical names → merge directly (already handled by the caller; do not merge them again here)
+2. Different names that clearly refer to the same entity → pick the most standard or most common name as the main name and keep the rest as aliases
+   - "React" and "React.js" → merge into "React", aliases ["React.js"]
+   - "Kubernetes" and "K8s" → merge into "Kubernetes", aliases ["K8s"]
+   - "VS Code" and "Visual Studio Code" → merge into "Visual Studio Code", aliases ["VS Code"]
+3. Names in different languages or scripts that refer to the same thing → merge them; keep the form that appears most often in the source text as the main name and the other forms as aliases
+4. If you cannot determine whether two entities are the same → keep them separate
+5. Keep the most detailed description for the merged entity
+6. Take the maximum confidence for the merged entity
+7. The merged type must be one of the types from the entities being merged, and must be one of the 20 values above
 
-实体列表：
+Entity list:
 {entities}
 
-请返回合并后的 JSON 对象，格式如下：
-{{
+Return a JSON object in the following format:
+{
   "merged": [
-    {{
-      "name": "规范化名称",
-      "type": "类型",
-      "description": "综合描述",
-      "aliases": ["别名1"],
+    {
+      "name": "canonical name",
+      "type": "type",
+      "description": "combined description",
+      "aliases": ["alias1"],
       "confidence": 0.95,
       "source_doc_ids": [1, 2]
-    }}
+    }
   ],
-  "removed_names": ["被合并掉的名称"]
-}}
+  "removed_names": ["names that were merged away"]
+}
 
-请仅返回 JSON 对象（直接输出对象，不要包裹在代码块中）：`
+Return only the JSON object (output the object directly; do not wrap it in a code block):`
 
 /** Gleaning（遗漏实体补充抽取）Prompt */
-export const ENTITY_GLEANING_PROMPT = `你之前从以下文本中抽取了一些实体。请再仔细检查一遍，找出第一次可能遗漏的实体。
-只返回上次未抽取的实体，不要重复已抽取的。
+export const ENTITY_GLEANING_PROMPT = `You previously extracted entities from the text below. Review it carefully once more and find the entities you may have missed the first time.
+Return only entities that were not extracted last time; do not repeat entities that have already been extracted.
 
-实体类型定义（type 必须严格从以下 20 种中选择，禁止自创）：
-- person: 人物
-- organization: 组织（公司、团队、机构、帮派、宗族、团体）
-- concept: 概念/理论
-- event: 事件
-- location: 地点
-- technology: 技术/工具
-- product: 产品/项目
-- system: 体系/平台/系统（管理体系、IT系统、业务平台）
-- document: 文档/证照（合同、许可证、证书、报告）
-- standard: 标准/法规/政策（技术标准、行业规范、法律法规）
-- facility: 设施/装备（核设施、生产设备、建筑、基础设施）
-- substance: 物质/材料（化学物质、放射性核素、原材料、药品）
-- process: 流程/工序/方法
-- role: 角色/职位/岗位
-- skill: 技能/能力
-- measure: 指标/度量/参数（KPI、技术指标、监测数据）
-- artifact: 物品/装备
-- creature: 生物/物种
-- realm: 等级/位阶
-- other: 其他
+Entity type definitions (type must be exactly one of the following 20 values; inventing new types is forbidden):
+- person: a person
+- organization: an organization (company, team, institution, gang, clan, group)
+- concept: a concept or theory
+- event: an event
+- location: a location
+- technology: a technology or tool
+- product: a product or project
+- system: a system (management system, IT system, business platform)
+- document: a document (contract, license, certificate, report)
+- standard: a standard, regulation, or policy (technical standard, industry code, law)
+- facility: a facility or equipment (nuclear facility, production equipment, building, infrastructure)
+- substance: a substance or material (chemical, radionuclide, raw material, drug)
+- process: a process or method
+- role: a role or position
+- skill: a skill or ability
+- measure: a measure, metric, or parameter (KPI, technical indicator, monitoring data)
+- artifact: an item or equipment
+- creature: a creature or species
+- realm: a rank or tier
+- other: other
 
-已抽取的实体名称：{existing_entities}
+Entity names already extracted: {existing_entities}
 
-文本内容：
+Text:
 {text}
 
-请仅返回 JSON 数组，每个实体包含 name、type、description、confidence 字段，格式与第一次抽取相同：`
+Return only a JSON array, where each entity has the fields name, type, description, and confidence, in the same format as the first extraction:`
 
 /** 统一实体+关系抽取 Prompt（一次调用同时输出实体和关系） */
-export const ENTITY_RELATION_EXTRACTION_PROMPT = `你是一个知识图谱构建助手。请从以下文本中同时抽取出所有有意义的命名实体、关键概念以及实体之间的关系。
+export const ENTITY_RELATION_EXTRACTION_PROMPT = `You are a knowledge graph construction assistant. Extract all meaningful named entities, key concepts, and the relations between entities from the text below in a single pass.
 
-实体类型定义（type 必须严格从以下 20 种中选择，禁止自创）：
-- person: 人物（个人、角色、虚构角色）
-- organization: 组织（公司、团队、机构、帮派、宗族、团体）
-- concept: 概念/理论（抽象概念、方法论、设计模式、算法、世界观）
-- event: 事件（会议、发布、里程碑、重大节点、战役）
-- location: 地点（地理区域、城镇、星球、虚构世界、自然区域）
-- technology: 技术/工具（编程语言、框架、库、软件、硬件、协议）
-- product: 产品/项目（具体产品、开源项目、应用、作品）
-- system: 体系/平台/系统（管理体系、IT系统、业务平台、质量体系、反馈体系）
-- document: 文档/证照（合同、许可证、证书、报告、法律文书、审查意见书）
-- standard: 标准/法规/政策（技术标准、行业规范、法律法规、政策文件）
-- facility: 设施/装备（核设施、生产设备、建筑、基础设施、装置）
-- substance: 物质/材料（化学物质、放射性核素、原材料、药品、流出物）
-- process: 流程/工序/方法（工作流程、操作步骤、制造工序、方法）
-- role: 角色/职位/岗位（岗位名称、职务、角色定义）
-- skill: 技能/能力（专业技能、技术能力、天赋、特长、本领）
-- measure: 指标/度量/参数（KPI、技术指标、监测参数、统计数据）
-- artifact: 物品/装备（武器、防具、工具、重要器物、装备）
-- creature: 生物/物种（非人类智慧生物、神话生物、物种）
-- realm: 等级/位阶（品级、段位、军衔、职称、称号、层级等）
-- other: 其他重要实体
+Entity type definitions (type must be exactly one of the following 20 values; inventing new types is forbidden):
+- person: a person (individual, character, fictional character)
+- organization: an organization (company, team, institution, gang, clan, group)
+- concept: a concept or theory (abstract concept, methodology, design pattern, algorithm, worldview)
+- event: an event (meeting, launch, milestone, turning point, battle)
+- location: a location (geographic region, town, planet, fictional world, natural area)
+- technology: a technology or tool (programming language, framework, library, software, hardware, protocol)
+- product: a product or project (concrete product, open-source project, application, work)
+- system: a system (management system, IT system, business platform, quality system, feedback system)
+- document: a document (contract, license, certificate, report, legal instrument, review opinion)
+- standard: a standard, regulation, or policy (technical standard, industry code, law, policy document)
+- facility: a facility or equipment (nuclear facility, production equipment, building, infrastructure, installation)
+- substance: a substance or material (chemical, radionuclide, raw material, drug, effluent)
+- process: a process or method (workflow, operating procedure, manufacturing process, method)
+- role: a role or position (job title, post, role definition)
+- skill: a skill or ability (professional skill, technical ability, talent, specialty, competence)
+- measure: a measure, metric, or parameter (KPI, technical indicator, monitoring parameter, statistics)
+- artifact: an item or equipment (weapon, armor, tool, important object, equipment)
+- creature: a creature or species (non-human intelligent being, mythical creature, species)
+- realm: a rank or tier (grade, tier, military rank, professional title, title of honor, level)
+- other: other important entity
 
-关系类型定义（relation_type 必须严格从以下 24 种中选择，禁止自创）：
-- contains: A 包含 B（A 是 B 的容器/集合/模块）
-- part_of: A 是 B 的一部分
-- is_a: A 是 B 的一种（继承/实例）
-- located_in: A 位于 B
-- depends_on: A 依赖 B
-- related_to: A 与 B 相关（通用关联）
-- leads_to: A 导致/产生 B
-- uses: A 使用/采用了 B
-- creates: A 创造/开发了 B
-- produces: A 生产/制造/产出 B
-- operates: A 运营/操作/运行 B
-- owns: A 拥有/持有 B
-- acquires: A 获得/得到 B（物品、技能、资源、许可）
-- belongs_to: A 属于/归属于 B（组织、团体、阵营）
-- governs: A 管辖/监管/治理 B
-- monitors: A 监测/监控/监督 B
-- employs: A 雇用/聘用 B
-- mentors: A 指导/教导/培训/考核 B
-- friend_of: A 与 B 是朋友/盟友/合作伙伴
-- enemy_of: A 与 B 是敌人/对手/竞争者
-- loves: A 爱慕/喜欢/倾心于 B
-- family_of: A 与 B 是亲属/血缘关系
-- fights: A 与 B 交战/冲突/对抗
-- kills: A 杀死/击败/淘汰 B
+Relation type definitions (relation_type must be exactly one of the following 24 values; inventing new types is forbidden):
+- contains: A contains B (A is the container, set, or module of B)
+- part_of: A is part of B
+- is_a: A is a kind of B (inheritance or instance)
+- located_in: A is located in B
+- depends_on: A depends on B
+- related_to: A is related to B (generic association)
+- leads_to: A leads to or produces B
+- uses: A uses or adopts B
+- creates: A created or developed B
+- produces: A produces or manufactures B
+- operates: A operates or runs B
+- owns: A owns or holds B
+- acquires: A acquires or obtains B (item, skill, resource, license)
+- belongs_to: A belongs to B (organization, group, faction)
+- governs: A governs, regulates, or administers B
+- monitors: A monitors, surveils, or supervises B
+- employs: A employs or hires B
+- mentors: A mentors, teaches, trains, or assesses B
+- friend_of: A is a friend, ally, or partner of B
+- enemy_of: A is an enemy, opponent, or competitor of B
+- loves: A loves or is attracted to B
+- family_of: A is a relative or blood relation of B
+- fights: A fights or conflicts with B
+- kills: A kills, defeats, or eliminates B
 
-实体抽取要求：
-1. 只抽取明确出现在文本中的实体，不要凭空猜测
-2. 不要抽取过于宽泛或通用的词
-3. 实体类型不确定时优先选最接近的类型，无法确定才设为 "other"
-4. 每个实体返回 name（规范化全称）、type（类型）、description（15字以内的简洁描述）、confidence（置信度 0-1）
-5. confidence 评分标准：0.9-1.0 = 实体名称明确出现且上下文清晰；0.7-0.89 = 实体名称出现但上下文有限；0.5-0.69 = 实体名称模糊或需推断；0-0.49 = 不确定
+Entity extraction requirements:
+1. Extract only entities that clearly appear in the text; do not guess
+2. Do not extract overly broad or generic words
+3. When the entity type is uncertain, prefer the closest type; use "other" only when nothing fits
+4. Return name (canonical full name), type, description (a concise description, ≤ 15 words), and confidence (0-1) for each entity. Keep names exactly as they appear in the source text and write the description in the same language as the source text
+5. Confidence scoring: 0.9-1.0 = the entity name clearly appears and the context is clear; 0.7-0.89 = the entity name appears but the context is limited; 0.5-0.69 = the entity name is ambiguous or must be inferred; 0-0.49 = uncertain
 
-关系抽取要求：
-1. 只返回有明确文本证据支持的关系
-2. 关系方向：source → target
-3. source 和 target 必须是 entities 列表中的名称（完全匹配）
-4. description 简短描述关系（15字内）
+Relation extraction requirements:
+1. Return only relations with explicit textual evidence
+2. Relation direction: source → target
+3. source and target must be names from the entities list (exact match)
+4. description briefly describes the relation (≤ 15 words), written in the same language as the source text
 
-示例输入：
-"React 是由 Facebook 开发的前端框架，使用 JSX 语法。它在 2013 年开源，目前版本为 18.2。React 的核心是虚拟 DOM 和组件化思想。"
+Example input:
+"React is a front-end framework developed by Facebook. It uses JSX syntax, was open-sourced in 2013, and is currently at version 18.2. React is built around the virtual DOM and componentization."
 
-示例输出：
+Example output:
 {
   "entities": [
-    {"name": "React", "type": "technology", "description": "Facebook开发的前端UI框架", "confidence": 0.95},
-    {"name": "Facebook", "type": "organization", "description": "美国科技公司Meta旗下", "confidence": 0.95},
-    {"name": "JSX", "type": "technology", "description": "JavaScript语法扩展", "confidence": 0.9},
-    {"name": "虚拟DOM", "type": "concept", "description": "轻量级DOM表示优化渲染", "confidence": 0.85},
-    {"name": "组件化", "type": "concept", "description": "UI拆分为独立可复用组件", "confidence": 0.85}
+    {"name": "React", "type": "technology", "description": "Front-end UI framework developed by Facebook", "confidence": 0.95},
+    {"name": "Facebook", "type": "organization", "description": "Technology company behind Meta", "confidence": 0.95},
+    {"name": "JSX", "type": "technology", "description": "Syntax extension for JavaScript", "confidence": 0.9},
+    {"name": "Virtual DOM", "type": "concept", "description": "Lightweight DOM representation that speeds up rendering", "confidence": 0.85},
+    {"name": "Componentization", "type": "concept", "description": "Splitting a UI into independent, reusable components", "confidence": 0.85}
   ],
   "relations": [
-    {"source": "Facebook", "target": "React", "relation_type": "creates", "description": "Facebook开发并开源了React"},
-    {"source": "React", "target": "JSX", "relation_type": "uses", "description": "React采用JSX作为模板语法"},
-    {"source": "React", "target": "虚拟DOM", "relation_type": "uses", "description": "React使用虚拟DOM优化渲染"}
+    {"source": "Facebook", "target": "React", "relation_type": "creates", "description": "Facebook created and open-sourced React"},
+    {"source": "React", "target": "JSX", "relation_type": "uses", "description": "React uses JSX as its templating syntax"},
+    {"source": "React", "target": "Virtual DOM", "relation_type": "uses", "description": "React uses the virtual DOM to optimize rendering"}
   ]
 }
 
-文本内容：
+Text:
 {text}
 
-请仅返回 JSON 对象（直接输出对象，不要包裹在代码块中）：`
+Return only the JSON object (output the object directly; do not wrap it in a code block):`
 
 /** 增量跨块关系补全 Prompt（按 chunk 顺序推进，每次只比较当前 chunk 实体与已处理的前序实体） */
-export const INCREMENTAL_CROSS_CHUNK_PROMPT = `你是一个知识图谱关系补全助手。以下 A 组实体出现在文档的前序章节中，B 组实体出现在当前章节中。请找出 A 组与 B 组之间可能存在的关系（A-B 之间、B-B 内部均可，但不要重复 A-A 内部的关系——这些已经抽取完毕）。
+export const INCREMENTAL_CROSS_CHUNK_PROMPT = `You are a knowledge graph relation completion assistant. Group A entities appear in earlier sections of the document, and group B entities appear in the current section. Find the relations that may exist between group A and group B (A-B pairs and pairs within B are both allowed, but do not repeat relations within A — those have already been extracted).
 
-文档标题：
+Document title:
 {docTitle}
 
-前序章节实体（A 组）：
+Earlier-section entities (group A):
 {previousEntities}
 
-当前章节实体（B 组）：
+Current-section entities (group B):
 {currentEntities}
 
-已发现的关系（请勿重复抽取）：
+Already discovered relations (do not extract them again):
 {existingPairs}
 
-关系类型定义（relation_type 必须严格从以下 24 种中选择，禁止使用列表外的任何值）：
-- contains: A 包含 B
-- part_of: A 是 B 的一部分
-- is_a: A 是 B 的一种
-- located_in: A 位于 B
-- depends_on: A 依赖 B
-- related_to: A 与 B 相关
-- leads_to: A 导致/产生 B
-- uses: A 使用/采用 B
-- creates: A 创造/开发 B
-- produces: A 生产/制造/产出 B
-- operates: A 运营/操作/运行 B
-- owns: A 拥有/持有 B
-- acquires: A 获得 B
-- belongs_to: A 归属于 B
-- governs: A 管辖/监管/治理 B
-- monitors: A 监测/监控/监督 B
-- employs: A 雇用/聘用 B
-- mentors: A 指导/教导/培训 B
-- friend_of: A 与 B 是朋友/盟友
-- enemy_of: A 与 B 是敌人/对手
-- loves: A 爱慕 B
-- family_of: A 与 B 是亲属
-- fights: A 与 B 战斗/对抗
-- kills: A 杀死 B
+Relation type definitions (relation_type must be exactly one of the following 24 values; no value outside this list is allowed):
+- contains: A contains B
+- part_of: A is part of B
+- is_a: A is a kind of B
+- located_in: A is located in B
+- depends_on: A depends on B
+- related_to: A is related to B
+- leads_to: A leads to or produces B
+- uses: A uses or adopts B
+- creates: A created or developed B
+- produces: A produces or manufactures B
+- operates: A operates or runs B
+- owns: A owns or holds B
+- acquires: A acquires B
+- belongs_to: A belongs to B
+- governs: A governs, regulates, or administers B
+- monitors: A monitors, surveils, or supervises B
+- employs: A employs or hires B
+- mentors: A mentors, teaches, or trains B
+- friend_of: A is a friend or ally of B
+- enemy_of: A is an enemy or opponent of B
+- loves: A loves B
+- family_of: A is a relative of B
+- fights: A fights or conflicts with B
+- kills: A kills B
 
-要求：
-1. 只返回有合理推断依据的关系
-2. 不要重复「已发现的关系」中列出的关系
-3. source 和 target 必须是给定实体列表中的名称（完全匹配）
-4. description 简短描述关系（15字内）
-5. 如果确实没有新的跨章节关系，返回空数组 []
+Requirements:
+1. Return only relations supported by reasonable inference
+2. Do not repeat relations listed under "Already discovered relations"
+3. source and target must be names from the given entity lists (exact match)
+4. description briefly describes the relation (≤ 15 words), written in the same language as the source text
+5. If there are genuinely no new cross-section relations, return an empty array []
 
-请仅返回 JSON 数组（直接输出数组，不要包裹在代码块中）：`
+Return only the JSON array (output the array directly; do not wrap it in a code block):`

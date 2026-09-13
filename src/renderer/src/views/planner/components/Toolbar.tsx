@@ -1,6 +1,7 @@
 import React from 'react'
 import { Button, Space, Tooltip, theme } from 'antd'
 import { RiListCheck2, RiBarChartHorizontalLine, RiAddLine } from '@remixicon/react'
+import { useTranslation } from '@renderer/i18n'
 
 interface Props {
   viewMode: 'list' | 'gantt'
@@ -9,6 +10,7 @@ interface Props {
 }
 
 const Toolbar: React.FC<Props> = ({ viewMode, onViewModeChange, onAddTask }) => {
+  const { t } = useTranslation()
   const { token } = theme.useToken()
   const btnStyle: React.CSSProperties = {
     display: 'inline-flex',
@@ -28,22 +30,22 @@ const Toolbar: React.FC<Props> = ({ viewMode, onViewModeChange, onAddTask }) => 
       }}
     >
       <Space size={0}>
-        <Tooltip title="列表视图">
+        <Tooltip title={t('planner.toolbar.listView')}>
           <Button
             type={viewMode === 'list' ? 'primary' : 'text'}
             size="small"
             icon={<RiListCheck2 size={16} />}
-            aria-label="列表视图"
+            aria-label={t('planner.toolbar.listView')}
             style={btnStyle}
             onClick={() => onViewModeChange('list')}
           />
         </Tooltip>
-        <Tooltip title="甘特图视图">
+        <Tooltip title={t('planner.toolbar.ganttView')}>
           <Button
             type={viewMode === 'gantt' ? 'primary' : 'text'}
             size="small"
             icon={<RiBarChartHorizontalLine size={16} />}
-            aria-label="甘特图视图"
+            aria-label={t('planner.toolbar.ganttView')}
             style={btnStyle}
             onClick={() => onViewModeChange('gantt')}
           />
@@ -52,12 +54,12 @@ const Toolbar: React.FC<Props> = ({ viewMode, onViewModeChange, onAddTask }) => 
 
       <div className="flex-1" />
 
-      <Tooltip title="新建项目">
+      <Tooltip title={t('planner.toolbar.newProject')}>
         <Button
           type="primary"
           size="small"
           icon={<RiAddLine size={16} />}
-          aria-label="新建项目"
+          aria-label={t('planner.toolbar.newProject')}
           style={btnStyle}
           onClick={onAddTask}
         />

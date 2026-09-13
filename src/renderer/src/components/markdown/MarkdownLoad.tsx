@@ -16,6 +16,7 @@ import 'katex/dist/katex.min.css'
 import { RiCheckLine, RiFileCopyLine } from '@remixicon/react'
 import { extractTextFromChildren } from '@renderer/utils/markdown'
 import { InlineCodeCopy } from '@renderer/components/markdown/MarkdownView'
+import { useTranslation } from '@renderer/i18n'
 import type { MarkdownViewProps } from '@renderer/types/components'
 
 // Stable references — prevent ReactMarkdown from re-rendering the entire DOM tree
@@ -52,6 +53,7 @@ const CopyButton = ({
   text: string
   isDarkMode?: boolean
 }): React.ReactNode => {
+  const { t } = useTranslation()
   const [copied, setCopied] = useState(false)
 
   const handleCopy = async (): Promise<void> => {
@@ -72,7 +74,7 @@ const CopyButton = ({
           ? 'bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-white'
           : 'bg-gray-200 hover:bg-gray-300 text-gray-600 hover:text-gray-900'
       }`}
-      title={copied ? 'Copied' : 'Copy code'}
+      title={copied ? t('markdown.copy.copied') : t('markdown.copy.code')}
     >
       {copied ? <RiCheckLine size={16} /> : <RiFileCopyLine size={16} />}
     </button>

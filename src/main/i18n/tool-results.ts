@@ -1,0 +1,221 @@
+/**
+ * 工具执行结果的文案（**会显示在聊天的工具结果卡片上**，因此必须跟随界面语言）。
+ *
+ * 与 `messages.ts` 的分工：那边是操作系统层面的界面（托盘/对话框/启动页），
+ * 这边是「工具把手里的结果告诉用户」的话术。
+ * 模型会读到同样的内容——这是刻意的：卡片上显示什么，模型就看到什么。
+ *
+ * 中文是源语言，`enUS` 用 `typeof zhCN` 约束，缺键/多键都是编译期错误。
+ *
+ * 注意：这里的键只覆盖 mnemon 写工具的返回文本。记忆空间/文档的**持久化默认名**
+ * （`热记忆归档` / `未命名记忆空间` / `记忆空间 <id>` / `磁盘发现的记忆空间`）
+ * 是数据不是文案，按名查找依赖它们，绝不能放到这里。
+ */
+export const zhCNToolResults = {
+  mnemon: {
+    /** 热记忆写入目标（target=user / memory）在卡片上的说法 */
+    targets: {
+      user: '用户画像',
+      memory: '项目记忆'
+    },
+
+    // ----- mnemon_runtime_memory：工具层拼装的成功文案 -----
+    /* 条数短语单独抽出来做单复数：中文不变，英文 1 entry / n entries */
+    entryCount_one: '{{count}} 条',
+    entryCount_other: '{{count}} 条',
+    added: '已添加到{{target}}（{{used}}/{{limit}} 字节，共 {{entryCount}}）。',
+    addedWithMaintenance:
+      '已添加到{{target}}（{{used}}/{{limit}} 字节，共 {{entryCount}}）。已触发容量维护：{{summary}}',
+    replaced: '已替换记忆条目。',
+    removed: '已移除记忆条目。',
+
+    /** RuntimeMemoryController.mutate 的结果 message（失败时由工具原样返回） */
+    runtimeMemory: {
+      added: '已添加记忆',
+      addedWithArchive: '已添加记忆（触发长期归档 {{entryCount}}）',
+      replaced: '已替换记忆',
+      removed: '已移除记忆',
+      archiveFailed: 'MEMORY 热记忆容量不足，且长期归档失败：{{message}}'
+    },
+
+    // ----- mnemon_document_manage -----
+    document: {
+      createRequires: '创建档案需要 title 与 content',
+      created: '已创建档案《{{title}}》（id={{id}}）',
+      updateRequiresId: '更新档案需要 id',
+      updated: '已更新档案《{{title}}》（revision={{revision}}）',
+      archiveRequiresId: '归档档案需要 id',
+      notFound: '档案不存在: {{id}}',
+      archived: '已归档档案《{{title}}》：{{summary}}',
+      defaultArchiveSummary: '由智能体归档'
+    },
+
+    // ----- mnemon_remember / mnemon_link / mnemon_forget -----
+    rememberFailed: '沉淀失败: {{error}}',
+    linked: '已建立 {{type}} 关系：{{sourceId}} → {{targetId}}',
+    linkFailed: '建立关系失败: {{error}}',
+    forgotten: '已软删除记忆 {{id}}',
+    forgetFailed: '删除失败: {{error}}',
+
+    // ----- mnemon_memory_body_create / update / merge -----
+    createBody: '已创建记忆空间「{{name}}」（id={{id}}，已激活）',
+    createBodyFailed: '创建失败: {{error}}',
+    updateBody: '已更新记忆空间「{{name}}」（active={{active}}）',
+    updateBodyFailed: '更新失败: {{error}}',
+    mergeBodies: '合并完成：导入 {{imported}} 条，跳过重复 {{skipped}} 条',
+    mergeBodiesDeactivated:
+      '合并完成：导入 {{imported}} 条，跳过重复 {{skipped}} 条；源空间已设为未激活',
+    mergeBodiesFailed: '合并失败: {{error}}',
+
+    /**
+     * 校验与失败消息：服务层/存储层抛出，经工具 catch 后原样返回卡片，
+     * 或由工具运行时以「工具错误」形式显示，因此同样跟随界面语言。
+     */
+    errors: {
+      // 热记忆
+      contentRequired: '内容不能为空',
+      entryTooLarge: '单条记忆超过上限 {{limit}} 字节',
+      entryExists: '该记忆已存在（内容完全相同），无需重复添加',
+      newContentRequired: '新内容不能为空',
+      keyRequired: 'old_text 不能为空',
+      keyNotFound: '未找到包含 "{{oldText}}" 的记忆条目',
+      keyAmbiguous: '"{{oldText}}" 匹配到 {{count}} 条记忆，请提供更长的唯一子串',
+      replaceOverLimit: '替换后超出容量上限（{{limit}} 字节），请先移除或合并部分条目',
+      userOverLimit:
+        'USER 热记忆容量不足（上限 {{limit}} 字节），且没有可合并的低优先级条目。请先移除或合并部分记忆。',
+      unknownAction: '未知操作: {{action}}',
+
+      // 归档钩子
+      archiveHookMissing: '未配置归档钩子',
+      nothingToArchive: '没有可归档的记忆条目',
+      hookArchivedNothing: '归档钩子未归档任何条目',
+
+      // 长期记忆写入
+      categoryInvalid: '类别必须为 {{values}}',
+      sourceInvalid: '来源必须为 {{values}}',
+      relationTypeInvalid: '关系类型必须为 {{values}}',
+      selfRelation: '不能与自己建立关系',
+      insightExists: '该记忆已存在（内容完全相同），如需更新请先 forget 旧条目',
+      insightNotFound: '未找到记忆 {{id}}（可能已删除）',
+
+      // 记忆空间
+      spaceNotActivated: '以下记忆空间未激活或不存在，不能读取: {{spaces}}',
+      noActiveSpace: '没有已激活的记忆空间，请先创建或激活一个记忆空间',
+      spaceNotFound: '记忆空间不存在: {{id}}',
+      targetSpaceNotFound: '目标记忆空间不存在: {{id}}',
+
+      // 项目档案
+      documentTooLarge: '单份文档超过上限 {{limit}} 字节',
+      documentCapacityExceeded:
+        '文档容量不足：active 总量上限 {{limit}} 字节（当前 {{current}}，需 {{needed}}）。请先归档部分文档。',
+      documentCapacityExceededOnUpdate:
+        '文档容量不足：更新后超出 active 总量上限，请先归档部分文档',
+      documentNotFound: '文档不存在: {{id}}',
+      documentArchived: '文档 {{id}} 已归档，不能更新（可先重建）',
+      documentNotActive: '文档 {{id}} 不是 active 状态'
+    },
+
+    /** 召回为空时的提示 */
+    hint: {
+      noMatchInActiveSpaces: '未在已激活记忆空间中找到匹配内容'
+    }
+  }
+}
+
+export const enUSToolResults: typeof zhCNToolResults = {
+  mnemon: {
+    targets: {
+      user: 'User Profile',
+      memory: 'Project Memory'
+    },
+
+    entryCount_one: '{{count}} entry',
+    entryCount_other: '{{count}} entries',
+    added: 'Added to {{target}} ({{used}}/{{limit}} bytes, {{entryCount}}).',
+    addedWithMaintenance:
+      'Added to {{target}} ({{used}}/{{limit}} bytes, {{entryCount}}). Capacity maintenance triggered: {{summary}}',
+    replaced: 'Memory entry replaced.',
+    removed: 'Memory entry removed.',
+
+    runtimeMemory: {
+      added: 'Memory entry added',
+      addedWithArchive: 'Memory entry added ({{entryCount}} moved to long-term memory)',
+      replaced: 'Memory entry replaced',
+      removed: 'Memory entry removed',
+      archiveFailed:
+        'MEMORY hot memory is over capacity and long-term archiving failed: {{message}}'
+    },
+
+    document: {
+      createRequires: 'Creating a document requires title and content',
+      created: 'Document "{{title}}" created (id={{id}})',
+      updateRequiresId: 'Updating a document requires id',
+      updated: 'Document "{{title}}" updated (revision={{revision}})',
+      archiveRequiresId: 'Archiving a document requires id',
+      notFound: 'Document not found: {{id}}',
+      archived: 'Document "{{title}}" archived: {{summary}}',
+      defaultArchiveSummary: 'Archived by the agent'
+    },
+
+    rememberFailed: 'Failed to store the memory: {{error}}',
+    linked: 'Linked {{type}}: {{sourceId}} → {{targetId}}',
+    linkFailed: 'Failed to create the relation: {{error}}',
+    forgotten: 'Memory {{id}} soft-deleted',
+    forgetFailed: 'Delete failed: {{error}}',
+
+    createBody: 'Memory Space "{{name}}" created (id={{id}}, activated)',
+    createBodyFailed: 'Create failed: {{error}}',
+    updateBody: 'Memory Space "{{name}}" updated (active={{active}})',
+    updateBodyFailed: 'Update failed: {{error}}',
+    mergeBodies: 'Merge complete: imported {{imported}}, skipped duplicates {{skipped}}',
+    mergeBodiesDeactivated:
+      'Merge complete: imported {{imported}}, skipped duplicates {{skipped}}; source spaces deactivated',
+    mergeBodiesFailed: 'Merge failed: {{error}}',
+
+    errors: {
+      contentRequired: 'Content must not be empty',
+      entryTooLarge: 'A single entry exceeds the {{limit}} byte limit',
+      entryExists: 'That memory already exists (identical content); no need to add it again',
+      newContentRequired: 'New content must not be empty',
+      keyRequired: 'old_text must not be empty',
+      keyNotFound: 'No memory entry contains "{{oldText}}"',
+      keyAmbiguous: '"{{oldText}}" matches {{count}} entries; provide a longer unique substring',
+      replaceOverLimit:
+        'The replacement would exceed the {{limit}} byte capacity limit; remove or merge some entries first',
+      userOverLimit:
+        'USER hot memory is over capacity (limit {{limit}} bytes) and has no low-priority entries to consolidate. Remove or merge some memories first.',
+      unknownAction: 'Unknown action: {{action}}',
+
+      archiveHookMissing: 'No archive hook is configured',
+      nothingToArchive: 'No memory entries can be archived',
+      hookArchivedNothing: 'The archive hook did not archive any entry',
+
+      categoryInvalid: 'Category must be one of {{values}}',
+      sourceInvalid: 'Source must be one of {{values}}',
+      relationTypeInvalid: 'Relation type must be one of {{values}}',
+      selfRelation: 'A memory cannot be linked to itself',
+      insightExists:
+        'That memory already exists (identical content); call forget on the old entry first to update it',
+      insightNotFound: 'Memory {{id}} not found (it may already be deleted)',
+
+      spaceNotActivated:
+        'These Memory Spaces are inactive or missing and cannot be read: {{spaces}}',
+      noActiveSpace: 'No active Memory Space; create or activate one first',
+      spaceNotFound: 'Memory Space not found: {{id}}',
+      targetSpaceNotFound: 'Target Memory Space not found: {{id}}',
+
+      documentTooLarge: 'A single document exceeds the {{limit}} byte limit',
+      documentCapacityExceeded:
+        'Not enough document capacity: the active total limit is {{limit}} bytes (current {{current}}, needed {{needed}}). Archive some documents first.',
+      documentCapacityExceededOnUpdate:
+        'Not enough document capacity: the update would exceed the active total limit; archive some documents first',
+      documentNotFound: 'Document not found: {{id}}',
+      documentArchived: 'Document {{id}} is archived and cannot be updated (recreate it first)',
+      documentNotActive: 'Document {{id}} is not in active status'
+    },
+
+    hint: {
+      noMatchInActiveSpaces: 'No matching content found in active Memory Spaces'
+    }
+  }
+}
