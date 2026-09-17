@@ -22,7 +22,8 @@ import { getAgentToolTexts } from '../../i18n/tool-results-agent'
  *   进程重启一律 disarmed（激活态不持久化），用户要求「继续」→ resume 重新武装；
  * - authority 执行期校验：create/edit/pause/resume 须「人类直接请求」（本轮为用户
  *   消息发起）；complete/blocked 接受「人类直接请求」或「精确命中当前目标轮」
- *   （自动续跑轮注入的 goal 来源）；自主轮 blocked 另须 roundsStarted ≥ 3。
+ *   （自动续跑轮注入的 goal 来源）；自主轮 blocked 另须 roundsStarted ≥ 3
+ *   （即至少完成 3 次自动续跑，与注入提示词里 "at least 3 rounds have passed" 对齐）。
  */
 
 /** 目标视图（工具输出与前端展示共用） */
@@ -47,7 +48,11 @@ export interface GoalBlockedReason {
 /** 更新动作（与 DSH update_goal 一致） */
 export type GoalUpdateAction = 'edit' | 'pause' | 'resume' | 'complete' | 'blocked'
 
-/** 自主轮（模型自报）允许 blocked 的最小已进行轮数（DSH 默认阈值） */
+/**
+ * 自主轮（模型自报）允许 blocked 的最小已进行轮数（DSH 默认阈值）。
+ * 以「自动续跑轮」计数：轮次在派发时结算，故达到该值时正处于第 3 次自动续跑轮内
+ * （与注入提示词 "at least 3 rounds have passed" 同义）。
+ */
 export const MIN_ROUNDS_FOR_BLOCK = 3
 /** 默认轮次上限（DSH goal 默认值） */
 export const DEFAULT_MAX_GOAL_ROUNDS = 256
@@ -156,9 +161,11 @@ export class GoalStore {
   /**
    * 创建目标：仅「无目标」或「已有目标已完成」时可创建（DSH create 语义）。
    * 成功后武装自动续跑（armed）。
-   * roundsStarted 从 1 起算：创建目标的这一轮（用户轮）即第 1 轮——
-   * 若模型在同一轮内直接完成目标，轮次显示为 1 而非恒 0；
-   * 自动续跑轮由驱动器在派发时依次递增（2、3、…）。
+   *
+   * roundsStarted 从 **0** 起算：它表示「已开始的自动续跑轮数」，创建目标的那个用户轮**不算**一轮。
+   * （此前从 1 起算，导致第一次自动续跑被标成「第 2 轮」——消息徽标写第 2 轮、目标栏显示 2/40，
+   * 而实际只续跑了 1 次；给模型的提示词也写着 "Automatic continuation round 2/40"。
+   * 计数与「自动轮」语义对齐后，三处数字一致：第 1 次续跑 = 第 1 轮。）
    */
   async create(
     topicId: number,
@@ -176,7 +183,7 @@ export class GoalStore {
       revision: 1,
       objective: objective.trim(),
       phase: 'active',
-      roundsStarted: 1,
+      roundsStarted: 0,
       maxGoalRounds,
       activation: 'armed'
     }
@@ -184,7 +191,7 @@ export class GoalStore {
     // 持久化成功后再武装（修复：先改内存态后落库,落库失败会留下 armed 但无目标的假状态）
     this.armedTopics.add(topicId)
     logger.info(
-      `[Goal] 目标已创建 topicId=${topicId} id=${view.id}（maxGoalRounds=${maxGoalRounds}，创建轮计为第 1 轮）`
+      `[Goal] 目标已创建 topicId=${topicId} id=${view.id}（maxGoalRounds=${maxGoalRounds}，自动续跑轮从第 1 轮起算）`
     )
     return persisted
   }

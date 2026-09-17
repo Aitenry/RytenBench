@@ -49,6 +49,29 @@ export class TodoStore {
 /** 进程级单例：跨请求共享，供 Runtime 与主进程广播使用 */
 export const todoStore = new TodoStore()
 
+/**
+ * 收尾清单：把仍停在 in_progress 的项结为 completed（未写入时返回 null）。
+ *
+ * 为什么需要它：清单是模型自己写的，而收尾书写并不可靠——2026-09-18 实例：工作全部做完、
+ * 回答也交付了，最后一次 write_todos 仍留一项 in_progress，卡片于是永远停在
+ * 「5/6 已完成 · 1 进行中」。清单描述的是「本轮的任务」，本轮正常交付就不该再有进行中。
+ *
+ * 调用方负责判定「本轮算不算正常结束」（用户停止 / 流失败 / 挂着提问 / 目标续跑轮都不算），
+ * 这里只做状态收敛；写入走 store.set，因此照常广播 harness-todos-updated。
+ */
+export function closeOutInProgress(
+  store: TodoStore,
+  topicId: number
+): { completed: number; total: number } | null {
+  const todos = store.get(topicId)
+  if (!todos.some((t) => t.status === 'in_progress')) return null
+  const closed = todos.map((t) =>
+    t.status === 'in_progress' ? { ...t, status: 'completed' as const } : t
+  )
+  store.set(topicId, closed)
+  return { completed: closed.filter((t) => t.status === 'completed').length, total: closed.length }
+}
+
 /** 构建待办工具集（闭包绑定 topicId，保证清单归属当前对话） */
 export function buildTodoTools(store: TodoStore, topicId: number): StructuredToolInterface[] {
   const todoSchema = z.object({
@@ -76,7 +99,7 @@ export function buildTodoTools(store: TodoStore, topicId: number): StructuredToo
       {
         name: 'write_todos',
         description:
-          'Write or update the todo list for the current task. For multi-step work, list every todo up front (all pending), then advance one item at a time: set an item to in_progress the moment you start it, set it to completed when it is done, and only then start the next item. Submit each status change as it happens; never wait until every step is finished and then update the whole list at once.',
+          'Write or update the todo list for the current task. For multi-step work, list every todo up front (all pending), then advance one item at a time: set an item to in_progress the moment you start it, set it to completed when it is done, and only then start the next item. Submit each status change as it happens; never wait until every step is finished and then update the whole list at once. Before you write the final answer for the turn, the list must reflect the final state: close out every finished item with completed, and leave an item in_progress only when the turn really stops mid-work (for example you are asking the user something).',
         schema: z.object({
           todos: z.array(todoSchema).describe('The todo list (replaces the previous list entirely)')
         })

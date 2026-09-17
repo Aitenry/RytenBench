@@ -76,7 +76,8 @@ export const enUSHarness: typeof zhCNHarness = {
     togglePanel: 'Workspace panel'
   },
   messageArea: {
-    scrollToBottom: 'Back to bottom'
+    scrollToBottom: 'Back to bottom',
+    showEarlier: 'Show {{count}} earlier messages'
   },
   messageLocator: {
     jumpToRound: 'Jump to turn {{round}}',
@@ -115,12 +116,19 @@ export const enUSHarness: typeof zhCNHarness = {
     projectMemoryBytes: 'Project memory MEMORY (<mono>{{bytes}}</mono> bytes)',
     toolInput: 'Input:',
     toolOutput: 'Output:',
+    toolOutputHidden: '{{hidden}} characters not shown',
+    longTextTail: 'Long message — showing the end only ({{hidden}} characters hidden)',
+    toolOutputTotal: '{{total}} characters in total',
+    toolOutputExpand: 'Show all',
+    toolOutputCollapse: 'Collapse',
     dispatched: 'Background task dispatched',
     subAgentRunning: '{{name}} · Running…',
     subAgentError: '{{name}} · Error',
     subAgentCompleted: '{{name}} · Completed',
     subAgentExecuting: 'The agent is working…',
     silentGenerating: 'Generating…',
+    taskList: 'Task list',
+    preflight: 'Exploration',
     todoList: 'To-do list',
     todoCompleted: '<mono>{{completed}}</mono>/<mono>{{total}}</mono> completed',
     todoInProgress: '· <mono>{{count}}</mono> in progress',
@@ -182,8 +190,12 @@ export const enUSHarness: typeof zhCNHarness = {
     feedbackDownRecorded: 'Recorded: bad answer',
     feedbackCanceled: 'Feedback cleared',
     saveToMemory: 'Save to memory',
-    savingToMemory: 'Saving to memory…',
+    savingToMemory: 'Handing off to the memory agent…',
     saveToMemoryEmpty: 'This answer has no body text to save',
+    saveToMemoryNoTopic: 'No conversation to curate memory for',
+    saveToMemoryDisabled: 'No memory directory is configured yet, so nothing can be stored',
+    saveToMemoryNoModel: 'No model available — pick a default model in settings first',
+    saveToMemoryStarted: 'Handed to the memory agent — watch its progress in the top bar',
     saveToMemoryFailed: 'Failed to save to memory',
     branch: 'Branch into a new conversation',
     branching: 'Creating branch…',

@@ -287,6 +287,19 @@ const Index: React.FC = () => {
   return (
     <div className="h-full flex-1">
       <style>{`
+        /* 任务段折叠头（消息内容按任务折叠）：外观沿用既有 Collapse，只收紧布局——
+           标签必须撑满 header 且自身可压缩，否则长任务名会顶出容器、右侧的
+           清单按钮也贴不到右边（antd 的标签容器是 .ant-collapse-title，没法定 inline 样式）。 */
+        .task-segment-collapse > .ant-collapse-item > .ant-collapse-header { align-items: center; }
+        .task-segment-collapse .ant-collapse-title {
+          flex: 1 1 auto;
+          min-width: 0;
+          display: flex;
+          align-items: center;
+        }
+        .task-segment-collapse .ant-collapse-title > span { width: 100%; }
+        .task-segment-collapse .ant-collapse-content-box { padding-block: 4px 8px !important; }
+        .task-segment-collapse .ant-collapse-header { padding-block: 7px !important; }
         .harness-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
         .harness-scrollbar::-webkit-scrollbar-track { background: transparent; }
         .harness-scrollbar::-webkit-scrollbar-thumb {

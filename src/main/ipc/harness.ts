@@ -16,10 +16,11 @@ import type {
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models'
 import { getProviderService } from '../provider/service'
 import { getSubAgentDefs } from '../harness/preload-cache'
-import { todoStore } from '../harness/runtime/todo'
+import { todoStore, closeOutInProgress } from '../harness/runtime/todo'
 import { goalStore } from '../harness/runtime/goal'
 import { jobsRegistry } from '../harness/runtime/jobs'
 import { subagentSessions } from '../harness/runtime/subagent-sessions'
+import { startMemoryAgent, type StartMemoryAgentResult } from '../harness/runtime/memory-agent'
 import { questionService } from '../harness/runtime/ask'
 import { goalRoundDriver } from '../harness/goal-driver'
 import { HarnessSettings } from '../types/settings'
@@ -31,6 +32,7 @@ import {
 } from '../database/mapper/harness'
 import { getActiveWorkspaceId } from '../database/workspace-context'
 import { sumUsage, type ModelUsageRecord } from '../harness/runtime/usage'
+import { startRendererMemorySampling, stopRendererMemorySampling } from '../harness/renderer-memory'
 
 /** 单轮对话执行参数（用户轮与目标自动轮共用 runHarnessTurn 管线） */
 interface RunHarnessTurnParams {
@@ -208,6 +210,17 @@ async function runHarnessTurn(
   // 创建 AbortController 用于取消流式输出
   const abortController = new AbortController()
   streamAbortControllers.set(event.sender.id, abortController)
+
+  // 渲染进程内存采样（OOM 可观测性）：本轮开始到收尾之间每 5s 采一次，
+  // 崩溃时由 main-window 的 render-process-gone 处理落最后一份快照。
+  // 必须在 try/finally 的每条退出路径上都 stop（含早退），否则采样表会一直挂着。
+  let memSampling = true
+  startRendererMemorySampling(`topic=${topicId}`)
+  const stopMemSampling = (): void => {
+    if (!memSampling) return
+    memSampling = false
+    stopRendererMemorySampling()
+  }
 
   // 渲染进程失效跟踪：崩溃/窗口关闭时「渲染帧」先于「WebContents 对象」销毁，
   // 此时 send 不抛异常（Electron 内部静默打印 "Error sending from webFrameMain ..."），
@@ -678,6 +691,7 @@ async function runHarnessTurn(
       safeSend(event.sender, 'harness-stream-error', { error: errMsg, topicId })
       // 流异常中断时不保存不完整的 AI 回复，直接跳到清理
       streamAbortControllers.delete(event.sender.id)
+      stopMemSampling()
       safeSend(event.sender, 'harness-stream-done', { topicId })
       return { topicId, cancelled: false }
     }
@@ -685,6 +699,7 @@ async function runHarnessTurn(
     // 流结束（正常/取消/异常/渲染进程失效）后移除失效跟踪监听
     event.sender.removeListener('render-process-gone', onSenderGone)
     event.sender.removeListener('destroyed', onSenderGone)
+    stopMemSampling()
   }
 
   // 4. 保存完整的 AI 回复（流执行失败时跳过：截断的不完整回复不应落库为完整消息）
@@ -708,6 +723,32 @@ async function runHarnessTurn(
       })
     } catch (err) {
       logger.error('Failed to save AI message:', err)
+    }
+  }
+
+  // 4.5 收尾任务清单：本轮正常结束时，把仍停在 in_progress 的项就地结为 completed。
+  //
+  // 为什么需要这条兜底：清单是模型自己写的，而它的收尾书写并不可靠——2026-09-18 实例：
+  // 六项工作全部做完、回答也交付了，最后一次 write_todos 仍留一项 in_progress，卡片于是
+  // 永远停在「5/6 已完成 · 1 进行中」，看起来像没更新。清单描述的是「本轮的任务」，
+  // 本轮既然正常交付，就不该再有「进行中」。
+  //
+  // 以下情形一律不动清单（它们都意味着本轮不算「干完了」）：
+  // - 用户点了停止（aborted）；
+  // - 流执行失败（streamFailed，已跳过落库）；
+  // - 正挂着待回答的提问（模型在等用户，任务确实还在中途）；
+  // - 目标自动续跑轮（后面还有轮次，由模型自己继续维护清单）。
+  if (
+    !streamFailed &&
+    !abortController.signal.aborted &&
+    options?.turnMeta?.source !== 'goal-round' &&
+    !questionService.getPending(topicId)
+  ) {
+    const closed = closeOutInProgress(todoStore, topicId)
+    if (closed) {
+      logger.info(
+        `[Harness] 本轮收尾：${closed.completed}/${closed.total} 项已完成（原仍有进行中项）`
+      )
     }
   }
 
@@ -849,6 +890,65 @@ export function registerHarnessIpc(): void {
   ipcMain.handle('harness-agents-list', (_event, topicId: number) => subagentSessions.list(topicId))
   ipcMain.handle('harness-agent-output', (_event, topicId: number, agentId: string) =>
     subagentSessions.readOutput(agentId, topicId)
+  )
+
+  /**
+   * 「存入记忆」：不再由渲染层把正文截断后直接塞进热记忆，改为起一个后台记忆整理
+   * 子代理——它读这一轮问答，自己判断哪些是可复用事实、该落到哪一层（热记忆 /
+   * 项目文档 / 长期记忆空间），再用 mnemon_* 工具写入。
+   *
+   * 进度与结果复用顶部栏后台代理入口（subagentSessions 变更会广播 harness-agents-updated），
+   * 这里只负责补齐上下文（该轮提问 + 模型护栏）并把任务交出去，不等它跑完。
+   */
+  ipcMain.handle(
+    'harness-memory-agent-start',
+    async (
+      _event,
+      payload: { topicId: number; answer: string; dialogueId?: number; providerId?: number }
+    ): Promise<StartMemoryAgentResult> => {
+      const harnessSettings = settingsStore.get('harness') as HarnessSettings | undefined
+
+      // 该轮提问：按对话行 id 往前找最近一条用户消息，给整理代理补全上下文
+      // （拿不到就只整理回答，不影响主流程）
+      let question: string | undefined
+      try {
+        const rows = await getDialoguesByTopicId(payload.topicId)
+        const at =
+          payload.dialogueId != null ? rows.findIndex((row) => row.id === payload.dialogueId) : -1
+        const before = at >= 0 ? rows.slice(0, at) : rows
+        for (let i = before.length - 1; i >= 0; i -= 1) {
+          if (before[i].role === 'user') {
+            question = before[i].content
+            break
+          }
+        }
+      } catch (err) {
+        logger.warn('[Harness] 读取该轮提问失败，记忆整理只带回答:', err)
+      }
+
+      // 与主轮次同源的工具调用轮数护栏（取不到则由 startMemoryAgent 用默认值兜底）
+      let maxToolRounds: number | undefined
+      try {
+        maxToolRounds = (await getProviderService().getConfig(undefined)).max_tool_rounds
+      } catch (err) {
+        logger.warn('[Harness] 读取模型工具调用轮数失败，记忆整理使用默认值:', err)
+      }
+
+      const result = await startMemoryAgent({
+        topicId: payload.topicId,
+        answer: payload.answer ?? '',
+        question,
+        workspaceId: harnessSettings?.activeWorkspaceId ?? 0,
+        memoryPath: harnessSettings?.memoryPath || undefined,
+        // 优先用那条回复自己的供应商（前端从用量行带过来），拿不到再走默认供应商
+        providerId: payload.providerId,
+        maxToolRounds
+      })
+      logger.info(
+        `[Harness] 记忆整理子代理：${result.ok ? `${result.agentId} (${result.label})` : result.reason}`
+      )
+      return result
+    }
   )
 
   // 后台子代理输出推送（弹窗监听后端，替代手动刷新/轮询）：

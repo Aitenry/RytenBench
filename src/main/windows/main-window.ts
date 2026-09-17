@@ -7,6 +7,7 @@ import { safeSend } from '../safe-send'
 import { getMainWindow, markMainWindowReady, setMainWindow } from './window-manager'
 import { isCloseToTrayEnabled, isTrayAvailable, syncTrayState } from '../tray'
 import { isQuittingNow, markQuitting } from '../lifecycle'
+import { dumpRendererMemory } from '../harness/renderer-memory'
 
 /** 各窗口的最大化状态（主窗口与 mermaid 预览窗口共用；随窗口销毁清理） */
 const windowMaxStates = new Map<
@@ -136,6 +137,9 @@ export function createMainWindow(): void {
     const msg = `[Window] 渲染进程退出 reason=${details.reason} exitCode=${details.exitCode}`
     if (abnormal) logger.error(msg)
     else logger.info(msg)
+    // 崩溃/OOM 时补一份内存快照（渲染进程已消失，只能靠流式期间的采样缓存）：
+    // 没有这个数字时，日志里只剩 reason=oom，无法判断水位是哪一段流量推上去的。
+    if (abnormal) dumpRendererMemory(details.reason, details.exitCode)
     if (
       details.reason === 'crashed' ||
       details.reason === 'oom' ||

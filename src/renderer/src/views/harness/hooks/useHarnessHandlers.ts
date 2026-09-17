@@ -10,7 +10,8 @@ import {
   isSameToolCall,
   computeTextDelta,
   pushBlock,
-  findPlaceholderPreparingTool
+  findPlaceholderPreparingTool,
+  coalesceChunks
 } from '../utils/harnessHelpers'
 import {
   getProviderDisplayName,
@@ -880,7 +881,9 @@ export const useHarnessHandlers = (): UseHarnessHandlersReturn => {
         if (pendingChunks.length === 0) return
         const session = sessionsRef.current.get(topicId)
         if (!session) return
-        const batch = pendingChunks
+        // 先合并「累积形态」的同类增量：逐 chunk 应用时每步都要复制整块文本（O(L²)），
+        // 合并后每批只复制一次（O(F×L)）。增量形态的段原样保留，语义不变。
+        const batch = coalesceChunks(pendingChunks)
         pendingChunks = []
         const startedAt = performance.now()
         let updatedMessages = session.messages

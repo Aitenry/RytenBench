@@ -34,14 +34,13 @@ interface MessageActionsProps {
   usage?: HarnessDialogueUsageRow
   /** 分支：交给 hooks 处理（它才知道话题列表与切换流程） */
   onBranch: (upToIndex: number) => Promise<void>
-  copyText: string
+  /** 复制文本按需生成：流式期间每批都把所有块正文拼一遍太贵，只在点击复制时算 */
+  getCopyText: () => string
   isCopied: boolean
   onCopy: (text: string, id: string) => void
   onDelete: (index: number) => void
 }
 
-/** 存入记忆的内容上限：热记忆总量有限，超长回答截断后再存 */
-const MEMORY_MAX_CHARS = 500
 /** 评价的本地索引键前缀（暂无 feedback 列，先按 话题+时间戳 存本地） */
 const FEEDBACK_KEY = 'rytenbench:message-feedback:'
 
@@ -60,7 +59,8 @@ function readFeedback(key: string): Feedback {
  * - 复制沿用父级已有实现（同一套「已复制」态）；
  * - 评价暂存 localStorage（按 topicId + 消息时间戳定位，重载后仍在）；
  *   要进库需要给 harness_dialogue 加 feedback 列；
- * - 存入记忆写的是 Mnemon 热记忆（MEMORY），超长回答截断到 500 字；
+ * - 存入记忆 = 起一个后台「记忆整理」子代理，由它读这一轮问答、自己判断该记什么并写入
+ *   Mnemon（进度在顶部栏后台代理入口看），渲染层不直接写热记忆；
  * - 分支 = 新建同工作区话题 + 把这条之前的消息逐条复制过去；
  * - 用量显示模型真实回传的 token（harness_dialogue_usage）；没有回传就不显示，不做估算。
  */
@@ -71,7 +71,7 @@ const MessageActions: React.FC<MessageActionsProps> = ({
   topicId,
   usage,
   onBranch,
-  copyText,
+  getCopyText,
   isCopied,
   onCopy,
   onDelete
@@ -116,30 +116,49 @@ const MessageActions: React.FC<MessageActionsProps> = ({
     [feedback, feedbackKey, viewMessage, t]
   )
 
-  /** 存入 Mnemon 热记忆（MEMORY） */
+  /**
+   * 存入记忆 = 交给后台「记忆整理」子代理。
+   *
+   * 渲染层不再把正文截断后直接写热记忆：一条回复动辄几千字，直接塞进去只会把热记忆
+   * 撑满、还把一次性进度写成了长期事实。改由子代理读这一轮问答，自己判断哪些是可复用
+   * 事实、该落哪一层（热记忆 / 项目文档 / 长期记忆空间）再写入；进度在顶部栏后台代理入口看。
+   */
   const handleSaveToMemory = useCallback(async (): Promise<void> => {
     const text = (message.content ?? '').trim()
     if (!text) {
       viewMessage('msg-memory', 'warning', t('harness.messageActions.saveToMemoryEmpty'), 2)
       return
     }
-    const content = text.length > MEMORY_MAX_CHARS ? `${text.slice(0, MEMORY_MAX_CHARS)}…` : text
+    if (topicId == null) {
+      viewMessage('msg-memory', 'warning', t('harness.messageActions.saveToMemoryNoTopic'), 2)
+      return
+    }
     setSavingMemory(true)
     try {
-      const result = await api.harness.mnemonRuntimeMutate({
-        action: 'add',
-        target: 'memory',
-        content,
-        importance: 'normal'
+      const result = await api.harness.startMemoryAgent({
+        topicId,
+        answer: text,
+        dialogueId: message.dialogueId,
+        // 这条回复自己用的供应商（用量行快照）：让整理跟着同一条模型走；
+        // 没有用量行时主进程回退到默认供应商
+        providerId: usage?.provider_id ?? undefined
       })
-      viewMessage('msg-memory', result.success ? 'success' : 'warning', result.message, 3)
+      if (result.ok) {
+        viewMessage('msg-memory', 'success', t('harness.messageActions.saveToMemoryStarted'), 3)
+      } else if (result.reason === 'memory-disabled') {
+        viewMessage('msg-memory', 'warning', t('harness.messageActions.saveToMemoryDisabled'), 3)
+      } else if (result.reason === 'no-model') {
+        viewMessage('msg-memory', 'warning', t('harness.messageActions.saveToMemoryNoModel'), 3)
+      } else {
+        viewMessage('msg-memory', 'error', t('harness.messageActions.saveToMemoryFailed'), 2)
+      }
     } catch (error) {
-      console.error('Failed to save answer to memory:', error)
+      console.error('Failed to hand the answer to the memory agent:', error)
       viewMessage('msg-memory', 'error', t('harness.messageActions.saveToMemoryFailed'), 2)
     } finally {
       setSavingMemory(false)
     }
-  }, [api, message.content, viewMessage, t])
+  }, [api, message.content, message.dialogueId, topicId, usage, viewMessage, t])
 
   /** 分支：建话题、复制消息、刷新列表、切换视图都在 hooks 里，这里只负责按钮态 */
   const handleBranch = useCallback(async (): Promise<void> => {
@@ -263,7 +282,7 @@ const MessageActions: React.FC<MessageActionsProps> = ({
       {iconButton(
         isCopied ? <RiCheckLine size={16} /> : <RiFileCopyLine size={16} />,
         isCopied ? t('harness.messageActions.copied') : t('harness.messageActions.copy'),
-        () => onCopy(copyText, message.id)
+        () => onCopy(getCopyText(), message.id)
       )}
       {iconButton(
         <RiThumbUpLine size={16} />,

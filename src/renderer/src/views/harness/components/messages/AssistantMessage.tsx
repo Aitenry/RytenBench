@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useCallback, useState, useMemo } from 'react'
-import { Tooltip, Collapse } from 'antd'
+import { Tooltip, Collapse, theme } from 'antd'
 import MessageActions from './MessageActions'
 import type { HarnessDialogueUsageRow } from '../../../../../../main/database/mapper/harness'
 import {
@@ -22,10 +22,14 @@ import MarkdownLoad from '@renderer/components/markdown/MarkdownLoad'
 import { ShinyText, ShinyIcon } from '@renderer/components/effects/ShinyText'
 import { useTranslation, Trans } from '@renderer/i18n'
 import LoadingMessage from './LoadingMessage'
+import ToolTextPreview from './ToolTextPreview'
+import StreamTextWindow from './StreamTextWindow'
 import type { Message, MessageBlock, ToolCall } from '@renderer/types/harness'
 import {
   getToolStatusLabel,
-  shouldShowSilenceIndicator
+  shouldShowSilenceIndicator,
+  buildTaskSegments,
+  type TaskSegment
 } from '@renderer/views/harness/utils/harnessHelpers'
 
 /** 工具进行中折叠头展示的语义图标：与工具完成后的定制卡片图标保持一致 */
@@ -150,6 +154,65 @@ const TruncatedTooltipText: React.FC<{
   )
 }
 
+/**
+ * 流式静默指示行（「正在生成…」）。
+ *
+ * 为什么单独抽成 memo 子组件：这行的判定依赖「距最后一次 chunk 有多久」，需要一个
+ * 500ms 时钟。时钟状态若放在 AssistantMessage 里，每秒两次 tick 会把整条消息（长任务下
+ * 可达上百个块、几十万字符）整棵重渲染——2026-09-18 实测：一个 40 轮目标任务的会话里，
+ * 渲染进程 workingSet 从 534MB 一路涨到 5991MB，且**流内静默期**（没有任何 chunk 到达）
+ * 依然以约 40MB/10s 稳定增长，正是这个时钟在反复重建巨型子树。时钟挪进来之后，
+ * tick 只影响这一行；父组件只在内容真的变化（合批刷入）时才重渲染。
+ */
+const SilenceGeneratingHint = React.memo(function SilenceGeneratingHint({
+  loading,
+  hasStartedContent,
+  getLastChunkAt,
+  color,
+  size = 14
+}: {
+  loading: boolean
+  hasStartedContent: boolean
+  /**
+   * 取「最后一次 chunk 时间」的稳定 getter。
+   *
+   * 刻意不传 `lastChunkAt` 数值：这个时间每批刷入都变，传值会让块级渲染缓存（见 renderBlocks）
+   * 每批都失效。传稳定的 getter 后，本组件在自己的 500ms tick 里去读最新值。
+   */
+  getLastChunkAt: () => number
+  color: string
+  /** 图标尺寸与字号：主消息用 14，子代理嵌套块用 12（与旧实现一致） */
+  size?: number
+}): React.ReactNode {
+  const { t } = useTranslation()
+  const [, tick] = useState(0)
+
+  useEffect(() => {
+    if (!loading) return
+    const id = setInterval(() => tick((v) => v + 1), 500)
+    return () => clearInterval(id)
+  }, [loading])
+
+  const silent = shouldShowSilenceIndicator({
+    loading,
+    hasStartedContent,
+    now: Date.now(),
+    lastChunkAt: getLastChunkAt()
+  })
+  if (!silent) return null
+
+  return (
+    <div className="flex items-center gap-2 mt-1" style={{ color }}>
+      <ShinyIcon icon={RiSparkling2Line} size={size} baseColor={color} />
+      <ShinyText baseColor={color}>
+        <span style={{ fontSize: size === 14 ? 13 : 12 }}>
+          {t('harness.assistantMessage.silentGenerating')}
+        </span>
+      </ShinyText>
+    </div>
+  )
+})
+
 const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
   ({
     message,
@@ -168,12 +231,35 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
     onCopy,
     onDelete
   }) => {
-    const { t } = useTranslation()
+    const { t, i18n } = useTranslation()
+    const { token } = theme.useToken()
     const isCopied = copiedId === message.id
 
-    // 复制文本：优先拼接 blocks 中的正文（修复：此前只取 message.content,
-    // 子智能体/工具型消息复制为空或缺失文本,与展示内容不一致）
-    const copyText = useMemo(() => {
+    /**
+     * 任务分段折叠状态（key = 段 key，值 = 是否折起）。
+     *
+     * 只记「用户手动改过」的段：默认态由状态推导——已完成且不是最后一段的任务默认折起，
+     * 进行中的与最后一段默认展开（最后一段通常承载最终答复，绝不能默认折掉）。
+     */
+    const [foldOverride, setFoldOverride] = useState<Record<string, boolean>>({})
+    /** 展开了「清单」的任务段（点标签右侧的列表图标切换；与折叠状态相互独立） */
+    const [listOpenKeys, setListOpenKeys] = useState<string[]>([])
+
+    // 块级渲染缓存：key 变化即整表重建（见 renderBlocks 里的说明）
+    const blockCacheRef = useRef<{
+      key: string
+      map: WeakMap<MessageBlock, { sig: string; node: React.ReactNode }>
+    }>({ key: '', map: new WeakMap() })
+
+    // 「最后一次 chunk 时间」的稳定读取器：值每批都变，但引用必须稳定，
+    // 否则块级缓存每批失效（静默提示改为自己定时读这个 getter）
+    const lastChunkAtRef = useRef(message.lastChunkAt ?? message.timestamp)
+    lastChunkAtRef.current = message.lastChunkAt ?? message.timestamp
+    const getLastChunkAt = useCallback((): number => lastChunkAtRef.current, [])
+
+    // 复制文本按需生成：此前是 useMemo([message])，流式期间每批刷入都要把全部块的正文拼一遍
+    // （实测 160k 字符 ≈ 数毫秒 + 等量垃圾），而它只在用户点「复制」时用得到。
+    const getCopyText = useCallback((): string => {
       const parts: string[] = []
       const collect = (blocks: MessageBlock[] | undefined): void => {
         for (const b of blocks ?? []) {
@@ -198,54 +284,85 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
       []
     )
     useEffect(() => {
-      if (message.loading) {
-        Object.values(scrollRefs.current).forEach((el) => {
-          if (el) {
-            el.scrollTop = el.scrollHeight
-          }
-        })
-      }
-    })
+      if (!message.loading) return
+      Object.values(scrollRefs.current).forEach((el) => {
+        if (el) {
+          el.scrollTop = el.scrollHeight
+        }
+      })
+      // 只在「有新 chunk 到达」或进入/退出流式时同步：原先不传依赖数组（每次渲染都跑），
+      // 每次都要对每个折叠容器读 scrollHeight 强制同步布局；巨型消息（上百块）下是明确
+      // 的卡顿与内存压力来源。滚动位置随内容增长更新，语义不变。
+    }, [message.loading, message.lastChunkAt])
 
     // 仅有「注入记忆」/「压缩中」块时仍渲染（卡片可见），其余空消息走 LoadingMessage；
-    // 「正在重试」块同理（展示重试进度行，避免被 LoadingMessage 整卡替换）
-    const hasMemoryBlock = message.blocks.some((b) => b.type === 'memoryInjected')
-    const hasCompactingBlock = message.blocks.some((b) => b.type === 'historyCompacting')
-    const hasRetryingBlock = message.blocks.some((b) => b.type === 'retrying')
+    // 「正在重试」块同理（展示重试进度行，避免被 LoadingMessage 整卡替换）。
+    // 这些标志此前是 4 次独立的全表扫描（每次刷入都要跑），并成一次遍历并记忆化。
+    const blockFlags = useMemo(() => {
+      let memory = false
+      let compacting = false
+      let retrying = false
+      let visibleTool = false
+      for (const b of message.blocks) {
+        if (b.type === 'memoryInjected') memory = true
+        else if (b.type === 'historyCompacting') compacting = true
+        else if (b.type === 'retrying') retrying = true
+        else if (
+          b.type === 'tool' &&
+          b.tool &&
+          (b.tool.status === 'preparing' ||
+            b.tool.status === 'executing' ||
+            b.tool.status === 'completed' ||
+            (!b.tool.status && !b.tool.output))
+        ) {
+          visibleTool = true
+        }
+      }
+      return { memory, compacting, retrying, visibleTool }
+    }, [message.blocks])
+    const hasMemoryBlock = blockFlags.memory
+    const hasCompactingBlock = blockFlags.compacting
+    const hasRetryingBlock = blockFlags.retrying
+    const hasVisibleToolBlock = blockFlags.visibleTool
+
+    /**
+     * 合并相邻的 reasoning 块：模型会把思考过程拆成 token 级事件，不合并就是满屏「思考过程」。
+     * 必须「复制后合并」（不可原地改写共享状态对象，否则文本会随渲染轮次自复制增长）。
+     * 放在顶层记忆化：块列表身份不变时（例如只改了 loading / 折叠态）不重跑这趟合并。
+     */
+    const mergedBlocks = useMemo(() => {
+      const out: MessageBlock[] = []
+      for (const block of message.blocks) {
+        if (block.type === 'reasoning') {
+          const last = out[out.length - 1]
+          if (last && last.type === 'reasoning') {
+            out[out.length - 1] = {
+              ...last,
+              reasoning: (last.reasoning || '') + (block.reasoning || '')
+            }
+            continue
+          }
+        }
+        out.push(block)
+      }
+      return out
+    }, [message.blocks])
 
     // 流式静默指示：推理型模型生成大工具参数期间，流内可能长时间无任何事件（连工具名
     // 都不发）——此时已输出的内容之后显示「正在生成…」光泽行，诚实反馈「仍在生成」，
-    // 工具调用一旦到达即切换为真实工具卡。每 500ms 刷新一次时钟。
-    const [, setSilenceTick] = useState(0)
+    // 工具调用一旦到达即切换为真实工具卡。
+    // 时钟在 SilenceGeneratingHint 内部（500ms tick 只重渲染那一行，不碰这棵子树）。
     // 子代理折叠手动展开记录（key = 会话 causeId 等稳定标识）：进行中强制展开、
     // 完成后默认收起，仍可手动点开查看输出。defaultActiveKey 只在首次挂载生效，
     // 状态翻转（running→completed）后不会自动收起，故改为受控 activeKey。
     const [saOpenOverride, setSaOpenOverride] = useState<Record<string, boolean>>({})
-    useEffect(() => {
-      if (!message.loading) return
-      const id = setInterval(() => setSilenceTick((t) => t + 1), 500)
-      return () => clearInterval(id)
-    }, [message.loading])
-    const silenceNow = Date.now()
-    const hasVisibleToolBlock = message.blocks.some(
-      (b) =>
-        b.type === 'tool' &&
-        b.tool &&
-        (b.tool.status === 'preparing' ||
-          b.tool.status === 'executing' ||
-          b.tool.status === 'completed' ||
-          (!b.tool.status && !b.tool.output))
+    const hasStartedContent = Boolean(
+      message.content || message.reasoning_content || message.blocks.length > 0
     )
-    const isSilent = shouldShowSilenceIndicator({
-      loading: Boolean(message.loading),
-      hasStartedContent: Boolean(
-        message.content || message.reasoning_content || message.blocks.length > 0
-      ),
-      now: silenceNow,
-      lastChunkAt: message.lastChunkAt ?? message.timestamp
-    })
+    // 静默行只在「流式进行中且无其它状态行可看」时挂载；是否真的静默交给子组件按时钟判定
     const showSilenceGenerating =
-      isSilent &&
+      Boolean(message.loading) &&
+      hasStartedContent &&
       !hasVisibleToolBlock &&
       !hasMemoryBlock &&
       !hasCompactingBlock &&
@@ -1148,7 +1265,11 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
         if (message.content) {
           return (
             <div style={{ color: colorText }} className="mb-2">
-              <MarkdownLoad content={message.content} isDarkMode={isDarkMode} />
+              {/* 无块消息（历史/异常路径）同样走窗口：整段正文可能是几十万字符 */}
+              <StreamTextWindow
+                content={message.content}
+                renderMarkdown={(text) => <MarkdownLoad content={text} isDarkMode={isDarkMode} />}
+              />
             </div>
           )
         }
@@ -1158,23 +1279,39 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
       // 合并相邻的 reasoning 块：防止模型把思考过程拆成 token 级事件，导致满屏"思考过程"
       // 必须「复制后合并」：此前直接改写原块对象（last.reasoning += ...），渲染期变异共享
       // 状态对象，一旦出现相邻同型块，文本会随渲染轮次自复制增长且永不裁剪（渲染进程 OOM
-      // 隐患）；复制后合并对原状态零副作用
-      const mergedBlocks: MessageBlock[] = []
-      for (const block of message.blocks) {
-        if (block.type === 'reasoning') {
-          const last = mergedBlocks[mergedBlocks.length - 1]
-          if (last && last.type === 'reasoning') {
-            mergedBlocks[mergedBlocks.length - 1] = {
-              ...last,
-              reasoning: (last.reasoning || '') + (block.reasoning || '')
-            }
-            continue
-          }
-        }
-        mergedBlocks.push(block)
+      // 隐患）；复制后合并对原状态零副作用。
+      // 合并结果在组件顶层记忆化（mergedBlocks，见 useMemo）：块列表身份不变时不必重跑。
+
+      // ── 块级渲染缓存（2026-09-18 仿真实测量出来的主成本）────────────────────
+      // 实测（.git/sim/render-sim.mjs，375 块 / 160k 字符的真实形态消息）：
+      //   内容增长的一次刷入 165ms，其中「内容不变、仅强制重渲染」也要 178ms——也就是说
+      //   成本几乎全在**每次刷入重建全部块的 vdom**，真正需要重算的增长块只占 ~10ms。
+      // React 在 element 引用完全相同时会整棵跳过该子树的重渲染；因此这里按「块对象身份」
+      // 缓存渲染结果：流式期间未变化的块对象身份不变（useHarnessHandlers 是不可变更新），
+      // 命中缓存的块不再参与重建。
+      //
+      // 缓存键：块渲染体读到的可变父状态（主题、语言、loading、子代理折叠态）。这些一变就
+      // 整表失效重建。注意 lastChunkAt 刻意不进键——它每批都变，传值会让缓存永不命中，
+      // 静默提示改为传稳定的 getter（getLastChunkAt）。
+      const blockCacheKey = `${isDarkMode}|${i18n.language}|${message.loading ? 1 : 0}|${JSON.stringify(saOpenOverride)}|${colorText}|${colorTextSecondary}|${colorTextTertiary}|${colorFillAlter}|${colorBorderSecondary}|${collapseBg}`
+      const blockNodes = blockCacheRef.current
+      if (blockNodes.key !== blockCacheKey) {
+        blockNodes.key = blockCacheKey
+        blockNodes.map = new WeakMap()
       }
 
-      return mergedBlocks.map((block, blockIndex) => {
+      // 逐块的「跨块依赖」：思考块是否已完成 = 其**之后**是否出现过非推理块。
+      // 它随后续追加的新块而翻转，因此必须进缓存键（否则新块到达时旧的思考块会命中缓存、
+      // 停在「思考中」不切换成「思考完成」——仿真的「增量 vs 冷启动」比对就是靠这个抓出来的）。
+      // 一次反向遍历得出，替换原先逐块 slice+some 的 O(B²) 扫描。
+      const hasContentAfterFlags = new Array<boolean>(mergedBlocks.length)
+      let seenNonReasoning = false
+      for (let i = mergedBlocks.length - 1; i >= 0; i -= 1) {
+        hasContentAfterFlags[i] = seenNonReasoning
+        if (mergedBlocks[i].type !== 'reasoning') seenNonReasoning = true
+      }
+
+      const renderBlock = (block: MessageBlock, blockIndex: number): React.ReactNode => {
         // 模型请求失败后自动重试中（过渡行：重试成功恢复输出或轮次结束时由 useHarnessHandlers 移除；
         // 仅消息进行中展示，避免历史消息出现残留）
         if (block.type === 'retrying' && block.retrying) {
@@ -1352,9 +1489,7 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
         }
         if (block.type === 'reasoning' && block.reasoning) {
           // 后续出现任意非推理块（正文/工具），或消息已结束（完成/中止/出错），都视为思考完成
-          const hasContentAfter = mergedBlocks
-            .slice(blockIndex + 1)
-            .some((b) => b.type !== 'reasoning')
+          const hasContentAfter = hasContentAfterFlags[blockIndex] ?? false
           const thinkingDone = hasContentAfter || !message.loading
           const thinkingLabel = thinkingDone
             ? t('harness.assistantMessage.thinkingDone')
@@ -1389,7 +1524,12 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                       className="max-h-64 overflow-y-auto harness-scrollbar text-sm border-l-2 pl-3 px-1.5"
                       style={{ borderColor: colorBorderSecondary }}
                     >
-                      <MarkdownLoad content={block.reasoning} isDarkMode={isDarkMode} />
+                      <StreamTextWindow
+                        content={block.reasoning}
+                        renderMarkdown={(text) => (
+                          <MarkdownLoad content={text} isDarkMode={isDarkMode} />
+                        )}
+                      />
                     </div>
                   )
                 }
@@ -1409,7 +1549,12 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
         if (block.type === 'text' && block.text) {
           return (
             <div key={blockIndex} style={{ color: colorText }} className="mb-2">
-              <MarkdownLoad content={block.text} isDarkMode={isDarkMode} />
+              {/* 长正文窗口：模型整段贴文件/输出时，单个 text 块可能几十万字符，
+                  默认只渲染末尾一段，避免每批 chunk 全量重解析 markdown */}
+              <StreamTextWindow
+                content={block.text}
+                renderMarkdown={(text) => <MarkdownLoad content={text} isDarkMode={isDarkMode} />}
+              />
             </div>
           )
         }
@@ -1487,14 +1632,16 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                       <div style={{ color: colorTextSecondary }} className="font-medium mt-2 mb-1">
                         {t('harness.assistantMessage.toolOutput')}
                       </div>
-                      <pre
-                        style={{ background: codeBg }}
-                        className="p-2 rounded text-sm overflow-x-auto whitespace-pre-wrap"
-                      >
-                        {typeof block.tool.output === 'string'
-                          ? block.tool.output
-                          : JSON.stringify(block.tool.output, null, 2)}
-                      </pre>
+                      {/* 纯文本输出走 ToolTextPreview：超长（read_file 单次上限 2,000,000 字符）
+                          只渲染开头一段，避免渲染进程被文本节点撑到 OOM */}
+                      <ToolTextPreview
+                        text={
+                          typeof block.tool.output === 'string'
+                            ? block.tool.output
+                            : JSON.stringify(block.tool.output, null, 2)
+                        }
+                        codeBg={codeBg}
+                      />
                     </div>
                   )
                 }
@@ -1622,13 +1769,13 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                             className="max-h-48 overflow-y-auto harness-scrollbar text-xs border-l-2 pl-3 px-1.5"
                             style={{ borderColor: colorBorderSecondary }}
                           >
-                            {message.loading ? (
-                              <ShinyText baseColor={colorText} className="shiny-text-block">
-                                <MarkdownLoad content={child.reasoning} isDarkMode={isDarkMode} />
-                              </ShinyText>
-                            ) : (
-                              <MarkdownLoad content={child.reasoning} isDarkMode={isDarkMode} />
-                            )}
+                            {/* 子智能体的推理同样走窗口：整段贴文件时也会是几十万字符 */}
+                            <StreamTextWindow
+                              content={child.reasoning}
+                              renderMarkdown={(text) => (
+                                <MarkdownLoad content={text} isDarkMode={isDarkMode} />
+                              )}
+                            />
                           </div>
                         )
                       }
@@ -1642,7 +1789,12 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
               if (child.type === 'text' && child.text) {
                 return (
                   <div key={ci} style={{ color: colorText }} className="mb-1">
-                    <MarkdownLoad content={child.text} isDarkMode={isDarkMode} />
+                    <StreamTextWindow
+                      content={child.text}
+                      renderMarkdown={(text) => (
+                        <MarkdownLoad content={text} isDarkMode={isDarkMode} />
+                      )}
+                    />
                   </div>
                 )
               }
@@ -1731,14 +1883,14 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                                 >
                                   {t('harness.assistantMessage.toolOutput')}
                                 </div>
-                                <pre
-                                  style={{ background: codeBg }}
-                                  className="p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap"
-                                >
-                                  {typeof child.tool.output === 'string'
-                                    ? child.tool.output
-                                    : JSON.stringify(child.tool.output, null, 2)}
-                                </pre>
+                                <ToolTextPreview
+                                  text={
+                                    typeof child.tool.output === 'string'
+                                      ? child.tool.output
+                                      : JSON.stringify(child.tool.output, null, 2)
+                                  }
+                                  codeBg={codeBg}
+                                />
                               </>
                             ) : null}
                           </div>
@@ -1824,24 +1976,14 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                             {child.children && child.children.length > 0 ? (
                               <>
                                 {renderChildren(child.children, depth + 1)}
-                                {childIsActive &&
-                                isSilent &&
-                                !lastChildIsActiveTool(child.children) ? (
-                                  <div
-                                    className="flex items-center gap-2 mt-1"
-                                    style={{ color: colorTextSecondary }}
-                                  >
-                                    <ShinyIcon
-                                      icon={RiSparkling2Line}
-                                      size={12}
-                                      baseColor={colorTextSecondary}
-                                    />
-                                    <ShinyText baseColor={colorTextSecondary}>
-                                      <span style={{ fontSize: 12 }}>
-                                        {t('harness.assistantMessage.silentGenerating')}
-                                      </span>
-                                    </ShinyText>
-                                  </div>
+                                {childIsActive && !lastChildIsActiveTool(child.children) ? (
+                                  <SilenceGeneratingHint
+                                    loading
+                                    hasStartedContent
+                                    getLastChunkAt={getLastChunkAt}
+                                    color={colorTextSecondary}
+                                    size={12}
+                                  />
                                 ) : null}
                               </>
                             ) : childSa.error ? (
@@ -1916,22 +2058,14 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                           {renderChildren(block.children)}
                           {/* 子代理流静默：已输出内容但超阈值无新事件（模型在生成工具参数）
                               且最后一个子块不是进行中工具卡时，显示「正在生成…」 */}
-                          {isActive && isSilent && !lastChildIsActiveTool(block.children) ? (
-                            <div
-                              className="flex items-center gap-2 mt-1"
-                              style={{ color: colorTextSecondary }}
-                            >
-                              <ShinyIcon
-                                icon={RiSparkling2Line}
-                                size={12}
-                                baseColor={colorTextSecondary}
-                              />
-                              <ShinyText baseColor={colorTextSecondary}>
-                                <span style={{ fontSize: 12 }}>
-                                  {t('harness.assistantMessage.silentGenerating')}
-                                </span>
-                              </ShinyText>
-                            </div>
+                          {isActive && !lastChildIsActiveTool(block.children) ? (
+                            <SilenceGeneratingHint
+                              loading
+                              hasStartedContent
+                              getLastChunkAt={getLastChunkAt}
+                              color={colorTextSecondary}
+                              size={12}
+                            />
                           ) : null}
                         </>
                       ) : isActive ? (
@@ -1964,23 +2098,313 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
           )
         }
         return null
+      }
+
+      /** 单块的渲染（走块级缓存）：块身份 + 跨块推导值 组成缓存签名 */
+      const renderBlockAt = (blockIndex: number): React.ReactNode => {
+        const block = mergedBlocks[blockIndex]
+        // 缓存签名：块身份之外，还要带上「跨块依赖」的推导值（当前只有思考完成态）。
+        // 漏掉它就会在追加新块时命中过期缓存——仿真比对（增量 vs 冷启动）能抓到这类问题。
+        const sig = `${blockIndex}|${hasContentAfterFlags[blockIndex] ? 1 : 0}`
+        const hit = blockNodes.map.get(block)
+        if (hit && hit.sig === sig) return hit.node
+        const node = renderBlock(block, blockIndex)
+        blockNodes.map.set(block, { sig, node })
+        return node
+      }
+
+      /** 任务清单（点折叠头上的列表图标才显示）：状态字形 + 条目，取自该段最后一次 write_todos 快照 */
+      const renderTaskChecklist = (segment: TaskSegment): React.ReactNode => (
+        <div
+          data-task-checklist
+          className="harness-scrollbar"
+          style={{
+            maxHeight: 220,
+            overflowY: 'auto',
+            margin: '0 0 8px',
+            paddingLeft: 2,
+            borderLeft: `2px solid ${colorBorderSecondary}`
+          }}
+        >
+          {segment.snapshot.map((item, i) => {
+            const itemDone = item.status === 'completed'
+            const itemRunning = item.status === 'in_progress'
+            return (
+              <div key={i} className="flex items-start gap-2" style={{ padding: '3px 0 3px 10px' }}>
+                {itemDone ? (
+                  <RiCheckboxCircleLine
+                    size={13}
+                    style={{ color: colorTextTertiary, marginTop: 3, flexShrink: 0 }}
+                  />
+                ) : (
+                  <RiCheckboxBlankCircleLine
+                    size={13}
+                    style={{
+                      color: itemRunning ? token.colorPrimary : colorBorderSecondary,
+                      marginTop: 3,
+                      flexShrink: 0
+                    }}
+                  />
+                )}
+                <span
+                  style={{
+                    fontSize: 12,
+                    lineHeight: '18px',
+                    color: itemDone ? colorTextTertiary : colorTextSecondary,
+                    wordBreak: 'break-word'
+                  }}
+                >
+                  {item.content}
+                </span>
+              </div>
+            )
+          })}
+        </div>
+      )
+
+      /**
+       * 按任务分段渲染（2026-09-18：消息内容按任务折叠）。
+       *
+       * - 折叠外观与其他折叠内容完全同款：antd Collapse（collapseBg + rounded-lg border-0 +
+       *   size=small），标签是小的次级文本——不自造一套头样式；
+       * - 正文里**不再渲染 write_todos 工具卡**（有任务头就重复了）：清单改由标签右侧的
+       *   列表图标按需展开；
+       * - 折起时 `destroyOnHidden` 卸载子节点：渲染开销与挂载块数成正比（仿真台实测 375 块
+       *   253~305KB/次刷入、80 块 77KB/次），这是折叠的意义所在；
+       * - 分段依据是流里的 write_todos 快照（见 buildTaskSegments），无需存储层改动；
+       * - 默认折叠态：**流式进行中**只折已完成的、进行中/末段保持展开（要能看见正在干什么）；
+       *   **一轮结束或从库里加载的历史消息一律折起**（用户要求：历史消息默认折叠、块结束后折叠）。
+       *   注意末段里往往接着「最终答复正文」——那部分会从折叠里摘出来常显（见 answerIndices），
+       *   否则一折就把答案藏了。
+       */
+      const segments = buildTaskSegments(mergedBlocks)
+      const lastSegIndex = segments.length - 1
+      const hasTasks = segments.some((s) => s.task)
+
+      /** 段外壳：折叠外观与「思考过程」「子代理」完全同款（antd Collapse + collapseBg + size=small） */
+      const renderSegmentShell = (args: {
+        segKey: string
+        label: React.ReactNode
+        collapsed: boolean
+        children: React.ReactNode
+        /** 折叠外常显的内容（末段的最终答复正文） */
+        tail?: React.ReactNode
+      }): React.ReactNode => (
+        <React.Fragment key={args.segKey}>
+          <Collapse
+            items={[{ key: args.segKey, label: args.label, children: args.children }]}
+            activeKey={args.collapsed ? [] : [args.segKey]}
+            onChange={(keys) =>
+              setFoldOverride((prev) => ({ ...prev, [args.segKey]: !keys.includes(args.segKey) }))
+            }
+            destroyOnHidden
+            size="small"
+            style={{ marginBottom: args.tail ? '4px' : '6px', background: collapseBg }}
+            className="task-segment-collapse rounded-lg border-0"
+          />
+          {args.tail}
+        </React.Fragment>
+      )
+
+      return segments.map((segment, segIndex) => {
+        // 正文块：跳过 write_todos（清单另开），其余照旧走块级缓存
+        const allIndices = segment.blockIndices.filter((i) => !segment.writeIndices.includes(i))
+        // 末段末尾连续的正文本块 = 最终答复：摘到折叠外面常显。
+        // 只在「这条消息真的有任务段」时摘——没有任务就不会折叠，摘了反而没人渲染它
+        // （仿真台抓到过：普通问答的正文会整段消失）。
+        let answerIndices: number[] = []
+        if (hasTasks && segIndex === lastSegIndex && !message.loading) {
+          let cut = allIndices.length
+          while (cut > 0 && mergedBlocks[allIndices[cut - 1]]?.type === 'text') cut -= 1
+          answerIndices = allIndices.slice(cut)
+        }
+        const visibleIndices = allIndices.slice(0, allIndices.length - answerIndices.length)
+        const blocksNode = visibleIndices.map(renderBlockAt)
+        const answerNode = answerIndices.map(renderBlockAt)
+
+        // ── 规划前的那一段（第一个 write_todos 之前）─────────────────────────
+        // 里面有大量「思考过程 + 探索用的 read/grep」，一条 300 块的消息里能有 57 块堆在这，
+        // 任务段折起来之后它就是正文里唯一剩下的那堵墙（用户：「前面有思考需要移出来」）。
+        // 有任务时把它也收成一段；**没有任务的消息（普通问答）保持原样全显示**。
+        if (!segment.task) {
+          if (!hasTasks) return blocksNode
+          const collapsed = foldOverride[segment.key] ?? !message.loading
+          const headLabel = (
+            <span
+              data-task-segment={segment.key}
+              className="flex items-center min-w-0"
+              style={{ width: '100%', gap: 8 }}
+            >
+              <span
+                style={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: '50%',
+                  flex: '0 0 auto',
+                  background: colorBorderSecondary
+                }}
+              />
+              <span
+                style={{
+                  flex: '1 1 auto',
+                  fontSize: 12,
+                  lineHeight: '18px',
+                  color: colorTextSecondary,
+                  minWidth: 0,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  textAlign: 'left'
+                }}
+              >
+                {t('harness.assistantMessage.preflight')}
+              </span>
+              <span
+                style={{
+                  flex: '0 0 auto',
+                  fontSize: 11,
+                  lineHeight: '16px',
+                  minWidth: 22,
+                  textAlign: 'center',
+                  padding: '0 5px',
+                  borderRadius: 9,
+                  border: `1px solid ${colorBorderSecondary}`,
+                  color: colorTextTertiary,
+                  fontFamily: MONO_FONT
+                }}
+              >
+                {visibleIndices.length}
+              </span>
+            </span>
+          )
+          return renderSegmentShell({
+            segKey: segment.key,
+            label: headLabel,
+            collapsed,
+            children: blocksNode,
+            tail: answerNode
+          })
+        }
+
+        const isLast = segIndex === lastSegIndex
+        // 流式中：已完成且非末段才折起；已结束/历史消息：一律折起
+        const defaultCollapsed = message.loading
+          ? segment.status === 'completed' && !isLast
+          : true
+        const collapsed = foldOverride[segment.key] ?? defaultCollapsed
+        const done = segment.status === 'completed'
+        const active = segment.status === 'in_progress'
+        const listOpen = listOpenKeys.includes(segment.key)
+        const taskLabel = (
+          <span
+            data-task-segment={segment.key}
+            className="flex items-center min-w-0"
+            style={{ width: '100%', gap: 8 }}
+          >
+            <span
+              style={{
+                width: 6,
+                height: 6,
+                borderRadius: '50%',
+                flex: '0 0 auto',
+                background: active
+                  ? token.colorPrimary
+                  : done
+                    ? colorTextTertiary
+                    : colorBorderSecondary
+              }}
+            />
+            {/* 任务名占据剩余宽度并可截断：这样右侧的计数胶囊与清单按钮才会贴到最右，
+                长任务名也不会把整行顶出容器。
+                刻意**不加光泽动效**：shiny-text 是 1.5s 无限循环，而一个任务常常跑几分钟，
+                会让整行从头闪到尾（用户明确反馈「一直在闪」）；状态由左侧圆点 + 加粗表达。 */}
+            <span
+              style={{
+                flex: '1 1 auto',
+                fontSize: 12,
+                lineHeight: '18px',
+                color: done ? colorTextTertiary : colorTextSecondary,
+                fontWeight: active ? 600 : 400,
+                minWidth: 0,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                textAlign: 'left'
+              }}
+            >
+              {segment.task}
+            </span>
+            <span
+              style={{
+                flex: '0 0 auto',
+                fontSize: 11,
+                lineHeight: '16px',
+                // 定宽 + 居中：位数不同时各行数字也对齐（等宽字形只用于数字）
+                minWidth: 22,
+                textAlign: 'center',
+                padding: '0 5px',
+                borderRadius: 9,
+                border: `1px solid ${colorBorderSecondary}`,
+                color: colorTextTertiary,
+                fontFamily: MONO_FONT
+              }}
+            >
+              {visibleIndices.length}
+            </span>
+            {segment.snapshot.length > 0 ? (
+              <button
+                type="button"
+                onClick={(e) => {
+                  // 别冒泡到 Collapse 标签，否则会连带折叠整段
+                  e.stopPropagation()
+                  setListOpenKeys((prev) =>
+                    prev.includes(segment.key)
+                      ? prev.filter((k) => k !== segment.key)
+                      : [...prev, segment.key]
+                  )
+                }}
+                title={t('harness.assistantMessage.taskList')}
+                className="flex items-center border-none cursor-pointer"
+                style={{
+                  flex: '0 0 auto',
+                  padding: 0,
+                  background: 'transparent',
+                  color: listOpen ? token.colorPrimary : colorTextTertiary
+                }}
+              >
+                <RiListCheck size={14} />
+              </button>
+            ) : null}
+          </span>
+        )
+
+        return renderSegmentShell({
+          segKey: segment.key,
+          label: taskLabel,
+          collapsed,
+          children: (
+            <>
+              {listOpen ? renderTaskChecklist(segment) : null}
+              {blocksNode}
+            </>
+          ),
+          tail: answerNode
+        })
       })
     }
-
     return (
       <div className="flex mb-6">
         <div className="w-full">
           {renderBlocks()}
-          {/* 流式静默指示：正文已出现但超过阈值无新 chunk（模型仍在生成大参数等） */}
+          {/* 流式静默指示：正文已出现但超过阈值无新 chunk（模型仍在生成大参数等）。
+              自带走时时钟，tick 不会重渲染整条消息。 */}
           {showSilenceGenerating ? (
-            <div className="flex items-center gap-2 mt-1" style={{ color: colorTextSecondary }}>
-              <ShinyIcon icon={RiSparkling2Line} size={14} baseColor={colorTextSecondary} />
-              <ShinyText baseColor={colorTextSecondary}>
-                <span style={{ fontSize: 13 }}>
-                  {t('harness.assistantMessage.silentGenerating')}
-                </span>
-              </ShinyText>
-            </div>
+            <SilenceGeneratingHint
+              loading
+              hasStartedContent={hasStartedContent}
+              getLastChunkAt={getLastChunkAt}
+              color={colorTextSecondary}
+            />
           ) : null}
           {/* 仅展示「注入记忆」卡片期间的生成中指示（压缩/重试进行中不显示，避免与过渡行重复） */}
           {message.loading &&
@@ -2008,7 +2432,7 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
               topicId={topicId}
               usage={usage}
               onBranch={onBranch}
-              copyText={copyText}
+              getCopyText={getCopyText}
               isCopied={isCopied}
               onCopy={onCopy}
               onDelete={onDelete}

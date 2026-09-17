@@ -10,9 +10,11 @@ import { getAgentToolTexts } from '../i18n/tool-results-agent'
  * 机制（适配 RytenBench 无事件总线的结构）：
  * - 用户轮次完成后调用 maybeDrive：目标 active + armed（内存武装态）且未达轮次上限时，
  *   自动发起下一轮（注入 <goal_round> 消息 + 目标来源元信息）；
- * - 轮次计数：创建轮为第 1 轮（goal.ts create 时 roundsStarted=1），
- *   自动轮在派发时结算（roundsStarted + 1，即第 2 轮起），保证轮内
- *   update_goal(complete/blocked) 的「精确命中当前目标轮」校验能匹配；
+ * - 轮次计数：roundsStarted 表示「已开始的自动续跑轮数」，创建目标的用户轮不计入
+ *   （goal.ts create 时 roundsStarted=0），自动轮在派发时结算（roundsStarted + 1，
+ *   首次续跑即第 1 轮），保证轮内 update_goal(complete/blocked) 的
+ *   「精确命中当前目标轮」校验能匹配，也让注入提示词的 "round N/M"、
+ *   消息徽标「第 N 轮」与目标栏计数三处一致；
  * - 每话题互斥：同一时间一个话题至多一个自动轮在跑（用户消息被 UI 层串行化，实际不重叠）；
  * - 用户取消自动轮 → 目标 disarm（停止自动续跑，等用户要求「继续」→ resume 重新武装）；
  * - 达轮次上限 → blocked(round-limit) 并停止。

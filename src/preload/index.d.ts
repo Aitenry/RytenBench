@@ -20,6 +20,7 @@ import { HarnessTopicRow, HarnessDialogueRow } from '../main/database/mapper/har
 import type { LlmProviderInput, LlmProviderConfig } from '../main/database/mapper/provider'
 import type { SystemSettings } from '../main/types/settings'
 import type { StructuredMessage, ToolInfo } from '../renderer/resource/types/window'
+import type { StartMemoryAgentResult } from '../main/harness/runtime/memory-agent'
 
 interface HarnessOptions {
   tools?: string[]
@@ -180,6 +181,13 @@ interface Api {
       topicId: number,
       agentId: string
     ) => Promise<SubagentSessionOutputView | undefined>
+    /** 存入记忆：起一个后台记忆整理子代理（自己总结后写入 Mnemon），立即返回 */
+    startMemoryAgent: (payload: {
+      topicId: number
+      answer: string
+      dialogueId?: number
+      providerId?: number
+    }) => Promise<StartMemoryAgentResult>
     onAgentsUpdated: (
       callback: (data: { topicId: number; rows: SubagentSessionRowView[] }) => void
     ) => () => void

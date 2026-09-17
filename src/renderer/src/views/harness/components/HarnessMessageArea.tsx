@@ -1,5 +1,6 @@
-import React, { useRef, useEffect, useCallback, useMemo, useState } from 'react'
+import React, { useRef, useEffect, useLayoutEffect, useCallback, useMemo, useState } from 'react'
 import { Spin } from 'antd'
+import { useTranslation } from '@renderer/i18n'
 import type { Message } from '@renderer/types/harness'
 import { Window } from '../../../../resource/types/window'
 import type { HarnessDialogueUsageRow } from '../../../../../main/database/mapper/harness'
@@ -37,6 +38,17 @@ interface HarnessMessageAreaProps {
 const STICK_THRESHOLD = 10
 /** 点击按钮后平滑滚动期间（ms）：期间的 scroll 事件视为程序滚动，不算用户打断 */
 const PROGRAMMATIC_WINDOW = 600
+/**
+ * 挂载窗口上限（条）：超出时只挂最近这么多条，更早的进「隐藏区」。
+ *
+ * 背景：用户持续上滑会把分页一页页全加载进来（每页 20 条），历史回复里常有几十上百 KB
+ * 的正文与工具输出，全部挂在 DOM 上正是渲染进程 OOM 的主要来源之一。这里不引入虚拟
+ * 列表（依赖与回归面都太大），只给「常驻 DOM 的消息数」加一个上限：更早的消息留在
+ * 内存里、需要时用顶部提示条一键恢复，滚动手感与定位标尺的行为完全不变。
+ */
+const HISTORY_RENDER_CAP = 60
+/** 「正文变化前记录视口锚点」的内部事件：见 renderFrom 的滚动补偿 */
+const VIEWPORT_SAVED_EVENT = 'harness-viewport-saved'
 
 const HarnessMessageArea: React.FC<HarnessMessageAreaProps> = ({
   messages,
@@ -57,11 +69,106 @@ const HarnessMessageArea: React.FC<HarnessMessageAreaProps> = ({
   onLoadMoreMessages,
   messagesEndRef
 }) => {
+  const { t } = useTranslation()
   const scrollRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
   const prevScrollHeightRef = useRef(0)
   const prevMessagesLengthRef = useRef(0)
   const prevFirstIdRef = useRef<string | null>(null)
+
+  /**
+   * 渲染窗口起点（messages 下标）：只挂载 messages.slice(renderFrom)。
+   * 上限见 HISTORY_RENDER_CAP；用户可点顶部提示条把隐藏的更早消息放回来。
+   */
+  const [renderFrom, setRenderFrom] = useState(0)
+
+  // 消息数量增长时维持「常驻条数 <= HISTORY_RENDER_CAP」：只向前推进窗口起点，
+  // 已经展开（renderFrom=0）或本条数不足上限时不动。用函数式更新保证与流式高频
+  // 的 messages 变化不打架。
+  useEffect(() => {
+    const overflow = messages.length - HISTORY_RENDER_CAP
+    if (overflow <= 0) return
+    setRenderFrom((prev) => (prev < overflow ? overflow : prev))
+  }, [messages.length])
+
+  const visibleMessages = useMemo(
+    () => (renderFrom > 0 ? messages.slice(renderFrom) : messages),
+    [messages, renderFrom]
+  )
+  const hiddenCount = Math.min(renderFrom, messages.length)
+
+  /**
+   * 滚动锚点：可变对象（不是 ref.current，避免 TS 对 ref.current 的赋值窄化把读取推成
+   * never）。字段在 VIEWPORT_SAVED_EVENT 回调里写入、在 layout effect 里读取。
+   */
+  const viewportAnchor = useRef<{ msgIndex: number; scrollTop: number; offset: number | null }>({
+    msgIndex: -1,
+    scrollTop: 0,
+    offset: null
+  })
+
+  /**
+   * 正文更新前记录「视口顶部那条消息 + 当时 scrollTop」。挂在 window 上、只注册一次；
+   * 由下方 layout effect 在每次提交前派发。用事件而不是直接调用，是为了让「保存」
+   * 与「还原」的时机严格分在两个 DOM 状态之间。
+   */
+  useEffect(() => {
+    const onSave = (): void => {
+      const el = scrollRef.current
+      const inner = contentRef.current
+      if (!el || !inner) {
+        viewportAnchor.current = { msgIndex: -1, scrollTop: 0, offset: null }
+        return
+      }
+      const innerTop = inner.getBoundingClientRect().top
+      const probe = el.scrollTop + STICK_THRESHOLD + 1
+      const nodes = inner.querySelectorAll<HTMLElement>('[data-msg-i]')
+      let found = -1
+      for (const node of nodes) {
+        if (node.getBoundingClientRect().top - innerTop >= probe) {
+          found = Number(node.getAttribute('data-msg-i'))
+          break
+        }
+      }
+      if (found < 0 && nodes.length > 0) {
+        found = Number(nodes[nodes.length - 1].getAttribute('data-msg-i'))
+      }
+      if (found < 0) {
+        viewportAnchor.current = { msgIndex: -1, scrollTop: 0, offset: null }
+        return
+      }
+      const anchor = inner.querySelector<HTMLElement>(`[data-msg-i="${found}"]`)
+      viewportAnchor.current = {
+        msgIndex: found,
+        scrollTop: el.scrollTop,
+        offset: anchor ? anchor.getBoundingClientRect().top - innerTop : null
+      }
+    }
+    window.addEventListener(VIEWPORT_SAVED_EVENT, onSave)
+    return () => window.removeEventListener(VIEWPORT_SAVED_EVENT, onSave)
+  }, [])
+
+  // 窗口起点前移会把上方内容摘掉、正文整体上移一截。若不补偿，正在上滑读历史的用户
+  // 会被「拽」着往下跑（新消息到达时尤其明显）。
+  // 补偿方式不依赖「每条多高」的估算，而是把「视口顶部那条消息」当作锚点：正文变化前
+  // 记下它相对内容顶部的偏移与当时的 scrollTop，重排后按锚点的新偏移还原 scrollTop，
+  // 读者的视线落点保持不变（点顶部「显示更早」把内容加回来时同理）。
+  useLayoutEffect(() => {
+    const el = scrollRef.current
+    const inner = contentRef.current
+    if (!el || !inner) return
+    el.dispatchEvent(new CustomEvent(VIEWPORT_SAVED_EVENT))
+    const saved = viewportAnchor.current
+    if (saved.offset === null || saved.msgIndex < 0) return
+    const node = inner.querySelector<HTMLElement>(`[data-msg-i="${saved.msgIndex}"]`)
+    if (!node) return
+    const innerTop = inner.getBoundingClientRect().top
+    const next = Math.max(
+      0,
+      saved.scrollTop + (node.getBoundingClientRect().top - innerTop - saved.offset)
+    )
+    if (Math.abs(next - el.scrollTop) > 0.5) el.scrollTop = next
+  })
 
   /** 贴底跟随开关：true 时新内容自动滚到底部；用户上滑阅读历史时关闭，回到底部或点击按钮恢复 */
   const stickToBottomRef = useRef(true)
@@ -75,6 +182,9 @@ const HarnessMessageArea: React.FC<HarnessMessageAreaProps> = ({
     setAtBottom(true)
     // 重置前插判定基线（话题切换后消息整体替换,不能按「首条 id 变化」判前插）
     prevFirstIdRef.current = null
+    // 渲染窗口也要归零：新话题的消息列表是另一份，沿用旧起点会切出一段空窗口
+    setRenderFrom(0)
+    viewportAnchor.current = { msgIndex: -1, scrollTop: 0, offset: null }
   }, [currentTopicId])
 
   // 加载更多历史消息后，保持滚动位置不跳动
@@ -129,7 +239,7 @@ const HarnessMessageArea: React.FC<HarnessMessageAreaProps> = ({
     const el = scrollRef.current
     if (!el) return
     el.scrollTop = el.scrollHeight
-  }, [messages])
+  }, [messages, renderFrom])
 
   /* 用户发出提问：无条件回到最新消息处。
    *  发送就代表要接着往下看，不能因为此前上滑读过历史而停在原位；
@@ -249,38 +359,72 @@ const HarnessMessageArea: React.FC<HarnessMessageAreaProps> = ({
                   <Spin size="small" />
                 </div>
               )}
-              {messages.map((message, idx) => (
-                /* data-msg-i：定位标尺按这个索引量每条消息在正文里的位置 */
-                <div key={message.id} data-msg-i={idx}>
-                  {message.role === 'user' ? (
-                    <UserMessage
-                      message={message}
-                      isDarkMode={isDarkMode}
-                      colorText={colorText}
-                      colorTextSecondary={colorTextSecondary}
-                      colorBorderSecondary={colorBorderSecondary}
-                    />
-                  ) : (
-                    <AssistantMessage
-                      message={message}
-                      index={idx}
-                      isDarkMode={isDarkMode}
-                      copiedId={copiedId}
-                      colorText={colorText}
-                      colorTextSecondary={colorTextSecondary}
-                      colorTextTertiary={colorTextTertiary}
-                      colorFillAlter={colorFillAlter}
-                      colorBorderSecondary={colorBorderSecondary}
-                      topicId={currentTopicId}
-                      turnStartedAt={turnStartByIndex[idx]}
-                      usage={usageByDialogue[String(message.dialogueId ?? message.id)]}
-                      onBranch={onBranch}
-                      onCopy={onCopy}
-                      onDelete={onDelete}
-                    />
-                  )}
+              {hiddenCount > 0 && (
+                /* 隐藏区恢复入口：只影响挂载，消息本身仍在内存里（见 HISTORY_RENDER_CAP） */
+                <div className="flex items-center gap-3 pb-3">
+                  <span
+                    className="flex-1"
+                    style={{ height: 1, background: colorBorderSecondary }}
+                    aria-hidden="true"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setRenderFrom(0)}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      padding: '2px 4px',
+                      color: colorTextTertiary,
+                      fontSize: 12,
+                      cursor: 'pointer'
+                    }}
+                  >
+                    {t('harness.messageArea.showEarlier', { count: hiddenCount })}
+                  </button>
+                  <span
+                    className="flex-1"
+                    style={{ height: 1, background: colorBorderSecondary }}
+                    aria-hidden="true"
+                  />
                 </div>
-              ))}
+              )}
+              {visibleMessages.map((message, i) => {
+                /* idx 是**全局**下标：定位标尺、删除/分支都按完整 messages 数组定位，
+                   窗口切片只改变挂载范围，不改变下标语义 */
+                const idx = renderFrom + i
+                return (
+                  /* data-msg-i：定位标尺按这个索引量每条消息在正文里的位置 */
+                  <div key={message.id} data-msg-i={idx}>
+                    {message.role === 'user' ? (
+                      <UserMessage
+                        message={message}
+                        isDarkMode={isDarkMode}
+                        colorText={colorText}
+                        colorTextSecondary={colorTextSecondary}
+                        colorBorderSecondary={colorBorderSecondary}
+                      />
+                    ) : (
+                      <AssistantMessage
+                        message={message}
+                        index={idx}
+                        isDarkMode={isDarkMode}
+                        copiedId={copiedId}
+                        colorText={colorText}
+                        colorTextSecondary={colorTextSecondary}
+                        colorTextTertiary={colorTextTertiary}
+                        colorFillAlter={colorFillAlter}
+                        colorBorderSecondary={colorBorderSecondary}
+                        topicId={currentTopicId}
+                        turnStartedAt={turnStartByIndex[idx]}
+                        usage={usageByDialogue[String(message.dialogueId ?? message.id)]}
+                        onBranch={onBranch}
+                        onCopy={onCopy}
+                        onDelete={onDelete}
+                      />
+                    )}
+                  </div>
+                )
+              })}
               <div ref={messagesEndRef} />
             </>
           )}

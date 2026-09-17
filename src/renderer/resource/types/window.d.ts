@@ -15,6 +15,7 @@ import { TodoItem } from '../../../main/harness/runtime/todo'
 import { GoalView } from '../../../main/harness/runtime/goal'
 import { JobSnapshot } from '../../../main/harness/runtime/jobs'
 import { SubagentSessionRow } from '../../../main/harness/runtime/subagent-sessions'
+import type { StartMemoryAgentResult } from '../../../main/harness/runtime/memory-agent'
 import { PendingQuestionView } from '../../../main/harness/runtime/ask'
 import { SystemSettings } from '@renderer/types/settings'
 
@@ -255,6 +256,16 @@ export interface Window {
       onAgentsUpdated: (
         callback: (data: { topicId: number; rows: SubagentSessionRow[] }) => void
       ) => () => void
+      /**
+       * 存入记忆：起一个后台「记忆整理」子代理，由它自己总结后写入 Mnemon，立即返回。
+       * 进度与结果走顶部栏后台代理入口（onAgentsUpdated / agentOutput）。
+       */
+      startMemoryAgent: (payload: {
+        topicId: number
+        answer: string
+        dialogueId?: number
+        providerId?: number
+      }) => Promise<StartMemoryAgentResult>
       /** 监听/停止监听某 agent 的输出推送（打开弹窗 watch，关闭取消） */
       watchAgentOutput: (topicId: number, agentId: string, watch: boolean) => void
       /** 后端推送：agent 输出有更新（运行中增量 / 终态最终输出），弹窗据此自动刷新 */

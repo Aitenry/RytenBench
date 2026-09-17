@@ -45,8 +45,8 @@ interface Turn {
 }
 
 /** Markdown 摘成一行纯文本：预览卡里不需要语法符号（非组件函数：译文由调用方传入 t） */
-function plainText(t: TFunction, raw: string | null | undefined): string {
-  return (raw ?? '')
+const plainTextRaw = (t: TFunction, raw: string | null | undefined): string =>
+  (raw ?? '')
     .replace(/```[\s\S]*?```/g, t('harness.messageLocator.codePlaceholder'))
     .replace(/`([^`]*)`/g, '$1')
     .replace(/!\[[^\]]*\]\([^)]*\)/g, t('harness.messageLocator.imagePlaceholder'))
@@ -55,6 +55,37 @@ function plainText(t: TFunction, raw: string | null | undefined): string {
     .replace(/\*\*|__/g, '')
     .replace(/\s+/g, ' ')
     .trim()
+
+/**
+ * 纯文本转换缓存（渲染进程内存/CPU 保护）。
+ *
+ * 上面这串正则在长回复上是实打实的开销，而 `turns` 每次 messages 变化都会全量重算——
+ * 流式期间每批 chunk 都触发一次，等于每批都把全部历史回复重新正则一遍（历史回复往往是
+ * 几十上百 KB）。缓存按「语言 + 原始字符串」记结果：历史消息的 content 字符串是同一份
+ * 引用，命中后直接返回；流式中的那条每批都是新字符串，由容量上限按 LRU 淘汰。
+ * 键里带语言，切语言后不会命中上一种语言的旧译文。
+ */
+const PLAIN_TEXT_CACHE_MAX = 80
+const plainTextCache = new Map<string, string>()
+
+const plainText = (t: TFunction, lang: string, raw: string | null | undefined): string => {
+  const text = raw ?? ''
+  if (text.length === 0) return ''
+  const key = `${lang}\u0000${text}`
+  const cached = plainTextCache.get(key)
+  if (cached !== undefined) {
+    // 命中即刷新为「最近使用」（Map 保持插入序，配合下方淘汰即 LRU）
+    plainTextCache.delete(key)
+    plainTextCache.set(key, cached)
+    return cached
+  }
+  const value = plainTextRaw(t, text)
+  if (plainTextCache.size >= PLAIN_TEXT_CACHE_MAX) {
+    const oldest = plainTextCache.keys().next().value
+    if (oldest !== undefined) plainTextCache.delete(oldest)
+  }
+  plainTextCache.set(key, value)
+  return value
 }
 
 /**
@@ -73,7 +104,8 @@ const MessageLocator: React.FC<MessageLocatorProps> = ({
   onJumpTo
 }) => {
   const { token } = theme.useToken()
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
+  const lang = i18n.language
   const [railHeight, setRailHeight] = useState(0)
   const [activeIndex, setActiveIndex] = useState(-1)
   const [hovered, setHovered] = useState<number | null>(null)
@@ -93,10 +125,14 @@ const MessageLocator: React.FC<MessageLocatorProps> = ({
         if (next.role === 'user') break
         if (next.role === 'assistant' && (next.content ?? '').trim()) answer = next.content ?? ''
       }
-      list.push({ index, question: plainText(t, message.content), answer: plainText(t, answer) })
+      list.push({
+        index,
+        question: plainText(t, lang, message.content),
+        answer: plainText(t, lang, answer)
+      })
     })
     return list
-  }, [messages, t])
+  }, [messages, t, lang])
 
   /** 按滚动位置刷新「当前轮次」 */
   const syncActive = useCallback((): void => {

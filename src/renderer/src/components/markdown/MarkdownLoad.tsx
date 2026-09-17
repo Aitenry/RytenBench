@@ -9,6 +9,7 @@ import rehypeRaw from 'rehype-raw'
 import rehypeKatex from 'rehype-katex'
 import { defaultSchema } from 'hast-util-sanitize'
 import type { Pluggable, PluggableList } from 'unified'
+import { visit } from 'unist-util-visit'
 import remarkMdxSource from './remarkMdxSource'
 import remarkMathBridge from './remarkMathBridge'
 import MermaidDiagram from './MermaidDiagram'
@@ -33,9 +34,72 @@ const sanitizeSchema = {
     span: [...(defaultSchema.attributes?.span ?? []), ['className', /^math/]]
   }
 }
+
+/** 超长代码块的语法高亮上限（字符）：超过则跳过 highlighter，只做纯文本渲染 */
+const MAX_HIGHLIGHT_CHARS = 20_000
+
+/** 递归拼接 hast 节点的纯文本（只用于量代码块长度，不参与输出） */
+function hastText(node: unknown): string {
+  const n = node as { type?: string; value?: string; children?: unknown[] } | null | undefined
+  if (!n) return ''
+  if (n.type === 'text') return n.value ?? ''
+  if (!Array.isArray(n.children)) return ''
+  let out = ''
+  for (const child of n.children) out += hastText(child)
+  return out
+}
+
+/**
+ * 超长代码块降级为纯文本（渲染进程内存/CPU 保护）。
+ *
+ * 背景：模型经常在回复里整段贴出工具输出或文件内容，一次流式回复里几十上百个代码块
+ * 并不罕见。rehype-highlight 对每个带语言的代码块跑一次 highlight.js，长文本下分词
+ * 结果是一棵巨大的 hast 树，随后又被 React 展开成大段 DOM；叠加流式期间的高频全量
+ * 重渲染（每批 chunk 重新解析整段 markdown），足以把渲染进程推到内存超限被杀
+ * （reason=oom / 0xE0000008）。
+ *
+ * 处理：给超过 MAX_HIGHLIGHT_CHARS 的 code 节点加 `no-highlight` 类，rehype-highlight
+ * 见到该类直接跳过（不抛错、不改内容），文本仍完整渲染，只是没有配色。
+ */
+function rehypeSkipHugeHighlight(): (tree: unknown) => void {
+  const tooLong = (node: unknown): boolean => hastText(node).length > MAX_HIGHLIGHT_CHARS
+  return (tree: unknown): void => {
+    // 兜底：本函数是 transformer，只能由 unified 在管线里带着 tree 调用。
+    // 若被误当 attacher 使用（即写成 rehypeSkipHugeHighlight() 传进 rehypePlugins），
+    // unified 会在 freeze 阶段无参调用它，tree 为 undefined，visit() 内部随即抛
+    // "Cannot use 'in' operator to search for 'children' in undefined"，整棵 markdown
+    // 渲染树会被 ErrorBoundary 兜住，界面直接白掉。这里直接退出，退化成「不做降级」。
+    if (!tree || typeof tree !== 'object') {
+      console.warn('[MarkdownLoad] rehypeSkipHugeHighlight 应以 attacher 形式传入（不要加括号）')
+      return
+    }
+    visit(tree as never, 'element', (node: never, _index: never, parent: never) => {
+      const el = node as {
+        tagName?: string
+        properties?: Record<string, unknown>
+      }
+      const up = parent as { tagName?: string } | undefined
+      // 与 rehype-highlight 的处理范围一致：只处理 <pre><code> 代码块
+      if (el.tagName !== 'code' || up?.tagName !== 'pre') return
+      if (el.properties?.className && String(el.properties.className).includes('no-highlight')) {
+        return
+      }
+      if (!tooLong(el)) return
+      const className = Array.isArray(el.properties?.className)
+        ? [...(el.properties?.className as string[]), 'no-highlight']
+        : ['no-highlight']
+      el.properties = { ...(el.properties ?? {}), className }
+    })
+  }
+}
+
 const rehypePlugins: PluggableList = [
   rehypeRaw,
   [rehypeSanitize, sanitizeSchema] as unknown as Pluggable,
+  // 传 attacher 本身：**不要写成 rehypeSkipHugeHighlight()**。
+  // 加括号拿到的是 transformer，在 unified 眼里它会被当成 attacher，freeze 阶段被无参
+  // 调用（tree === undefined）并抛错，整个 markdown 渲染随之崩掉。
+  rehypeSkipHugeHighlight,
   rehypeHighlight,
   // strict:'ignore'：模型常把中文写进 $...$ 数学模式，KaTeX 默认 strict='warn' 会为每个
   // 字符刷一条 console.warning（一次渲染数百条，灌爆日志）；ignore 静默降级渲染。

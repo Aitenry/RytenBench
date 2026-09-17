@@ -131,6 +131,13 @@
   font-size: 0.9em;
 }
 
+/* 内联代码：外层是「点击复制」的 span（inline-flex items-center，见 InlineCodeCopy），
+   code 若继承段落/列表的 1.7 行高，行盒会比同行文字高出一截，胶囊被撑高且与文字错位；
+   这里固定成 16px。只作用于该包装内的 code，代码块（pre code）不受影响。 */
+.markdown-body .inline-code-copy > code {
+  line-height: 16px;
+}
+
 /* 防横向溢出：根容器兜底断词；内联代码（含斜杠长串）在超宽时断行，
    代码块（pre code）保持不换行（pre 自带 overflow-x） */
 .markdown-body {

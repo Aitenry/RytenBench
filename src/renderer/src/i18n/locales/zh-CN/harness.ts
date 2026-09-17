@@ -73,7 +73,8 @@ export const zhCNHarness = {
     togglePanel: '工作区面板'
   },
   messageArea: {
-    scrollToBottom: '回到底部'
+    scrollToBottom: '回到底部',
+    showEarlier: '显示更早的 {{count}} 条消息'
   },
   messageLocator: {
     jumpToRound: '跳转到第 {{round}} 轮',
@@ -109,12 +110,19 @@ export const zhCNHarness = {
     projectMemoryBytes: '项目记忆 MEMORY（<mono>{{bytes}}</mono> 字节）',
     toolInput: '输入：',
     toolOutput: '输出：',
+    toolOutputHidden: '共 {{hidden}} 字符未显示',
+    longTextTail: '正文过长，仅显示末尾（前 {{hidden}} 字符未显示）',
+    toolOutputTotal: '全文 {{total}} 字符',
+    toolOutputExpand: '显示全部',
+    toolOutputCollapse: '收起',
     dispatched: '已派发后台任务',
     subAgentRunning: '{{name}} · 执行中…',
     subAgentError: '{{name}} · 出错',
     subAgentCompleted: '{{name}} · 已完成',
     subAgentExecuting: '智能体正在执行中…',
     silentGenerating: '正在生成…',
+    taskList: '任务清单',
+    preflight: '前期探索',
     todoList: '待办清单',
     todoCompleted: '<mono>{{completed}}</mono>/<mono>{{total}}</mono> 已完成',
     todoInProgress: '· <mono>{{count}}</mono> 进行中',
@@ -176,8 +184,12 @@ export const zhCNHarness = {
     feedbackDownRecorded: '已记录：有问题的回答',
     feedbackCanceled: '已取消评价',
     saveToMemory: '存入记忆',
-    savingToMemory: '正在存入记忆…',
+    savingToMemory: '正在交给记忆智能体…',
     saveToMemoryEmpty: '这条回答没有可保存的正文',
+    saveToMemoryNoTopic: '当前没有话题，无法整理记忆',
+    saveToMemoryDisabled: '尚未配置记忆目录，无法存入记忆',
+    saveToMemoryNoModel: '没有可用的模型，请先在设置中指定默认模型',
+    saveToMemoryStarted: '已交给记忆智能体整理，可在顶部栏查看进度',
     saveToMemoryFailed: '存入记忆失败',
     branch: '在新对话中分支',
     branching: '正在创建分支…',

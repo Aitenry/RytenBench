@@ -73,6 +73,10 @@ const GoalBar: React.FC<{ currentTopicId: number | null }> = ({ currentTopicId }
     complete: colorTextTertiary
   }
   const autoDriving = goal.phase === 'active' && goal.activation === 'armed'
+  // 轮次计数只在「仍可继续自动续跑」且确实已开始自动轮时展示：
+  // - complete：目标已结束，"3/40" 会被读成「还剩 37 轮」，与「已完成」自相矛盾（此前无条件渲染）；
+  // - roundsStarted === 0：尚无自动续跑（创建轮不计入轮次），"0/40" 是噪声。
+  const showRound = goal.phase !== 'complete' && goal.roundsStarted > 0
 
   return (
     <div
@@ -149,12 +153,14 @@ const GoalBar: React.FC<{ currentTopicId: number | null }> = ({ currentTopicId }
         >
           {phaseText[goal.phase]}
         </span>
-        <span style={{ fontSize: 11, color: colorTextTertiary, whiteSpace: 'nowrap' }}>
-          {t('harness.goalBar.round', {
-            current: goal.roundsStarted,
-            max: goal.maxGoalRounds
-          })}
-        </span>
+        {showRound && (
+          <span style={{ fontSize: 11, color: colorTextTertiary, whiteSpace: 'nowrap' }}>
+            {t('harness.goalBar.round', {
+              current: goal.roundsStarted,
+              max: goal.maxGoalRounds
+            })}
+          </span>
+        )}
       </div>
     </div>
   )

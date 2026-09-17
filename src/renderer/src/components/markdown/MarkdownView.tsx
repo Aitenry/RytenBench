@@ -128,7 +128,7 @@ export const InlineCodeCopy = ({
   return (
     <span
       onClick={handleCopy}
-      className={`inline-flex items-center gap-1 cursor-pointer transition-all max-w-full min-w-0`}
+      className={`inline-code-copy inline-flex items-center gap-1 cursor-pointer transition-all max-w-full min-w-0`}
       title={copied ? t('markdown.copy.copied') : t('markdown.copy.clickToCopy')}
     >
       {children}

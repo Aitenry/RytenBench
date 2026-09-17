@@ -271,6 +271,16 @@ const api = {
     listAgents: (topicId: number) => ipcRenderer.invoke('harness-agents-list', topicId),
     agentOutput: (topicId: number, agentId: string) =>
       ipcRenderer.invoke('harness-agent-output', topicId, agentId),
+    /**
+     * 存入记忆：起一个后台「记忆整理」子代理，由它自己总结后写入 Mnemon，立即返回。
+     * 进度与结果走顶部栏后台代理入口（onAgentsUpdated / agentOutput），不等它跑完。
+     */
+    startMemoryAgent: (payload: {
+      topicId: number
+      answer: string
+      dialogueId?: number
+      providerId?: number
+    }) => ipcRenderer.invoke('harness-memory-agent-start', payload),
     onAgentsUpdated: (
       callback: (data: { topicId: number; rows: SubagentSessionRow[] }) => void
     ) => {
