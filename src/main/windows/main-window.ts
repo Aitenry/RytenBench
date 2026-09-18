@@ -176,12 +176,29 @@ export function createMainWindow(): void {
   // 崩溃后只剩 exitCode 无法定位根因）。
   // 修复：KaTeX 等库会为同一条警告连发数百次（如中文入数学模式），警告按 10 秒窗口
   // 去重（第 100 次重复时留一条计数摘要），错误始终逐条转发。
-  win.webContents.on('console-message', (event) => {
-    const level = event.level
-    const msg = event.message
-    if (level !== 'error' && level !== 'warning') return
-    if (level === 'error') {
-      logger.error(`[Renderer:error] ${msg}`)
+  win.webContents.on('console-message', (event, details) => {
+    /**
+     * 取字段要兼容两种形态：老版把 level/message/lineNumber/sourceId 直接挂在 event 上，
+     * 新版给第二个参数 MessageDetails（level 是数字、URL 叫 sourceUrl）。
+     * 位置信息是关键：渲染进程的未捕获异常此前只落一句 "Uncaught TypeError: ..."，
+     * 定位不到来源（2026-09-19 那条 startTime 报错就吃了这个亏）。
+     */
+    const info = (details ?? event) as {
+      level?: string | number
+      message?: string
+      lineNumber?: number
+      sourceId?: string
+      sourceUrl?: string
+    }
+    const msg = info.message ?? ''
+    const level = info.level
+    const isError = level === 'error' || level === 3
+    const isWarning = level === 'warning' || level === 2
+    if (!isError && !isWarning) return
+    const url = info.sourceUrl ?? info.sourceId
+    const at = url ? ` @ ${url}:${info.lineNumber ?? 0}` : ''
+    if (isError) {
+      logger.error(`[Renderer:error] ${msg}${at}`)
       return
     }
     const key = msg
@@ -197,7 +214,7 @@ export function createMainWindow(): void {
       return
     }
     consoleWarnSeen.set(key, { count: 1, lastAt: now })
-    logger.warn(`[Renderer:warning] ${msg}`)
+    logger.warn(`[Renderer:warning] ${msg}${at}`)
   })
 
   win.webContents.setWindowOpenHandler((details) => {
