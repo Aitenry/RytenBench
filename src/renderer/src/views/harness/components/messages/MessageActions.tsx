@@ -207,13 +207,28 @@ const MessageActions: React.FC<MessageActionsProps> = ({
   /** 悬停用量徽标时弹出的「本轮用量」面板（缓存命中/推理等明细在 usage_metadata 里） */
   const usageDetails = useMemo(() => buildUsageDetails(usage), [usage])
 
+  /**
+   * 这一排按钮的提示统一放**下方**（用户 2026-09-19：「这些按键的提示内容，需要在底部，像『在新对话中分支』
+   * 这种提示组件」——那条当时是 antd 自动翻转刚好落到下面）。原因也顺手记下：操作栏紧贴在正文下方，
+   * 提示放到上方会盖住用户正在读的那段文字；固定 bottom 之后行为一致，不再随位置翻来翻去。
+   *
+   * 后续两条（同一天）：**不要箭头**（arrow: false）+ **贴近内容**（align.offset 压到 4px）。
+   * antd 的默认间距是 `halfArrowWidth + marginXXS(8)`（带箭头时约 12px）；关掉箭头后 arrowWidth=0，
+   * 再显式给 offset 才能压到 4px。
+   */
+  const tooltipCommon = {
+    placement: 'bottom' as const,
+    arrow: false,
+    align: { offset: [0, 4] }
+  }
+
   const iconButton = (
     icon: React.ReactNode,
     title: string,
     onClick: () => void,
     options?: { active?: boolean; danger?: boolean; disabled?: boolean }
   ): React.ReactNode => (
-    <Tooltip title={title}>
+    <Tooltip title={title} {...tooltipCommon}>
       <button
         type="button"
         aria-label={title}
@@ -256,7 +271,7 @@ const MessageActions: React.FC<MessageActionsProps> = ({
   )
 
   const chip = (icon: React.ReactNode, text: string, title?: string): React.ReactNode => (
-    <Tooltip title={title ?? ''}>
+    <Tooltip title={title ?? ''} {...tooltipCommon}>
       <span
         style={{
           display: 'inline-flex',
@@ -356,7 +371,9 @@ const MessageActions: React.FC<MessageActionsProps> = ({
             <span
               style={{
                 position: 'absolute',
-                bottom: 'calc(100% + 8px)',
+                // 用量面板**挂上方**（用户 2026-09-19：「这个提示内容不需要放在下面啊」）：
+                // 它有 7 行明细，挂下面会压住下一条消息；而按钮那种一行提示统一在下方。
+                bottom: 'calc(100% + 4px)',
                 left: 0,
                 zIndex: 30,
                 display: 'block'

@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useCallback, useState, useMemo } from 'react'
-import { Tooltip, Collapse, theme } from 'antd'
+import { Collapse, theme } from 'antd'
 import MessageActions from './MessageActions'
 import type { HarnessDialogueUsageRow } from '../../../../../../main/database/mapper/harness'
 import {
@@ -8,15 +8,9 @@ import {
   RiListCheck,
   RiCheckboxCircleLine,
   RiCheckboxBlankCircleLine,
-  RiFileEditLine,
-  RiPencilLine,
-  RiFolderOpenLine,
-  RiSearchLine,
-  RiTerminalBoxLine,
   RiBrain4Line,
   RiPictureInPicture2Line,
-  RiSparkling2Line,
-  RiEye2Line
+  RiSparkling2Line
 } from '@remixicon/react'
 import MarkdownLoad from '@renderer/components/markdown/MarkdownLoad'
 import { ShinyText, ShinyIcon } from '@renderer/components/effects/ShinyText'
@@ -24,6 +18,10 @@ import { useTranslation, Trans } from '@renderer/i18n'
 import LoadingMessage from './LoadingMessage'
 import ToolTextPreview from './ToolTextPreview'
 import StreamTextWindow from './StreamTextWindow'
+import FoldBody from './FoldBody'
+import { ToolProgressCard, ToolResultCard, type ToolCardStyle } from './ToolResultCard'
+import { TOOL_IN_PROGRESS_ICONS } from '../../utils/toolIcons'
+import { MONO_FONT, TruncatedTooltipText } from './TruncatedTooltipText'
 import type { Message, MessageBlock, ToolCall } from '@renderer/types/harness'
 import {
   getToolStatusLabel,
@@ -31,30 +29,6 @@ import {
   buildTaskSegments,
   type TaskSegment
 } from '@renderer/views/harness/utils/harnessHelpers'
-
-/** 工具进行中折叠头展示的语义图标：与工具完成后的定制卡片图标保持一致 */
-const TOOL_IN_PROGRESS_ICONS: Record<
-  string,
-  React.ComponentType<{
-    size?: number | string
-    color?: string
-    className?: string
-    style?: React.CSSProperties
-  }>
-> = {
-  read_file: RiEye2Line,
-  write_file: RiFileEditLine,
-  edit_file: RiPencilLine,
-  ls: RiFolderOpenLine,
-  glob: RiSearchLine,
-  grep: RiSearchLine,
-  execute: RiTerminalBoxLine,
-  write_todos: RiListCheck,
-  read_todos: RiListCheck
-}
-
-/** 数字等宽字体：计数里的数字用等宽字形，避免位数变化时整行抖动 */
-const MONO_FONT = "'JetBrains Mono', 'Cascadia Code', Consolas, 'Courier New', monospace"
 
 /** 定制化卡片工具集：进行中/完成态共用同款卡片外形（光泽只在进行中扫过，完成后静止） */
 const CARD_TOOLS = new Set([
@@ -66,6 +40,27 @@ const CARD_TOOLS = new Set([
   'grep',
   'execute'
 ])
+
+/**
+ * 折叠头统一垂直居中。
+ *
+ * antd 默认是 `.ant-collapse-header { align-items: flex-start }`：头部只有一行小字号标签时，
+ * 文字会贴上沿、与左侧箭头不在同一条中线上（用户反馈「思考过程这几个字并没有居中」）。
+ * 任务段此前靠 `.task-segment-collapse` 的 CSS 单独修过（见 Index.tsx 的 style），其余
+ * 折叠头（思考过程 / 子代理 / 注入记忆 / 通用工具）没有，于是同一屏里两种对齐并存。
+ *
+ * 这里用 antd 的语义 styles 传内联样式统一改：内联优先，不受 CSS 注入顺序与选择器权重影响，
+ * 也不必再为每种折叠头补一条全局规则。
+ */
+const COLLAPSE_HEADER_CENTERED = { header: { alignItems: 'center' } } as const
+
+/**
+ * 段内容（前期探索 / 任务段）展开后的固定高度上限。
+ *
+ * 比思考框的 256 高一些：段里装的是工具卡 + 思考 + 正文，单块更高（工具卡本身 30+px），
+ * 320 大约能一屏看到 6~8 步，够判断「这一步在干什么」而不至于把整段铺满屏幕。
+ */
+const SEGMENT_BODY_MAX_HEIGHT = 320
 
 interface AssistantMessageProps {
   message: Message
@@ -87,71 +82,6 @@ interface AssistantMessageProps {
   onBranch: (upToIndex: number) => Promise<void>
   onCopy: (text: string, id: string) => void
   onDelete: (index: number) => void
-}
-
-/** 工具卡片文本：单行显示 + 溢出省略，悬停展示完整内容（无箭头 Tooltip，仅在溢出时出现）
- *
- *  两个易踩的坑，都在这里一次性收口：
- *  1. 省略号只对「块级（或块化）且宽度受约束」的盒子生效。此前这里是内联 span，
- *     overflow/text-overflow 被完全忽略，且 clientWidth 恒为 0 → 长文本（execute 的整条命令）
- *     直接顶破卡片、悬停提示还对短文本误触发。故此处显式 display:block，
- *     并加 1px 容差避免子像素取整导致误判。
- *  2. 光泽必须做在「承载文字的那一个元素」上：外层 ShinyText 包内层截断 span 时，
- *     省略号失效；且外层基色若用 colorText，暗色主题下基色 rgba(255,255,255,0.85)
- *     与高光 rgba(255,255,255,0.9) 几乎同色，看起来「只有图标在发光、文字没有光」。
- *     这里用 shinyBaseColor=colorTextSecondary（与 ShinyIcon 同基色）+ 纯白高光，
- *     明暗两种主题下光泽都清晰可见。
- */
-const TruncatedTooltipText: React.FC<{
-  text: string
-  style?: React.CSSProperties
-  /** 光泽基色（传入即启用光泽扫过；建议与同排 ShinyIcon 的 baseColor 一致） */
-  shinyBaseColor?: string
-  /** 光泽高光色，默认纯白（与 ShinyIcon 扫过色一致） */
-  shinyShineColor?: string
-}> = ({ text, style, shinyBaseColor, shinyShineColor = '#fff' }) => {
-  const spanRef = useRef<HTMLSpanElement>(null)
-  const [overflow, setOverflow] = useState(false)
-
-  useEffect(() => {
-    const el = spanRef.current
-    if (!el) return
-    const check = (): void => {
-      setOverflow(el.scrollWidth > el.clientWidth + 1)
-    }
-    check()
-    const observer = new ResizeObserver(check)
-    observer.observe(el)
-    return () => observer.disconnect()
-  }, [text])
-
-  return (
-    // Tooltip 与 span 始终渲染，保证 ResizeObserver 观察的 DOM 节点稳定；
-    // 空 title 时 antd 不会显示提示（仅溢出时 title 才有内容）
-    <Tooltip title={overflow ? text : ''} arrow={false} styles={{ root: { maxWidth: 560 } }}>
-      <span
-        ref={spanRef}
-        className={shinyBaseColor ? 'shiny-text' : undefined}
-        style={{
-          // 覆盖 .shiny-text 的 display:inline-block —— 省略号必须是块级盒子
-          display: 'block',
-          whiteSpace: 'nowrap',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          minWidth: 0,
-          ...(shinyBaseColor
-            ? ({
-                '--shiny-base': shinyBaseColor,
-                '--shiny-shine': shinyShineColor
-              } as React.CSSProperties)
-            : null),
-          ...style
-        }}
-      >
-        {text}
-      </span>
-    </Tooltip>
-  )
 }
 
 /**
@@ -275,25 +205,15 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
       return joined || message.content
     }, [message])
 
-    // 折叠内容滚动容器管理 & 流式输出时自动滚动到底部
-    const scrollRefs = useRef<Record<string, HTMLDivElement | null>>({})
-    const setScrollRef = useCallback(
-      (key: string) => (el: HTMLDivElement | null) => {
-        scrollRefs.current[key] = el
-      },
-      []
-    )
-    useEffect(() => {
-      if (!message.loading) return
-      Object.values(scrollRefs.current).forEach((el) => {
-        if (el) {
-          el.scrollTop = el.scrollHeight
-        }
-      })
-      // 只在「有新 chunk 到达」或进入/退出流式时同步：原先不传依赖数组（每次渲染都跑），
-      // 每次都要对每个折叠容器读 scrollHeight 强制同步布局；巨型消息（上百块）下是明确
-      // 的卡顿与内存压力来源。滚动位置随内容增长更新，语义不变。
-    }, [message.loading, message.lastChunkAt])
+    // 滚动容器与流式贴底：**全部交给 FoldBody 自管**（固定高度 + 展开全部 + 可打断的贴底跟随）。
+    //
+    // 这里原先有一个无差别的 effect：流式中每来一个 chunk 就把所有折叠容器
+    // `scrollTop = scrollHeight`——不判断用户是否正在往上读，想回看前面几行会被立刻拽回底部。
+    // 用户明确要求「可以打断、回到底部再继续」，所以每个内容框自己按「是否在底部」决定跟不跟；
+    // 这个集中式的强拽 effect 连同 scrollRefs 一并删掉了。
+    /** 流式贴底跟随的触发信号（每个 chunk 变一次） */
+    const followSignal = message.lastChunkAt
+    const streamingFollow = Boolean(message.loading)
 
     // 仅有「注入记忆」/「压缩中」块时仍渲染（卡片可见），其余空消息走 LoadingMessage；
     // 「正在重试」块同理（展示重试进度行，避免被 LoadingMessage 整卡替换）。
@@ -568,154 +488,40 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
       return renderTodoCard(todos, key, isNested)
     }
 
-    /** 渲染 deepagent 内置工具卡片（非折叠）
-     *  进行中（生成参数/执行）与完成态同款扁平外形：border / 背景 / 语义图标 / 参数摘要一致，
-     *  仅「参数构建中…/执行中…」状态文字与光泽扫过（ShinyText/ShinyIcon）；完成后恢复静态。
-     *  参数构建期间（input 为空）退化为工具名 + 状态，参数到达后显示路径/命令摘要 */
+    /** 内置工具卡片（非折叠）：进行中 / 完成态共用同款外形，具体渲染在 ToolResultCard.tsx。
+     *
+     *  2026-09-19 起这些工具的结果不再下发/落库——卡片上的路径/计数/退出码由主进程投影
+     *  （service/tool-presentation.ts）给出，点卡片才去右侧面板看真实文件或结果详情。 */
     const renderToolCard = (
       tool: ToolCall,
       key: string | number,
       isNested = false,
       progress?: 'preparing' | 'executing'
     ): React.ReactNode => {
-      const card = tool.card
-      const size = isNested ? 14 : 16
-      const fontSize = isNested ? '12px' : '13px'
-
-      const iconStyle = { color: colorTextSecondary, flexShrink: 0 }
-      const inProgress = progress === 'preparing' || progress === 'executing'
-
-      const renderRow = (
-        icon: React.ReactNode,
-        label: React.ReactNode,
-        extra?: React.ReactNode
-      ): React.ReactNode => (
-        <div
-          key={key}
-          style={{
-            background: collapseBg,
-            border: 'var(--ant-line-width) var(--ant-line-type) var(--ant-color-border)',
-            marginBottom: isNested ? '4px' : '6px',
-            borderRadius: '8px',
-            padding: '9px 12px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px'
-          }}
-        >
-          {icon}
-          {label}
-          {extra}
-        </div>
-      )
-
-      /** 进行中态：语义图标 + 参数摘要（输入中能解析就显示，否则退化为工具名）+ 状态后缀，光泽扫过 */
-      if (inProgress) {
-        const input = (tool.input || {}) as Record<string, unknown>
-        let summary = ''
-        switch (tool.name) {
-          case 'read_file':
-          case 'write_file':
-          case 'edit_file':
-            summary = typeof input.file_path === 'string' ? input.file_path : ''
-            break
-          case 'ls':
-            summary = typeof input.path === 'string' ? input.path : ''
-            break
-          case 'glob':
-          case 'grep':
-            summary = typeof input.pattern === 'string' ? input.pattern : ''
-            break
-          case 'execute':
-            summary = typeof input.command === 'string' ? input.command : ''
-            break
-        }
-        const status =
-          progress === 'preparing'
-            ? ` · ${t('harness.assistantMessage.toolPreparing')}`
-            : ` · ${t('harness.assistantMessage.toolExecuting')}`
-        const Icon = TOOL_IN_PROGRESS_ICONS[tool.name] || RiTerminalBoxLine
-        return renderRow(
-          <ShinyIcon icon={Icon} size={size} baseColor={colorTextSecondary} />,
-          <TruncatedTooltipText
-            text={`${summary || tool.name || t('harness.assistantMessage.toolCallFallback')}${status}`}
-            shinyBaseColor={colorTextSecondary}
-            style={{ color: colorText, fontSize, flex: 1 }}
+      const style: ToolCardStyle = {
+        isDarkMode,
+        colorText,
+        colorTextSecondary,
+        colorTextTertiary,
+        colorFillAlter,
+        colorBorderSecondary
+      }
+      if (progress) {
+        return (
+          <ToolProgressCard
+            key={key}
+            tool={tool}
+            progress={progress}
+            isNested={isNested}
+            style={style}
           />
         )
       }
-
-      // 完成态：无卡片数据视为无定制展示，返回 null 交由通用折叠兜底
-      if (!card) return null
-
-      const renderPathRow = (
-        icon: React.ReactNode,
-        label: string,
-        extra?: React.ReactNode
-      ): React.ReactNode =>
-        renderRow(
-          icon,
-          <TruncatedTooltipText text={label} style={{ color: colorText, fontSize, flex: 1 }} />,
-          extra
-        )
-
-      switch (tool.name) {
-        case 'read_file':
-          return renderPathRow(<RiEye2Line size={size} style={iconStyle} />, card.path || '')
-        case 'write_file':
-          return renderPathRow(<RiFileEditLine size={size} style={iconStyle} />, card.path || '')
-        case 'edit_file':
-          return renderPathRow(<RiPencilLine size={size} style={iconStyle} />, card.path || '')
-        case 'ls':
-          return renderPathRow(
-            <RiFolderOpenLine size={size} style={iconStyle} />,
-            card.path || '/',
-            card.count !== undefined ? (
-              <span style={{ color: colorTextTertiary, fontSize, flexShrink: 0 }}>
-                <Trans
-                  i18nKey="harness.assistantMessage.itemCount"
-                  count={card.count}
-                  components={{ mono: <span style={{ fontFamily: MONO_FONT }} /> }}
-                />
-              </span>
-            ) : undefined
-          )
-        case 'glob':
-          return renderPathRow(
-            <RiSearchLine size={size} style={iconStyle} />,
-            card.pattern || '',
-            card.count !== undefined ? (
-              <span style={{ color: colorTextTertiary, fontSize, flexShrink: 0 }}>
-                <Trans
-                  i18nKey="harness.assistantMessage.itemCount"
-                  count={card.count}
-                  components={{ mono: <span style={{ fontFamily: MONO_FONT }} /> }}
-                />
-              </span>
-            ) : undefined
-          )
-        case 'grep':
-          return renderPathRow(
-            <RiSearchLine size={size} style={iconStyle} />,
-            card.pattern || '',
-            card.count !== undefined ? (
-              <span style={{ color: colorTextTertiary, fontSize, flexShrink: 0 }}>
-                <Trans
-                  i18nKey="harness.assistantMessage.matchCount"
-                  count={card.count}
-                  components={{ mono: <span style={{ fontFamily: MONO_FONT }} /> }}
-                />
-              </span>
-            ) : undefined
-          )
-        case 'execute':
-          return renderPathRow(
-            <RiTerminalBoxLine size={size} style={iconStyle} />,
-            card.command || ''
-          )
-        default:
-          return null
-      }
+      // 无卡片数据（异常形态）：返回 null，交由通用折叠兜底展示
+      if (!tool.card) return null
+      return (
+        <ToolResultCard key={key} tool={tool} topicId={topicId} isNested={isNested} style={style} />
+      )
     }
 
     // ── Mnemon 记忆工具定制卡片 ──────────────────────────────────────────
@@ -1293,7 +1099,7 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
       // 缓存键：块渲染体读到的可变父状态（主题、语言、loading、子代理折叠态）。这些一变就
       // 整表失效重建。注意 lastChunkAt 刻意不进键——它每批都变，传值会让缓存永不命中，
       // 静默提示改为传稳定的 getter（getLastChunkAt）。
-      const blockCacheKey = `${isDarkMode}|${i18n.language}|${message.loading ? 1 : 0}|${JSON.stringify(saOpenOverride)}|${colorText}|${colorTextSecondary}|${colorTextTertiary}|${colorFillAlter}|${colorBorderSecondary}|${collapseBg}`
+      const blockCacheKey = `${isDarkMode}|${i18n.language}|${message.loading ? 1 : 0}|${JSON.stringify(saOpenOverride)}|${topicId ?? 0}|${colorText}|${colorTextSecondary}|${colorTextTertiary}|${colorFillAlter}|${colorBorderSecondary}|${collapseBg}`
       const blockNodes = blockCacheRef.current
       if (blockNodes.key !== blockCacheKey) {
         blockNodes.key = blockCacheKey
@@ -1406,6 +1212,7 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
           const total = mem.user.length + mem.memory.length
           return (
             <Collapse
+              styles={COLLAPSE_HEADER_CENTERED}
               key={blockIndex}
               items={[
                 {
@@ -1513,16 +1320,21 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
               } as const)
           return (
             <Collapse
+              styles={COLLAPSE_HEADER_CENTERED}
               key={`${blockIndex}-${thinkingDone ? 'done' : 'thinking'}`}
               items={[
                 {
                   key: blockIndex,
                   ...extra,
                   children: (
-                    <div
-                      ref={setScrollRef(`reasoning-${blockIndex}`)}
-                      className="max-h-64 overflow-y-auto harness-scrollbar text-sm border-l-2 pl-3 px-1.5"
-                      style={{ borderColor: colorBorderSecondary }}
+                    /* 思考正文框：固定高度 + 展开全部 + 可打断的贴底跟随（见 FoldBody） */
+                    <FoldBody
+                      maxHeight={256}
+                      streaming={streamingFollow}
+                      followSignal={followSignal}
+                      className="text-sm px-1.5"
+                      kind="thinking"
+                      borderColor={colorBorderSecondary}
                     >
                       <StreamTextWindow
                         content={block.reasoning}
@@ -1530,7 +1342,7 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                           <MarkdownLoad content={text} isDarkMode={isDarkMode} />
                         )}
                       />
-                    </div>
+                    </FoldBody>
                   )
                 }
               ]}
@@ -1605,6 +1417,7 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
               (toolName.startsWith('mnemon_') ? RiBrain4Line : undefined))
           return (
             <Collapse
+              styles={COLLAPSE_HEADER_CENTERED}
               key={blockIndex}
               items={[
                 {
@@ -1616,9 +1429,14 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                   ),
                   collapsible: inProgress ? 'disabled' : undefined,
                   children: (
-                    <div
-                      ref={setScrollRef(`tool-${blockIndex}`)}
-                      className="max-h-64 overflow-y-auto harness-scrollbar px-1.5"
+                    /* 固定高度 + 可打断的贴底跟随：工具输出边长边跑，用户上滑即打断 */
+                    <FoldBody
+                      maxHeight={256}
+                      expandable={false}
+                      streaming={streamingFollow}
+                      followSignal={followSignal}
+                      className="px-1.5"
+                      kind="tool"
                     >
                       <div style={{ color: colorTextSecondary }} className="font-medium mb-1">
                         {t('harness.assistantMessage.toolInput')}
@@ -1642,7 +1460,7 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                         }
                         codeBg={codeBg}
                       />
-                    </div>
+                    </FoldBody>
                   )
                 }
               ]}
@@ -1754,6 +1572,7 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
               if (child.type === 'reasoning' && child.reasoning) {
                 return (
                   <Collapse
+                    styles={COLLAPSE_HEADER_CENTERED}
                     key={ci}
                     items={[
                       {
@@ -1764,10 +1583,14 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                           </span>
                         ),
                         children: (
-                          <div
-                            ref={setScrollRef(`nested-reasoning-${ci}`)}
-                            className="max-h-48 overflow-y-auto harness-scrollbar text-xs border-l-2 pl-3 px-1.5"
-                            style={{ borderColor: colorBorderSecondary }}
+                          /* 子智能体的思考同样是「思考过程」：同款固定高度 + 展开全部 + 可打断跟随 */
+                          <FoldBody
+                            maxHeight={192}
+                            streaming={streamingFollow}
+                            followSignal={followSignal}
+                            className="text-xs px-1.5"
+                            kind="thinking-nested"
+                            borderColor={colorBorderSecondary}
                           >
                             {/* 子智能体的推理同样走窗口：整段贴文件时也会是几十万字符 */}
                             <StreamTextWindow
@@ -1776,7 +1599,7 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                                 <MarkdownLoad content={text} isDarkMode={isDarkMode} />
                               )}
                             />
-                          </div>
+                          </FoldBody>
                         )
                       }
                     ]}
@@ -1844,6 +1667,7 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                     (toolName.startsWith('mnemon_') ? RiBrain4Line : undefined))
                 return (
                   <Collapse
+                    styles={COLLAPSE_HEADER_CENTERED}
                     key={ci}
                     items={[
                       {
@@ -1859,9 +1683,13 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                         ),
                         collapsible: inProgress ? 'disabled' : undefined,
                         children: (
-                          <div
-                            ref={setScrollRef(`nested-tool-${ci}`)}
-                            className="max-h-48 overflow-y-auto harness-scrollbar ml-2 px-1.5"
+                          <FoldBody
+                            maxHeight={192}
+                            expandable={false}
+                            streaming={streamingFollow}
+                            followSignal={followSignal}
+                            className="ml-2 px-1.5"
+                            kind="tool-nested"
                           >
                             <div
                               style={{ color: colorTextSecondary }}
@@ -1893,7 +1721,7 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                                 />
                               </>
                             ) : null}
-                          </div>
+                          </FoldBody>
                         )
                       }
                     ]}
@@ -1936,6 +1764,7 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                   : (saOpenOverride[childSaPanelKey] ?? false)
                 return (
                   <Collapse
+                    styles={COLLAPSE_HEADER_CENTERED}
                     // key 用数组序号（修复：此前 `name-${isActive?'a':'d'}` 在状态翻转时强制换 key
                     // 重挂 Collapse 丢失展开态,同名子智能体两次委派还会产生重复 key 致 React 复用错位）
                     key={`nested-sa-${ci}`}
@@ -1964,9 +1793,13 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                         ),
                         collapsible: childIsActive ? 'disabled' : undefined,
                         children: (
-                          <div
-                            ref={setScrollRef(`nested-subagent-${ci}`)}
-                            className="max-h-48 overflow-y-auto harness-scrollbar pl-2 px-1.5"
+                          <FoldBody
+                            maxHeight={192}
+                            expandable={false}
+                            streaming={streamingFollow}
+                            followSignal={followSignal}
+                            className="pl-2 px-1.5"
+                            kind="subagent-nested"
                           >
                             {childSa.taskDescription ? (
                               <div style={{ color: colorTextSecondary }} className="text-xs mb-1">
@@ -1991,7 +1824,7 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                                 {childSa.error}
                               </div>
                             ) : null}
-                          </div>
+                          </FoldBody>
                         )
                       }
                     ]}
@@ -2020,6 +1853,7 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
 
           return (
             <Collapse
+              styles={COLLAPSE_HEADER_CENTERED}
               // key 用数组序号（修复：状态翻转换 key 重挂 Collapse 丢失展开态；同名子智能体
               // 两次委派产生重复 key 致 React 复用错位）
               key={`sa-${blockIndex}`}
@@ -2044,9 +1878,13 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                   ),
                   collapsible: isActive ? 'disabled' : undefined,
                   children: (
-                    <div
-                      ref={setScrollRef(`subagent-${blockIndex}`)}
-                      className="max-h-64 overflow-y-auto harness-scrollbar pl-2 px-1.5"
+                    <FoldBody
+                      maxHeight={256}
+                      expandable={false}
+                      streaming={streamingFollow}
+                      followSignal={followSignal}
+                      className="pl-2 px-1.5"
+                      kind="subagent"
                     >
                       {sa.taskDescription ? (
                         <div style={{ color: colorTextSecondary }} className="text-sm mb-2">
@@ -2077,7 +1915,7 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                           {sa.error}
                         </div>
                       ) : null}
-                    </div>
+                    </FoldBody>
                   )
                 }
               ]}
@@ -2134,7 +1972,8 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                 {itemDone ? (
                   <RiCheckboxCircleLine
                     size={13}
-                    style={{ color: colorTextTertiary, marginTop: 3, flexShrink: 0 }}
+                    // 已完成 = 绿（与段头上的状态点同一套语义）
+                    style={{ color: token.colorSuccess, marginTop: 3, flexShrink: 0 }}
                   />
                 ) : (
                   <RiCheckboxBlankCircleLine
@@ -2177,11 +2016,16 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
        *   注意末段里往往接着「最终答复正文」——那部分会从折叠里摘出来常显（见 answerIndices），
        *   否则一折就把答案藏了。
        */
-      const segments = buildTaskSegments(mergedBlocks)
+      const segments = buildTaskSegments(mergedBlocks, { streaming: Boolean(message.loading) })
       const lastSegIndex = segments.length - 1
-      const hasTasks = segments.some((s) => s.task)
 
-      /** 段外壳：折叠外观与「思考过程」「子代理」完全同款（antd Collapse + collapseBg + size=small） */
+      /**
+       * 段外壳：折叠外观与「思考过程」「子代理」完全同款（antd Collapse + collapseBg + size=small）。
+       *
+       * 段内容也走 FoldBody（用户 2026-09-19：「这个内容，也要折叠啊」）——展开的段不再是一堵
+       * 随任务跑越堆越高的墙，而是**固定高度 + 内部滚动**；流式时贴底跟随最新一步，用户上滑即
+       * 打断、滚回底部自动继续；内容超高时框外给「展开全部」。
+       */
       const renderSegmentShell = (args: {
         segKey: string
         label: React.ReactNode
@@ -2192,7 +2036,23 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
       }): React.ReactNode => (
         <React.Fragment key={args.segKey}>
           <Collapse
-            items={[{ key: args.segKey, label: args.label, children: args.children }]}
+            styles={COLLAPSE_HEADER_CENTERED}
+            items={[
+              {
+                key: args.segKey,
+                label: args.label,
+                children: (
+                  <FoldBody
+                    maxHeight={SEGMENT_BODY_MAX_HEIGHT}
+                    streaming={streamingFollow}
+                    followSignal={followSignal}
+                    kind="segment"
+                  >
+                    {args.children}
+                  </FoldBody>
+                )
+              }
+            ]}
             activeKey={args.collapsed ? [] : [args.segKey]}
             onChange={(keys) =>
               setFoldOverride((prev) => ({ ...prev, [args.segKey]: !keys.includes(args.segKey) }))
@@ -2209,14 +2069,37 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
       return segments.map((segment, segIndex) => {
         // 正文块：跳过 write_todos（清单另开），其余照旧走块级缓存
         const allIndices = segment.blockIndices.filter((i) => !segment.writeIndices.includes(i))
-        // 末段末尾连续的正文本块 = 最终答复：摘到折叠外面常显。
-        // 只在「这条消息真的有任务段」时摘——没有任务就不会折叠，摘了反而没人渲染它
-        // （仿真台抓到过：普通问答的正文会整段消失）。
+        /**
+         * 末段末尾「思考 + 正文」一起摘到折叠外面常显。
+         *
+         * - 正文（连续 text 块）= 最终答复，必须摘，否则一折答案就没了；
+         * - 紧跟其前的**思考块**（连续 reasoning 块）也要一起摘：它是产出这段答复的那一步，
+         *   留在折叠里答复就成了无源之水（用户：思考要跟着最后的内容）。
+         *   工具卡会打断回溯——被工具隔开的思考与末尾答复不连续，硬摘会打乱时序；
+         * - 必须至少摘到一段正文才成立：整段以思考结尾（本轮被中止等）时不摘，
+         *   交给折叠统一收着，避免把「没有答复的消息」整块搬到外面；
+         * - **不对「有没有任务」做区分**：前期探索段现在一律包裹，普通问答同样要摘
+         *   （仿真台抓到过：摘出漏掉时普通问答的正文会整段消失）；
+         * - 流式进行中不摘——那时段本来就展开着。
+         */
         let answerIndices: number[] = []
-        if (hasTasks && segIndex === lastSegIndex && !message.loading) {
+        if (segIndex === lastSegIndex && !message.loading) {
           let cut = allIndices.length
-          while (cut > 0 && mergedBlocks[allIndices[cut - 1]]?.type === 'text') cut -= 1
-          answerIndices = allIndices.slice(cut)
+          let sawText = false
+          while (cut > 0) {
+            const type = mergedBlocks[allIndices[cut - 1]]?.type
+            if (type === 'text') {
+              sawText = true
+              cut -= 1
+              continue
+            }
+            if (type === 'reasoning') {
+              cut -= 1
+              continue
+            }
+            break
+          }
+          answerIndices = sawText ? allIndices.slice(cut) : []
         }
         const visibleIndices = allIndices.slice(0, allIndices.length - answerIndices.length)
         const blocksNode = visibleIndices.map(renderBlockAt)
@@ -2225,25 +2108,28 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
         // ── 规划前的那一段（第一个 write_todos 之前）─────────────────────────
         // 里面有大量「思考过程 + 探索用的 read/grep」，一条 300 块的消息里能有 57 块堆在这，
         // 任务段折起来之后它就是正文里唯一剩下的那堵墙（用户：「前面有思考需要移出来」）。
-        // 有任务时把它也收成一段；**没有任务的消息（普通问答）保持原样全显示**。
+        // **不管这条消息有没有任务，这一段一律包裹**（用户 2026-09-18 要求）：普通问答的
+        // 思考过程同样收进「前期探索」，答复由 answerIndices 摘到折叠外常显。
+        // 唯一的例外：段里没有可折叠内容（整条消息只有答复正文）——那就不摆一个空的探索头。
         if (!segment.task) {
-          if (!hasTasks) return blocksNode
-          const collapsed = foldOverride[segment.key] ?? !message.loading
+          if (visibleIndices.length === 0) return answerNode
+          /**
+           * 默认折叠态（无人工覆盖时）：
+           * - 段不是末段（有任务的消息里，它后面还有任务段）→ 与任务段同口径：流式中展开、结束/历史折起；
+           * - 末段且**有答复摘到折叠外** → 同样折起（答复在外面常显）；
+           * - 末段但**没有答复可摘**（整条消息以工具卡或思考结尾）→ 保持展开：否则用户只能看到
+           *   一个「前期探索」头，等于把整条消息藏了。宁可不折，也不藏内容。
+           */
+          const isLastSegment = segIndex === lastSegIndex
+          const collapsed =
+            foldOverride[segment.key] ??
+            (!message.loading && (!isLastSegment || answerIndices.length > 0))
           const headLabel = (
             <span
               data-task-segment={segment.key}
               className="flex items-center min-w-0"
               style={{ width: '100%', gap: 8 }}
             >
-              <span
-                style={{
-                  width: 6,
-                  height: 6,
-                  borderRadius: '50%',
-                  flex: '0 0 auto',
-                  background: colorBorderSecondary
-                }}
-              />
               <span
                 style={{
                   flex: '1 1 auto',
@@ -2259,21 +2145,34 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
               >
                 {t('harness.assistantMessage.preflight')}
               </span>
-              <span
-                style={{
-                  flex: '0 0 auto',
-                  fontSize: 11,
-                  lineHeight: '16px',
-                  minWidth: 22,
-                  textAlign: 'center',
-                  padding: '0 5px',
-                  borderRadius: 9,
-                  border: `1px solid ${colorBorderSecondary}`,
-                  color: colorTextTertiary,
-                  fontFamily: MONO_FONT
-                }}
-              >
-                {visibleIndices.length}
+              {/* 状态点 + 计数成一组：点放在数字**前面**（用户 2026-09-19 要求），
+                  标签因此占满左侧，长任务名能多显示几个字 */}
+              <span style={{ display: 'flex', alignItems: 'center', gap: 4, flex: '0 0 auto' }}>
+                <span
+                  style={{
+                    width: 6,
+                    height: 6,
+                    borderRadius: '50%',
+                    flex: '0 0 auto',
+                    background: colorBorderSecondary
+                  }}
+                />
+                <span
+                  style={{
+                    flex: '0 0 auto',
+                    fontSize: 11,
+                    lineHeight: '16px',
+                    minWidth: 22,
+                    textAlign: 'center',
+                    padding: '0 5px',
+                    borderRadius: 9,
+                    border: `1px solid ${colorBorderSecondary}`,
+                    color: colorTextTertiary,
+                    fontFamily: MONO_FONT
+                  }}
+                >
+                  {visibleIndices.length}
+                </span>
               </span>
             </span>
           )
@@ -2288,9 +2187,7 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
 
         const isLast = segIndex === lastSegIndex
         // 流式中：已完成且非末段才折起；已结束/历史消息：一律折起
-        const defaultCollapsed = message.loading
-          ? segment.status === 'completed' && !isLast
-          : true
+        const defaultCollapsed = message.loading ? segment.status === 'completed' && !isLast : true
         const collapsed = foldOverride[segment.key] ?? defaultCollapsed
         const done = segment.status === 'completed'
         const active = segment.status === 'in_progress'
@@ -2301,23 +2198,10 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
             className="flex items-center min-w-0"
             style={{ width: '100%', gap: 8 }}
           >
-            <span
-              style={{
-                width: 6,
-                height: 6,
-                borderRadius: '50%',
-                flex: '0 0 auto',
-                background: active
-                  ? token.colorPrimary
-                  : done
-                    ? colorTextTertiary
-                    : colorBorderSecondary
-              }}
-            />
-            {/* 任务名占据剩余宽度并可截断：这样右侧的计数胶囊与清单按钮才会贴到最右，
+            {/* 任务名占据剩余宽度并可截断：这样右侧的状态点 + 计数胶囊与清单按钮才会贴到最右，
                 长任务名也不会把整行顶出容器。
                 刻意**不加光泽动效**：shiny-text 是 1.5s 无限循环，而一个任务常常跑几分钟，
-                会让整行从头闪到尾（用户明确反馈「一直在闪」）；状态由左侧圆点 + 加粗表达。 */}
+                会让整行从头闪到尾（用户明确反馈「一直在闪」）；状态由右侧圆点 + 加粗表达。 */}
             <span
               style={{
                 flex: '1 1 auto',
@@ -2334,22 +2218,39 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
             >
               {segment.task}
             </span>
-            <span
-              style={{
-                flex: '0 0 auto',
-                fontSize: 11,
-                lineHeight: '16px',
-                // 定宽 + 居中：位数不同时各行数字也对齐（等宽字形只用于数字）
-                minWidth: 22,
-                textAlign: 'center',
-                padding: '0 5px',
-                borderRadius: 9,
-                border: `1px solid ${colorBorderSecondary}`,
-                color: colorTextTertiary,
-                fontFamily: MONO_FONT
-              }}
-            >
-              {visibleIndices.length}
+            {/* 状态点 + 计数成一组：点放在数字**前面**（用户 2026-09-19 要求） */}
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4, flex: '0 0 auto' }}>
+              <span
+                style={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: '50%',
+                  flex: '0 0 auto',
+                  // 完成 = 绿、进行中 = 主色、未开始 = 描边灰（用户要求：已完成的任务要显示绿色）
+                  background: done
+                    ? token.colorSuccess
+                    : active
+                      ? token.colorPrimary
+                      : colorBorderSecondary
+                }}
+              />
+              <span
+                style={{
+                  flex: '0 0 auto',
+                  fontSize: 11,
+                  lineHeight: '16px',
+                  // 定宽 + 居中：位数不同时各行数字也对齐（等宽字形只用于数字）
+                  minWidth: 22,
+                  textAlign: 'center',
+                  padding: '0 5px',
+                  borderRadius: 9,
+                  border: `1px solid ${colorBorderSecondary}`,
+                  color: colorTextTertiary,
+                  fontFamily: MONO_FONT
+                }}
+              >
+                {visibleIndices.length}
+              </span>
             </span>
             {segment.snapshot.length > 0 ? (
               <button

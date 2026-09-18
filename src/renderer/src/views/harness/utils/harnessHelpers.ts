@@ -173,8 +173,14 @@ const inProgressTaskOf = (block: MessageBlock): string | null => {
   return todos.find((t) => t.status === 'in_progress')?.content ?? null
 }
 
-/** 把块序列切成任务段（纯函数：输入块数组，输出段划分，不改动入参） */
-export function buildTaskSegments(blocks: MessageBlock[]): TaskSegment[] {
+/** 把块序列切成任务段（纯函数：输入块数组，输出段划分，不改动入参）
+ *
+ *  `streaming`：该条消息是否仍在流式。只影响**末段**的状态判定——见下方状态推导。
+ */
+export function buildTaskSegments(
+  blocks: MessageBlock[],
+  options: { streaming?: boolean } = {}
+): TaskSegment[] {
   const segments: TaskSegment[] = []
   const seen = new Map<string, number>()
   const fresh = (extra: Partial<TaskSegment>): TaskSegment => ({
@@ -193,7 +199,13 @@ export function buildTaskSegments(blocks: MessageBlock[]): TaskSegment[] {
     const started = inProgressTaskOf(blocks[i])
     if (started) {
       // 已有内容的段先收口（空段不产出，避免连续 write_todos 造出空任务头）
-      if (current.blockIndices.length > 0) segments.push(current)
+      if (current.blockIndices.length > 0) {
+        // 这一条 write_todos 同时是上一段的**收尾快照**（它通常把上一段的任务标成 completed）。
+        // 记进上一段：否则上一段清单里那个任务永远停在 in_progress，而段头状态点已经是绿的，
+        // 两处颜色互相打架（用户反馈「什么颜色都有」）。它不属于上一段的正文，故不进 writeIndices。
+        if (snapshot) current.snapshot = snapshot
+        segments.push(current)
+      }
       const nth = (seen.get(started) ?? 0) + 1
       seen.set(started, nth)
       current = fresh({ key: `segment-${nth}-${started}`, task: started, status: 'in_progress' })
@@ -206,13 +218,82 @@ export function buildTaskSegments(blocks: MessageBlock[]): TaskSegment[] {
   }
   if (current.blockIndices.length > 0) segments.push(current)
 
-  // 任务状态按「最后一个块是否仍在该任务名下」推断：段结束后若出现了新的 write_todos，
-  // 说明该任务已收尾（快照里它不再是 in_progress）——这里用「后面还有别的段」来判定
+  /**
+   * 任务状态推导（用户 2026-09-19：「任务都已经完成了，并没有显示绿色，什么颜色都有」）。
+   *
+   * 旧实现的错：段的 status 在**开段那一刻**写成 'in_progress' 就再没更新过——于是
+   * ① 后面明明又开过新任务（＝这个任务早结束了），它还是蓝的；
+   * ② 一轮跑完、清单里最后那次「全部完成」写入也落在末段里，末段的点仍然是蓝的。
+   * 现在按「段内最后一次快照 = 唯一真源」推导，规则：
+   *  - 非末段：后面还有别的任务段 ⇒ 这个任务已经结束 → completed（绿）；
+   *  - 末段：看**本段最后一次快照**里这个任务的状态；快照里没有它（改过名等）时按
+   *    「仍在流式 → in_progress，否则 completed」兜底——一轮已经结束就不该再显示「进行中」；
+   *  - pending 保持 pending（灰），不把没开始的任务说成完成。
+   */
   return segments.map((segment, index) => {
     if (!segment.task) return segment
     const isLast = index === segments.length - 1
-    return { ...segment, status: isLast ? segment.status : 'completed' }
+    if (!isLast) return { ...segment, status: 'completed' as const }
+    const own = segment.snapshot.find((item) => item.content === segment.task)?.status
+    if (own === 'pending') return { ...segment, status: 'pending' as const }
+    if (own === 'completed') return { ...segment, status: 'completed' as const }
+    return {
+      ...segment,
+      status: options.streaming ? ('in_progress' as const) : ('completed' as const)
+    }
   })
+}
+
+/**
+ * 目标原文：从「目标续跑」消息里取出人类可读的目标描述。
+ *
+ * 主进程下发的 goalRound 消息，content 有两种形态：
+ *  - 干净的：单行 `CNCBD 知识资源模块：把"专家/机构"从手输文本改成真实关联…`；
+ *  - 提示词原文：`<goal_round>\nObjective: CNCBD…\n(Automatic continuation round 2/40…)\n…</goal_round>`。
+ * 单行形态**不能**按冒号切（目标本身常含全角冒号，会把正文切掉），所以规则是：
+ * 多行时取第二行并剥掉 `Objective:` / `目标：` 这类短标签；单行时原样返回。
+ */
+export const goalObjective = (content: string): string => {
+  const lines = (content ?? '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+  if (lines.length === 0) return ''
+  if (lines.length === 1) return lines[0]
+  const second = lines[1]
+  const stripped = second.replace(/^\s*[A-Za-z_\u4e00-\u9fa5]{1,16}\s*[:：]\s*/, '')
+  return stripped || second
+}
+
+/**
+ * 「继续执行」这类短指令：只表示「再跑一轮」，不是提问。
+ *
+ * 背景（用户 2026-09-19）：「会出现独立的内容，是因为断开之后，用户会发送『继续执行』，
+ * 这个导致页面看起来不连贯。」目标自动续跑被 disarm / 停止后，用户会手动补一句继续指令，
+ * 它被当成普通提问渲染成蓝色气泡，页面就断开了。
+ *
+ * 必须是**整条消息就是这句指令**才算（前后带别的要求的不算，例如「继续，但先改 X」），
+ * 且只认这几种写法；渲染成居中的低调分隔行（见 ContinuationNote），不做任何语义推断。
+ */
+const CONTINUATION_PROMPTS: RegExp[] = [
+  /^继续执行$/,
+  /^继续$/,
+  /^接着执行$/,
+  /^接着做$/,
+  /^继续做$/,
+  /^继续推进$/,
+  /^往下做$/,
+  /^continue$/i,
+  /^go on$/i,
+  /^keep going$/i,
+  /^resume$/i
+]
+
+/** 判断一条用户消息是否只是「继续」指令 */
+export const isContinuationPrompt = (content: string): boolean => {
+  const text = (content ?? '').trim().replace(/[。.!！~～,，]+$/, '')
+  if (!text) return false
+  return CONTINUATION_PROMPTS.some((re) => re.test(text))
 }
 
 /**

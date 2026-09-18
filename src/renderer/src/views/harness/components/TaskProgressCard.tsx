@@ -26,7 +26,8 @@ const TaskProgressCard: React.FC<{ currentTopicId: number | null }> = ({ current
       colorText,
       colorTextSecondary,
       colorTextTertiary,
-      colorPrimary
+      colorPrimary,
+      colorSuccess
     }
   } = theme.useToken()
 
@@ -149,7 +150,8 @@ const TaskProgressCard: React.FC<{ currentTopicId: number | null }> = ({ current
                 {done ? (
                   <RiCheckboxCircleFill
                     size={16}
-                    style={{ color: colorPrimary, marginTop: 2, flexShrink: 0 }}
+                    // 已完成 = 绿（与消息区段头/清单同一套语义，此前是主色蓝）
+                    style={{ color: colorSuccess, marginTop: 2, flexShrink: 0 }}
                   />
                 ) : t.status === 'in_progress' ? (
                   <span

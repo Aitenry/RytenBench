@@ -119,6 +119,8 @@ const MessageLocator: React.FC<MessageLocatorProps> = ({
     const list: Turn[] = []
     messages.forEach((message, index) => {
       if (message.role !== 'user') return
+      // 目标自动续跑的横幅不是「提问」（它渲染成批次横幅、由左右切换查看），不占标尺刻度
+      if (message.blocks.some((b) => b.type === 'goalRound')) return
       let answer = ''
       for (let i = index + 1; i < messages.length; i++) {
         const next = messages[i]

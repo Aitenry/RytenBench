@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import {
   RiFolder3Line,
   RiFolderOpenLine,
@@ -24,6 +24,12 @@ interface FileExplorerProps {
   colorTextTertiary: string
   onOpenFile: (filePath: string, fileName: string) => void
   activeFilePath?: string | null
+  /**
+   * 请求定位到的（真实绝对）路径：变化即逐级展开目录树并高亮。
+   * 由工具卡片（ls）触发——「在资源管理器中查看这个目录」。
+   * 带 nonce：同一目录被再次请求时（用户收起树后又点了一次卡片）也要重新展开。
+   */
+  revealRequest?: { path: string; nonce: number } | null
 }
 
 interface TreeNode extends FileEntry {
@@ -40,11 +46,15 @@ const FileExplorer: React.FC<FileExplorerProps> = ({
   colorTextSecondary,
   colorTextTertiary,
   onOpenFile,
-  activeFilePath
+  activeFilePath,
+  revealRequest
 }) => {
   const [rootNodes, setRootNodes] = useState<TreeNode[]>([])
   const [loading, setLoading] = useState(false)
   const { t } = useTranslation()
+  /** 树的当前快照：定位（revealPath）需要在不触发额外渲染的前提下逐级读取/装载子节点 */
+  const rootNodesRef = useRef<TreeNode[]>([])
+  rootNodesRef.current = rootNodes
 
   const fetchDir = useCallback(async (dirPath: string): Promise<FileEntry[]> => {
     const win = window as unknown as Window
@@ -76,6 +86,63 @@ const FileExplorer: React.FC<FileExplorerProps> = ({
   useEffect(() => {
     loadRoot()
   }, [loadRoot])
+
+  /**
+   * 定位（工具卡片 ls 点开）：从根出发逐级找到目标目录并展开。
+   *
+   * 比较路径时统一正斜杠——工作区路径与主进程返回的子路径在 Windows 上都是反斜杠，
+   * 但渲染层手里的目标路径来自虚拟路径拼接，两边的分隔符不保证一致。
+   * 未装载过的层级就地装载（与 toggleExpand 同一套 fetchDir），最后整体刷新一次。
+   */
+  useEffect(() => {
+    const target = revealRequest?.path
+    if (!target) return
+    let cancelled = false
+    const normalize = (p: string): string => p.replace(/\\/g, '/').replace(/\/+$/, '')
+
+    const run = async (): Promise<void> => {
+      const rootNorm = normalize(workspacePath)
+      const targetNorm = normalize(target)
+      const segments = targetNorm.startsWith(rootNorm)
+        ? targetNorm.slice(rootNorm.length).split('/').filter(Boolean)
+        : []
+      if (segments.length === 0) return
+
+      let nodes = rootNodesRef.current
+      let parentNorm = rootNorm
+      for (const segment of segments) {
+        const wanted = `${parentNorm}/${segment}`
+        const node = nodes.find((n) => normalize(n.path) === wanted)
+        if (!node || !node.isDirectory) return
+        if (!node.loaded) {
+          try {
+            const entries = await fetchDir(node.path)
+            if (cancelled) return
+            node.children = entries.map((e) => ({
+              ...e,
+              children: null,
+              expanded: false,
+              loaded: false
+            }))
+            node.loaded = true
+          } catch (err) {
+            console.warn('Failed to reveal directory:', err)
+            return
+          }
+        }
+        node.expanded = true
+        parentNorm = normalize(node.path)
+        nodes = node.children ?? []
+      }
+      if (!cancelled) setRootNodes([...rootNodesRef.current])
+    }
+    void run()
+    return () => {
+      cancelled = true
+    }
+    // rootNodes.length 进依赖：面板刚挂载时根目录还在异步加载，定位请求会扑空；
+    // 根节点装载完成后（长度变化）自动重跑一次。run 是幂等的（只做展开），不会自激。
+  }, [revealRequest, workspacePath, fetchDir, rootNodes.length])
 
   const toggleExpand = useCallback(
     async (node: TreeNode) => {

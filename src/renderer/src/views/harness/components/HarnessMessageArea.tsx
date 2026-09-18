@@ -6,6 +6,9 @@ import { Window } from '../../../../resource/types/window'
 import type { HarnessDialogueUsageRow } from '../../../../../main/database/mapper/harness'
 import UserMessage from './messages/UserMessage'
 import AssistantMessage from './messages/AssistantMessage'
+import GoalRoundBanner from './messages/GoalRoundBanner'
+import ContinuationNote from './messages/ContinuationNote'
+import { isContinuationPrompt, goalObjective } from '../utils/harnessHelpers'
 import ScrollToBottomButton from './ScrollToBottomButton'
 import MessageLocator from './MessageLocator'
 import WelcomeIntro from './WelcomeIntro'
@@ -28,6 +31,15 @@ interface HarnessMessageAreaProps {
   isLoadingMoreMessages: boolean
   onCopy: (text: string, id: string) => Promise<void>
   onDelete: (msgIndex: number) => Promise<void>
+  /**
+   * 孤立提问（没有回复）的气泡内编辑：进入编辑态 / 回车提交（就地替换并重发）/ 取消。
+   * 只有孤立提问才会用到。
+   */
+  onStartEditMessage: (msgIndex: number) => void
+  onSubmitEditMessage: (msgIndex: number, content: string) => Promise<void>
+  onCancelEditMessage: () => void
+  /** 正在气泡内编辑的提问 id */
+  editingMessageId: string | null
   /** 分支：把到该条为止的消息复制到新话题并切过去（由 hooks 统一处理列表与切换） */
   onBranch: (upToIndex: number) => Promise<void>
   onLoadMoreMessages: () => void
@@ -47,6 +59,20 @@ const PROGRAMMATIC_WINDOW = 600
  * 内存里、需要时用顶部提示条一键恢复，滚动手感与定位标尺的行为完全不变。
  */
 const HISTORY_RENDER_CAP = 60
+/**
+ * 流式期间的在屏消息上限（远小于历史态的 60）。
+ *
+ * 为什么需要单独一个更小的上限：**每次 commit 的成本与「在屏消息数」成正比**，而不是与
+ * 变化的那条消息成正比。用真实组件跑仿真（test/sim-renderer-memory.mjs：节点数与内容都
+ * 不变，只按批追加流式块、每批后强制 GC 再量堆）实测：
+ *   挂载 60 条 → 每批净常驻 1,112 KB ｜ 24 条 → 445 KB ｜ 12 条 → 272 KB（-76%）
+ * 流式按 ~30 commit/s 跑，60 条在屏就是 ~33 MB/s 的常驻压力（长任务必然被 OOM 杀）。
+ * 所以流式期间只挂最近 12 条；一轮结束回到历史态后不再自动补回（顶部「显示更早」可一键恢复），
+ * 避免收尾瞬间又挂一次全量。
+ *
+ * 只在「用户贴底看最新输出」时收紧；上滑阅读历史时不动窗口，免得把正在读的内容抽走。
+ */
+const STREAMING_RENDER_CAP = 12
 /** 「正文变化前记录视口锚点」的内部事件：见 renderFrom 的滚动补偿 */
 const VIEWPORT_SAVED_EVENT = 'harness-viewport-saved'
 
@@ -65,6 +91,10 @@ const HarnessMessageArea: React.FC<HarnessMessageAreaProps> = ({
   isLoadingMoreMessages,
   onCopy,
   onDelete,
+  onStartEditMessage,
+  onSubmitEditMessage,
+  onCancelEditMessage,
+  editingMessageId,
   onBranch,
   onLoadMoreMessages,
   messagesEndRef
@@ -82,14 +112,18 @@ const HarnessMessageArea: React.FC<HarnessMessageAreaProps> = ({
    */
   const [renderFrom, setRenderFrom] = useState(0)
 
-  // 消息数量增长时维持「常驻条数 <= HISTORY_RENDER_CAP」：只向前推进窗口起点，
+  // 消息数量增长时维持「常驻条数 <= 上限」：只向前推进窗口起点，
   // 已经展开（renderFrom=0）或本条数不足上限时不动。用函数式更新保证与流式高频
   // 的 messages 变化不打架。
+  // 流式期间用更小的 STREAMING_RENDER_CAP（每次 commit 的成本与在屏消息数成正比），
+  // 且仅在用户贴底时收紧——上滑读历史时不抽走内容。stickToBottomRef 是 ref，
+  // 这里只在 messages.length 变化时读一次，语义足够。
   useEffect(() => {
-    const overflow = messages.length - HISTORY_RENDER_CAP
+    const cap = streaming && stickToBottomRef.current ? STREAMING_RENDER_CAP : HISTORY_RENDER_CAP
+    const overflow = messages.length - cap
     if (overflow <= 0) return
     setRenderFrom((prev) => (prev < overflow ? overflow : prev))
-  }, [messages.length])
+  }, [messages.length, streaming])
 
   const visibleMessages = useMemo(
     () => (renderFrom > 0 ? messages.slice(renderFrom) : messages),
@@ -284,6 +318,144 @@ const HarnessMessageArea: React.FC<HarnessMessageAreaProps> = ({
     return out
   }, [messages])
 
+  /**
+   * 孤立提问：没有对应回复的用户消息（下一条不是助手消息，或它本身就是最后一条）。
+   *
+   * 典型来源：发送时流失败/被中止、模型报错后放弃重试、或数据库事故后只留下提问。
+   * 这类气泡此前没有任何可操作入口，只能干看着——按 id 标记出来给它们补「编辑并重发 / 删除」。
+   * 用 id 而不是下标：渲染窗口会切片，下标只保证在这条消息上有效。
+   */
+  const orphanUserIds = useMemo(() => {
+    const ids = new Set<string>()
+    messages.forEach((message, i) => {
+      if (message.role !== 'user') return
+      const next = messages[i + 1]
+      if (!next || next.role !== 'assistant') ids.add(message.id)
+    })
+    return ids
+  }, [messages])
+
+  /**
+   * 目标续跑批次：把「同一批次的助手回复」合成一行，靠左右切换查看各轮。
+   *
+   * 背景（用户 2026-09-19）：「我想把同一个批次里面的AI回复这些轮次合并起来，使用左右点击切换，
+   * 也可以减少渲染。」
+   *
+   * 数据形态：目标轮次驱动器（主进程 goal-driver）每轮先下发 `goalRound` 标记 chunk，渲染端把它挂成
+   * 一条 user 消息（blocks=[{type:'goalRound',round}]、content=目标原文），于是同一批次在列表里是
+   * 交替的 [助手][横幅][助手][横幅]……。轮次一多，气泡与挂载的块都线性增长。
+   *
+   * 归并规则（纯渲染层，不动存储）：
+   *  - 一段连续的「助手 + 横幅 + 助手 + 横幅 + 助手」= 一个批次，**包含开头那条助手**（它是这批
+   *    工作的第一轮，自动续跑都建立在它之上）；
+   *  - 批次渲染成一行：一个横幅（显示 第 N/M 轮 + 目标 + 左右切换）+ **当前选中那一轮的助手消息**；
+   *  - 其余轮次不挂载 —— 这正是「减少渲染」的来源；
+   *  - 默认选中最后一轮（最新）；用户手动往前翻过后不再被新轮次抢走，翻回最后一轮则恢复跟随。
+   */
+  const goalRoundOf = (m: Message | undefined): boolean =>
+    Boolean(m && m.role === 'user' && m.blocks.some((b) => b.type === 'goalRound'))
+
+  type RenderRow =
+    | { kind: 'single'; index: number }
+    | {
+        kind: 'batch'
+        key: string
+        /** note：该轮之前用户手补的「继续执行」（自动续跑断开后手动接续），渲染成低调的分隔行 */
+        rounds: { index: number; objective: string; note?: string }[]
+      }
+
+  const renderRows = useMemo<RenderRow[]>(() => {
+    const rows: RenderRow[] = []
+    const total = visibleMessages.length
+    const isBanner = (m: Message | undefined): boolean => goalRoundOf(m)
+    const isCont = (m: Message | undefined): boolean =>
+      Boolean(m && m.role === 'user' && isContinuationPrompt(m.content))
+    /** 批次里首轮的目标原文：从后面第一条横幅取（可能隔着一条「继续执行」） */
+    const lookaheadObjective = (from: number): string => {
+      for (let j = from; j < Math.min(from + 2, total); j += 1) {
+        if (isBanner(visibleMessages[j])) return goalObjective(visibleMessages[j].content)
+      }
+      return ''
+    }
+
+    for (let i = 0; i < total; i += 1) {
+      const message = visibleMessages[i]
+      const last = rows[rows.length - 1]
+
+      /**
+       * 横幅 →（可选的「继续执行」）→ 助手 = 一轮，接进上一批。
+       *
+       * 允许中间夹一条手补的「继续执行」：实测用例（用户 2026-09-19 贴的 DOM）就是
+       * 「…助手 → 横幅(第 3 轮) → 继续执行 → 助手」，旧规则要求横幅后面紧跟助手，
+       * 于是第 3 轮被漏成了独立一行。
+       */
+      if (isBanner(message)) {
+        const withNote = isCont(visibleMessages[i + 1])
+        const assistant = withNote ? visibleMessages[i + 2] : visibleMessages[i + 1]
+        if (last && last.kind === 'batch' && assistant?.role === 'assistant') {
+          last.rounds.push({
+            index: i + (withNote ? 2 : 1),
+            objective: goalObjective(message.content),
+            note: withNote ? visibleMessages[i + 1].content.trim() : undefined
+          })
+          i += withNote ? 2 : 1
+          continue
+        }
+        rows.push({ kind: 'single', index: i })
+        continue
+      }
+
+      /**
+       * 用户手补的「继续执行」（自动续跑断开后）：后面那条助手仍是这批工作的一轮。
+       * 只要上一行已经是批次，就吸收——不再要求「后面还得再有横幅」：用户手写继续指令
+       * 本身就是在续这批工作，旧规则会把它留成独立气泡 + 独立回复（页面断开）。
+       */
+      if (isCont(message)) {
+        const assistant = visibleMessages[i + 1]
+        if (last && last.kind === 'batch' && assistant?.role === 'assistant') {
+          last.rounds.push({
+            index: i + 1,
+            objective: last.rounds[last.rounds.length - 1].objective,
+            note: message.content.trim()
+          })
+          i += 1
+          continue
+        }
+        rows.push({ kind: 'single', index: i })
+        continue
+      }
+
+      // 助手 +（后面是横幅或「继续执行」）→ 开一个新批次
+      if (
+        message.role === 'assistant' &&
+        (isBanner(visibleMessages[i + 1]) || isCont(visibleMessages[i + 1]))
+      ) {
+        rows.push({
+          kind: 'batch',
+          key: message.id,
+          rounds: [{ index: i, objective: lookaheadObjective(i + 1) }]
+        })
+        continue
+      }
+      rows.push({ kind: 'single', index: i })
+    }
+    return rows
+  }, [visibleMessages])
+
+  /**
+   * 手动选中的轮次（批次 key → 轮次下标）。**只记「偏离最新」的选择**：翻到最后一轮就删掉这条记录，
+   * 于是新轮次到达时继续跟随；往前翻过则保持不动，不被流式输出抢走视线。
+   */
+  const [pinnedRound, setPinnedRound] = useState<Record<string, number>>({})
+  const gotoRound = useCallback((key: string, target: number, last: number) => {
+    setPinnedRound((prev) => {
+      const next = { ...prev }
+      if (target >= last) delete next[key]
+      else next[key] = target
+      return next
+    })
+  }, [])
+
   /** 对话真实用量（harness_dialogue_usage）：按 dialogue_id 回填到各条助手消息，不用估算值 */
   const [usageByDialogue, setUsageByDialogue] = useState<Record<string, HarnessDialogueUsageRow>>(
     {}
@@ -342,7 +514,8 @@ const HarnessMessageArea: React.FC<HarnessMessageAreaProps> = ({
   const showScrollButton = messages.length > 0 && (!atBottom || streaming)
 
   return (
-    <div className="relative flex-1 min-h-0 flex flex-col">
+    // harness-message-list：聊天区的样式作用域（折叠头对齐等规则挂在 Index.tsx 的 style 里）
+    <div className="harness-message-list relative flex-1 min-h-0 flex flex-col">
       <div
         ref={scrollRef}
         // 底部 pb-20 为悬浮的「回到底部」按钮预留空间：
@@ -388,9 +561,63 @@ const HarnessMessageArea: React.FC<HarnessMessageAreaProps> = ({
                   />
                 </div>
               )}
-              {visibleMessages.map((message, i) => {
+              {renderRows.map((row) => {
                 /* idx 是**全局**下标：定位标尺、删除/分支都按完整 messages 数组定位，
                    窗口切片只改变挂载范围，不改变下标语义 */
+                if (row.kind === 'batch') {
+                  const last = row.rounds.length - 1
+                  const active = Math.min(pinnedRound[row.key] ?? last, last)
+                  const round = row.rounds[active]
+                  const idx = renderFrom + round.index
+                  return (
+                    /* 批次占一行：横幅（带左右切换）+ 当前轮的助手消息；其余轮次不挂载 */
+                    <div key={row.key} data-msg-i={idx} data-goal-batch={row.rounds.length}>
+                      <GoalRoundBanner
+                        current={active + 1}
+                        total={row.rounds.length}
+                        objective={round.objective}
+                        colorTextSecondary={colorTextSecondary}
+                        colorBorderSecondary={colorBorderSecondary}
+                        onPrev={() => gotoRound(row.key, active - 1, last)}
+                        onNext={() => gotoRound(row.key, active + 1, last)}
+                      />
+                      {/* 该轮之前用户手补的「继续执行」：低调分隔行，紧贴这一轮内容 */}
+                      {round.note ? (
+                        <ContinuationNote
+                          text={round.note}
+                          colorTextSecondary={colorTextSecondary}
+                          colorBorderSecondary={colorBorderSecondary}
+                        />
+                      ) : null}
+                      <AssistantMessage
+                        message={visibleMessages[round.index]}
+                        index={idx}
+                        isDarkMode={isDarkMode}
+                        copiedId={copiedId}
+                        colorText={colorText}
+                        colorTextSecondary={colorTextSecondary}
+                        colorTextTertiary={colorTextTertiary}
+                        colorFillAlter={colorFillAlter}
+                        colorBorderSecondary={colorBorderSecondary}
+                        topicId={currentTopicId}
+                        turnStartedAt={turnStartByIndex[idx]}
+                        usage={
+                          usageByDialogue[
+                            String(
+                              visibleMessages[round.index].dialogueId ??
+                                visibleMessages[round.index].id
+                            )
+                          ]
+                        }
+                        onBranch={onBranch}
+                        onCopy={onCopy}
+                        onDelete={onDelete}
+                      />
+                    </div>
+                  )
+                }
+                const i = row.index
+                const message = visibleMessages[i]
                 const idx = renderFrom + i
                 return (
                   /* data-msg-i：定位标尺按这个索引量每条消息在正文里的位置 */
@@ -402,6 +629,12 @@ const HarnessMessageArea: React.FC<HarnessMessageAreaProps> = ({
                         colorText={colorText}
                         colorTextSecondary={colorTextSecondary}
                         colorBorderSecondary={colorBorderSecondary}
+                        orphan={orphanUserIds.has(message.id)}
+                        editing={editingMessageId === message.id}
+                        onEdit={() => onStartEditMessage(idx)}
+                        onEditSubmit={(content) => void onSubmitEditMessage(idx, content)}
+                        onEditCancel={onCancelEditMessage}
+                        onDelete={() => void onDelete(idx)}
                       />
                     ) : (
                       <AssistantMessage

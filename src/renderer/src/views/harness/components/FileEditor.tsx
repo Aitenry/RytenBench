@@ -8,12 +8,17 @@ import '../utils/monacoSetup'
 import { disableMonacoValidation } from '../utils/monacoSetup'
 import { getLanguageFromPath } from '../utils/fileLang'
 import { useTranslation } from '@renderer/i18n'
+import ToolDetailView, { type ToolDetailTab } from './ToolDetailView'
 
 export interface OpenFile {
   path: string
   name: string
   content: string
   isDirty: boolean
+  /** 只读页签（工具结果详情；或工作区之外的记忆文件）——不参与保存、不显示未保存圆点 */
+  readOnly?: boolean
+  /** 工具结果详情页签：有值时渲染 ToolDetailView 而不是 Monaco */
+  tool?: ToolDetailTab
 }
 
 interface FileEditorProps {
@@ -50,6 +55,8 @@ const FileEditor: React.FC<FileEditorProps> = ({
   const language = activeFile ? getLanguageFromPath(activeFile.path) : 'plaintext'
   const editorTheme = isDarkMode ? 'vs-dark' : 'vs'
   const { t } = useTranslation()
+  // 只读页签（工具结果详情 / 工作区外的文件）：编辑器可选中复制、不可编辑
+  const activeReadOnly = Boolean(activeFile?.readOnly || activeFile?.tool)
 
   // --- Tab overflow management ---
   const tabBarRef = useRef<HTMLDivElement>(null)
@@ -143,13 +150,21 @@ const FileEditor: React.FC<FileEditorProps> = ({
   activeFilePathRef.current = activeFilePath
   const onSaveFileRef = useRef(onSaveFile)
   onSaveFileRef.current = onSaveFile
+  const activeReadOnlyRef = useRef(activeReadOnly)
+  activeReadOnlyRef.current = activeReadOnly
 
   const handleEditorMount: OnMount = useCallback((editorInstance, monaco) => {
     editorInstance.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
       const path = activeFilePathRef.current
-      if (path) onSaveFileRef.current(path)
+      if (path && !activeReadOnlyRef.current) onSaveFileRef.current(path)
     })
   }, [])
+
+  /** 只读页签的编辑器配置：禁用编辑与保存，其余观感保持一致 */
+  const readOnlyOptions = useMemo<editor.IStandaloneEditorConstructionOptions>(
+    () => ({ ...editorOptions, readOnly: true, domReadOnly: true }),
+    [editorOptions]
+  )
 
   useEffect(() => {
     const existingStyle = document.getElementById('monaco-scrollbar-style')
@@ -362,34 +377,44 @@ const FileEditor: React.FC<FileEditorProps> = ({
         )}
       </div>
 
-      {/* Monaco Editor */}
-      <div className="flex-1">
-        {activeFile && (
-          <Editor
-            key={activeFile.path}
-            height="100%"
-            theme={editorTheme}
-            language={language}
-            value={activeFile.content}
-            options={editorOptions}
-            beforeMount={() => disableMonacoValidation(monaco)}
-            onMount={handleEditorMount}
-            onChange={(value) => {
-              if (value !== undefined && activeFilePath) {
-                onContentChange(activeFilePath, value)
-              }
-            }}
-            loading={
-              <div
-                className="flex items-center justify-center h-full"
-                style={{ color: colorTextTertiary, fontSize: 13 }}
-              >
-                {t('harness.fileEditor.loading')}
-              </div>
-            }
+      {/* 工具结果详情页签（ls / glob / grep / execute）：不走 Monaco，按工具语义就地渲染 */}
+      {activeFile?.tool ? (
+        <div className="flex-1 min-h-0">
+          <ToolDetailView
+            tab={activeFile.tool}
+            style={{ isDarkMode, colorText, colorTextSecondary, colorTextTertiary }}
           />
-        )}
-      </div>
+        </div>
+      ) : (
+        /* Monaco Editor */
+        <div className="flex-1">
+          {activeFile && (
+            <Editor
+              key={activeFile.path}
+              height="100%"
+              theme={editorTheme}
+              language={language}
+              value={activeFile.content}
+              options={activeReadOnly ? readOnlyOptions : editorOptions}
+              beforeMount={() => disableMonacoValidation(monaco)}
+              onMount={handleEditorMount}
+              onChange={(value) => {
+                if (value !== undefined && activeFilePath && !activeReadOnly) {
+                  onContentChange(activeFilePath, value)
+                }
+              }}
+              loading={
+                <div
+                  className="flex items-center justify-center h-full"
+                  style={{ color: colorTextTertiary, fontSize: 13 }}
+                >
+                  {t('harness.fileEditor.loading')}
+                </div>
+              }
+            />
+          )}
+        </div>
+      )}
     </div>
   )
 }

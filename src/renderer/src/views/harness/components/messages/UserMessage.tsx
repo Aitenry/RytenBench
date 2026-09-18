@@ -1,7 +1,10 @@
-import React from 'react'
-import { Image, Tag } from 'antd'
-import { RiAttachment2, RiFlag2Line } from '@remixicon/react'
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { App, Image, Tag, Tooltip, theme } from 'antd'
+import { RiAttachment2, RiPencilLine, RiDeleteBin6Line } from '@remixicon/react'
 import { useTranslation } from '@renderer/i18n'
+import GoalRoundBanner from './GoalRoundBanner'
+import ContinuationNote from './ContinuationNote'
+import { isContinuationPrompt, goalObjective } from '../../utils/harnessHelpers'
 import type { Message } from '@renderer/types/harness'
 
 interface UserMessageProps {
@@ -10,24 +13,85 @@ interface UserMessageProps {
   colorText: string
   colorTextSecondary: string
   colorBorderSecondary: string
+  /**
+   * 这条提问没有对应的回复（下一条不是助手消息，或它本身就是最后一条）。
+   *
+   * 出现这种孤立提问的典型场景：发送时流失败/被中止、或数据库事故后只留下了提问。
+   * 此时气泡后面没有任何可操作的入口，只能干看着——所以给它补上「编辑 / 删除」。
+   */
+  orphan?: boolean
+  /** 正在**气泡内**编辑这条提问 */
+  editing?: boolean
+  /** 进入编辑态 */
+  onEdit?: () => void
+  /** 气泡内回车提交（内容已就地替换这条提问，不会新增用户气泡） */
+  onEditSubmit?: (content: string) => void
+  /** Esc / 取消编辑 */
+  onEditCancel?: () => void
+  /** 点击删除（确认后由上层删除库内行与界面消息） */
+  onDelete?: () => void
 }
-
-/**
- * 目标自动续跑消息的正文：goal_round 块的第 2 行是带标签的目标本身
- * （提示词里是 `目标：…` / `Objective: …`）。标签随提示词语言变化，
- * 所以这里统一剥掉行首的短标签，而不是硬编码某一种写法。
- */
-const goalObjective = (content: string): string =>
-  (content.split('\n')[1] ?? '').replace(/^\s*[^:：\s]{1,16}[:：]\s*/, '')
 
 const UserMessage: React.FC<UserMessageProps> = ({
   message,
   isDarkMode,
   colorText,
   colorTextSecondary,
-  colorBorderSecondary
+  colorBorderSecondary,
+  orphan = false,
+  editing = false,
+  onEdit,
+  onEditSubmit,
+  onEditCancel,
+  onDelete
 }) => {
   const { t } = useTranslation()
+  const { token } = theme.useToken()
+  const { modal } = App.useApp()
+  const [hovered, setHovered] = useState<'edit' | 'delete' | null>(null)
+  /** 气泡内编辑的草稿 */
+  const [draft, setDraft] = useState(message.content)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  // 进入编辑态：草稿取当前正文，焦点落到末尾（与「接着改」的直觉一致）
+  useEffect(() => {
+    if (!editing) return
+    setDraft(message.content)
+  }, [editing, message.content])
+
+  // 输入框高度随内容自适应（气泡不能被撑出滚动条）
+  useLayoutEffect(() => {
+    const el = textareaRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${el.scrollHeight}px`
+  }, [draft, editing])
+
+  useEffect(() => {
+    if (!editing) return
+    const el = textareaRef.current
+    if (!el) return
+    el.focus()
+    el.setSelectionRange(el.value.length, el.value.length)
+  }, [editing])
+
+  /**
+   * 气泡内键盘约定：Enter 发送、Shift+Enter 换行、Esc 取消。
+   * 输入法组词中的 Enter 不能当发送（中文场景极易误触）。
+   */
+  const handleEditorKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      onEditCancel?.()
+      return
+    }
+    if (e.key !== 'Enter' || e.shiftKey) return
+    if (e.nativeEvent.isComposing) return
+    e.preventDefault()
+    const text = draft.trim()
+    if (!text) return
+    onEditSubmit?.(text)
+  }
 
   const imageBlocks = message.blocks.filter((b) => b.type === 'image' && b.image_url)
   const documentBlocks = message.blocks.filter((b) => b.type === 'document' && b.fileName)
@@ -35,35 +99,59 @@ const UserMessage: React.FC<UserMessageProps> = ({
   const goalRoundBlock = message.blocks.find((b) => b.type === 'goalRound')
 
   if (goalRoundBlock) {
+    /* 单轮/未合并时的续跑横幅：与批次横幅同一组件（窄窗口可收缩、单行省略） */
     return (
-      <div className="flex justify-center mb-6">
-        <div
+      <GoalRoundBanner
+        current={goalRoundBlock.round ?? 1}
+        total={1}
+        objective={goalObjective(message.content)}
+        colorTextSecondary={colorTextSecondary}
+        colorBorderSecondary={colorBorderSecondary}
+      />
+    )
+  }
+
+  /**
+   * 「继续执行」这类短指令：不是提问，渲染成低调的居中分隔行（否则就是一个独立气泡，
+   * 页面读起来是断的——用户 2026-09-19 反馈的原话见 ContinuationNote）。
+   */
+  if (isContinuationPrompt(message.content) && !editing) {
+    return (
+      <ContinuationNote
+        text={message.content.trim()}
+        colorTextSecondary={colorTextSecondary}
+        colorBorderSecondary={colorBorderSecondary}
+      />
+    )
+  }
+
+  /** 孤立提问的操作按钮：与助手消息操作栏同款（图标 + Tooltip，悬停加底色变深） */
+  const actionButton = (
+    kind: 'edit' | 'delete',
+    icon: React.ReactNode,
+    title: string,
+    onClick: () => void
+  ): React.ReactNode => {
+    const active = hovered === kind
+    return (
+      <Tooltip title={title}>
+        <button
+          type="button"
+          aria-label={title}
+          onClick={onClick}
+          onMouseEnter={() => setHovered(kind)}
+          onMouseLeave={() => setHovered(null)}
+          className="p-1 rounded-md transition-colors"
           style={{
             display: 'inline-flex',
             alignItems: 'center',
-            gap: 6,
-            padding: '4px 12px',
-            borderRadius: 12,
-            border: `1px dashed ${colorBorderSecondary}`,
-            color: colorTextSecondary,
-            fontSize: 12
+            background: active ? token.colorFillTertiary : 'transparent',
+            color: kind === 'delete' && active ? token.colorError : token.colorTextTertiary
           }}
         >
-          <RiFlag2Line size={13} />
-          <span>{t('harness.userMessage.goalRound', { round: goalRoundBlock.round ?? '?' })}</span>
-          <span style={{ opacity: 0.75 }}>—</span>
-          <span
-            style={{
-              maxWidth: 360,
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap'
-            }}
-          >
-            {goalObjective(message.content)}
-          </span>
-        </div>
-      </div>
+          {icon}
+        </button>
+      </Tooltip>
     )
   }
 
@@ -73,11 +161,41 @@ const UserMessage: React.FC<UserMessageProps> = ({
         <div
           style={{
             background: isDarkMode ? '#1a3a5c' : '#edf3fe',
-            color: colorText
+            color: colorText,
+            // 编辑中：加一圈主色描边，明确「正在改这条提问」
+            boxShadow: editing ? `0 0 0 1.5px ${token.colorPrimary}` : undefined
           }}
           className="px-5 py-3 rounded-2xl rounded-br-sm"
         >
-          <p className="whitespace-pre-wrap">{message.content}</p>
+          {editing ? (
+            /* 就地编辑：输入区就在气泡里（不用聊天输入框），回车即发送 */
+            <textarea
+              ref={textareaRef}
+              value={draft}
+              rows={1}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={handleEditorKeyDown}
+              className="whitespace-pre-wrap"
+              style={{
+                display: 'block',
+                width: '100%',
+                minWidth: 240,
+                margin: 0,
+                padding: 0,
+                border: 'none',
+                outline: 'none',
+                resize: 'none',
+                overflow: 'hidden',
+                background: 'transparent',
+                color: 'inherit',
+                font: 'inherit',
+                lineHeight: 'inherit',
+                caretColor: token.colorPrimary
+              }}
+            />
+          ) : (
+            <p className="whitespace-pre-wrap">{message.content}</p>
+          )}
         </div>
         {imageBlocks.length > 0 && (
           <Image.PreviewGroup items={imageBlocks.map((b) => b.image_url!)}>
@@ -106,6 +224,42 @@ const UserMessage: React.FC<UserMessageProps> = ({
             ))}
           </div>
         )}
+
+        {/* 孤立提问（没有回复）才有这行：状态说明 + 编辑 / 删除；编辑中就换成键盘约定提示 */}
+        {orphan ? (
+          <div
+            className="flex items-center justify-end gap-2 mt-1.5"
+            style={{ fontSize: 11.5, color: token.colorTextTertiary }}
+          >
+            {editing ? (
+              <span>{t('harness.userMessage.editHint')}</span>
+            ) : (
+              <>
+                <span>{t('harness.userMessage.noReply')}</span>
+                {actionButton(
+                  'edit',
+                  <RiPencilLine size={14} />,
+                  t('harness.userMessage.edit'),
+                  () => onEdit?.()
+                )}
+                {actionButton(
+                  'delete',
+                  <RiDeleteBin6Line size={14} />,
+                  t('harness.userMessage.deleteOrphan'),
+                  () =>
+                    modal.confirm({
+                      title: t('harness.userMessage.deleteOrphanTitle'),
+                      content: t('harness.userMessage.deleteOrphanContent'),
+                      okText: t('common.action.delete'),
+                      cancelText: t('common.action.cancel'),
+                      okButtonProps: { danger: true },
+                      onOk: () => onDelete?.()
+                    })
+                )}
+              </>
+            )}
+          </div>
+        ) : null}
       </div>
     </div>
   )

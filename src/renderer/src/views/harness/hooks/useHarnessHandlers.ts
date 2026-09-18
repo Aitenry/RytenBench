@@ -101,6 +101,14 @@ export interface UseHarnessHandlersReturn {
   handleSend: () => Promise<void>
   handleNewHarness: () => void
   handleDeleteMessagePair: (msgIndex: number) => Promise<void>
+  /** 进入**气泡内**编辑（孤立提问） */
+  handleStartEditMessage: (msgIndex: number) => void
+  /** 气泡内回车提交：就地替换该提问并重发（不新增用户气泡） */
+  handleSubmitEditMessage: (msgIndex: number, content: string) => Promise<void>
+  /** 取消气泡内编辑（Esc） */
+  handleCancelEditMessage: () => void
+  /** 正在气泡内编辑的提问 id（用于把它渲染成可编辑态） */
+  editingMessageId: string | null
   /** 分支：把当前话题里到 upToIndex 为止的消息复制到新话题，并把列表与视图都切过去 */
   handleBranchConversation: (upToIndex: number) => Promise<void>
   handleKeyDown: (e: React.KeyboardEvent<HTMLDivElement>) => void
@@ -166,6 +174,8 @@ export const useHarnessHandlers = (): UseHarnessHandlersReturn => {
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [loadingTopicIds, setLoadingTopicIds] = useState<Set<number>>(new Set())
+  /** 正在气泡内编辑的提问 id（气泡变成可编辑态用） */
+  const [editingOrphanId, setEditingOrphanId] = useState<string | null>(null)
 
   // ── 分页状态 ──
   const [topicsPage, setTopicsPage] = useState(0)
@@ -1108,6 +1118,8 @@ export const useHarnessHandlers = (): UseHarnessHandlersReturn => {
     setInputValue('')
     setAttachments([])
     setIsLoading(false)
+    // 切换/新建会话时放弃气泡内编辑状态（那条提问不属于新会话）
+    setEditingOrphanId(null)
   }, [saveSessionToCache])
 
   const handleSelectTopic = useCallback(
@@ -1116,6 +1128,9 @@ export const useHarnessHandlers = (): UseHarnessHandlersReturn => {
 
       // 保存当前话题状态到缓存
       saveSessionToCache()
+
+      // 切话题时放弃气泡内编辑状态：那条提问属于上一个话题
+      setEditingOrphanId(null)
 
       currentTopicIdRef.current = topic.id
       setCurrentTopicId(topic.id)
@@ -1308,6 +1323,150 @@ export const useHarnessHandlers = (): UseHarnessHandlersReturn => {
     }
   }, [])
 
+  // 用 ref 持有最新消息快照（修复：handleDeleteMessagePair 此前依赖 [messages],流式期间
+  // 每个 chunk 重建回调,作为 onDelete 传给全部消息组件击穿 React.memo → 每 chunk 全量重渲染历史消息）
+  const messagesSnapshotRef = useRef<Message[]>([])
+  messagesSnapshotRef.current = messages
+
+  /**
+   * 一轮问答的公共管线：乐观上屏 → 确保话题 → 加载态 → 流监听 → 会话缓存 → 发起流。
+   *
+   * @param userMessage   这一轮的用户消息（正常发送时新建；气泡内编辑时是**就地替换**的那条）
+   * @param attachments   本轮附件（图片 dataURL / 文档路径），用于传给主进程
+   * @param replaceIndex  气泡内编辑：替换消息列表里的第 index 条，**不新增用户气泡**
+   */
+  const startTurn = useCallback(
+    async (params: {
+      userMessage: Message
+      attachments: Attachment[]
+      replaceIndex?: number
+    }): Promise<void> => {
+      const { userMessage, attachments: turnAttachments, replaceIndex } = params
+      const currentImages = turnAttachments.filter((a) => a.isImage).map((a) => a.dataUrl)
+      const currentDocuments = turnAttachments
+        .filter((a) => !a.isImage)
+        .map((a) => ({ fileName: a.fileName, filePath: a.dataUrl }))
+
+      const aiMessageId = `${Date.now()}_${currentTopicIdRef.current ?? 'new'}_${Math.random().toString(36).slice(2, 8)}`
+      const initialAiMessage: Message = {
+        id: aiMessageId,
+        role: 'assistant',
+        content: '',
+        blocks: [],
+        timestamp: Date.now(),
+        toolCalls: [],
+        loading: true
+      }
+
+      // 乐观上屏：编辑时原地替换（沿用同一个 id → 同一个气泡，不会多出一条），正常发送时追加
+      setMessages((prev) => [
+        ...(replaceIndex != null
+          ? prev.map((m, i) => (i === replaceIndex ? userMessage : m))
+          : [...prev, userMessage]),
+        initialAiMessage
+      ])
+
+      try {
+        // 如果还没有 topic，先创建（让话题立即出现在侧边栏）
+        let topicId = currentTopicIdRef.current
+        if (!topicId) {
+          const title = userMessage.content.slice(0, 50)
+          const workspaceId = await getActiveWorkspaceId()
+          topicId = await (window as unknown as Window).api.harness.createTopic(workspaceId, title)
+          currentTopicIdRef.current = topicId
+          setCurrentTopicId(topicId)
+          refreshTopics().then()
+        }
+
+        // 记录本轮输入到全局输入历史（输入框 ↑/↓ 键切换用，localStorage 持久化，上限 100 条）
+        const sentText = userMessage.content
+        const inputHistory = inputHistoryRef.current
+        if (inputHistory[inputHistory.length - 1] !== sentText) {
+          inputHistory.push(sentText)
+          if (inputHistory.length > INPUT_HISTORY_MAX) {
+            inputHistory.splice(0, inputHistory.length - INPUT_HISTORY_MAX)
+          }
+          try {
+            localStorage.setItem(INPUT_HISTORY_STORAGE_KEY, JSON.stringify(inputHistory))
+          } catch {
+            // 存储失败不影响发送流程
+          }
+        }
+
+        currentSessionIdRef.current = aiMessageId
+
+        // 标记加载状态
+        isLoadingMapRef.current.set(topicId, true)
+        syncLoadingTopics()
+        setIsLoading(true)
+
+        // 启动流监听（独立于当前对话窗口，持续更新缓存）
+        startStreamListener(topicId, aiMessageId)
+
+        // 缓存当前会话——使用 messagesBelongToTopicRef 防止跨话题污染：
+        // 如果 handleSelectTopic 的异步 DB 加载尚未完成，messages 仍属于旧话题，
+        // 此时应丢弃旧消息，从新对话开始（否则会把 A 的历史混入 B 的会话缓存）
+        const sameTopic = messagesBelongToTopicRef.current === topicId
+        const base = sameTopic ? messages : ([] as Message[])
+        const withUser =
+          replaceIndex != null
+            ? base.map((m, i) => (i === replaceIndex ? userMessage : m))
+            : [...base, userMessage]
+        const currentMessages: Message[] = [...withUser, initialAiMessage]
+        sessionsRef.current.set(topicId, {
+          messages: currentMessages,
+          inputValue: '',
+          attachments: [],
+          sessionId: aiMessageId
+        })
+        messagesBelongToTopicRef.current = topicId
+
+        // 同步 React 状态
+        setMessages(currentMessages)
+
+        ;(window as unknown as Window).api.harness.startMessageStream(userMessage.content, {
+          images: currentImages.length > 0 ? currentImages : undefined,
+          documents: currentDocuments.length > 0 ? currentDocuments : undefined,
+          topicId,
+          providerId: selectedProviderId ?? undefined,
+          // 编辑重发：让主进程改写这条已存在的用户消息行，而不是插入新行
+          // （否则库里会多出一条同内容提问，历史顺序也被挪到末尾）
+          reuseUserDialogueId:
+            replaceIndex != null ? (resolveDialogueId(userMessage) ?? undefined) : undefined
+        })
+      } catch (error) {
+        console.error('Error sending message:', error)
+        const errorMessage: Message = {
+          id: aiMessageId,
+          role: 'assistant',
+          content: t('harness.handlers.sendFailed'),
+          blocks: [],
+          timestamp: Date.now(),
+          loading: false
+        }
+        setMessages((prev) => prev.map((msg) => (msg.id === aiMessageId ? errorMessage : msg)))
+
+        // 清理加载状态
+        const topicId = currentTopicIdRef.current
+        if (topicId != null) {
+          isLoadingMapRef.current.delete(topicId)
+          syncLoadingTopics()
+          setIsLoading(false)
+        }
+      }
+    },
+    [
+      messages,
+      selectedProviderId,
+      startStreamListener,
+      syncLoadingTopics,
+      getActiveWorkspaceId,
+      refreshTopics,
+      t
+    ]
+  )
+
+  /** 输入框发送：新增一条用户气泡 */
   const handleSend = useCallback(async (): Promise<void> => {
     if (!inputValue.trim()) return
 
@@ -1316,11 +1475,6 @@ export const useHarnessHandlers = (): UseHarnessHandlersReturn => {
 
     const currentAttachments = [...attachments]
     setAttachments([])
-
-    const currentImages = currentAttachments.filter((a) => a.isImage).map((a) => a.dataUrl)
-    const currentDocuments = currentAttachments
-      .filter((a) => !a.isImage)
-      .map((a) => ({ fileName: a.fileName, filePath: a.dataUrl }))
 
     const userMessage: Message = {
       id: Date.now().toString(),
@@ -1334,118 +1488,41 @@ export const useHarnessHandlers = (): UseHarnessHandlersReturn => {
       timestamp: Date.now()
     }
 
-    setMessages((prev) => [...prev, userMessage])
-    setInputValue('')
+    await startTurn({ userMessage, attachments: currentAttachments })
+  }, [inputValue, attachments, startTurn])
 
-    const aiMessageId = `${Date.now()}_${currentTopicIdRef.current ?? 'new'}_${Math.random().toString(36).slice(2, 8)}`
+  /** 进入**气泡内**编辑（内容不出气泡，聊天输入框不参与） */
+  const handleStartEditMessage = useCallback((msgIndex: number): void => {
+    const current = messagesSnapshotRef.current[msgIndex]
+    if (!current || current.role !== 'user') return
+    setEditingOrphanId(current.id)
+  }, [])
 
-    const initialAiMessage: Message = {
-      id: aiMessageId,
-      role: 'assistant',
-      content: '',
-      blocks: [],
-      timestamp: Date.now(),
-      toolCalls: [],
-      loading: true
-    }
+  /** 取消气泡内编辑（Esc） */
+  const handleCancelEditMessage = useCallback((): void => {
+    setEditingOrphanId(null)
+  }, [])
 
-    setMessages((prev) => [...prev, initialAiMessage])
-
-    try {
-      // 如果还没有 topic，先创建（让话题立即出现在侧边栏）
-      let topicId = currentTopicIdRef.current
-      if (!topicId) {
-        const title = userMessage.content.slice(0, 50)
-        const workspaceId = await getActiveWorkspaceId()
-        topicId = await (window as unknown as Window).api.harness.createTopic(workspaceId, title)
-        currentTopicIdRef.current = topicId
-        setCurrentTopicId(topicId)
-        refreshTopics().then()
-      }
-
-      // 记录本轮输入到全局输入历史（输入框 ↑/↓ 键切换用，localStorage 持久化，上限 100 条）
-      const sentText = inputValue.trim()
-      const inputHistory = inputHistoryRef.current
-      if (inputHistory[inputHistory.length - 1] !== sentText) {
-        inputHistory.push(sentText)
-        if (inputHistory.length > INPUT_HISTORY_MAX) {
-          inputHistory.splice(0, inputHistory.length - INPUT_HISTORY_MAX)
-        }
-        try {
-          localStorage.setItem(INPUT_HISTORY_STORAGE_KEY, JSON.stringify(inputHistory))
-        } catch {
-          // 存储失败不影响发送流程
-        }
-      }
-
-      currentSessionIdRef.current = aiMessageId
-
-      // 标记加载状态
-      isLoadingMapRef.current.set(topicId, true)
-      syncLoadingTopics()
-      setIsLoading(true)
-
-      // 启动流监听（独立于当前对话窗口，持续更新缓存）
-      startStreamListener(topicId, aiMessageId)
-
-      // 缓存当前会话——使用 messagesBelongToTopicRef 防止跨话题污染：
-      // 如果 handleSelectTopic 的异步 DB 加载尚未完成，messages 仍属于旧话题，
-      // 此时应丢弃旧消息，从新对话开始（否则会把 A 的历史混入 B 的会话缓存）
-      const sameTopic = messagesBelongToTopicRef.current === topicId
-      const baseMessages = sameTopic ? messages : ([] as Message[])
-      const currentMessages: Message[] = [...baseMessages, userMessage, initialAiMessage]
-      sessionsRef.current.set(topicId, {
-        messages: currentMessages,
-        inputValue: '',
+  /**
+   * 气泡内回车提交：内容**就地替换**这条提问（不新增用户气泡），随后按普通一轮发起请求；
+   * 库里用 UPDATE 改写同一行（reuseUserDialogueId），行 id 与历史顺序都不变。
+   */
+  const handleSubmitEditMessage = useCallback(
+    async (msgIndex: number, content: string): Promise<void> => {
+      const current = messagesSnapshotRef.current[msgIndex]
+      if (!current || current.role !== 'user') return
+      const text = content.trim()
+      if (!text) return
+      setEditingOrphanId(null)
+      window.dispatchEvent(new CustomEvent('harness-send-started'))
+      await startTurn({
+        userMessage: { ...current, content: text },
         attachments: [],
-        sessionId: aiMessageId
+        replaceIndex: msgIndex
       })
-      messagesBelongToTopicRef.current = topicId
-
-      // 同步 React 状态
-      setMessages(currentMessages)
-
-      ;(window as unknown as Window).api.harness.startMessageStream(userMessage.content, {
-        images: currentImages.length > 0 ? currentImages : undefined,
-        documents: currentDocuments.length > 0 ? currentDocuments : undefined,
-        topicId,
-        providerId: selectedProviderId ?? undefined
-      })
-    } catch (error) {
-      console.error('Error sending message:', error)
-      const errorMessage: Message = {
-        id: aiMessageId,
-        role: 'assistant',
-        content: t('harness.handlers.sendFailed'),
-        blocks: [],
-        timestamp: Date.now(),
-        loading: false
-      }
-      setMessages((prev) => prev.map((msg) => (msg.id === aiMessageId ? errorMessage : msg)))
-
-      // 清理加载状态
-      const topicId = currentTopicIdRef.current
-      if (topicId != null) {
-        isLoadingMapRef.current.delete(topicId)
-        syncLoadingTopics()
-        setIsLoading(false)
-      }
-    }
-  }, [
-    messages,
-    inputValue,
-    attachments,
-    selectedProviderId,
-    startStreamListener,
-    syncLoadingTopics,
-    t
-  ])
-
-  // 用 ref 持有最新消息快照（修复：handleDeleteMessagePair 此前依赖 [messages],流式期间
-  // 每个 chunk 重建回调,作为 onDelete 传给全部消息组件击穿 React.memo → 每 chunk 全量重渲染历史消息）
-  const messagesSnapshotRef = useRef<Message[]>([])
-  messagesSnapshotRef.current = messages
-
+    },
+    [startTurn]
+  )
   const handleDeleteMessagePair = useCallback(
     async (msgIndex: number): Promise<void> => {
       const msgs = [...messagesSnapshotRef.current]
@@ -1502,6 +1579,7 @@ export const useHarnessHandlers = (): UseHarnessHandlersReturn => {
     [syncLoadingTopics]
   )
 
+  /** 聊天输入框的 Enter 发送（气泡内编辑的 Enter 由 UserMessage 自己处理） */
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLDivElement>): void => {
       if (e.key === 'Enter' && !e.shiftKey) {
@@ -1596,6 +1674,10 @@ export const useHarnessHandlers = (): UseHarnessHandlersReturn => {
     handleSend,
     handleNewHarness,
     handleDeleteMessagePair,
+    handleStartEditMessage,
+    handleSubmitEditMessage,
+    handleCancelEditMessage,
+    editingMessageId: editingOrphanId,
     handleBranchConversation,
     handleKeyDown,
     handleStop,
