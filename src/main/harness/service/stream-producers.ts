@@ -1,6 +1,9 @@
 import logger from 'electron-log'
 import { StructuredMessage, ToolCard } from '../types'
 import type { RuntimeStream, MessageRecord, ToolCallRecord, SubAgentRecord } from '../runtime/types'
+import { takeToolFacts } from '../runtime/tool-result-facts'
+import { getToolOutputStore } from '../runtime/tool-output-store'
+import { buildToolProjection, projectToolInput, PROJECTED_TOOLS } from './tool-presentation'
 
 /**
  * 流式生产者 — 消费 LangChain 运行时的三路记录流，转换为前端协议 StructuredMessage。
@@ -9,6 +12,11 @@ import type { RuntimeStream, MessageRecord, ToolCallRecord, SubAgentRecord } fro
  * - 消息生产者：推理/文本增量去重（兼容 delta 与整段两种形态）+ 工具 preparing 节流；
  * - 工具生产者：executing → completed + 定制卡片；task 工具转换为子代理 started/completed；
  * - 子代理生产者：按 (name, causeId) 分组，逐记录转发 running 事件，结束时发 early completed。
+ *
+ * 结果投影（2026-09-19）：内置文件/命令工具的结果**不再原样下发**——入参裁到卡片所需
+ * （write_file 的整份正文、edit_file 的 old/new 串一律丢弃），输出置空，只留一张卡片；
+ * 需要看内容时由渲染进程按 callId 取详情（ls/glob/grep/execute 另存于 tool-output-store）。
+ * 详见 service/tool-presentation.ts。
  */
 
 type EnqueueFn = (item: StructuredMessage) => void
@@ -52,81 +60,64 @@ function createSilenceWatchdog(tag: string): { reset: () => void; dispose: () =>
 }
 
 // ============================================================================
-// 定制化工具卡片生成
+// 工具结果投影：完成态的下发/落库口径
 // ============================================================================
 
-/** 从工具名称、输入和输出中提取定制化卡片数据 */
-function buildToolCard(
+/** 完成态工具块（已投影：入参裁剪、输出置空、附带卡片） */
+interface ProjectedToolCall {
+  name: string
+  input: Record<string, unknown>
+  output: string
+  status: 'completed'
+  id: string
+  card?: ToolCard
+}
+
+/**
+ * 收敛一次工具调用的完成态：读取原始输出 → 投影 → 另存详情。
+ *
+ * 三者必须一起做：详情必须在输出被丢弃**之前**写入 store，卡片里的 detail 标记才成立。
+ */
+async function finishToolCall(
+  topicId: number | undefined,
   name: string,
   input: Record<string, unknown>,
-  output: string
-): ToolCard | undefined {
-  switch (name) {
-    case 'read_file':
-    case 'write_file':
-    case 'edit_file': {
-      const filePath = typeof input.file_path === 'string' ? input.file_path : undefined
-      if (!filePath) return undefined
-      return { path: filePath }
-    }
-    case 'ls': {
-      const dirPath = typeof input.path === 'string' ? input.path : '/'
-      let count: number | undefined
-      try {
-        const parsed = JSON.parse(output)
-        if (Array.isArray(parsed.files)) {
-          count = parsed.files.length
-        } else if (parsed.files === undefined && parsed.error) {
-          // 失败时不显示计数
-        }
-      } catch {
-        // 非 JSON 输出（字符串列表），按行估算
-        const trimmed = output.trim()
-        if (trimmed) {
-          count = trimmed.split('\n').length
-        }
-      }
-      return { path: dirPath, count }
-    }
-    case 'glob': {
-      const pattern = typeof input.pattern === 'string' ? input.pattern : undefined
-      let count: number | undefined
-      try {
-        const parsed = JSON.parse(output)
-        if (Array.isArray(parsed.files)) {
-          count = parsed.files.length
-        }
-      } catch {
-        const trimmed = output.trim()
-        if (trimmed) {
-          count = trimmed.split('\n').length
-        }
-      }
-      return { pattern, count }
-    }
-    case 'grep': {
-      const pattern = typeof input.pattern === 'string' ? input.pattern : undefined
-      let count: number | undefined
-      try {
-        const parsed = JSON.parse(output)
-        if (Array.isArray(parsed.matches)) {
-          count = parsed.matches.length
-        }
-      } catch {
-        const trimmed = output.trim()
-        if (trimmed) {
-          count = trimmed.split('\n').length
-        }
-      }
-      return { pattern, count }
-    }
-    case 'execute': {
-      const command = typeof input.command === 'string' ? input.command : undefined
-      return command ? { command } : undefined
-    }
-    default:
-      return undefined
+  callId: string,
+  safeGetOutput: SafeGetOutputFn,
+  call: { output: unknown }
+): Promise<ProjectedToolCall> {
+  const raw = await safeGetOutput(call)
+  const output = typeof raw === 'string' ? raw : JSON.stringify(raw)
+  if (!PROJECTED_TOOLS.has(name)) {
+    // 非内置工具（mnemon_* / manage_* 等）：保持原样，前端要解析 JSON 渲染专属卡片
+    return { name, input, output, status: 'completed', id: callId }
   }
+  const projected = buildToolProjection({
+    name,
+    input,
+    output,
+    facts: takeToolFacts(callId)
+  })
+  let savedDetail = false
+  if (projected.detailText && topicId) {
+    savedDetail = getToolOutputStore()?.save(topicId, callId, projected.detailText) ?? false
+  }
+  // 详情没落盘就别在卡片上留「可点开」的暗示：否则点开只有一句「详情不可用」
+  const card =
+    projected.card?.detail && !savedDetail ? { ...projected.card, detail: false } : projected.card
+  return {
+    name,
+    input: projected.input,
+    output: projected.output,
+    status: 'completed',
+    id: callId,
+    card
+  }
+}
+
+/** 执行态工具块的入参：内置工具同样裁到卡片所需（write_file 的正文不进 IPC） */
+function executingToolInput(name: string, input: Record<string, unknown>): Record<string, unknown> {
+  return PROJECTED_TOOLS.has(name) ? projectToolInput(name, input) : input
 }
 
 // ============================================================================
@@ -263,7 +254,9 @@ export async function produceToolCalls(
   safeGetOutput: SafeGetOutputFn,
   /** 与 produceMessages 共享的标志：本工具开始执行即置 true（模型消息已结束，
    *  参数已生成完，消息生产者据此停止「参数构建中」保活） */
-  toolsStarted?: { value: boolean }
+  toolsStarted?: { value: boolean },
+  /** 当前话题 id：结果详情按话题分目录存放（话题删除时一并清理） */
+  topicId?: number
 ): Promise<void> {
   try {
     for await (const call of run.toolCalls as AsyncIterable<ToolCallRecord>) {
@@ -314,11 +307,11 @@ export async function produceToolCalls(
         })
         continue
       }
-      // 先发"执行中"状态
+      // 先发"执行中"状态（入参已按工具裁剪：write_file 的整份正文不进 IPC）
       enqueue({
         tool: {
           name: call.name,
-          input,
+          input: executingToolInput(call.name, input),
           output: '',
           status: 'executing',
           id: call.callId
@@ -327,18 +320,9 @@ export async function produceToolCalls(
       // 延迟 100ms 确保渲染进程有时间渲染 loading 状态
       await sleep(100)
       if (signal?.aborted) break
-      const raw = await safeGetOutput(call)
-      const output = typeof raw === 'string' ? raw : JSON.stringify(raw)
-      // 再发"已完成"状态
+      // 再发"已完成"状态（结果投影 + 详情另存）
       enqueue({
-        tool: {
-          name: call.name,
-          input,
-          output,
-          status: 'completed',
-          id: call.callId,
-          card: buildToolCard(call.name, input, output)
-        }
+        tool: await finishToolCall(topicId, call.name, input, call.callId, safeGetOutput, call)
       })
     }
   } catch (err) {
@@ -372,7 +356,9 @@ export async function produceSubAgents(
   signal: AbortSignal | undefined,
   enqueue: EnqueueFn,
   markDone: MarkDoneFn,
-  safeGetOutput: SafeGetOutputFn
+  safeGetOutput: SafeGetOutputFn,
+  /** 当前话题 id：子代理调用内置工具时，结果详情同样按话题存放 */
+  topicId?: number
 ): Promise<void> {
   const groups = new Map<string, SubAgentGroupState>()
   const silenceWatchdog = createSilenceWatchdog('子代理流')
@@ -462,7 +448,7 @@ export async function produceSubAgents(
             status: 'running',
             tool: {
               name: call.name,
-              input,
+              input: executingToolInput(call.name, input),
               output: '',
               status: 'executing',
               id: call.callId
@@ -471,21 +457,12 @@ export async function produceSubAgents(
         })
         await sleep(100)
         if (signal?.aborted) break
-        const raw = await safeGetOutput(call)
-        const output = typeof raw === 'string' ? raw : JSON.stringify(raw)
         enqueue({
           subAgent: {
             name: rec.name,
             causeId: rec.causeId,
             status: 'running',
-            tool: {
-              name: call.name,
-              input,
-              output,
-              status: 'completed',
-              id: call.callId,
-              card: buildToolCard(call.name, input, output)
-            }
+            tool: await finishToolCall(topicId, call.name, input, call.callId, safeGetOutput, call)
           }
         })
       } else if (rec.kind === 'sub_end') {

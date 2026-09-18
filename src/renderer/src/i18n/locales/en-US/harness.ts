@@ -104,6 +104,8 @@ export const enUSHarness: typeof zhCNHarness = {
     toolExecuting: 'Running…',
     thinkingInProgress: 'Thinking…',
     thinkingDone: 'Thinking process',
+    foldExpand: 'Show all',
+    foldCollapse: 'Collapse',
     retrying: 'Retrying (attempt {{attempt}}/{{retries}})…',
     compacting: 'Compacting earlier conversation…',
     compacted: 'Earlier conversation compacted',
@@ -134,6 +136,22 @@ export const enUSHarness: typeof zhCNHarness = {
     todoInProgress: '· <mono>{{count}}</mono> in progress',
     todoEmpty: 'No to-dos yet. Ask the model to plan tasks with write_todos',
     todoFallback: 'To-do {{index}}',
+    toolOpenFile: 'Open file',
+    toolRevealDir: 'Reveal in explorer',
+    toolViewDetail: 'View result details',
+    toolFailed: 'Failed',
+    toolTruncated: ' · truncated',
+    toolLines: '{{count}} lines',
+    toolLines_one: '{{count}} line',
+    toolLines_other: '{{count}} lines',
+    toolLineRange: '{{start}}-{{end}} of {{total}} lines',
+    toolFileCount: '{{count}} files',
+    toolFileCount_one: '{{count}} file',
+    toolFileCount_other: '{{count}} files',
+    toolExitCode: 'exit {{code}}',
+    toolReplacements: '<mono>{{count}}</mono> replacements',
+    toolReplacements_one: '<mono>{{count}}</mono> replacement',
+    toolReplacements_other: '<mono>{{count}}</mono> replacements',
     itemCount: '<mono>{{count}}</mono> items',
     itemCount_one: '<mono>{{count}}</mono> item',
     itemCount_other: '<mono>{{count}}</mono> items',
@@ -235,7 +253,15 @@ export const enUSHarness: typeof zhCNHarness = {
     inProgress: '· {{count}} in progress'
   },
   userMessage: {
-    goalRound: 'Goal auto-continuation · round {{round}}'
+    goalRound: 'Goal auto-continuation · round {{round}}',
+    goalPrev: 'Previous round',
+    goalNext: 'Next round',
+    noReply: 'No reply',
+    edit: 'Edit this prompt (in place, Enter to resend)',
+    editHint: 'Enter to send · Shift+Enter for newline · Esc to cancel',
+    deleteOrphan: 'Delete this prompt',
+    deleteOrphanTitle: 'Delete this prompt?',
+    deleteOrphanContent: 'This prompt has no reply yet. Deleting it cannot be undone.'
   },
   askQuestion: {
     title: 'Your confirmation is needed',
@@ -271,10 +297,20 @@ export const enUSHarness: typeof zhCNHarness = {
     title: 'Resource editor',
     refresh: 'Refresh',
     loading: 'Loading...',
-    empty: 'Empty folder'
+    empty: 'Empty folder',
+    openFailed: 'Failed to open the file',
+    saveFailed: 'Failed to save the file'
   },
   fileEditor: {
     loading: 'Loading editor...'
+  },
+  toolDetail: {
+    unavailable: 'Result details unavailable (may have been cleaned up with the topic)',
+    emptyOutput: '(no output)',
+    emptyResult: '(no results)',
+    exitCode: 'exit {{code}}',
+    outputFooter:
+      'Full command output; anything beyond the output limit was truncated when produced.'
   },
   helpers: {
     toolPreparing: '{{name}} · Building arguments…',

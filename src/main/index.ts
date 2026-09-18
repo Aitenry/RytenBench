@@ -1,8 +1,10 @@
 import { app, BrowserWindow, ipcMain, crashReporter } from 'electron'
+import { join } from 'path'
 import { electronApp, optimizer } from '@electron-toolkit/utils'
 import logger from 'electron-log'
 import { registerAllIpc } from './ipc'
 import { registerLifecycleHooks } from './lifecycle'
+import { configureToolOutputStore } from './harness/runtime/tool-output-store'
 import { createLoadingWindow } from './windows/loading-window'
 import { createMainWindow } from './windows/main-window'
 import { registerMermaidPreviewIpc } from './windows/mermaid-preview'
@@ -43,6 +45,10 @@ app
   .whenReady()
   .then(async () => {
     electronApp.setAppUserModelId('com.ryten.bench')
+
+    // 工具结果详情存储目录（内置工具的结果不再随流下发/落库，点开卡片时按需读取）：
+    // 放 userData 而不是工作区——工作区挂载为虚拟 '/'，写进去会污染用户项目
+    configureToolOutputStore(join(app.getPath('userData'), 'tool-output'))
 
     app.on('browser-window-created', (_, window) => {
       optimizer.watchWindowShortcuts(window)

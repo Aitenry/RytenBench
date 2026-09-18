@@ -6,6 +6,14 @@ import { exec } from 'child_process'
 import logger from 'electron-log'
 import { mainFormat, mainPlural } from '../../i18n'
 import { getFsToolTexts } from '../../i18n/tool-results-fs'
+import { recordToolFacts } from './tool-result-facts'
+import {
+  MAX_EXEC_CHARS,
+  MAX_FILE_CHARS,
+  MAX_FILE_READ_CHARS,
+  MAX_OUTPUT_CHARS,
+  MAX_SCAN_ENTRIES
+} from './tool-limits'
 
 /**
  * 虚拟文件系统工具集 — 替代 deepagents FilesystemBackend / SafeFilesystemBackend
@@ -18,25 +26,24 @@ import { getFsToolTexts } from '../../i18n/tool-results-fs'
  * - 工具按次构建、无共享状态（隔离）；
  * - 虚拟路径越界直接拒绝（能力衰减）；
  * - grep/glob 捕获 EPERM（延续原 SafeFilesystemBackend 逻辑）。
+ *
+ * 输出边界（MAX_FILE_CHARS / MAX_EXEC_CHARS 等）统一放在 tool-limits.ts：
+ * 前端投影（service/tool-presentation.ts）要按同一批常量判断结果是否被截断。
  */
 
 /** EPERM / EACCES - 无权限访问的错误码 */
 const ACCESS_DENIED_CODES = new Set(['EPERM', 'EACCES'])
 
-/** 单文件读取/搜索结果上限 */
-const MAX_FILE_CHARS = 20_000
-/** read_file 内存保护上限（超大文件截断到 2M 字符，防止把整个文件读进内存/上下文） */
-const MAX_FILE_READ_CHARS = 2_000_000
-/** 命令输出上限 */
-const MAX_EXEC_CHARS = 8_000
-/** 递归搜索条目上限 */
-const MAX_SCAN_ENTRIES = 2_000
 /**
- * 工具输出硬上限（内存保护；正常业务输出远达不到）。
- * 12K~500K 区间的超长输出由溢出策略（spill.ts）保存全文并返回预览，
- * 因此这里不再提前截断到 20K——否则溢出保存的是截断后的内容，失去意义。
+ * 从工具运行配置里取本次调用的 toolCallId（agent.ts 注入 `configurable.toolCallId`）。
+ * 供工具把结构化事实（行数/字节/替换处数/失败原因）登记给前端卡片用——
+ * 工具的返回值是**给模型的文本**，里面没有可靠的结构化信号。
  */
-const MAX_OUTPUT_CHARS = 500_000
+function callIdOf(config: unknown): string | undefined {
+  const cfg = config as { configurable?: Record<string, unknown> } | undefined
+  const id = cfg?.configurable?.toolCallId
+  return typeof id === 'string' ? id : undefined
+}
 
 interface FsMount {
   /** 虚拟前缀，如 '/' 或 '/memories/' */
@@ -50,6 +57,18 @@ export interface FsBackendOptions {
   workspacePath?: string
   /** 记忆目录（挂载为虚拟 '/memories/'） */
   memoryPath?: string
+}
+
+/** 由选项构建挂载表（IPC 层读取虚拟路径文件时复用同一套映射） */
+export function buildFsMounts(options: FsBackendOptions): FsMount[] {
+  const mounts: FsMount[] = []
+  if (options.workspacePath) {
+    mounts.push({ prefix: '/', root: options.workspacePath })
+  }
+  if (options.memoryPath) {
+    mounts.push({ prefix: '/memories/', root: options.memoryPath })
+  }
+  return mounts
 }
 
 /** 解析虚拟路径 → 真实路径；越界或未挂载返回错误 */
@@ -146,13 +165,7 @@ function walkDir(root: string, relDir: string, out: string[], cap = MAX_SCAN_ENT
  * 构建文件系统工具集。无任何挂载时返回空数组（组件不激活，对应论文「依赖缺失 = 不激活」）。
  */
 export function buildFsTools(options: FsBackendOptions): StructuredToolInterface[] {
-  const mounts: FsMount[] = []
-  if (options.workspacePath) {
-    mounts.push({ prefix: '/', root: options.workspacePath })
-  }
-  if (options.memoryPath) {
-    mounts.push({ prefix: '/memories/', root: options.memoryPath })
-  }
+  const mounts: FsMount[] = buildFsMounts(options)
   if (mounts.length === 0) return []
 
   const tr = getFsToolTexts()
@@ -161,12 +174,20 @@ export function buildFsTools(options: FsBackendOptions): StructuredToolInterface
 
   const tools: StructuredToolInterface[] = [
     tool(
-      async ({ file_path, offset, limit }) => {
+      async ({ file_path, offset, limit }, config) => {
+        const callId = callIdOf(config)
         const resolved = resolve(file_path)
-        if ('error' in resolved) return resolved.error
+        if ('error' in resolved) {
+          recordToolFacts(callId, { error: resolved.error })
+          return resolved.error
+        }
         try {
           const stat = fs.statSync(resolved.realPath)
-          if (!stat.isFile()) return mainFormat(tr.read.notFile, { path: file_path })
+          if (!stat.isFile()) {
+            const notFile = mainFormat(tr.read.notFile, { path: file_path })
+            recordToolFacts(callId, { error: notFile })
+            return notFile
+          }
           let content = fs.readFileSync(resolved.realPath, 'utf-8')
           // 内存保护：超过 2M 字符的文件只保留前 2M 字符
           const oversized = content.length > MAX_FILE_READ_CHARS
@@ -184,6 +205,12 @@ export function buildFsTools(options: FsBackendOptions): StructuredToolInterface
               oversized ? tr.read.lineRangeOversized : tr.read.lineRange,
               { start: startLine, end: shownEnd, total: lines.length }
             )
+            // 结构化事实：卡片展示「文件共 N 行 · 本次读 start-end」
+            recordToolFacts(callId, {
+              lines: lines.length,
+              truncated: oversized,
+              range: { start: startLine, end: shownEnd, total: lines.length }
+            })
             return lineNote + sliced.join('\n')
           }
           // 内联读取上限：超出部分不进入模型上下文（read 工具自有边界，不走溢出策略，
@@ -192,11 +219,21 @@ export function buildFsTools(options: FsBackendOptions): StructuredToolInterface
             const note = mainFormat(tr.read.truncated, {
               total: content.length.toLocaleString()
             })
+            recordToolFacts(callId, {
+              lines: content.split('\n').length,
+              truncated: true
+            })
             return `${content.slice(0, MAX_FILE_CHARS)}\n...${note}`
           }
+          recordToolFacts(callId, {
+            lines: content.split('\n').length,
+            truncated: oversized
+          })
           return content
         } catch (err) {
-          return mainFormat(tr.read.failed, { message: (err as Error).message })
+          const failed = mainFormat(tr.read.failed, { message: (err as Error).message })
+          recordToolFacts(callId, { error: failed })
+          return failed
         }
       },
       {
@@ -224,19 +261,24 @@ export function buildFsTools(options: FsBackendOptions): StructuredToolInterface
     ),
 
     tool(
-      async ({ file_path, content }) => {
+      async ({ file_path, content }, config) => {
+        const callId = callIdOf(config)
         const resolved = resolve(file_path)
-        if ('error' in resolved) return resolved.error
+        if ('error' in resolved) {
+          recordToolFacts(callId, { error: resolved.error })
+          return resolved.error
+        }
         try {
           // 异步写（修复：同步写阻塞主进程事件循环）
           await fs.promises.mkdir(path.dirname(resolved.realPath), { recursive: true })
           await fs.promises.writeFile(resolved.realPath, content, 'utf-8')
-          return mainFormat(tr.write.written, {
-            path: file_path,
-            bytes: Buffer.byteLength(content, 'utf-8')
-          })
+          const bytes = Buffer.byteLength(content, 'utf-8')
+          recordToolFacts(callId, { bytes })
+          return mainFormat(tr.write.written, { path: file_path, bytes })
         } catch (err) {
-          return mainFormat(tr.write.failed, { message: (err as Error).message })
+          const failed = mainFormat(tr.write.failed, { message: (err as Error).message })
+          recordToolFacts(callId, { error: failed })
+          return failed
         }
       },
       {
@@ -251,14 +293,19 @@ export function buildFsTools(options: FsBackendOptions): StructuredToolInterface
     ),
 
     tool(
-      async ({ file_path, old_string, new_string, replace_all }) => {
+      async ({ file_path, old_string, new_string, replace_all }, config) => {
+        const callId = callIdOf(config)
         // 空 old_string 会使下方的非重叠计数循环永不终止（indexOf('', idx) 恒等于 idx，
         // idx = found + 0 永不前进）——同步死循环直接卡死主进程事件循环，入口必须显式拒绝
         if (!old_string) {
+          recordToolFacts(callId, { error: tr.edit.emptyOldString })
           return tr.edit.emptyOldString
         }
         const resolved = resolve(file_path)
-        if ('error' in resolved) return resolved.error
+        if ('error' in resolved) {
+          recordToolFacts(callId, { error: resolved.error })
+          return resolved.error
+        }
         try {
           const current = fs.readFileSync(resolved.realPath, 'utf-8')
           // 非重叠计数
@@ -271,20 +318,26 @@ export function buildFsTools(options: FsBackendOptions): StructuredToolInterface
             idx = found + old_string.length
           }
           if (count === 0) {
+            recordToolFacts(callId, { error: tr.edit.noMatch })
             return tr.edit.noMatch
           }
           if (count > 1 && !replace_all) {
-            return mainPlural(tr.edit.occurrences_one, tr.edit.occurrences_other, count)
+            const multiple = mainPlural(tr.edit.occurrences_one, tr.edit.occurrences_other, count)
+            recordToolFacts(callId, { error: multiple })
+            return multiple
           }
           const updated = replace_all
             ? current.split(old_string).join(new_string)
             : current.replace(old_string, new_string)
           fs.writeFileSync(resolved.realPath, updated, 'utf-8')
+          recordToolFacts(callId, { replacements: count })
           return mainFormat(mainPlural(tr.edit.updated_one, tr.edit.updated_other, count), {
             path: file_path
           })
         } catch (err) {
-          return mainFormat(tr.edit.failed, { message: (err as Error).message })
+          const failed = mainFormat(tr.edit.failed, { message: (err as Error).message })
+          recordToolFacts(callId, { error: failed })
+          return failed
         }
       },
       {
@@ -311,9 +364,13 @@ export function buildFsTools(options: FsBackendOptions): StructuredToolInterface
     ),
 
     tool(
-      async ({ path: dirPath }) => {
+      async ({ path: dirPath }, config) => {
+        const callId = callIdOf(config)
         const resolved = resolve(dirPath ?? '/')
-        if ('error' in resolved) return resolved.error
+        if ('error' in resolved) {
+          recordToolFacts(callId, { error: resolved.error })
+          return resolved.error
+        }
         try {
           const entries = fs.readdirSync(resolved.realPath, { withFileTypes: true })
           const files: string[] = []
@@ -324,7 +381,9 @@ export function buildFsTools(options: FsBackendOptions): StructuredToolInterface
           }
           return JSON.stringify({ path: dirPath ?? '/', files, dirs })
         } catch (err) {
-          return mainFormat(tr.ls.failed, { message: (err as Error).message })
+          const failed = mainFormat(tr.ls.failed, { message: (err as Error).message })
+          recordToolFacts(callId, { error: failed })
+          return failed
         }
       },
       {
@@ -341,9 +400,13 @@ export function buildFsTools(options: FsBackendOptions): StructuredToolInterface
     ),
 
     tool(
-      async ({ pattern, path: searchPath }) => {
+      async ({ pattern, path: searchPath }, config) => {
+        const callId = callIdOf(config)
         const resolved = resolve(searchPath ?? '/')
-        if ('error' in resolved) return resolved.error
+        if ('error' in resolved) {
+          recordToolFacts(callId, { error: resolved.error })
+          return resolved.error
+        }
         try {
           const regex = globToRegExp(pattern)
           const relPaths: string[] = []
@@ -356,7 +419,9 @@ export function buildFsTools(options: FsBackendOptions): StructuredToolInterface
             logger.warn(`[FsBackend] glob "${pattern}" blocked by ${code}`)
             return JSON.stringify({ pattern, files: [] })
           }
-          return mainFormat(tr.glob.failed, { message: (err as Error).message })
+          const failed = mainFormat(tr.glob.failed, { message: (err as Error).message })
+          recordToolFacts(callId, { error: failed })
+          return failed
         }
       },
       {
@@ -374,9 +439,13 @@ export function buildFsTools(options: FsBackendOptions): StructuredToolInterface
     ),
 
     tool(
-      async ({ pattern, path: searchPath, glob: fileGlob }) => {
+      async ({ pattern, path: searchPath, glob: fileGlob }, config) => {
+        const callId = callIdOf(config)
         const resolved = resolve(searchPath ?? '/')
-        if ('error' in resolved) return resolved.error
+        if ('error' in resolved) {
+          recordToolFacts(callId, { error: resolved.error })
+          return resolved.error
+        }
         try {
           const regex = new RegExp(pattern)
           const fileRegex = fileGlob ? globToRegExp(fileGlob) : null
@@ -409,7 +478,9 @@ export function buildFsTools(options: FsBackendOptions): StructuredToolInterface
             logger.warn(`[FsBackend] grep "${pattern}" blocked by ${code}`)
             return JSON.stringify({ matches: [] })
           }
-          return mainFormat(tr.glob.failed, { message: (err as Error).message })
+          const failed = mainFormat(tr.glob.failed, { message: (err as Error).message })
+          recordToolFacts(callId, { error: failed })
+          return failed
         }
       },
       {
@@ -496,6 +567,36 @@ export function buildFsTools(options: FsBackendOptions): StructuredToolInterface
   }
 
   return tools
+}
+
+/**
+ * 读取虚拟路径下的文本文件（渲染进程「点开工具卡片里的文件」用）。
+ *
+ * 与 workspace-read-file 的区别：那条通道只允许工作区内的路径（纯文件浏览器的边界），
+ * 而工具卡片里的路径可能是记忆挂载（/memories/...）。这里复用同一套挂载解析，
+ * 边界仍然是「必须落在某个已挂载根目录内」。
+ *
+ * @returns 文件内容；路径非法或读取失败时返回 { error }
+ */
+export function readVirtualTextFile(
+  options: FsBackendOptions,
+  virtualPath: string
+): { content: string } | { error: string } {
+  const mounts = buildFsMounts(options)
+  if (mounts.length === 0) {
+    return { error: mainFormat(getFsToolTexts().path.notMounted, { path: virtualPath }) }
+  }
+  const resolved = resolveVirtualPath(virtualPath, mounts)
+  if ('error' in resolved) return resolved
+  try {
+    const stat = fs.statSync(resolved.realPath)
+    if (!stat.isFile()) {
+      return { error: mainFormat(getFsToolTexts().read.notFile, { path: virtualPath }) }
+    }
+    return { content: fs.readFileSync(resolved.realPath, 'utf-8') }
+  } catch (err) {
+    return { error: (err as Error).message }
+  }
 }
 
 /** 供其他模块复用的输出格式化（子代理最终输出等） */

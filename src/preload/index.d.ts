@@ -223,6 +223,10 @@ interface Api {
     ) => Promise<PaginatedResult<HarnessDialogueRow>>
     addDialogue: (dialogue: Omit<HarnessDialogueRow, 'id' | 'created_at'>) => Promise<number>
     deleteDialoguesByTopic: (topicId: number) => Promise<boolean>
+    /** 工具结果按需读取（卡片点开 ls/glob/grep/execute 详情时；未保存返回 null） */
+    getToolOutput: (topicId: number, callId: string) => Promise<string | null>
+    /** 按虚拟路径读取文本文件（卡片「打开文件」；工作区与记忆挂载都可读） */
+    readVirtualFile: (virtualPath: string) => Promise<{ content: string } | { error: string }>
   }
   providers: {
     getAll: () => Promise<LlmProviderConfig[]>

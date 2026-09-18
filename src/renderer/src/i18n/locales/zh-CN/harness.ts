@@ -99,6 +99,8 @@ export const zhCNHarness = {
     toolExecuting: '执行中…',
     thinkingInProgress: '思考中…',
     thinkingDone: '思考过程',
+    foldExpand: '展开全部',
+    foldCollapse: '收起',
     retrying: '正在重试（第 {{attempt}}/{{retries}} 次）…',
     compacting: '正在压缩早期对话…',
     compacted: '早期对话已压缩',
@@ -128,6 +130,22 @@ export const zhCNHarness = {
     todoInProgress: '· <mono>{{count}}</mono> 进行中',
     todoEmpty: '暂无待办，可先让模型用 write_todos 制定任务计划',
     todoFallback: '待办 {{index}}',
+    toolOpenFile: '打开文件',
+    toolRevealDir: '在资源管理器中定位',
+    toolViewDetail: '查看结果详情',
+    toolFailed: '执行失败',
+    toolTruncated: ' · 已截断',
+    toolLines: '{{count}} 行',
+    toolLines_one: '{{count}} 行',
+    toolLines_other: '{{count}} 行',
+    toolLineRange: '{{start}}-{{end}} / 共 {{total}} 行',
+    toolFileCount: '{{count}} 个文件',
+    toolFileCount_one: '{{count}} 个文件',
+    toolFileCount_other: '{{count}} 个文件',
+    toolExitCode: 'exit {{code}}',
+    toolReplacements: '<mono>{{count}}</mono> 处',
+    toolReplacements_one: '<mono>{{count}}</mono> 处',
+    toolReplacements_other: '<mono>{{count}}</mono> 处',
     itemCount: '<mono>{{count}}</mono> 项',
     itemCount_one: '<mono>{{count}}</mono> 项',
     itemCount_other: '<mono>{{count}}</mono> 项',
@@ -229,7 +247,15 @@ export const zhCNHarness = {
     inProgress: '· {{count}} 进行中'
   },
   userMessage: {
-    goalRound: '目标自动续跑 · 第 {{round}} 轮'
+    goalRound: '目标自动续跑 · 第 {{round}} 轮',
+    goalPrev: '上一轮',
+    goalNext: '下一轮',
+    noReply: '未收到回复',
+    edit: '编辑这条提问（在气泡内改，回车重发）',
+    editHint: 'Enter 发送 · Shift+Enter 换行 · Esc 取消',
+    deleteOrphan: '删除这条提问',
+    deleteOrphanTitle: '删除这条提问？',
+    deleteOrphanContent: '这条提问还没有对应的回复，删除后无法恢复。'
   },
   askQuestion: {
     title: '需要你的确认',
@@ -264,10 +290,19 @@ export const zhCNHarness = {
     title: '资源编辑器',
     refresh: '刷新',
     loading: '加载中...',
-    empty: '空文件夹'
+    empty: '空文件夹',
+    openFailed: '打开文件失败',
+    saveFailed: '保存文件失败'
   },
   fileEditor: {
     loading: '正在加载编辑器...'
+  },
+  toolDetail: {
+    unavailable: '结果详情不可用（可能已随话题清理）',
+    emptyOutput: '（无输出）',
+    emptyResult: '（无结果）',
+    exitCode: 'exit {{code}}',
+    outputFooter: '命令完整输出；超出输出上限的部分在生成时已截断。'
   },
   helpers: {
     toolPreparing: '{{name}} · 参数构建中…',

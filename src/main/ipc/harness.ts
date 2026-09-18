@@ -6,6 +6,8 @@ import { isSenderAlive, safeSend } from '../safe-send'
 import { mainMessages } from '../i18n'
 import { settingsStore, streamAbortControllers, activeHarnessStreams } from '../context'
 import { HarnessService, buildTools } from '../harness'
+import { readVirtualTextFile } from '../harness/runtime/fs-backend'
+import { getToolOutputStore } from '../harness/runtime/tool-output-store'
 import type {
   ToolCallDetail,
   SubAgentEvent,
@@ -27,6 +29,7 @@ import { HarnessSettings } from '../types/settings'
 import {
   createTopic,
   addDialogue,
+  updateDialogueContent,
   addDialogueUsage,
   getDialoguesByTopicId
 } from '../database/mapper/harness'
@@ -44,6 +47,11 @@ interface RunHarnessTurnParams {
     images?: string[]
     documents?: { fileName: string; filePath: string }[]
     turnMeta?: TurnMeta
+    /**
+     * 「编辑并重发」：这一轮的提问已经存在库里（气泡内就地编辑），直接改写该行内容，
+     * 不再插入新的用户消息行——否则库里会多出一条同内容提问、历史顺序也被挪到末尾。
+     */
+    reuseUserDialogueId?: number
   }
 }
 
@@ -147,26 +155,33 @@ async function runHarnessTurn(
   // 记下返回的行 id：流式结束后随 harness-stream-done 回传，前端删这轮时才找得到用户那一行
   let userDialogueId: number | null = null
   try {
-    const userBlocks: { type: string; image_url?: string; fileName?: string; round?: number }[] = []
-    if (options?.images?.length) {
-      for (const img of options.images) {
-        userBlocks.push({ type: 'image', image_url: img })
+    if (options?.reuseUserDialogueId) {
+      // 编辑重发：改写原提问行（保 id、保位置），不再插入新行
+      userDialogueId = options.reuseUserDialogueId
+      await updateDialogueContent(userDialogueId, question)
+    } else {
+      const userBlocks: { type: string; image_url?: string; fileName?: string; round?: number }[] =
+        []
+      if (options?.images?.length) {
+        for (const img of options.images) {
+          userBlocks.push({ type: 'image', image_url: img })
+        }
       }
-    }
-    if (options?.documents?.length) {
-      for (const doc of options.documents) {
-        userBlocks.push({ type: 'document', fileName: doc.fileName })
+      if (options?.documents?.length) {
+        for (const doc of options.documents) {
+          userBlocks.push({ type: 'document', fileName: doc.fileName })
+        }
       }
+      if (options?.turnMeta?.source === 'goal-round') {
+        userBlocks.push({ type: 'goalRound', round: options.turnMeta.goalRound })
+      }
+      userDialogueId = await addDialogue({
+        topic_id: topicId,
+        role: 'user',
+        content: question,
+        blocks: JSON.stringify(userBlocks)
+      })
     }
-    if (options?.turnMeta?.source === 'goal-round') {
-      userBlocks.push({ type: 'goalRound', round: options.turnMeta.goalRound })
-    }
-    userDialogueId = await addDialogue({
-      topic_id: topicId,
-      role: 'user',
-      content: question,
-      blocks: JSON.stringify(userBlocks)
-    })
   } catch (err) {
     logger.error('Failed to save user message:', err)
   }
@@ -1070,6 +1085,37 @@ export function registerHarnessIpc(): void {
     })
     if (result.canceled || result.filePaths.length === 0) return null
     return result.filePaths[0]
+  })
+
+  // ── 工具结果按需读取（内置工具的结果不再随流下发/落库）─────────────────────
+  // 聊天里的工具卡片只带元信息；用户点开时才按 (topicId, callId) 取完整结果。
+  // 未命中（详情未保存 / 已被清理）返回 null，前端显示「详情不可用」而不是空白。
+  ipcMain.handle('harness-tool-output-get', (_event, topicId: number, callId: string) => {
+    try {
+      return getToolOutputStore()?.read(topicId, callId) ?? null
+    } catch (err) {
+      logger.error('Error in harness-tool-output-get:', err)
+      return null
+    }
+  })
+
+  // 按虚拟路径读取文本文件（工具卡片「打开文件」用）：
+  // 与 workspace-read-file 的区别是这里按挂载解析（工作区 + 记忆目录），
+  // 边界仍是「必须落在某个已挂载根目录内」。
+  ipcMain.handle('harness-vfs-read', (_event, virtualPath: string) => {
+    try {
+      const harnessSettings = settingsStore.get('harness') as HarnessSettings | undefined
+      return readVirtualTextFile(
+        {
+          workspacePath: harnessSettings?.workspacePath || undefined,
+          memoryPath: harnessSettings?.memoryPath || undefined
+        },
+        virtualPath
+      )
+    } catch (err) {
+      logger.error('Error in harness-vfs-read:', err)
+      return { error: (err as Error).message }
+    }
   })
 
   // 列出技能目录中的所有技能

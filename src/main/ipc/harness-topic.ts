@@ -5,6 +5,7 @@ import { goalStore } from '../harness/runtime/goal'
 import { jobsRegistry } from '../harness/runtime/jobs'
 import { subagentSessions } from '../harness/runtime/subagent-sessions'
 import { SpillStore } from '../harness/runtime/spill'
+import { getToolOutputStore } from '../harness/runtime/tool-output-store'
 import { deleteCompactionByTopic } from '../database/mapper/compaction'
 import { settingsStore } from '../context'
 import { clearTopicCache } from '../harness/preload-cache'
@@ -152,6 +153,8 @@ export function registerHarnessTopicIpc(): void {
         harnessSettings?.memoryPath || undefined,
         id
       )
+      // 清理该话题的工具结果详情（聊天卡片点开的 ls/glob/grep/execute 结果）
+      getToolOutputStore()?.removeTopic(id)
       return await deleteTopic(id)
     } catch (error) {
       logger.error('Error in harness-topic-delete:', error)

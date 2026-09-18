@@ -148,11 +148,17 @@ export async function* runStream(
       enqueue,
       markDone,
       safeGetOutput,
-      toolsStarted
+      toolsStarted,
+      options?.topicId
     ).catch(() => {})
-    const subAgentProducer = produceSubAgents(run, signal, enqueue, markDone, safeGetOutput).catch(
-      () => {}
-    )
+    const subAgentProducer = produceSubAgents(
+      run,
+      signal,
+      enqueue,
+      markDone,
+      safeGetOutput,
+      options?.topicId
+    ).catch(() => {})
 
     // 主消费者循环：从队列中取出并 yield
     while (producersAlive > 0 || queue.length > 0) {

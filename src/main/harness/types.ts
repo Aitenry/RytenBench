@@ -32,8 +32,19 @@ export interface HarnessMessage {
   content: string
 }
 
-/** 工具定制化卡片数据（deepagent 内置工具专用） */
+/** 工具卡片语义分类：决定前端图标、元信息与「点击后打开什么」 */
+export type ToolCardKind = 'file' | 'dir' | 'search' | 'command'
+
+/**
+ * 工具定制化卡片数据（内置文件/命令工具专用）。
+ *
+ * 设计前提：这些工具的结果**不再随 IPC 下发、也不再落库**（见 service/tool-presentation.ts），
+ * 前端只拿到这张卡片；要看内容就点卡片，去右侧面板打开真实文件或结果详情。
+ * 因此卡片必须自带足够的元信息（路径、行数、条目数、退出码、失败原因）。
+ */
 export interface ToolCard {
+  /** 卡片语义分类 */
+  kind?: ToolCardKind
   /** 文件/目录路径（read_file / write_file / edit_file / ls） */
   path?: string
   /** 搜索模式（glob / grep） */
@@ -42,6 +53,30 @@ export interface ToolCard {
   count?: number
   /** 执行命令（execute） */
   command?: string
+  /** 结果状态；error 时卡片显示失败原因 */
+  status?: 'ok' | 'error'
+  /** 失败原因 / 结果摘要（已截断，仅供单行展示） */
+  message?: string
+  /** read_file：文件总行数 */
+  lines?: number
+  /** read_file / execute：结果字符数 */
+  chars?: number
+  /** read_file：输出被内联上限截断（文件比这里显示的长） */
+  truncated?: boolean
+  /** read_file：按 offset/limit 读取时的行区间（1 基，闭区间） */
+  range?: { start: number; end: number; total: number }
+  /** write_file：写入字节数 */
+  bytes?: number
+  /** ls：子目录数 */
+  dirs?: number
+  /** ls / glob：文件数 */
+  files?: number
+  /** grep：命中的文件数（去重） */
+  fileCount?: number
+  /** execute：退出码 */
+  exitCode?: number
+  /** 本次调用有完整结果详情，点卡片可在右侧面板打开 */
+  detail?: boolean
 }
 
 export interface ToolCallDetail {

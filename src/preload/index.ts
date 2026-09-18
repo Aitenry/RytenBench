@@ -185,6 +185,10 @@ const api = {
       options?: {
         topicId?: number
         providerId?: number
+        images?: string[]
+        documents?: { fileName: string; filePath: string }[]
+        /** 编辑并重发：改写这条已存在的用户消息行，而不是插入新行 */
+        reuseUserDialogueId?: number
       }
     ) => {
       ipcRenderer.send('harness-start-stream', message, options)
@@ -400,7 +404,16 @@ const api = {
       ipcRenderer.invoke('harness-dialogue-delete-by-topic', topicId),
     deleteDialogue: (id: number) => ipcRenderer.invoke('harness-dialogue-delete', id),
     // 对话真实用量（一条助手回复一行）
-    getUsageByTopic: (topicId: number) => ipcRenderer.invoke('harness-usage-get-by-topic', topicId)
+    getUsageByTopic: (topicId: number) => ipcRenderer.invoke('harness-usage-get-by-topic', topicId),
+    // 工具结果按需读取：内置工具（read_file/execute 等）的结果不再随流下发，
+    // 聊天卡片点开时才取（ls/glob/grep/execute 的详情按 topicId+callId 取回）
+    getToolOutput: (topicId: number, callId: string) =>
+      ipcRenderer.invoke('harness-tool-output-get', topicId, callId) as Promise<string | null>,
+    // 按虚拟路径读取文本文件（卡片「打开文件」；工作区与记忆挂载都可读）
+    readVirtualFile: (virtualPath: string) =>
+      ipcRenderer.invoke('harness-vfs-read', virtualPath) as Promise<
+        { content: string } | { error: string }
+      >
   },
   graph: {
     getData: (wikiId: number, typeFilter?: string, docIds?: number[]) =>

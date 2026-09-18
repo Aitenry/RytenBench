@@ -279,6 +279,36 @@ async function addDialogue(
   })
 }
 
+/**
+ * 就地改写一条对话的正文（「编辑并重发」用）。
+ *
+ * 为什么必须是 UPDATE 而不是「删掉旧的 + 插一条新的」：编辑重发的是**同一条**提问，
+ * 删插会让它在库里变成一条新行（created_at 变成现在）——历史顺序被挪到末尾、行 id 也变了，
+ * 前端手里的 id 随即失效（删除/用量都按 id 找行）。改内容、保 id、保位置才对。
+ * 与 addDialogue 一样顺手刷新话题活跃时间。
+ */
+async function updateDialogueContent(id: number, content: string): Promise<boolean> {
+  return withOrm('updateDialogueContent', async (db) => {
+    let updated = false
+    await db.transaction(async (tx) => {
+      const rows = await tx
+        .update(harness_dialogue)
+        .set({ content })
+        .where(eq(harness_dialogue.id, id))
+        .returning({ id: harness_dialogue.id, topicId: harness_dialogue.topic_id })
+      updated = rows.length > 0
+      if (rows[0]) {
+        await tx
+          .update(harness_topic)
+          .set({ updated_at: sql`now()` })
+          .where(eq(harness_topic.id, rows[0].topicId))
+      }
+    })
+    logger.info(`Updated dialogue ID=${id} content (${content.length} chars)`)
+    return updated
+  })
+}
+
 async function deleteDialoguesByTopicId(topicId: number): Promise<boolean> {
   return withOrm('deleteDialoguesByTopicId', async (db) => {
     const deleted = await db
@@ -381,6 +411,7 @@ export {
   getDialoguesByTopicId,
   getDialoguesByTopicIdPaginated,
   addDialogue,
+  updateDialogueContent,
   deleteDialoguesByTopicId,
   deleteDialogueById,
   addDialogueUsage,
