@@ -30,7 +30,13 @@ export const zhCN = {
     selectMusicRoot: '选择音乐根目录',
     selectCoverImage: '选择封面图片',
     selectPlaylistCover: '选择歌单封面',
-    selectMusicFiles: '选择音乐文件'
+    selectMusicFiles: '选择音乐文件',
+    dbStartupFailedTitle: '数据库无法启动',
+    dbStartupFailedMessage: '本地数据库（PGlite）启动失败，可能是数据目录损坏。',
+    dbStartupFailedDetail:
+      '常见原因：上次退出时被强制结束进程，或同时有另一个进程（如 drizzle-kit studio/push）打开了同一个数据目录。\n\n选择「备份并以空库启动」会把损坏的目录改名留档（不会删除），应用随后以空数据库正常启动；之后可用 `node scripts/recover-pglite.mjs` 尝试从留档目录里抢救会话、文档等数据。\n\n选择「退出应用」则保持现状，什么都不改。',
+    dbStartupFailedReset: '备份并以空库启动',
+    dbStartupFailedQuit: '退出应用'
   },
   splash: {
     stepLoadConfig: '加载配置',
@@ -155,7 +161,14 @@ export const enUS: typeof zhCN = {
     selectMusicRoot: 'Select the music root folder',
     selectCoverImage: 'Select a cover image',
     selectPlaylistCover: 'Select a playlist cover',
-    selectMusicFiles: 'Select music files'
+    selectMusicFiles: 'Select music files',
+    dbStartupFailedTitle: 'Database failed to start',
+    dbStartupFailedMessage:
+      'The local database (PGlite) could not start — its data directory may be corrupted.',
+    dbStartupFailedDetail:
+      'Common causes: the previous run was force-killed, or another process (e.g. drizzle-kit studio/push) had the same data directory open.\n\n"Back up and start empty" renames the corrupted directory out of the way (nothing is deleted) and starts the app with a fresh database; you can later try `node scripts/recover-pglite.mjs` to salvage conversations and documents from the archived directory.\n\n"Quit" changes nothing and exits the app.',
+    dbStartupFailedReset: 'Back up and start empty',
+    dbStartupFailedQuit: 'Quit'
   },
   splash: {
     stepLoadConfig: 'Loading configuration',

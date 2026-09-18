@@ -10,6 +10,11 @@ logger.transports.file.fileName = 'database.log'
 // 定义数据库文件路径
 const dbDir = path.join(app.getPath('userData'), 'RytenBenchDB')
 
+/** 数据库数据目录（备份/重建时由启动流程使用） */
+export function getDatabaseDir(): string {
+  return dbDir
+}
+
 export class Database {
   private db: PGlite | null = null
 

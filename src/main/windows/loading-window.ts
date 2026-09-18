@@ -1,9 +1,10 @@
-import { BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain } from 'electron'
 import { join } from 'path'
+import { rename } from 'fs/promises'
 import { is } from '@electron-toolkit/utils'
 import icon from '../../../resources/logo.png?asset'
 import logger from 'electron-log'
-import { createDatabase, type Database } from '../database/loading'
+import { createDatabase, getDatabaseDir, type Database } from '../database/loading'
 import { runMigrations } from '../database/orm'
 import { migrateWorkspaceData } from '../database/workspace-migration'
 import { setDatabaseInstance, setInitializationPromise } from '../database/instance'
@@ -113,6 +114,77 @@ async function loadConfig(): Promise<void> {
   }
 }
 
+/**
+ * 数据库启动失败的识别：PGlite 起不来时 drizzle 只会抛「Failed query: CREATE SCHEMA …」，
+ * 真正的原因藏在 cause 链里（如 RuntimeError: Aborted()，Postgres 侧的
+ * "could not locate a valid checkpoint record" 只写进 stdout）。这里把整条 cause 链打出来，
+ * 否则日志里只剩一句无从下手的 SQL。
+ */
+function describeErrorChain(err: unknown): string {
+  const parts: string[] = []
+  let current: unknown = err
+  for (let depth = 0; current instanceof Error && depth < 5; depth += 1) {
+    parts.push(`${current.name}: ${current.message}`)
+    current = (current as { cause?: unknown }).cause
+  }
+  return parts.length > 0 ? parts.join(' ← ') : String(err)
+}
+
+/** 数据库无法启动的典型特征（本地集群损坏 / 需要崩溃恢复但恢复不了） */
+function looksLikeDatabaseStartupFailure(err: unknown): boolean {
+  const text = describeErrorChain(err)
+  return (
+    /Failed query/i.test(text) ||
+    /Aborted\(\)/i.test(text) ||
+    /PGlite failed to initialize/i.test(text) ||
+    /could not locate a valid checkpoint record/i.test(text) ||
+    /incorrect checksum in control file/i.test(text)
+  )
+}
+
+/**
+ * 数据库损坏时的兜底：把损坏目录改名留档（不删），让应用用空库继续可用。
+ *
+ * 为什么需要它：PGlite 是嵌入式 Postgres，**没有 pg_resetwal 这类修复工具**，一旦
+ * pg_control/WAL 里的检查点记录被写坏（非正常退出、或两个进程同时打开同一目录），
+ * 集群就再也起不来，而在此之前应用只是一直卡在「初始化失败」的启动页上（主窗口不展示），
+ * 用户既看不到原因也无法自救。
+ *
+ * 留档而不是删除：坏目录里的数据页通常完好，可用 `node scripts/recover-pglite.mjs`
+ * 抢救出会话/文档等数据（该脚本正是 2026-09-18 那次事故里实际用过的恢复流程）。
+ */
+async function offerDatabaseReset(
+  err: unknown
+): Promise<'recovered' | 'declined' | 'not-applicable'> {
+  const text = describeErrorChain(err)
+  if (!looksLikeDatabaseStartupFailure(err)) return 'not-applicable'
+
+  const m = mainMessages().dialog
+  logger.error(`[Init] 数据库无法启动，可能是数据目录损坏：${text}`)
+  const { response } = await dialog.showMessageBox({
+    type: 'error',
+    noLink: true,
+    title: m.dbStartupFailedTitle,
+    message: m.dbStartupFailedMessage,
+    detail: m.dbStartupFailedDetail,
+    buttons: [m.dbStartupFailedReset, m.dbStartupFailedQuit],
+    defaultId: 0,
+    cancelId: 1
+  })
+  if (response !== 0) return 'declined'
+
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+  const backupDir = `${getDatabaseDir()}.corrupt-${stamp}`
+  try {
+    await rename(getDatabaseDir(), backupDir)
+    logger.warn(`[Init] 损坏的数据库目录已留档：${backupDir}`)
+  } catch (renameErr) {
+    logger.error('[Init] 留档损坏目录失败（可能被其他进程占用）:', renameErr)
+    return 'declined'
+  }
+  return 'recovered'
+}
+
 async function performInitializationTasks(): Promise<void> {
   // 扁平化初始化步骤：配置 / 密钥库 / 连接数据库 / 执行数据库迁移 / 工作区迁移。
   // 进度条按步骤均匀推进，逐步增长，避免整任务一步跳到 25%。
@@ -171,12 +243,43 @@ async function performInitializationTasks(): Promise<void> {
     }
   ]
 
-  for (let i = 0; i < steps.length; i++) {
-    // 步骤起始进度：已完成 i 步 / 总步数，每步只推进一小格
-    sendInitProgress(steps[i].name, (i / steps.length) * 100, i + 1, steps.length)
-    await steps[i].execute()
+  const runSteps = async (): Promise<void> => {
+    for (let i = 0; i < steps.length; i++) {
+      // 步骤起始进度：已完成 i 步 / 总步数，每步只推进一小格
+      sendInitProgress(steps[i].name, (i / steps.length) * 100, i + 1, steps.length)
+      await steps[i].execute()
+    }
   }
 
+  try {
+    await runSteps()
+  } catch (err) {
+    // 数据库起不来：先关掉失败的实例（Windows 上句柄未释放会导致目录改名失败），
+    // 再给用户一条可执行的出路；其余错误照原样抛出（加载页会显示失败提示）
+    logger.error(`[Init] 初始化失败（cause 链）：${describeErrorChain(err)}`)
+    try {
+      // 显式断言一次：database 只在 steps 回调里赋值，TS 的控制流分析会把它窄化成 null
+      const failedDb = database as Database | null
+      await Promise.race([
+        failedDb ? failedDb.close() : Promise.resolve(),
+        new Promise((resolve) => setTimeout(resolve, 2000))
+      ])
+    } catch (closeErr) {
+      logger.warn('[Init] 关闭失败的数据库实例时出错:', closeErr)
+    }
+    const outcome = await offerDatabaseReset(err)
+    if (outcome !== 'recovered') {
+      // 用户选择退出：不留一个只能看不能用的启动页，通知加载页后直接退出
+      if (outcome === 'declined') {
+        const win = getLoadingWindow()
+        if (win) safeSend(win.webContents, 'init-error', describeErrorChain(err))
+        setTimeout(() => app.quit(), 300)
+      }
+      throw err
+    }
+    database = null
+    await runSteps()
+  }
   // 建表与工作区迁移全部完成后再开放数据库访问：
   // 主窗口预热期间渲染进程可能已发起查询，提前暴露会导致「relation ... does not exist」。
   setDatabaseInstance(database)
