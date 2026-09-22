@@ -7,6 +7,7 @@ import { settingsStore } from './context'
 import { getMainWindow } from './windows/window-manager'
 import { getIp } from './address'
 import { formatDate } from './shared/weather-utils'
+
 const DEFAULT_REFRESH_MIN = 60
 /** 请求超时上限（open-meteo 无 AbortSignal 支持，用竞速兜底，防 IPC invoke 永久悬挂） */
 const FETCH_TIMEOUT_MS = 15_000

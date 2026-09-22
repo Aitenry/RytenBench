@@ -20,6 +20,7 @@ import { ThemeProvider } from './contexts/ThemeContext'
  */
 const reportedUncaught = new Set<string>()
 const UNCAUGHT_REPORT_LIMIT = 5
+
 function reportUncaught(kind: string, error: unknown, fallback: string): void {
   const err = error as { message?: string; stack?: string } | undefined
   const key = `${kind}:${err?.message ?? fallback}`

@@ -78,9 +78,7 @@ export type StartMemoryAgentResult =
  */
 async function resolveProviderId(explicit?: number): Promise<number | undefined> {
   if (explicit != null) return explicit
-  const { getDefaultProvider, getEnabledProviders } = await import(
-    '../../database/mapper/provider'
-  )
+  const { getDefaultProvider, getEnabledProviders } = await import('../../database/mapper/provider')
   const preferred = await getDefaultProvider()
   if (preferred) return preferred.id
   const enabled = await getEnabledProviders()
@@ -152,10 +150,7 @@ export async function startMemoryAgent(
     if (!model) return { ok: false, reason: 'model-failed', message: (err as Error)?.message }
   }
 
-  const maxToolCalls = Math.max(
-    MIN_TOOL_CALLS,
-    Math.floor(params.maxToolRounds ?? MAX_TOOL_CALLS)
-  )
+  const maxToolCalls = Math.max(MIN_TOOL_CALLS, Math.floor(params.maxToolRounds ?? MAX_TOOL_CALLS))
   const config: SubAgentConfig = {
     name: MEMORY_AGENT_NAME,
     description: 'Summarises a conversation turn and writes the durable parts into Mnemon memory.',

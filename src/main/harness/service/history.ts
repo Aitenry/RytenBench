@@ -137,6 +137,28 @@ function dialogueChars(d: HistoryDialogue): number {
 }
 
 /**
+ * 是否为「回合内插话」行（用户在我们正在生成回复时插进来的一句话）。
+ *
+ * 判定依据是落库时写入的 blocks 标记（`{type:'interjection'}`）——不靠内容或时间猜。
+ * blocks 解析失败时按普通对话处理（宁可多带一次上下文，也不要丢掉用户消息）。
+ *
+ * 现状：插话走**纯注入**（不落库、不进对话流），所以目前没有任何行会带这个标记，
+ * 这里恒为 false——纯防御：若将来把插话也落库留痕，回放必须能排除它，
+ * 否则同一诉求会被重复送进模型（且回放顺序会变成「先答复再提问」）。
+ */
+export function isInterjectionRow(d: HistoryDialogue): boolean {
+  if (!d.blocks) return false
+  try {
+    const blocks: unknown = JSON.parse(d.blocks)
+    return (
+      Array.isArray(blocks) && blocks.some((b) => (b as { type?: string })?.type === 'interjection')
+    )
+  } catch {
+    return false
+  }
+}
+
+/**
  * 将数据库中的对话记录转换为 LangChain BaseMessage 数组。
  *
  * 上下文压缩策略（参考 dsh-compaction-basic 的阈值/保留机制）：
@@ -152,12 +174,16 @@ export async function convertDialoguesToMessages(
   options?: HistoryConvertOptions
 ): Promise<HistoryContext> {
   const maxChars = options?.maxChars ?? DEFAULT_HISTORY_BUDGET
-  const totalChars = dialogues.reduce((sum, d) => sum + dialogueChars(d), 0)
+  // 回合内插话（steering）行不进模型上下文：它已经作为 HumanMessage 在本轮回合中
+  // 被模型读到、并已体现在同一轮助手的输出里；回放会重复一遍同一诉求
+  //（且它落库在助手行之前，重放顺序会把「先答复再提问」颠倒）。前端仍按原样渲染。
+  const replayable = dialogues.filter((d) => !isInterjectionRow(d))
+  const totalChars = replayable.reduce((sum, d) => sum + dialogueChars(d), 0)
 
   // 摘要压缩路径：压力达标且有摘要器
   if (options?.summarizer && options.topicId != null && totalChars >= maxChars * PRESSURE_RATIO) {
     try {
-      const result = await compactWithSummarizer(dialogues, maxChars, options)
+      const result = await compactWithSummarizer(replayable, maxChars, options)
       if (result) return result
     } catch (err) {
       // 摘要失败：回退字符截断；已落库的旧 checkpoint 保留，后续轮次仍可复用
@@ -169,8 +195,8 @@ export async function convertDialoguesToMessages(
   const selected: HistoryDialogue[] = []
   let total = 0
   let truncated = false
-  for (let i = dialogues.length - 1; i >= 0; i--) {
-    const d = dialogues[i]
+  for (let i = replayable.length - 1; i >= 0; i--) {
+    const d = replayable[i]
     if (total + dialogueChars(d) > maxChars && selected.length > 0) {
       truncated = true
       break

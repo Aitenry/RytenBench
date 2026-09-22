@@ -29,7 +29,7 @@ const MODE_ICON: Record<RepeatMode, React.ReactNode> = {
 }
 
 /** 循环模式提示文案的词条键（模块级只存键，渲染时在组件内 t() 求值）
-    值必须收窄成字面量联合：i18next 的 t() 只接受字面量键，裸 string 过不了类型检查 */
+ 值必须收窄成字面量联合：i18next 的 t() 只接受字面量键，裸 string 过不了类型检查 */
 type RepeatLabelKey =
   'music.player.repeatAll' | 'music.player.repeatOne' | 'music.player.repeatShuffle'
 

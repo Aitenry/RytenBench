@@ -34,6 +34,7 @@ const IMPORTANCE_DOT: Record<string, string> = {
   normal: '#1677ff',
   low: '#bfbfbf'
 }
+
 /** 重要性文案：把 t 作为参数传入，普通函数内不调用 hook */
 function getImportanceLabel(t: TFunction, importance: string): string {
   switch (importance) {
