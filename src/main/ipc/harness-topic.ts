@@ -7,7 +7,7 @@ import { subagentSessions } from '../harness/runtime/subagent-sessions'
 import { SpillStore } from '../harness/runtime/spill'
 import { getToolOutputStore } from '../harness/runtime/tool-output-store'
 import { deleteCompactionByTopic } from '../database/mapper/compaction'
-import { settingsStore } from '../context'
+import { settingsStore, harnessQueue } from '../context'
 import { clearTopicCache } from '../harness/preload-cache'
 import type { HarnessSettings } from '../types/settings'
 import {
@@ -155,6 +155,8 @@ export function registerHarnessTopicIpc(): void {
       )
       // 清理该话题的工具结果详情（聊天卡片点开的 ls/glob/grep/execute 结果）
       getToolOutputStore()?.removeTopic(id)
+      // 清理该话题的插话队列（含待注入缓冲：那条插话已随话题一起消失）
+      harnessQueue.clear(id)
       return await deleteTopic(id)
     } catch (error) {
       logger.error('Error in harness-topic-delete:', error)

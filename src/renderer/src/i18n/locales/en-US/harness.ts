@@ -65,11 +65,26 @@ export const enUSHarness: typeof zhCNHarness = {
     attachTooltip: 'Upload attachment',
     modelPlaceholder: 'Select a model',
     stopTooltip: 'Stop generating',
+    queueTooltip: 'Sending while generating queues the message',
     visionUnsupported: 'The current model does not support vision, so images cannot be pasted',
     imageReadFailed: 'Failed to read the image attachment: {{name}}',
     filePathUnavailable:
       'Cannot get the local path of "{{name}}". Add it by drag-and-drop or the upload button',
     pasteImageFallbackName: 'paste-image.png'
+  },
+  queue: {
+    count: '{{count}} queued message(s)',
+    hint: 'Messages sent while generating wait here',
+    heldHint: 'Not injected in time — will be sent with your next message',
+    steered: 'Interjected',
+    edit: 'Edit',
+    save: 'Save',
+    cancelEdit: 'Cancel',
+    remove: 'Remove',
+    editFailed: 'Failed to edit the queued message',
+    steer: 'Interject now (merge into this turn)',
+    steerUnavailable: 'No running turn — this message will be sent as the next turn',
+    attachmentCount: '[{{count}} attachment(s)] '
   },
   header: {
     toggleSidebar: 'Sidebar',

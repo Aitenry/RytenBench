@@ -1,20 +1,27 @@
-import { BrowserWindow, dialog, ipcMain, type IpcMainEvent } from 'electron'
+import { BrowserWindow, dialog, ipcMain } from 'electron'
 import { join } from 'path'
 import * as fs from 'fs'
 import logger from 'electron-log'
 import { isSenderAlive, safeSend } from '../safe-send'
 import { mainMessages } from '../i18n'
-import { settingsStore, streamAbortControllers, activeHarnessStreams } from '../context'
+import {
+  settingsStore,
+  streamAbortControllers,
+  activeHarnessStreams,
+  harnessQueue
+} from '../context'
 import { HarnessService, buildTools } from '../harness'
 import { readVirtualTextFile } from '../harness/runtime/fs-backend'
 import { getToolOutputStore } from '../harness/runtime/tool-output-store'
 import type {
+  AgentInjection,
   ToolCallDetail,
   SubAgentEvent,
   MemoryInjection,
   TurnMeta,
   HistoryCompaction
 } from '../harness/types'
+import type { QueueAttachments } from '../harness/queue-store'
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models'
 import { getProviderService } from '../provider/service'
 import { getSubAgentDefs } from '../harness/preload-cache'
@@ -37,9 +44,18 @@ import { getActiveWorkspaceId } from '../database/workspace-context'
 import { sumUsage, type ModelUsageRecord } from '../harness/runtime/usage'
 import { startRendererMemorySampling, stopRendererMemorySampling } from '../harness/renderer-memory'
 
+/**
+ * 轮次执行只需要 sender（存活校验、safeSend、渲染进程失效监听），
+ * 因此按最小接口收窄类型：`harness-start-stream`（ipcMain.on → IpcMainEvent）与
+ * `harness-queue-enqueue`（ipcMain.handle → IpcMainInvokeEvent）共用同一条轮次管线。
+ */
+interface HarnessSenderEvent {
+  sender: Electron.WebContents
+}
+
 /** 单轮对话执行参数（用户轮与目标自动轮共用 runHarnessTurn 管线） */
 interface RunHarnessTurnParams {
-  event: IpcMainEvent
+  event: HarnessSenderEvent
   question: string
   options?: {
     topicId?: number
@@ -52,7 +68,43 @@ interface RunHarnessTurnParams {
      * 不再插入新的用户消息行——否则库里会多出一条同内容提问、历史顺序也被挪到末尾。
      */
     reuseUserDialogueId?: number
+    /**
+     * 前端为这一轮登记的助手消息临时 id（首段）。回合内插话会切分助手输出，主进程为
+     * 每个段落生成新的临时 id，随 steered chunk 下发，前端据此把段落接到对应气泡上。
+     */
+    messageId?: string
   }
+}
+
+/** 落库后的助手消息（一轮一条；插话是纯注入，不切分） */
+interface AssistantSegment {
+  messageId: string
+  dialogueId: number | null
+  content: string
+}
+
+/** 流式段落累积器：插话边界处整体换新的一组状态 */
+interface SegmentAccumulator {
+  blocks: {
+    type: string
+    text?: string
+    tool?: ToolCallDetail
+    reasoning?: string
+    subAgent?: SubAgentEvent
+    memory?: MemoryInjection
+    compaction?: HistoryCompaction
+    children?: {
+      type: string
+      text?: string
+      tool?: ToolCallDetail
+      reasoning?: string
+    }[]
+  }[]
+  content: string
+  reasoning: string
+  failed: boolean
+  /** 本段是否已写入早期对话摘要压缩块（压缩卡片只保留在首段，避免插话后重复） */
+  compactionSeen: boolean
 }
 
 /**
@@ -293,6 +345,43 @@ async function runHarnessTurn(
   }
   // 本轮模型真实用量（usage_metadata）：流结束时由 HarnessService 回调进来，助手消息落库后写入用量表
   let usageRecords: ModelUsageRecord[] = []
+
+  // ── 助手消息累积器（一轮 = 一条助手行）────────────────────────────────
+  // 段落表按「可多段」的形态保留（落库、回传 messageId → dialogueId 都按段走），
+  // 但当前**只会有 0/1 段**：回合内插话是纯注入（见下方 drainInjections），不切分助手输出，
+  // 所以一轮问答始终落一条助手消息，与旧行为等价。留结构是为了以后真需要切段时不必改协议。
+  const segments: AssistantSegment[] = []
+  /** 本轮助手消息的前端临时 id（前端在 startMessageStream 时已建好占位并下发） */
+  const segmentMessageId = options?.messageId ?? `seg_${Date.now()}`
+  /** 累积器（保留结构以便后续扩展多段能力） */
+  const newAccumulator = (): SegmentAccumulator => ({
+    blocks: [],
+    content: '',
+    reasoning: '',
+    failed: false,
+    /** 是否已写入早期对话摘要压缩块（避免重复插入压缩卡片） */
+    compactionSeen: false
+  })
+  const acc = newAccumulator()
+
+  /** 把本轮助手输出落库并登记 */
+  const flushSegment = async (): Promise<void> => {
+    let dialogueId: number | null = null
+    if (!acc.failed) {
+      try {
+        dialogueId = await addDialogue({
+          topic_id: topicId,
+          role: 'assistant',
+          content: acc.content,
+          blocks: JSON.stringify(acc.blocks)
+        })
+      } catch (err) {
+        logger.error('[Harness] 保存 AI 消息失败:', err)
+      }
+    }
+    segments.push({ messageId: segmentMessageId, dialogueId, content: acc.content })
+  }
+
   const stream = harnessService.sendMessageStream(
     question,
     {
@@ -315,33 +404,29 @@ async function runHarnessTurn(
           retrying: { attempt, retries },
           __topicId: topicId
         })
+      },
+      // 回合内插话（steering）：**纯注入**——把文字并进模型上下文，不落库、不产生对话内容。
+      // 调用点有两个（见 runtime/agent.ts）：模型节点调用前（主路径，长回答途中插话也能生效）、
+      // 工具节点执行前。本轮结束时仍未取走的条目由 releaseHolds 放回队列，不静默丢内容。
+      drainInjections: async (): Promise<AgentInjection[] | null> => {
+        const items = harnessQueue.takeInjections(topicId)
+        if (items.length === 0) return null
+        logger.info(`[HarnessQueue] 取出 ${items.length} 条待注入插话（topic=${topicId}）`)
+        return items.map((item) => {
+          safeSend(event.sender, 'harness-stream-chunk', {
+            steered: { text: item.text },
+            __topicId: topicId
+          })
+          // 队列已摘除该条：广播给所有窗口（含发起窗口）抹掉队列行
+          harnessQueue.notifyConsumed(topicId, { item })
+          return { text: item.text }
+        })
       }
     },
     (records) => {
       usageRecords = records
     }
   )
-  const accumulatedBlocks: {
-    type: string
-    text?: string
-    tool?: ToolCallDetail
-    reasoning?: string
-    subAgent?: SubAgentEvent
-    /** 本轮注入的热记忆（memoryInjected 类型；随 blocks 持久化，历史对话可恢复显示） */
-    memory?: MemoryInjection
-    /** 本轮早期对话摘要压缩（historyCompacted 类型；随 blocks 持久化） */
-    compaction?: HistoryCompaction
-    children?: {
-      type: string
-      text?: string
-      tool?: ToolCallDetail
-      reasoning?: string
-    }[]
-  }[] = []
-  let fullContent = ''
-  let lastReasoning = ''
-  /** 流式执行失败（部分输出后图执行失败）：跳过把残缺回复落库 */
-  let streamFailed = false
 
   try {
     for await (const chunk of stream) {
@@ -357,7 +442,7 @@ async function runHarnessTurn(
       }
       // 部分输出后流失败：转发错误事件给前端，并标记跳过落库
       if (chunk.streamError) {
-        streamFailed = true
+        acc.failed = true
         logger.error('[Harness] 流式执行失败（已有部分输出）:', chunk.streamError.message)
         safeSend(event.sender, 'harness-stream-error', {
           error: chunk.streamError.message,
@@ -366,19 +451,20 @@ async function runHarnessTurn(
       }
       // 本轮热记忆注入：置于消息块最顶部（首个 chunk 到达，仅累积一次，随 blocks 持久化）
       if (chunk.memoryInjected) {
-        const exists = accumulatedBlocks.some((b) => b.type === 'memoryInjected')
+        const exists = acc.blocks.some((b) => b.type === 'memoryInjected')
         if (!exists) {
-          accumulatedBlocks.unshift({
+          acc.blocks.unshift({
             type: 'memoryInjected',
             memory: chunk.memoryInjected
           })
         }
       }
-      // 本轮早期对话摘要压缩：紧随注入记忆块（正文流开始前到达，仅累积一次）
+      // 本轮早期对话摘要压缩：紧随注入记忆块（正文流开始前到达，仅累积一次）。
+      // 压缩卡片只落在首段：插话切段后新段落不再重复插入（重复的 historyCompacted 直接忽略）
       if (chunk.historyCompacted) {
-        const exists = accumulatedBlocks.some((b) => b.type === 'historyCompacted')
-        if (!exists) {
-          accumulatedBlocks.push({
+        if (!acc.compactionSeen) {
+          acc.compactionSeen = true
+          acc.blocks.push({
             type: 'historyCompacted',
             compaction: chunk.historyCompacted
           })
@@ -390,22 +476,22 @@ async function runHarnessTurn(
         // 不再做 endsWith 去重（修复）：主进程增量已按形态去重，此处收到的是真实增量，
         // 「增量恰好等于已累积尾部」往往是模型真实重复输出，误判会丢真实内容，
         // 且落库结果与渲染端显示不一致。
-        if (lastReasoning && rc.startsWith(lastReasoning) && rc.length > lastReasoning.length) {
-          const delta = rc.slice(lastReasoning.length)
-          const lastBlock = accumulatedBlocks[accumulatedBlocks.length - 1]
+        if (acc.reasoning && rc.startsWith(acc.reasoning) && rc.length > acc.reasoning.length) {
+          const delta = rc.slice(acc.reasoning.length)
+          const lastBlock = acc.blocks[acc.blocks.length - 1]
           if (lastBlock && lastBlock.type === 'reasoning') {
             lastBlock.reasoning = (lastBlock.reasoning || '') + delta
           } else {
-            accumulatedBlocks.push({ type: 'reasoning', reasoning: delta })
+            acc.blocks.push({ type: 'reasoning', reasoning: delta })
           }
-          lastReasoning = rc
+          acc.reasoning = rc
         } else {
-          lastReasoning += rc
-          const lastBlock = accumulatedBlocks[accumulatedBlocks.length - 1]
+          acc.reasoning += rc
+          const lastBlock = acc.blocks[acc.blocks.length - 1]
           if (lastBlock && lastBlock.type === 'reasoning') {
             lastBlock.reasoning = (lastBlock.reasoning || '') + rc
           } else {
-            accumulatedBlocks.push({ type: 'reasoning', reasoning: rc })
+            acc.blocks.push({ type: 'reasoning', reasoning: rc })
           }
         }
       }
@@ -413,22 +499,22 @@ async function runHarnessTurn(
         const c = String(chunk.content)
         // 同 reasoning 分支：只做 startsWith 后缀切片（完整形态防御），不做 endsWith 去重；
         // 累积形态下新建文本块时同样只存增量，避免与渲染端（存后缀）出现双重计数
-        if (fullContent && c.startsWith(fullContent) && c.length > fullContent.length) {
-          const delta = c.slice(fullContent.length)
-          fullContent = c
-          const lastBlock = accumulatedBlocks[accumulatedBlocks.length - 1]
+        if (acc.content && c.startsWith(acc.content) && c.length > acc.content.length) {
+          const delta = c.slice(acc.content.length)
+          acc.content = c
+          const lastBlock = acc.blocks[acc.blocks.length - 1]
           if (lastBlock && lastBlock.type === 'text') {
             lastBlock.text = (lastBlock.text || '') + delta
           } else {
-            accumulatedBlocks.push({ type: 'text', text: delta })
+            acc.blocks.push({ type: 'text', text: delta })
           }
         } else {
-          fullContent += c
-          const lastBlock = accumulatedBlocks[accumulatedBlocks.length - 1]
+          acc.content += c
+          const lastBlock = acc.blocks[acc.blocks.length - 1]
           if (lastBlock && lastBlock.type === 'text') {
             lastBlock.text = (lastBlock.text || '') + c
           } else {
-            accumulatedBlocks.push({ type: 'text', text: c })
+            acc.blocks.push({ type: 'text', text: c })
           }
         }
       }
@@ -450,8 +536,8 @@ async function runHarnessTurn(
           }
           if (chunk.tool.status === 'completed') {
             // 匹配同一次调用的未完成工具块并更新
-            for (let i = accumulatedBlocks.length - 1; i >= 0; i--) {
-              const b = accumulatedBlocks[i]
+            for (let i = acc.blocks.length - 1; i >= 0; i--) {
+              const b = acc.blocks[i]
               if (
                 b.type === 'tool' &&
                 b.tool &&
@@ -467,11 +553,11 @@ async function runHarnessTurn(
           } else if (chunk.tool.status === 'preparing') {
             // 模型开始构建工具参数；后续进度 chunk 仅用于保活，已存在则跳过。
             // 若同一次调用已处于 executing/completed（事件乱序），也跳过，避免重复块。
-            const exists = accumulatedBlocks.some(
+            const exists = acc.blocks.some(
               (b) => b.type === 'tool' && matchesTool(b.tool as ToolCallDetail)
             )
             if (!exists) {
-              accumulatedBlocks.push({
+              acc.blocks.push({
                 type: 'tool',
                 tool: {
                   name: chunk.tool.name,
@@ -485,8 +571,8 @@ async function runHarnessTurn(
           } else {
             // executing：优先合并到同一次调用的 preparing 块
             let merged = false
-            for (let i = accumulatedBlocks.length - 1; i >= 0; i--) {
-              const b = accumulatedBlocks[i]
+            for (let i = acc.blocks.length - 1; i >= 0; i--) {
+              const b = acc.blocks[i]
               if (b.type === 'tool' && b.tool?.status === 'preparing' && matchesTool(b.tool)) {
                 b.tool.name = chunk.tool.name
                 b.tool.input = chunk.tool.input
@@ -500,8 +586,8 @@ async function runHarnessTurn(
             // 未按名称匹配到 preparing 块时，并入最近的占位块并改名为真实工具名，
             // 避免「tool · 生成中…」幽灵块与真实工具块并存（与渲染端 applyChunkToMessages 一致）
             if (!merged) {
-              for (let i = accumulatedBlocks.length - 1; i >= 0; i--) {
-                const b = accumulatedBlocks[i]
+              for (let i = acc.blocks.length - 1; i >= 0; i--) {
+                const b = acc.blocks[i]
                 if (b.type === 'tool' && b.tool?.status === 'preparing' && b.tool.name === 'tool') {
                   b.tool.name = chunk.tool.name
                   b.tool.input = chunk.tool.input
@@ -513,7 +599,7 @@ async function runHarnessTurn(
               }
             }
             if (!merged) {
-              accumulatedBlocks.push({
+              acc.blocks.push({
                 type: 'tool',
                 tool: {
                   name: chunk.tool.name,
@@ -530,7 +616,7 @@ async function runHarnessTurn(
       if (chunk.subAgent) {
         const sa = chunk.subAgent
 
-        // 注意：不把子智能体输出拼入 fullContent（主消息 content）。
+        // 注意：不把子智能体输出拼入 acc.content（主消息 content）。
         // 子智能体详情已持久化在 blocks 的 subAgent 块（含 children），
         // 历史重载按 blocks 渲染即可；若再拼入 content，会导致：
         // ① 复制消息/上下文注入时子智能体全文重复出现在主智能体发言中；
@@ -538,14 +624,14 @@ async function runHarnessTurn(
         // 子智能体块匹配逻辑见下：
 
         // 匹配智能体累积块：优先 causeId，回退 name
-        const matchesSa = (b: (typeof accumulatedBlocks)[number]): boolean => {
+        const matchesSa = (b: (typeof acc.blocks)[number]): boolean => {
           if (b.type !== 'subAgent' || !b.subAgent) return false
           if (sa.causeId && b.subAgent.causeId) return b.subAgent.causeId === sa.causeId
           return b.subAgent.name === sa.name
         }
 
         // 查找或创建同名智能体累积块
-        let saBlock = accumulatedBlocks.find(matchesSa)
+        let saBlock = acc.blocks.find(matchesSa)
         if (!saBlock) {
           saBlock = {
             type: 'subAgent',
@@ -557,7 +643,7 @@ async function runHarnessTurn(
             },
             children: []
           }
-          accumulatedBlocks.push(saBlock)
+          acc.blocks.push(saBlock)
         }
 
         if (sa.status === 'started') {
@@ -717,28 +803,22 @@ async function runHarnessTurn(
     stopMemSampling()
   }
 
-  // 4. 保存完整的 AI 回复（流执行失败时跳过：截断的不完整回复不应落库为完整消息）
+  // 4. 保存本轮各段 AI 回复（流执行失败时逐段跳过：截断的不完整回复不应落库为完整消息）。
   //    落库后把新对话行 id 回传前端：流式期间的消息用的是临时 id，只有拿到库里的行 id，
-  //    前端才能把用量行（按 dialogue_id 关联）当场贴到这条消息上，不必重新加载会话
-  let assistantDialogueId: number | null = null
-  if (!streamFailed) {
-    try {
-      assistantDialogueId = await addDialogue({
-        topic_id: topicId,
-        role: 'assistant',
-        content: fullContent,
-        blocks: JSON.stringify(accumulatedBlocks)
-      })
-      // 真实用量落库（模型没回传 usage_metadata 时直接跳过，不写全 0 的假数据）
-      await persistTurnUsage({
-        dialogueId: assistantDialogueId,
-        topicId,
-        providerId: options?.providerId,
-        records: usageRecords
-      })
-    } catch (err) {
-      logger.error('Failed to save AI message:', err)
-    }
+  //    前端才能把用量行（按 dialogue_id 关联）当场贴到这条消息上，不必重新加载会话。
+  //    无插话时这里恰好只有一段，与旧行为完全一致。
+  await flushSegment()
+  const lastPersisted = [...segments].reverse().find((seg) => seg.dialogueId != null)
+  const assistantDialogueId = lastPersisted?.dialogueId ?? null
+  if (assistantDialogueId != null) {
+    // 真实用量落库（模型没回传 usage_metadata 时直接跳过，不写全 0 的假数据）。
+    // 一条用量行关联一段：多段时挂在最后一段上（整轮 token 是累加的，无法按段切分）
+    await persistTurnUsage({
+      dialogueId: assistantDialogueId,
+      topicId,
+      providerId: options?.providerId,
+      records: usageRecords
+    })
   }
 
   // 4.5 收尾任务清单：本轮正常结束时，把仍停在 in_progress 的项就地结为 completed。
@@ -750,11 +830,11 @@ async function runHarnessTurn(
   //
   // 以下情形一律不动清单（它们都意味着本轮不算「干完了」）：
   // - 用户点了停止（aborted）；
-  // - 流执行失败（streamFailed，已跳过落库）；
+  // - 流执行失败（acc.failed，该段已跳过落库）；
   // - 正挂着待回答的提问（模型在等用户，任务确实还在中途）；
   // - 目标自动续跑轮（后面还有轮次，由模型自己继续维护清单）。
   if (
-    !streamFailed &&
+    !acc.failed &&
     !abortController.signal.aborted &&
     options?.turnMeta?.source !== 'goal-round' &&
     !questionService.getPending(topicId)
@@ -773,13 +853,120 @@ async function runHarnessTurn(
     topicId,
     // 本轮两条对话行的库内 id：前端据此把临时 id 换成真 id（删除这一轮、关联用量都要用）
     userDialogueId: userDialogueId ?? undefined,
-    assistantDialogueId: assistantDialogueId ?? undefined
+    assistantDialogueId: assistantDialogueId ?? undefined,
+    // 助手段落表：无插话时只有一段（等价于旧的单条 assistantDialogueId）；
+    // 有插话时一段一条，前端按 messageId 把库内行 id 贴回对应的助手气泡
+    segments: segments.map((seg) => ({
+      messageId: seg.messageId,
+      dialogueId: seg.dialogueId ?? undefined
+    }))
   })
   return { topicId, cancelled: abortController.signal.aborted }
 }
 
+/** 广播插话队列当前状态（所有窗口；前端按 topicId 过滤） */
+function broadcastQueue(topicId: number): void {
+  const queue = harnessQueue.view(topicId)
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) safeSend(win.webContents, 'harness-queue-updated', { topicId, queue })
+  }
+}
+
+/** sender.id → 该渲染帧当前在跑的话题（「停止」时据此丢弃待注入缓冲） */
+const senderTopic = new Map<number, number>()
+
+/** 回合内插话的对外载荷（队列条目 + 落库行 id） */
+interface StartStreamOptions {
+  topicId?: number
+  providerId?: number
+  images?: string[]
+  documents?: { fileName: string; filePath: string }[]
+  turnMeta?: TurnMeta
+  reuseUserDialogueId?: number
+  messageId?: string
+}
+
+/** 启动一轮用户对话并跟踪其生命周期（退 Application 前会等待它落库） */
+function launchTurn(
+  event: HarnessSenderEvent,
+  question: string,
+  options: StartStreamOptions | undefined,
+  trackTurn: (p: Promise<{ topicId: number; cancelled: boolean }>) => Promise<{
+    topicId: number
+    cancelled: boolean
+  }>
+): Promise<{ topicId: number; cancelled: boolean }> {
+  const topicId = options?.topicId
+  if (topicId != null) {
+    // 标记话题进行中：生成中新发来的消息据此走排队而不是插一轮
+    harnessQueue.setTurnActive(topicId, true)
+    senderTopic.set(event.sender.id, topicId)
+  }
+  return trackTurn(runHarnessTurn({ event, question, options })).finally(() => {
+    if (topicId != null) {
+      harnessQueue.setTurnActive(topicId, false)
+      // 本轮点了插话却没等到注入边界的条目放回队列（见 releaseHolds 的说明）：
+      // 它们既不落库也不进对话流，必须让用户还看得见，否则等于内容凭空消失
+      harnessQueue.releaseHolds(topicId)
+      // 只在本帧没有别的在跑话题时删掉映射（同帧切话题同时开两轮的情况很罕见，保守处理）
+      if (senderTopic.get(event.sender.id) === topicId) senderTopic.delete(event.sender.id)
+    }
+  })
+}
+
+/**
+ * 回合结束后的队列处置。
+ *
+ * 排队中的消息（用户明确要发的下一轮提问）在这里作为**新一轮**接续发出，FIFO。
+ * 注意与插话分开：点了「立即插话」的条目走纯注入，不产生对话内容；只有排队区里
+ * 还没点插话的消息才会被接续成轮次。目标自动续跑仍在跑时不抢跑，交给最后一轮收尾后接续。
+ */
+function drainPendingQueue(
+  event: HarnessSenderEvent,
+  topicId: number,
+  options: StartStreamOptions | undefined,
+  trackTurn: (p: Promise<{ topicId: number; cancelled: boolean }>) => Promise<{
+    topicId: number
+    cancelled: boolean
+  }>
+): void {
+  if (harnessQueue.isTurnActive(topicId)) return
+  if (goalRoundDriver.isRunning(topicId)) return
+  const item = harnessQueue.shift(topicId)
+  if (!item) return
+  logger.info(`[HarnessQueue] 回合结束，接续队列消息：${item.text.slice(0, 40)}`)
+  launchTurn(
+    event,
+    item.text,
+    {
+      ...options,
+      topicId,
+      // 接续轮不继承「编辑重发」目标行与旧消息 id
+      reuseUserDialogueId: undefined,
+      messageId: undefined,
+      images: item.images,
+      documents: item.documents
+    },
+    trackTurn
+  ).catch((err) => logger.error('[HarnessQueue] 接续队列消息失败:', err))
+}
+
 /** 对话发送 / 流式输出 / 目录选择 / 技能列表 IPC */
 export function registerHarnessIpc(): void {
+  // 队列变更 → 广播到所有窗口（输入框上方的插话队列实时刷新）
+  harnessQueue.onChanged = ({ topicId }) => broadcastQueue(topicId)
+  // 插话已并入当前回合（纯注入）→ 广播给所有窗口：前端抹掉队列行 + 给一句瞬时反馈
+  harnessQueue.onConsumed = (eventPayload) => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) {
+        safeSend(win.webContents, 'harness-queue-steered', {
+          topicId: eventPayload.topicId,
+          itemId: eventPayload.item.id,
+          text: eventPayload.item.text
+        })
+      }
+    }
+  }
   ipcMain.handle(
     'harness-send-message',
     async (
@@ -826,23 +1013,65 @@ export function registerHarnessIpc(): void {
     }
   )
 
-  ipcMain.on(
-    'harness-start-stream',
-    (
+  ipcMain.on('harness-start-stream', (event, question: string, options?: StartStreamOptions) => {
+    // 跟踪进行中的流：应用退出时统一中止并等待数据保存完成。
+    // 用户轮次完成后触发目标轮次驱动器（自动续跑轮由驱动器内部递归调度）
+    // 每个轮次（含目标驱动器派发的自动轮）都登记进 activeHarnessStreams，
+    // 退出时 lifecycle 才能拦截并等待落库（修复：此前只跟踪首轮，自动轮运行中退出会丢回复）
+    const trackTurn = (
+      p: Promise<{ topicId: number; cancelled: boolean }>
+    ): Promise<{ topicId: number; cancelled: boolean }> => {
+      activeHarnessStreams.add(p)
+      p.finally(() => activeHarnessStreams.delete(p))
+      return p
+    }
+    const streamPromise = launchTurn(event, question, options, trackTurn)
+      .then(async ({ topicId, cancelled }) => {
+        if (options?.turnMeta?.source === 'goal-round') return
+        if (cancelled) {
+          // 用户停止本轮：disarm 目标并跳过自动续跑调度（修复：此前 cancelled 被丢弃，
+          // 停止后立即白烧一轮自动轮；目标保持 active，用户要求「继续」时经 resume 重新武装）
+          logger.info('[Harness] 本轮被用户取消，目标 disarm，跳过自动续跑调度')
+          goalStore.disarm(topicId)
+          return
+        }
+        await goalRoundDriver.maybeDrive(topicId, (p) =>
+          trackTurn(
+            runHarnessTurn({
+              event,
+              question: p.question,
+              options: { ...options, topicId: p.topicId, turnMeta: p.turnMeta }
+            })
+          )
+        )
+        // 目标续跑全部结束后再处置队列：排队中的插话作为新一轮发出
+        drainPendingQueue(event, topicId, options, trackTurn)
+      })
+      .catch((err) => logger.error('[Harness] 轮次执行异常:', err))
+    activeHarnessStreams.add(streamPromise)
+    streamPromise.finally(() => activeHarnessStreams.delete(streamPromise))
+  })
+
+  /**
+   * 生成中发消息：当前话题有回合在跑 → 收进插话队列；没有在跑 → 直接发起新一轮。
+   * 渲染进程不再自己判断（多窗口/多话题下判断会失准），一律由主进程裁决。
+   */
+  ipcMain.handle(
+    'harness-queue-enqueue',
+    async (
       event,
-      question: string,
-      options?: {
-        topicId?: number
-        providerId?: number
-        images?: string[]
-        documents?: { fileName: string; filePath: string }[]
-        turnMeta?: TurnMeta
+      payload: { topicId: number; text: string; attachments?: QueueAttachments }
+    ): Promise<{ queued: boolean }> => {
+      const { topicId, text } = payload
+      const attachments = payload.attachments ?? {}
+      if (!Number.isInteger(topicId) || topicId <= 0 || !text.trim()) {
+        return { queued: false }
       }
-    ) => {
-      // 跟踪进行中的流：应用退出时统一中止并等待数据保存完成。
-      // 用户轮次完成后触发目标轮次驱动器（自动续跑轮由驱动器内部递归调度）
-      // 每个轮次（含目标驱动器派发的自动轮）都登记进 activeHarnessStreams，
-      // 退出时 lifecycle 才能拦截并等待落库（修复：此前只跟踪首轮，自动轮运行中退出会丢回复）
+      if (harnessQueue.isTurnActive(topicId)) {
+        harnessQueue.enqueue({ topicId, senderId: event.sender.id, text, attachments })
+        return { queued: true }
+      }
+      // 没有在跑的回合：直接开一轮（与普通发送同一条管线）
       const trackTurn = (
         p: Promise<{ topicId: number; cancelled: boolean }>
       ): Promise<{ topicId: number; cancelled: boolean }> => {
@@ -850,30 +1079,64 @@ export function registerHarnessIpc(): void {
         p.finally(() => activeHarnessStreams.delete(p))
         return p
       }
-      const streamPromise = trackTurn(runHarnessTurn({ event, question, options }))
-        .then(({ topicId, cancelled }) => {
-          if (options?.turnMeta?.source !== 'goal-round') {
-            if (cancelled) {
-              // 用户停止本轮：disarm 目标并跳过自动续跑调度（修复：此前 cancelled 被丢弃，
-              // 停止后立即白烧一轮自动轮；目标保持 active，用户要求「继续」时经 resume 重新武装）
-              logger.info('[Harness] 本轮被用户取消，目标 disarm，跳过自动续跑调度')
-              goalStore.disarm(topicId)
-              return
-            }
-            void goalRoundDriver.maybeDrive(topicId, (p) =>
-              trackTurn(
-                runHarnessTurn({
-                  event,
-                  question: p.question,
-                  options: { ...options, topicId: p.topicId, turnMeta: p.turnMeta }
-                })
-              )
-            )
+      void trackTurn(
+        runHarnessTurn({
+          event,
+          question: text,
+          options: {
+            topicId,
+            // 队列接续轮沿用默认模型与主智能体默认工具集
+            images: attachments.images,
+            documents: attachments.documents,
+            turnMeta: { source: 'user' }
           }
         })
-        .catch((err) => logger.error('[Harness] 轮次执行异常:', err))
-      activeHarnessStreams.add(streamPromise)
-      streamPromise.finally(() => activeHarnessStreams.delete(streamPromise))
+      )
+        .then(() => {
+          drainPendingQueue(event, topicId, { topicId }, trackTurn)
+        })
+        .catch((err) => logger.error('[HarnessQueue] 直接发起轮次异常:', err))
+      return { queued: false }
+    }
+  )
+
+  /** 队列查询（窗口/话题重新挂载时拉取当前队列） */
+  ipcMain.handle('harness-queue-list', (_event, topicId: number) => harnessQueue.view(topicId))
+
+  /** 删除一条排队消息 */
+  ipcMain.handle('harness-queue-remove', (_event, payload: { topicId: number; itemId: string }) => {
+    return harnessQueue.remove(payload.topicId, payload.itemId)
+  })
+
+  /** 改写一条排队消息的文本 */
+  ipcMain.handle(
+    'harness-queue-update',
+    (_event, payload: { topicId: number; itemId: string; text: string }) => {
+      if (!payload.text.trim()) return false
+      return harnessQueue.update(payload.topicId, payload.itemId, payload.text)
+    }
+  )
+
+  /**
+   * 「立即插话」：把这条排队消息并入**正在运行**的回合。
+   * 这里只把它移入待注入缓冲并落库、下发回执；真正的注入发生在下一个工具节点边界
+   *（见 runtime/agent.ts createInterjectionHandler）。
+   */
+  ipcMain.handle(
+    'harness-queue-steer',
+    async (
+      _event,
+      payload: { topicId: number; itemId: string }
+    ): Promise<{ accepted: boolean }> => {
+      const { topicId, itemId } = payload
+      const item = harnessQueue.steer(topicId, itemId)
+      if (!item) return { accepted: false }
+      // 纯注入：条目进入待注入缓冲，下一个工具节点边界会被并进模型上下文，
+      // 不落库、不产生对话内容；本轮没等到边界的条目由 releaseHolds 放回队列。
+      logger.info(
+        `[HarnessQueue] 插话已受理话题 ${topicId}（等待下一个工具节点边界注入）：${item.text.slice(0, 40)}`
+      )
+      return { accepted: true }
     }
   )
 
@@ -1042,6 +1305,13 @@ export function registerHarnessIpc(): void {
     if (controller) {
       controller.abort()
       streamAbortControllers.delete(event.sender.id)
+    }
+    // 用户点了停止：只中止当前回合的注入缓冲；**排队中的插话保留**——
+    // 那些是用户明确写下、还没被处理的消息（停止后由回合收尾路径作为新一轮接续发出）。
+    const topicId = senderTopic.get(event.sender.id)
+    if (topicId != null) {
+      harnessQueue.dropInjections(topicId)
+      broadcastQueue(topicId)
     }
     questionService.abortAll()
   })

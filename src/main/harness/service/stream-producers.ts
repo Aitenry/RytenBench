@@ -1,5 +1,6 @@
 import logger from 'electron-log'
 import { StructuredMessage, ToolCard } from '../types'
+import type { AgentInjection } from '../types'
 import type { RuntimeStream, MessageRecord, ToolCallRecord, SubAgentRecord } from '../runtime/types'
 import { takeToolFacts } from '../runtime/tool-result-facts'
 import { getToolOutputStore } from '../runtime/tool-output-store'
@@ -22,6 +23,11 @@ import { buildToolProjection, projectToolInput, PROJECTED_TOOLS } from './tool-p
 type EnqueueFn = (item: StructuredMessage) => void
 type MarkDoneFn = () => void
 type SafeGetOutputFn = (call: { output: unknown }) => Promise<unknown>
+/**
+ * 回合内插话的排空回调（由主进程队列提供）：返回本轮待并入模型的插话。
+ * 回调内部已完成「落库 + 下发 steered chunk + 助手段落边界切分」，生产者只管时机。
+ */
+type DrainInjectionsFn = () => Promise<AgentInjection[] | null>
 
 /** 延迟 100ms 确保渲染进程有时间渲染 loading 状态 */
 function sleep(ms: number): Promise<void> {
@@ -56,6 +62,34 @@ function createSilenceWatchdog(tag: string): { reset: () => void; dispose: () =>
       if (timer) clearTimeout(timer)
       timer = null
     }
+  }
+}
+
+// ============================================================================
+// 回合内插话（steering）：段落边界的确定
+// ============================================================================
+
+/**
+ * 创建「插话排空器」。
+ *
+ * 时机（消息流）：只在本轮工具**已完成下发**之后排空——`toolsStarted.value` 为 false 说明
+ * 要么模型还没吐出工具调用（第一条工具记录未到），要么模型已经进入下一轮输出（新的
+ * tool_block_start 会把标志重置）。后者正是我们要的边界：上一条工具卡（executing →
+ * completed）已经全部下发，插话成为干净的助手消息段落边界，不会出现「插话之后又冒出
+ * 上一段的工具完成卡」。
+ *
+ * 工具流还会在每条工具调用记录之后补一次（同样的守卫），覆盖「最后一次工具调用之后、
+ * 模型尚未产生任何输出」的窗口。
+ */
+function createInjectionDrainer(
+  toolsStarted: { value: boolean } | undefined,
+  drain?: DrainInjectionsFn
+): (force: boolean) => Promise<void> {
+  return async (force: boolean) => {
+    if (!drain) return
+    // 非强制模式：工具已开始但结果尚未全部下发，此刻排空会把插话插在工具完成卡之前
+    if (!force && toolsStarted?.value) return
+    await drain()
   }
 }
 
@@ -173,7 +207,9 @@ export async function produceMessages(
   /** 与 produceToolCalls 共享的标志：首轮工具开始执行即为 true（模型消息已结束、
    *  参数已生成完，preparing 保活必须停止，防止已完成工具卡被复活为「参数构建中…」）；
    *  新一轮模型输出开始（新 tool_block_start）时重置为 false。 */
-  toolsStarted?: { value: boolean }
+  toolsStarted?: { value: boolean },
+  /** 回合内插话：待注入消息的排空回调（未配置则不启用） */
+  drainInjections?: DrainInjectionsFn
 ): Promise<void> {
   // lastSent 跨所有记录共享：某些 provider 会把整段文本拆成多条重复发送
   let lastSentReasoning = ''
@@ -183,10 +219,13 @@ export async function produceMessages(
   const toolBlocks = new Map<number, { id?: string; name: string }>()
   let lastProgressAt = 0
   const silenceWatchdog = createSilenceWatchdog('消息流')
+  const drainInjectionsInto = createInjectionDrainer(toolsStarted, drainInjections)
   try {
     for await (const rec of run.messages as AsyncIterable<MessageRecord>) {
       if (signal?.aborted) break
       silenceWatchdog.reset()
+      // 段落边界：本轮工具已完成下发（标志为 false）时把待注入插话并入模型并下发 steered chunk
+      await drainInjectionsInto(false)
       if (rec.kind === 'reasoning') {
         const delta = reasoningDelta(rec.text, lastSentReasoning)
         if (delta) {
@@ -256,8 +295,11 @@ export async function produceToolCalls(
    *  参数已生成完，消息生产者据此停止「参数构建中」保活） */
   toolsStarted?: { value: boolean },
   /** 当前话题 id：结果详情按话题分目录存放（话题删除时一并清理） */
-  topicId?: number
+  topicId?: number,
+  /** 回合内插话：待注入消息的排空回调（未配置则不启用） */
+  drainInjections?: DrainInjectionsFn
 ): Promise<void> {
+  const drainInjectionsInto = createInjectionDrainer(toolsStarted, drainInjections)
   try {
     for await (const call of run.toolCalls as AsyncIterable<ToolCallRecord>) {
       if (signal?.aborted) break
@@ -324,6 +366,9 @@ export async function produceToolCalls(
       enqueue({
         tool: await finishToolCall(topicId, call.name, input, call.callId, safeGetOutput, call)
       })
+      // 本次工具已完成下发：此刻排空插话，边界最干净（覆盖「最后一次工具调用之后、
+      // 模型尚未产生任何输出」的窗口；之后的等待由消息流的守卫排空兜底）
+      await drainInjectionsInto(true)
     }
   } catch (err) {
     if ((err as Error)?.name !== 'AbortError') {

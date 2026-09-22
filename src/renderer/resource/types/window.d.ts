@@ -61,10 +61,28 @@ export interface StructuredMessage {
   retrying?: { attempt: number; retries: number }
   /** 流式执行失败（部分输出后图执行失败；IPC 层据此跳过落库） */
   streamError?: { message: string }
+  /**
+   * 用户插话已并入当前回合（steering 回执）。纯注入：不落库、不在对话流里生成新气泡，
+   * 也不切分助手消息——前端只用它做一句瞬时反馈。
+   */
+  steered?: {
+    text: string
+  }
   /** 主进程注入的话题 ID（每次 harness-stream-chunk 均携带） */
   __topicId?: number
   /** 目标自动续跑轮的起始标记（流首 chunk） */
   goalRound?: { round: number; objective: string }
+}
+
+/** 生成中的插话队列条目（主进程为单一真源，广播视图不含附件正文） */
+export interface QueuedMessageView {
+  id: string
+  topicId: number
+  text: string
+  createdAt: number
+  attachments: { fileName: string; isImage: boolean }[]
+  /** 点过插话但本轮没等到注入边界：留在队列里，随下一次发送带出 */
+  held?: boolean
 }
 
 export interface SubAgentEvent {
@@ -217,8 +235,10 @@ export interface Window {
           topicId: number
           /** 本轮用户消息的库内行 id（流式前落库） */
           userDialogueId?: number
-          /** 本轮助手消息的库内行 id（流式后落库） */
+          /** 本轮最后一段助手消息的库内行 id（流式后落库） */
           assistantDialogueId?: number
+          /** 助手段落表（有插话切段时多段，每段一条库内行） */
+          segments?: { messageId: string; dialogueId?: number }[]
         }) => void
       ) => () => void
       onStreamError: (callback: (error: { error: string; topicId?: number }) => void) => () => void
@@ -298,8 +318,31 @@ export interface Window {
           providerId?: number
           /** 编辑并重发：改写这条已存在的用户消息行，而不是插入新行 */
           reuseUserDialogueId?: number
+          /** 本轮首段助手消息的前端临时 id（插话会切段，主进程按段回传 dialogueId） */
+          messageId?: string
         }
       ) => void
+      // ── 生成中的插话队列 ──────────────────────────────────────────────
+      /** 生成中发消息：主进程裁决——有回合在跑则入队（queued=true），否则直接开新一轮 */
+      enqueueMessage: (payload: {
+        topicId: number
+        text: string
+        attachments?: {
+          images?: string[]
+          documents?: { fileName: string; filePath: string }[]
+        }
+      }) => Promise<{ queued: boolean }>
+      listQueuedMessages: (topicId: number) => Promise<QueuedMessageView[]>
+      removeQueuedMessage: (topicId: number, itemId: string) => Promise<boolean>
+      updateQueuedMessage: (topicId: number, itemId: string, text: string) => Promise<boolean>
+      /** 立即插话：把这条排队消息注入正在运行的回合（下一个工具节点边界生效） */
+      steerQueuedMessage: (topicId: number, itemId: string) => Promise<{ accepted: boolean }>
+      onQueueUpdated: (
+        callback: (data: { topicId: number; queue: QueuedMessageView[] }) => void
+      ) => () => void
+      onQueueSteered: (
+        callback: (data: { topicId: number; itemId: string; text: string }) => void
+      ) => () => void
       getTools: () => Promise<ToolInfo[]>
       selectSkillsDirectory: () => Promise<string | null>
       selectWorkspace: () => Promise<string | null>

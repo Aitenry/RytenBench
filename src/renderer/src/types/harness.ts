@@ -110,6 +110,8 @@ export interface MessageBlock {
     | 'historyCompacted'
     | 'goalRound'
     | 'retrying'
+    /** 回合内插话标记：主进程按它把该行排除出模型上下文（只作展示与留痕） */
+    | 'interjection'
   text?: string
   tool?: ToolCall
   reasoning?: string

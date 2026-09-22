@@ -4,6 +4,7 @@ import { LlmProviderConfig } from '../../../../../main/database/mapper/provider'
 import { Window, ToolInfo } from '../../../../resource/types/window'
 import type { Message, Attachment, ToolCall, MessageBlock } from '@renderer/types/harness'
 import type { StreamChunk } from '../../../../../main/harness/types'
+import type { QueuedMessageView } from '../../../../resource/types/window'
 import { useMessage } from '@renderer/hooks/useMessage'
 import { useTranslation } from '@renderer/i18n'
 import {
@@ -116,6 +117,16 @@ export interface UseHarnessHandlersReturn {
   handleLoadMoreTopics: () => Promise<void>
   handleLoadMoreMessages: () => Promise<void>
   refreshTopics: () => Promise<void>
+  /** 生成中的插话队列（当前话题） */
+  queuedMessages: QueuedMessageView[]
+  /** 刚并入当前回合的插话正文（瞬时反馈，2.6s 后自动消失） */
+  steeredNotice: string | null
+  /** 删除一条排队消息 */
+  handleRemoveQueued: (itemId: string) => Promise<void>
+  /** 改写一条排队消息的文本 */
+  handleUpdateQueued: (itemId: string, text: string) => Promise<void>
+  /** 立即插话：把这条排队消息注入正在运行的回合 */
+  handleSteerQueued: (itemId: string) => Promise<void>
 }
 
 /**
@@ -131,6 +142,17 @@ function resolveDialogueId(message: Message | undefined): number | null {
   if (typeof message.dialogueId === 'number') return message.dialogueId
   const numeric = Number(message.id)
   return Number.isInteger(numeric) && numeric > 0 && numeric < 1e10 ? numeric : null
+}
+
+/**
+ * 用户插话（steering）**不改动对话流**：插话是纯注入——主进程把它并进正在运行的回合，
+ * 既不落库也不切分助手消息（用户明确要求「不要形成新的对话内容和入库」）。
+ *
+ * 因此在渲染端插话 chunk 只作为回执被过滤掉：它带的是提示文本而不是内容/推理/工具，
+ * 逐条应用只会平白触发一次无用更新。（「已插话」的瞬时反馈由队列条负责。）
+ */
+function isSteerChunk(chunk: StreamChunk): boolean {
+  return Boolean(chunk.steered)
 }
 
 export const useHarnessHandlers = (): UseHarnessHandlersReturn => {
@@ -177,6 +199,15 @@ export const useHarnessHandlers = (): UseHarnessHandlersReturn => {
   /** 正在气泡内编辑的提问 id（气泡变成可编辑态用） */
   const [editingOrphanId, setEditingOrphanId] = useState<string | null>(null)
 
+  // ── 生成中的插话队列（主进程为单一真源，这里只保存当前话题的镜像）──
+  const [queuedMessages, setQueuedMessages] = useState<QueuedMessageView[]>([])
+  /** 刚刚被并进当前回合的插话正文（只做 2.6s 瞬时反馈，不落库、不进对话流） */
+  const [steeredNotice, setSteeredNotice] = useState<string | null>(null)
+  const steeredNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  /** topicId → 该话题当前流式中的助手段落 id（插话切段时用它定位要定稿的那条）。
+   *  按话题分桶：多话题可能同时有流在跑，共用一个 ref 会切错气泡。 */
+  const assistantIdByTopicRef = useRef<Map<number, string>>(new Map())
+
   // ── 分页状态 ──
   const [topicsPage, setTopicsPage] = useState(0)
   const [topicsHasMore, setTopicsHasMore] = useState(true)
@@ -188,7 +219,6 @@ export const useHarnessHandlers = (): UseHarnessHandlersReturn => {
   const [messagesLoadingMore, setMessagesLoadingMore] = useState(false)
 
   // ── 多会话支持 ──
-  /** 每个 topicId 的会话缓存（进行中的对话） */
   const sessionsRef = useRef<Map<number, SessionState>>(new Map())
   /** 每个 topicId 的加载状态 */
   const isLoadingMapRef = useRef<Map<number, boolean>>(new Map())
@@ -198,6 +228,45 @@ export const useHarnessHandlers = (): UseHarnessHandlersReturn => {
   const doneCleanupsRef = useRef<Map<number, () => void>>(new Map())
   /** 每个 topicId 的 stream error 清理函数 */
   const errorCleanupsRef = useRef<Map<number, () => void>>(new Map())
+
+  // ── 插话队列同步 ──
+  // 主进程是队列的单一真源：这里订阅广播 + 切话题时主动拉一次，本地不做乐观增删，
+  // 避免「入队时前端先加一遍、广播回来再加一遍」的双份队列。
+  const applyQueue = useCallback((topicId: number, queue: QueuedMessageView[]): void => {
+    if (currentTopicIdRef.current !== topicId) return
+    setQueuedMessages(queue)
+  }, [])
+
+  useEffect(() => {
+    const api = (window as unknown as Window).api.harness
+    const offUpdated = api.onQueueUpdated(({ topicId, queue }) => applyQueue(topicId, queue))
+    const offSteered = api.onQueueSteered(({ topicId, itemId, text }) => {
+      // 插话是纯注入：不产生对话流气泡，这里只把队列镜像里的那一行去掉 +
+      // 给一句瞬时反馈（「已插话」）说明它真的被并进了当前回合
+      if (currentTopicIdRef.current !== topicId) return
+      setQueuedMessages((prev) => prev.filter((item) => item.id !== itemId))
+      setSteeredNotice(text)
+      if (steeredNoticeTimerRef.current != null) clearTimeout(steeredNoticeTimerRef.current)
+      steeredNoticeTimerRef.current = setTimeout(() => setSteeredNotice(null), 2600)
+    })
+    return () => {
+      offUpdated()
+      offSteered()
+      if (steeredNoticeTimerRef.current != null) clearTimeout(steeredNoticeTimerRef.current)
+    }
+  }, [applyQueue])
+
+  /** 切话题后拉取该话题的队列（广播只覆盖「变更」，不覆盖「切换」） */
+  useEffect(() => {
+    if (currentTopicId == null) {
+      setQueuedMessages([])
+      return
+    }
+    void (window as unknown as Window).api.harness
+      .listQueuedMessages(currentTopicId)
+      .then((queue) => applyQueue(currentTopicId, queue))
+      .catch(console.error)
+  }, [currentTopicId, applyQueue])
 
   /** 同步 isLoadingMapRef 到 loadingTopicIds 状态 */
   const syncLoadingTopics = useCallback((): void => {
@@ -875,6 +944,9 @@ export const useHarnessHandlers = (): UseHarnessHandlersReturn => {
       doneCleanupsRef.current.get(topicId)?.()
       errorCleanupsRef.current.get(topicId)?.()
 
+      // 本轮助手消息的前端临时 id：整轮流式都写进这一条气泡
+      assistantIdByTopicRef.current.set(topicId, aiMessageId)
+
       // ── 流式 chunk 合批（渲染进程 OOM 修复）──────────────────────────
       // 此前每条 chunk IPC 到达都立即全量重渲染整条消息：ReactMarkdown 解析 + 语法高亮 +
       // KaTeX 作用于全文，超长回复下累计 O(L²)，主线程被占满、GC 让位、IPC 事件积压，
@@ -893,12 +965,16 @@ export const useHarnessHandlers = (): UseHarnessHandlersReturn => {
         if (!session) return
         // 先合并「累积形态」的同类增量：逐 chunk 应用时每步都要复制整块文本（O(L²)），
         // 合并后每批只复制一次（O(F×L)）。增量形态的段原样保留，语义不变。
-        const batch = coalesceChunks(pendingChunks)
+        const coalesced = coalesceChunks(pendingChunks)
         pendingChunks = []
         const startedAt = performance.now()
+        // 插话回执（steered）纯过滤：它不改对话流（见 isSteerChunk 的说明），
+        // 助手消息继续按同一条气泡累积——一轮问答始终只有一条助手消息
+        const dataChunks = coalesced.filter((chunk) => !isSteerChunk(chunk))
         let updatedMessages = session.messages
-        for (const chunk of batch) {
-          updatedMessages = applyChunkToMessages(updatedMessages, aiMessageId, chunk, topicId)
+        const targetId = assistantIdByTopicRef.current.get(topicId) ?? aiMessageId
+        for (const chunk of dataChunks) {
+          updatedMessages = applyChunkToMessages(updatedMessages, targetId, chunk, topicId)
         }
         sessionsRef.current.set(topicId, { ...session, messages: updatedMessages })
         // 复用 session cache 的结果直接更新 React state
@@ -908,7 +984,7 @@ export const useHarnessHandlers = (): UseHarnessHandlersReturn => {
         }
         // 自适应间隔：正文越长单次全量渲染越贵，间隔随长度线性放大；本批处理耗时
         // （工具/智能体密集批次）同样拉大间隔，给主线程与 GC 喘息
-        const aiMsg = updatedMessages.find((m) => m.id === aiMessageId)
+        const aiMsg = updatedMessages.find((m) => m.id === targetId)
         const textLen = Math.max(aiMsg?.content?.length ?? 0, aiMsg?.reasoning_content?.length ?? 0)
         const took = performance.now() - startedAt
         flushIntervalMs = Math.min(
@@ -945,7 +1021,7 @@ export const useHarnessHandlers = (): UseHarnessHandlersReturn => {
       })
 
       const doneCleanup = (window as unknown as Window).api.harness.onStreamDone(
-        ({ topicId: doneTopicId, assistantDialogueId, userDialogueId }) => {
+        ({ topicId: doneTopicId, assistantDialogueId, userDialogueId, segments }) => {
           // 守卫：只处理本 topic 的完成事件（Set 分发可能导致旧 handler 收到其他 topic 的事件）
           if (doneTopicId !== topicId) return
 
@@ -962,6 +1038,8 @@ export const useHarnessHandlers = (): UseHarnessHandlersReturn => {
 
           // 清理智能体追踪
           activeSubAgentCauseIdsRef.current.delete(doneTopicId)
+          // 本轮段落指针用完了：清掉，避免下轮误用上一轮的临时 id
+          assistantIdByTopicRef.current.delete(doneTopicId)
 
           // 清理流监听器（doneCleanup 自身由 startStreamListener L575-576 在下一次同 topic 启动时清理）
           chunkCleanupsRef.current.get(doneTopicId)?.()
@@ -991,13 +1069,23 @@ export const useHarnessHandlers = (): UseHarnessHandlersReturn => {
                   break
                 }
               }
+              // 插话切段后一段助手消息对应库里一行：按 messageId 精确贴回；
+              // 没有段落表（老路径）时退回「最后一条 loading 挂 assistantDialogueId」
+              const segmentIds = new Map(
+                (segments ?? [])
+                  .filter((seg) => seg.dialogueId != null)
+                  .map((seg) => [seg.messageId, seg.dialogueId as number])
+              )
               return prev.map((msg, i) => {
                 if (msg.loading) {
                   return {
                     ...msg,
                     loading: false,
                     dialogueId:
-                      i === lastLoading ? (assistantDialogueId ?? msg.dialogueId) : msg.dialogueId,
+                      segmentIds.get(msg.id) ??
+                      (i === lastLoading
+                        ? (assistantDialogueId ?? msg.dialogueId)
+                        : msg.dialogueId),
                     // 结束兜底移除「正在重试」过渡块（成功路径在首个数据 chunk 时已移除；
                     // 此处覆盖中止/重试耗尽等未产生数据的收尾）
                     blocks: msg.blocks.filter((b) => b.type !== 'retrying')
@@ -1025,11 +1113,12 @@ export const useHarnessHandlers = (): UseHarnessHandlersReturn => {
 
           console.error(`[Stream] Error for topic ${topicId}: ${errMsg}`)
 
-          // 更新会话缓存中的 AI 消息为错误信息
+          // 更新会话缓存中的 AI 消息为错误信息（当前段落可能是插话切段后的续写段）
+          const activeId = assistantIdByTopicRef.current.get(topicId) ?? aiMessageId
           const session = sessionsRef.current.get(topicId)
           if (session) {
             const updatedMessages = session.messages.map((msg) =>
-              msg.id === aiMessageId ? { ...msg, content: errMsg, blocks: [], loading: false } : msg
+              msg.id === activeId ? { ...msg, content: errMsg, blocks: [], loading: false } : msg
             )
             sessionsRef.current.set(topicId, {
               ...session,
@@ -1041,9 +1130,7 @@ export const useHarnessHandlers = (): UseHarnessHandlersReturn => {
           if (currentTopicIdRef.current === topicId) {
             setMessages((prev) =>
               prev.map((msg) =>
-                msg.id === aiMessageId
-                  ? { ...msg, content: errMsg, blocks: [], loading: false }
-                  : msg
+                msg.id === activeId ? { ...msg, content: errMsg, blocks: [], loading: false } : msg
               )
             )
           }
@@ -1101,6 +1188,7 @@ export const useHarnessHandlers = (): UseHarnessHandlersReturn => {
           sessionId: aiMessageId
         })
         currentSessionIdRef.current = aiMessageId
+        assistantIdByTopicRef.current.set(topicId, aiMessageId)
         startStreamListener(topicId, aiMessageId)
       }
     )
@@ -1120,6 +1208,9 @@ export const useHarnessHandlers = (): UseHarnessHandlersReturn => {
     setIsLoading(false)
     // 切换/新建会话时放弃气泡内编辑状态（那条提问不属于新会话）
     setEditingOrphanId(null)
+    // 新会话没有插话队列；当前段落指针也一并复位
+    setQueuedMessages([])
+    assistantIdByTopicRef.current.clear()
   }, [saveSessionToCache])
 
   const handleSelectTopic = useCallback(
@@ -1271,6 +1362,7 @@ export const useHarnessHandlers = (): UseHarnessHandlersReturn => {
         errorCleanupsRef.current.get(topicId)?.()
         errorCleanupsRef.current.delete(topicId)
         activeSubAgentCauseIdsRef.current.delete(topicId)
+        assistantIdByTopicRef.current.delete(topicId)
 
         if (currentTopicIdRef.current === topicId) {
           handleNewHarness()
@@ -1366,6 +1458,17 @@ export const useHarnessHandlers = (): UseHarnessHandlersReturn => {
         initialAiMessage
       ])
 
+      // ── 发出后清空输入区 ──────────────────────────────────────────────
+      // 输入框只在 inputValue 变成 '' 时才清编辑器（见 HarnessInput 的同步 effect），
+      // 此前这里没清 → 内容一直留在对话框中（气泡也上屏了，看起来像没发出去）。
+      // 放在 startTurn 而不是 handleSend：三条入口（首次发送 / 生成中入队后接续 / 队列自动
+      // 接续）都要清；气泡内编辑重发（replaceIndex != null）时输入框没内容，不动。
+      if (replaceIndex == null) {
+        // 竞态防御：发送是异步的，若在这期间用户又打了新内容，不能被这次发送清掉
+        setInputValue((prev) => (prev.trim() === userMessage.content ? '' : prev))
+        setAttachments([])
+      }
+
       try {
         // 如果还没有 topic，先创建（让话题立即出现在侧边栏）
         let topicId = currentTopicIdRef.current
@@ -1429,6 +1532,8 @@ export const useHarnessHandlers = (): UseHarnessHandlersReturn => {
           documents: currentDocuments.length > 0 ? currentDocuments : undefined,
           topicId,
           providerId: selectedProviderId ?? undefined,
+          // 首段助手消息的前端临时 id：插话会切段，主进程按段回传库内行 id
+          messageId: aiMessageId,
           // 编辑重发：让主进程改写这条已存在的用户消息行，而不是插入新行
           // （否则库里会多出一条同内容提问，历史顺序也被挪到末尾）
           reuseUserDialogueId:
@@ -1466,7 +1571,7 @@ export const useHarnessHandlers = (): UseHarnessHandlersReturn => {
     ]
   )
 
-  /** 输入框发送：新增一条用户气泡 */
+  /** 输入框发送：空闲时直接开一轮；生成中则交给主进程收进插话队列 */
   const handleSend = useCallback(async (): Promise<void> => {
     if (!inputValue.trim()) return
 
@@ -1488,8 +1593,72 @@ export const useHarnessHandlers = (): UseHarnessHandlersReturn => {
       timestamp: Date.now()
     }
 
+    // 生成中（本话题有回合在跑）：不打断当前回合，消息进插话队列等用户点「立即插话」
+    // 或等本轮跑完自动接续。是否在跑由主进程裁决（多窗口/多话题下前端判断会失准）。
+    // 新话题（还没有 topicId）必然没有回合在跑，走本地起轮路径。
+    const topicId = currentTopicIdRef.current
+    if (topicId != null && isLoadingMapRef.current.get(topicId)) {
+      try {
+        const { queued } = await (window as unknown as Window).api.harness.enqueueMessage({
+          topicId,
+          text: userMessage.content,
+          attachments: {
+            images: currentAttachments.filter((a) => a.isImage).map((a) => a.dataUrl),
+            documents: currentAttachments
+              .filter((a) => !a.isImage)
+              .map((a) => ({ fileName: a.fileName, filePath: a.dataUrl }))
+          }
+        })
+        if (queued) {
+          // 已入队（按队列行显示在输入框上方），清空输入区。
+          // 注意：不能直接 setInputValue('') —— 入队是异步的，期间用户可能又打了新内容；
+          // 与本次入队内容一致才清，避免误删新草稿。
+          setInputValue((prev) => (prev.trim() === userMessage.content ? '' : prev))
+          return
+        }
+      } catch (err) {
+        console.error('Failed to enqueue message:', err)
+      }
+    }
+
     await startTurn({ userMessage, attachments: currentAttachments })
   }, [inputValue, attachments, startTurn])
+
+  /** 删除一条排队消息（主进程为真源，删除后靠广播回同步） */
+  const handleRemoveQueued = useCallback(async (itemId: string): Promise<void> => {
+    const topicId = currentTopicIdRef.current
+    if (topicId == null) return
+    try {
+      await (window as unknown as Window).api.harness.removeQueuedMessage(topicId, itemId)
+    } catch (err) {
+      console.error('Failed to remove queued message:', err)
+    }
+  }, [])
+
+  /** 改写一条排队消息的文本 */
+  const handleUpdateQueued = useCallback(async (itemId: string, text: string): Promise<void> => {
+    const topicId = currentTopicIdRef.current
+    if (topicId == null || !text.trim()) return
+    try {
+      await (window as unknown as Window).api.harness.updateQueuedMessage(topicId, itemId, text)
+    } catch (err) {
+      console.error('Failed to update queued message:', err)
+    }
+  }, [])
+
+  /**
+   * 立即插话：把这条排队消息并入**正在运行**的回合（下一个工具节点边界生效）。
+   * 回执与落库由主进程在注入点统一下发（steered chunk），这里只发请求。
+   */
+  const handleSteerQueued = useCallback(async (itemId: string): Promise<void> => {
+    const topicId = currentTopicIdRef.current
+    if (topicId == null) return
+    try {
+      await (window as unknown as Window).api.harness.steerQueuedMessage(topicId, itemId)
+    } catch (err) {
+      console.error('Failed to steer queued message:', err)
+    }
+  }, [])
 
   /** 进入**气泡内**编辑（内容不出气泡，聊天输入框不参与） */
   const handleStartEditMessage = useCallback((msgIndex: number): void => {
@@ -1683,6 +1852,12 @@ export const useHarnessHandlers = (): UseHarnessHandlersReturn => {
     handleStop,
     handleLoadMoreTopics,
     handleLoadMoreMessages,
-    refreshTopics
+    refreshTopics,
+    // 插话队列
+    queuedMessages,
+    steeredNotice,
+    handleRemoveQueued,
+    handleUpdateQueued,
+    handleSteerQueued
   }
 }

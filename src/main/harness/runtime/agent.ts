@@ -8,10 +8,18 @@ import {
   type OverwriteValue
 } from '@langchain/langgraph'
 import { BaseChatModel } from '@langchain/core/language_models/chat_models'
-import { AIMessage, BaseMessage, SystemMessage, ToolMessage } from '@langchain/core/messages'
+import {
+  AIMessage,
+  BaseMessage,
+  HumanMessage,
+  SystemMessage,
+  ToolMessage
+} from '@langchain/core/messages'
 import type { StructuredToolInterface } from '@langchain/core/tools'
 import logger from 'electron-log'
 import type { RuntimeRecord, ToolCallRecord } from './types'
+// 插话注入载荷的单一真源在 ../types（IPC 层与图共用同一个类型，避免结构漂移）
+import type { AgentInjection } from '../types'
 import { formatOutput } from './fs-backend'
 import type { SpillStore } from './spill'
 import {
@@ -35,6 +43,7 @@ function resolveModelName(model: BaseChatModel): string | undefined {
   if (typeof candidate.modelName === 'string' && candidate.modelName) return candidate.modelName
   return undefined
 }
+
 export type { StreamMessageLike }
 
 /**
@@ -85,6 +94,44 @@ export interface BuildGraphOptions {
   usageSink?: { push(record: ModelUsageRecord): void }
   /** 工具调用总次数上限（模型级「工具调用轮数」；缺省用工程默认值 MAX_TOOL_CALLS） */
   maxToolCalls?: number
+  /**
+   * 待注入插话的排空回调：每个工具节点执行前调用一次。
+   * 返回待并入模型上下文的用户插话（已从队列取出）；无插话返回 null。
+   */
+  drainInjections?: () => Promise<AgentInjection[] | null>
+}
+
+/**
+ * 生成「回合内插话」处理器：把待注入的插话取出并转成模型可读的人类消息。
+ *
+ * 调用点有两处，缺一不可（2026-09-20 实测教训：只有工具节点会漏掉「整轮不调用工具」的情形）：
+ * - **模型节点调用前**（主路径）：模型每被调用一次就是一次「能读到插话」的机会。
+ *   例如长回答途中插话——下一次模型调用即可读到，无需等工具；
+ * - **工具节点执行前**（补充）：本次工具结果已就绪、模型即将开始下一步，
+ *   此时注入可让插话紧跟工具结果之后的模型调用生效，且注入的 HumanMessage
+ *   排在 ToolMessage 之后，OpenAI「tool_calls 后必须紧跟工具结果」的约束不受影响。
+ *
+ * 排空是"取出即消费"（队列侧 takeInjections），两个调用点共用同一个闭包实例，
+ * 因此同一条插话只会被取出一次、只注入一次。
+ * 无插话时返回 null，调用方保持原有返回值，零开销。
+ */
+function createInterjectionHandler(
+  drain?: () => Promise<AgentInjection[] | null>
+): (() => Promise<{ messages: HumanMessage[] } | null>) | undefined {
+  if (!drain) return undefined
+  return async () => {
+    const injected = await drain()
+    if (!injected || injected.length === 0) return null
+    logger.info(`[Agent] 插话已并入模型上下文（${injected.length} 条）`)
+    return {
+      messages: injected.map(
+        (item) =>
+          new HumanMessage(
+            `[The user interjected while you were working — take this into account and adjust immediately] ${item.text}`
+          )
+      )
+    }
+  }
 }
 
 /** 安全绑定工具：不支持工具调用的模型退化为纯对话（组件降级而非报错） */
@@ -136,7 +183,9 @@ function createToolRunner(
   subagentCtx?: SubAgentToolContext,
   spill?: SpillStore,
   /** 工具调用总次数上限（模型级「工具调用轮数」，缺省用工程默认值） */
-  maxToolCalls: number = MAX_TOOL_CALLS
+  maxToolCalls: number = MAX_TOOL_CALLS,
+  /** 回合内插话：工具节点执行前把待注入的插话并入模型上下文（未配置则不启用） */
+  interject?: () => Promise<{ messages: HumanMessage[] } | null>
 ) {
   const toolsByName = new Map(tools.map((t) => [t.name, t]))
   const callLimit = Math.max(MIN_TOOL_CALLS, Math.floor(maxToolCalls))
@@ -154,15 +203,20 @@ function createToolRunner(
   return async (
     state: { messages: BaseMessage[] },
     config: LangGraphRunnableConfig
-  ): Promise<{ messages: ToolMessage[] }> => {
+  ): Promise<{ messages: BaseMessage[] }> => {
+    // 回合内插话：本次工具执行完，模型下一步就会带着这些用户消息继续
+    //（排在工具结果之后，OpenAI 的「tool_calls 后必须紧跟工具结果」约束不受影响）
+    const interjected = interject ? await interject() : null
+    const injectedMessages: BaseMessage[] = interjected?.messages ?? []
+
     const lastMessage = state.messages[state.messages.length - 1]
     const toolCalls = (lastMessage as AIMessage).tool_calls
     if (!toolCalls || toolCalls.length === 0) {
-      return { messages: [] }
+      return { messages: injectedMessages }
     }
 
     const push = queue?.current
-    const outputs: ToolMessage[] = []
+    const outputs: BaseMessage[] = []
     for (const call of toolCalls) {
       if (config.signal?.aborted) {
         const err = new Error('Tool call aborted')
@@ -282,7 +336,7 @@ function createToolRunner(
       outputs.push(new ToolMessage({ content: output, tool_call_id: callId }))
     }
 
-    return { messages: outputs }
+    return { messages: [...outputs, ...injectedMessages] }
   }
 }
 
@@ -301,13 +355,28 @@ export function buildAgentGraph(
 
   // 可变模型绑定：自动重试耗尽后用户可在提问弹窗里切换模型，切换后绑定同一批工具继续
   let modelWithTools = bindToolsSafely(model, tools)
-  const runTools = createToolRunner(tools, queue, subagentCtx, spill, options.maxToolCalls)
+  // 插话处理器只建一个实例，模型节点与工具节点共用（队列侧"取出即消费"，不会重复注入）
+  const interject = createInterjectionHandler(options.drainInjections)
+  const runTools = createToolRunner(
+    tools,
+    queue,
+    subagentCtx,
+    spill,
+    options.maxToolCalls,
+    interject
+  )
 
   async function callModel(
     state: { messages: BaseMessage[] },
     config: LangGraphRunnableConfig
   ): Promise<{ messages: BaseMessage[] }> {
-    const messages = [new SystemMessage(systemPrompt), ...state.messages]
+    // 模型调用前先并进待注入的插话：这是插话生效的**主路径**——
+    // 长回答途中插话时，下一次模型调用就能读到，不必等工具节点
+    //（2026-09-20 实测：只挂工具节点会漏掉「整轮不调用工具」的长回答）
+    const injected = interject ? await interject() : null
+    const injectedMessages: BaseMessage[] = injected?.messages ?? []
+    const contextMessages = [...state.messages, ...injectedMessages]
+    const messages = [new SystemMessage(systemPrompt), ...contextMessages]
     const configurable = (config.configurable ?? {}) as Record<string, unknown>
     const topicId = typeof configurable.topicId === 'number' ? configurable.topicId : 0
     const turnSource =
@@ -329,7 +398,9 @@ export function buildAgentGraph(
             subagent: Boolean(subagentCtx)
           })
         }
-        return { messages: [response] }
+        // 注入的插话必须一起写回图状态，否则它只在这一调用里可见、下一步就丢了：
+        // 返回顺序 = 插话（人类消息）→ 模型回复，保证「用户插话 → 助手回应」在历史里顺序正确
+        return { messages: [...injectedMessages, response] }
       } catch (err) {
         const error = err instanceof Error ? err : new Error(String(err))
         if (error.name === 'AbortError' || config.signal?.aborted) throw err
@@ -383,7 +454,7 @@ export function buildAgentGraph(
   async function callTools(
     state: { messages: BaseMessage[] },
     config: LangGraphRunnableConfig
-  ): Promise<{ messages: ToolMessage[] }> {
+  ): Promise<{ messages: BaseMessage[] }> {
     return await runTools(state, config)
   }
 

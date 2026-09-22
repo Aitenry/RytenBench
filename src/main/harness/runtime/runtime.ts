@@ -25,7 +25,7 @@ import { RecordQueue, startGraphStream, invokeGraph, type GraphRunOptions } from
 import { SpillStore } from './spill'
 import type { MnemonComponent } from './mnemon'
 import type { RuntimeStream } from './types'
-import type { MemoryInjection, TurnMeta } from '../types'
+import type { MemoryInjection, TurnMeta, AgentInjection } from '../types'
 
 /**
  * AgentRuntime — 声明式组件组装入口（对应论文 §5.2 声明式配置 + 协调）
@@ -273,7 +273,9 @@ Once a delegation finishes, the subagent's full output is shown to the user dire
     messages: BaseMessage[],
     signal?: AbortSignal,
     topicId = 0,
-    turnMeta?: TurnMeta
+    turnMeta?: TurnMeta,
+    /** 回合内插话：工具节点执行前排空待注入插话（未配置则关闭注入） */
+    drainInjections?: () => Promise<AgentInjection[] | null>
   ): RuntimeStream {
     const queue = new RecordQueue()
     this.queueRef.current = queue
@@ -287,7 +289,8 @@ Once a delegation finishes, the subagent's full output is shown to the user dire
       systemPrompt: this.systemPrompt,
       queue: this.queueRef,
       spill: this.spillRef.current,
-      usageSink: { push: (record) => this.usageRecords.push(record) }
+      usageSink: { push: (record) => this.usageRecords.push(record) },
+      drainInjections
     })
     return startGraphStream(
       graph,

@@ -101,7 +101,7 @@ export const shouldShowSilenceIndicator = (args: {
 
 /**
  * chunk 是否「只带正文」/「只带思考」：任何其它载荷（工具、子代理、记忆注入、压缩、重试、
- * 错误、目标轮标记）都算边界，不能并进同一段文本增量里。
+ * 错误、目标轮标记、插话段落边界）都算边界，不能并进同一段文本增量里。
  */
 const isPureTextChunk = (chunk: StreamChunk): boolean =>
   Boolean(chunk.content) &&
@@ -113,7 +113,8 @@ const isPureTextChunk = (chunk: StreamChunk): boolean =>
   !chunk.historyCompacting &&
   !chunk.retrying &&
   !chunk.streamError &&
-  !chunk.goalRound
+  !chunk.goalRound &&
+  !chunk.steered
 
 const isPureReasoningChunk = (chunk: StreamChunk): boolean =>
   Boolean(chunk.reasoning_content) &&
@@ -125,7 +126,8 @@ const isPureReasoningChunk = (chunk: StreamChunk): boolean =>
   !chunk.historyCompacting &&
   !chunk.retrying &&
   !chunk.streamError &&
-  !chunk.goalRound
+  !chunk.goalRound &&
+  !chunk.steered
 
 /**
  * 单条助手消息内的「任务分段」——供消息内容按任务折叠使用。

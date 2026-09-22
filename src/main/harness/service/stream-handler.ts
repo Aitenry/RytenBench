@@ -92,7 +92,9 @@ export async function* runStream(
       [...contextMessages, userMessage],
       signal,
       options?.topicId,
-      options?.turnMeta
+      options?.turnMeta,
+      // 回合内插话（steering）：工具节点边界排空用户插话并并入模型上下文（未配置则关闭）
+      options?.drainInjections
     )
 
     // 使用队列实现消息和工具调用的并发流式输出
@@ -139,9 +141,15 @@ export async function* runStream(
     const toolsStarted = { value: false }
 
     // 启动三个生产者
-    const msgProducer = produceMessages(run, signal, enqueue, markDone, toolsStarted).catch(
-      () => {}
-    )
+    const msgProducer = produceMessages(
+      run,
+      signal,
+      enqueue,
+      markDone,
+      toolsStarted,
+      // 回合内插话：消息流在「本轮工具已完成下发」的段落边界排空待注入插话
+      options?.drainInjections
+    ).catch(() => {})
     const toolProducer = produceToolCalls(
       run,
       signal,
@@ -149,7 +157,9 @@ export async function* runStream(
       markDone,
       safeGetOutput,
       toolsStarted,
-      options?.topicId
+      options?.topicId,
+      // 每条工具调用完成下发后也排空一次（工具尚未开始执行的窗口由消息流守卫排空兜底）
+      options?.drainInjections
     ).catch(() => {})
     const subAgentProducer = produceSubAgents(
       run,

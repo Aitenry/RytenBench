@@ -19,7 +19,11 @@ import { WikiRow, WikiDirectoryRow } from '../main/database/mapper/wiki'
 import { HarnessTopicRow, HarnessDialogueRow } from '../main/database/mapper/harness'
 import type { LlmProviderInput, LlmProviderConfig } from '../main/database/mapper/provider'
 import type { SystemSettings } from '../main/types/settings'
-import type { StructuredMessage, ToolInfo } from '../renderer/resource/types/window'
+import type {
+  StructuredMessage,
+  ToolInfo,
+  QueuedMessageView
+} from '../renderer/resource/types/window'
 import type { StartMemoryAgentResult } from '../main/harness/runtime/memory-agent'
 
 interface HarnessOptions {
@@ -162,7 +166,7 @@ interface Api {
     ) => Promise<StructuredMessage[]>
     startMessageStream: (
       message: string,
-      options?: HarnessOptions & { topicId?: number; providerId?: number }
+      options?: HarnessOptions & { topicId?: number; providerId?: number; messageId?: string }
     ) => void
     getTools: () => Promise<ToolInfo[]>
     selectSkillsDirectory: () => Promise<string | null>
@@ -173,7 +177,29 @@ interface Api {
         topicId: number
         userDialogueId?: number
         assistantDialogueId?: number
+        segments?: { messageId: string; dialogueId?: number }[]
       }) => void
+    ) => () => void
+    // ── 生成中的插话队列 ────────────────────────────────────────────────
+    /** 生成中发消息：主进程裁决——有回合在跑则入队，否则直接开新一轮 */
+    enqueueMessage: (payload: {
+      topicId: number
+      text: string
+      attachments?: {
+        images?: string[]
+        documents?: { fileName: string; filePath: string }[]
+      }
+    }) => Promise<{ queued: boolean }>
+    listQueuedMessages: (topicId: number) => Promise<QueuedMessageView[]>
+    removeQueuedMessage: (topicId: number, itemId: string) => Promise<boolean>
+    updateQueuedMessage: (topicId: number, itemId: string, text: string) => Promise<boolean>
+    /** 立即插话：把这条排队消息注入正在运行的回合 */
+    steerQueuedMessage: (topicId: number, itemId: string) => Promise<{ accepted: boolean }>
+    onQueueUpdated: (
+      callback: (data: { topicId: number; queue: QueuedMessageView[] }) => void
+    ) => () => void
+    onQueueSteered: (
+      callback: (data: { topicId: number; itemId: string; text: string }) => void
     ) => () => void
     // 后台子代理会话（顶部栏列表）
     listAgents: (topicId: number) => Promise<SubagentSessionRowView[]>

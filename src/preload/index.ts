@@ -12,6 +12,7 @@ import type { GoalView } from '../main/harness/runtime/goal'
 import type { JobSnapshot } from '../main/harness/runtime/jobs'
 import type { SubagentSessionRow } from '../main/harness/runtime/subagent-sessions'
 import type { PendingQuestionView, AskAnswer } from '../main/harness/runtime/ask'
+import type { QueuedMessageView } from '../main/harness/queue-store'
 
 type AskAnswerItem = AskAnswer['answers'][number]
 import type { SystemSettings } from '../main/types/settings'
@@ -189,9 +190,58 @@ const api = {
         documents?: { fileName: string; filePath: string }[]
         /** 编辑并重发：改写这条已存在的用户消息行，而不是插入新行 */
         reuseUserDialogueId?: number
+        /** 本轮首段助手消息的前端临时 id（插话会切段，主进程按段回传 dialogueId） */
+        messageId?: string
       }
     ) => {
       ipcRenderer.send('harness-start-stream', message, options)
+    },
+    // ── 生成中的插话队列 ──────────────────────────────────────────────
+    /** 生成中发消息：主进程裁决——有回合在跑则入队（queued=true），否则直接开新一轮 */
+    enqueueMessage: (payload: {
+      topicId: number
+      text: string
+      attachments?: {
+        images?: string[]
+        documents?: { fileName: string; filePath: string }[]
+      }
+    }) => ipcRenderer.invoke('harness-queue-enqueue', payload) as Promise<{ queued: boolean }>,
+    listQueuedMessages: (topicId: number) =>
+      ipcRenderer.invoke('harness-queue-list', topicId) as Promise<QueuedMessageView[]>,
+    removeQueuedMessage: (topicId: number, itemId: string) =>
+      ipcRenderer.invoke('harness-queue-remove', { topicId, itemId }) as Promise<boolean>,
+    updateQueuedMessage: (topicId: number, itemId: string, text: string) =>
+      ipcRenderer.invoke('harness-queue-update', { topicId, itemId, text }) as Promise<boolean>,
+    /** 立即插话：把这条排队消息注入正在运行的回合（下一个工具节点边界生效） */
+    steerQueuedMessage: (topicId: number, itemId: string) =>
+      ipcRenderer.invoke('harness-queue-steer', { topicId, itemId }) as Promise<{
+        accepted: boolean
+      }>,
+    onQueueUpdated: (callback: (data: { topicId: number; queue: QueuedMessageView[] }) => void) => {
+      const listener = (
+        _event: Electron.IpcRendererEvent,
+        data: { topicId: number; queue: QueuedMessageView[] }
+      ): void => {
+        callback(data)
+      }
+      ipcRenderer.on('harness-queue-updated', listener)
+      return () => {
+        ipcRenderer.removeListener('harness-queue-updated', listener)
+      }
+    },
+    onQueueSteered: (
+      callback: (data: { topicId: number; itemId: string; text: string }) => void
+    ) => {
+      const listener = (
+        _event: Electron.IpcRendererEvent,
+        data: { topicId: number; itemId: string; text: string }
+      ): void => {
+        callback(data)
+      }
+      ipcRenderer.on('harness-queue-steered', listener)
+      return () => {
+        ipcRenderer.removeListener('harness-queue-steered', listener)
+      }
     },
     getTools: () => ipcRenderer.invoke('harness-get-tools'),
     onStreamChunk: (callback: (chunk: Record<string, unknown>) => void) => {
@@ -205,6 +255,8 @@ const api = {
         topicId: number
         userDialogueId?: number
         assistantDialogueId?: number
+        /** 助手段落表（无插话时只有一段）：messageId 对应一段助手气泡 */
+        segments?: { messageId: string; dialogueId?: number }[]
       }) => void
     ) => {
       streamDoneHandlers.add(callback)

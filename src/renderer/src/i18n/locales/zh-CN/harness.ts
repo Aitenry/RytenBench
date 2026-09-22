@@ -63,10 +63,25 @@ export const zhCNHarness = {
     attachTooltip: '上传附件',
     modelPlaceholder: '选择模型',
     stopTooltip: '停止生成',
+    queueTooltip: '生成中发送会进入插话队列',
     visionUnsupported: '当前模型不支持视觉识别，无法粘贴图片附件',
     imageReadFailed: '读取图片附件失败：{{name}}',
     filePathUnavailable: '无法获取「{{name}}」的本地路径，请通过拖拽或上传按钮添加',
     pasteImageFallbackName: 'paste-image.png'
+  },
+  queue: {
+    count: '{{count}} 条排队消息',
+    hint: '生成中发送的消息先排在这里',
+    heldHint: '未及插话，将随下一次发送带出',
+    steered: '已插话',
+    edit: '编辑',
+    save: '保存',
+    cancelEdit: '取消',
+    remove: '删除',
+    editFailed: '排队消息修改失败',
+    steer: '立即插话（并入当前这轮）',
+    steerUnavailable: '当前没有生成中的回合，这条会在下一轮发出',
+    attachmentCount: '[{{count}} 个附件] '
   },
   header: {
     toggleSidebar: '侧边栏',

@@ -13,6 +13,19 @@ export interface HarnessOptions {
   onCompactionRetry?: (attempt: number, retries: number) => void
   /** 历史上下文字符预算（由当前模型上下文窗口换算，最小 60,000；缺省用默认值） */
   contextBudget?: number
+  /**
+   * 回合内插话（steering）：图内每个工具节点执行前调用一次，把用户排队中点
+   * 「立即插话」的消息并入运行中的上下文（排在本次工具结果之后），模型下一步即可读到。
+   * 落库、段落切分与 steered chunk 下发都由这个回调内部一并完成（IPC 层提供）。
+   * 未配置 = 关闭插话注入（子代理与非流式路径不传）。
+   */
+  drainInjections?: () => Promise<AgentInjection[] | null>
+}
+
+/** 一次「立即插话」注入的载荷（纯注入：只有正文，不落库、不产生对话内容） */
+export interface AgentInjection {
+  /** 插话正文 */
+  text: string
 }
 
 /** 本轮来源元信息（经图 configurable 注入工具层，供目标工具做执行期权限校验） */
@@ -133,6 +146,14 @@ export interface StructuredMessage {
   retrying?: RetryInfo
   /** 流式执行失败（部分输出后图执行失败时下发；IPC 层据此跳过把残缺回复落库） */
   streamError?: { message: string }
+  /**
+   * 用户插话已并入当前回合（steering 回执）。**纯注入**：不落库、不在对话流里生成
+   * 新气泡，也不切分助手消息——前端只用它做一句瞬时反馈。
+   */
+  steered?: {
+    /** 插话正文（仅供提示展示） */
+    text: string
+  }
 }
 
 /** IPC 发送的流式 chunk（StructuredMessage + 主进程注入的 topicId） */

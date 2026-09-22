@@ -16,3 +16,5 @@ setActiveWorkspaceIdProvider(() => {
 export const streamAbortControllers = new Map<number, AbortController>()
 // 进行中的对话流（退出前需等待其保存数据；含目标自动续跑轮）
 export const activeHarnessStreams = new Set<Promise<unknown>>()
+// 生成中的插话队列（按话题排队 / 待注入缓冲；见 harness/queue-store.ts）
+export { harnessQueue } from './harness/queue-store'

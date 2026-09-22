@@ -9,6 +9,7 @@ import HarnessSidebar from './components/HarnessSidebar'
 import HarnessHeader from './components/HarnessHeader'
 import HarnessMessageArea from './components/HarnessMessageArea'
 import HarnessInput from './components/HarnessInput'
+import QueueDock from './components/QueueDock'
 import TaskProgressCard from './components/TaskProgressCard'
 import GoalBar from './components/GoalBar'
 import AskQuestionModal from './components/AskQuestionModal'
@@ -83,7 +84,12 @@ const Index: React.FC = () => {
     handleStop,
     handleLoadMoreTopics,
     handleLoadMoreMessages,
-    refreshTopics
+    refreshTopics,
+    queuedMessages,
+    steeredNotice,
+    handleRemoveQueued,
+    handleUpdateQueued,
+    handleSteerQueued
   } = useHarness()
 
   // 模型就绪检查：应用即开即用，只有「助手」页依赖模型配置——未配置时在本页内引导
@@ -599,6 +605,19 @@ const Index: React.FC = () => {
                   <div className="max-w-4xl mx-auto">
                     <TaskProgressCard currentTopicId={currentTopicId} />
                     <GoalBar currentTopicId={currentTopicId} />
+                    <QueueDock
+                      queue={queuedMessages}
+                      running={isLoading}
+                      steeredNotice={steeredNotice}
+                      colorBorderSecondary={colorBorderSecondary}
+                      colorText={colorText}
+                      colorTextSecondary={colorTextSecondary}
+                      colorTextTertiary={colorTextTertiary}
+                      colorFillAlter={colorFillAlter}
+                      onRemove={handleRemoveQueued}
+                      onUpdate={handleUpdateQueued}
+                      onSteer={handleSteerQueued}
+                    />
                     <HarnessInput
                       inputValue={inputValue}
                       onInputChange={setInputValue}
