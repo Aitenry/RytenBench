@@ -548,7 +548,8 @@ const HarnessInput: React.FC<HarnessInputProps> = ({
     if (!ed || ed.isDestroyed) return
     if (inputValue === '') {
       if (!ed.isEmpty) {
-        ed.commands.clearContent()
+        // emitUpdate: false —— 清空是外部状态驱动的结果，不要再回灌一次 onInputChange
+        ed.commands.clearContent(false)
         ed.commands.focus()
         // 外部清空输入（发送/新对话/切话题）时重置历史浏览位置
         historyIndexRef.current = -1
@@ -643,6 +644,16 @@ const HarnessInput: React.FC<HarnessInputProps> = ({
   )
 
   const hasContent = inputValue.trim().length > 0
+
+  // 主按钮语义：生成中且输入框为空 → 停止；其余（含生成中已输入内容）→ 发送。
+  // 生成中输入的这条会进入输入框上方的插话队列，不打断当前回合。
+  const primaryStops = isLoading && !hasContent
+  const onPrimary = primaryStops ? onStop : onSend
+  const primaryHint = primaryStops
+    ? t('harness.input.stopTooltip')
+    : isLoading
+      ? t('harness.input.queueTooltip')
+      : ''
 
   // chip 主题色经 CSS 变量注入 FileRef NodeView
   const chipCssVars = useMemo(
@@ -874,25 +885,19 @@ const HarnessInput: React.FC<HarnessInputProps> = ({
           />
         </div>
         <div className="flex items-center gap-2">
-          {isLoading ? (
-            <Tooltip title={t('harness.input.stopTooltip')}>
-              <Button
-                type="primary"
-                danger
-                shape="circle"
-                icon={<RiStopFill size={16} />}
-                onClick={onStop}
-              />
-            </Tooltip>
-          ) : (
+          {/* 主按钮只有一个，语义随状态切换（与参考项目 deepseek-harness 的 InputBar 同款）：
+              生成中且输入框为空 → 「停止」；生成中但已经打了字 → 「发送」（这条进插话队列）。
+              这样生成中既能继续发消息，也不会丢掉随时叫停的能力。 */}
+          <Tooltip title={primaryHint}>
             <Button
               type="primary"
+              danger={primaryStops}
               shape="circle"
-              icon={<RiArrowUpLine size={16} />}
-              onClick={onSend}
+              icon={primaryStops ? <RiStopFill size={16} /> : <RiArrowUpLine size={16} />}
+              onClick={onPrimary}
               disabled={!hasContent}
             />
-          )}
+          </Tooltip>
         </div>
       </div>
     </div>
