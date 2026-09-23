@@ -14,7 +14,6 @@ import { type Extension } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
 import {
   acceptChunk,
-  getChunks,
   goToNextChunk,
   goToPreviousChunk,
   rejectChunk,
@@ -22,6 +21,7 @@ import {
 } from '@codemirror/merge'
 import CodeEditor from './CodeEditor'
 import { chunkActionGutter } from '../utils/cmChunkActions'
+import { computeMergeStats } from '../utils/mergeStats'
 import type { EditorPaletteInput } from '../utils/cmTheme'
 import type { FileChangeView } from '../types/file-change'
 import type { Window } from '../../../../resource/types/window'
@@ -351,27 +351,23 @@ const FileDiffView: React.FC<FileDiffViewProps> = ({
     return () => ro.disconnect()
   }, [history.length, isDirty, statsText, canEdit, isPending])
 
-  /** 统计差异规模（处数 / 新增行 / 删除行）：由 CodeMirror 自己的 diff 结果换算 */
+  /**
+   * 统计差异规模（处数 / 新增行 / 删除行）。
+   *
+   * 有合并视图时由 CodeMirror 自己的 chunk 结果换算；没有可比对的正文
+   * （新建文件、命令执行期间被捕获的写入）时回落到**改动记录自带的统计**——
+   * 算法与边界见 utils/mergeStats.ts（那两种「算不出 diff」的返回是真编辑器上量出来的）。
+   */
   const refreshStats = useCallback(
     (view: EditorView) => {
-      const result = getChunks(view.state)
-      if (!result || !original) {
-        setStats({ chunks: 0, added: 0, removed: 0 })
-        return
-      }
-      let added = 0
-      let removed = 0
-      for (const chunk of result.chunks) {
-        const aStartLine = original.slice(0, chunk.fromA).split('\n').length
-        const aEndLine = original.slice(0, chunk.toA).split('\n').length
-        const bStartLine = view.state.doc.lineAt(chunk.fromB).number
-        const bEndLine = view.state.doc.lineAt(Math.min(chunk.toB, view.state.doc.length)).number
-        removed += Math.max(0, aEndLine - aStartLine)
-        added += Math.max(0, bEndLine - bStartLine + (chunk.toB > chunk.fromB ? 1 : 0))
-      }
-      setStats({ chunks: result.chunks.length, added, removed })
+      const next = computeMergeStats(view.state, original, change)
+      setStats((prev) =>
+        prev && prev.chunks === next.chunks && prev.added === next.added && prev.removed === next.removed
+          ? prev
+          : next
+      )
     },
-    [original]
+    [original, change]
   )
 
   useEffect(() => {
