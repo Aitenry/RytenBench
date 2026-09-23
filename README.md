@@ -30,7 +30,7 @@
 ### AI
 
 - **AI Harness Assistant** — Conversational AI powered by a LangGraph runtime with streaming responses, reasoning (deep thinking) display, tool-call cards, and sub-agent delegation. Harness history is persisted per workspace and topic.
-- **Workspaces** — Multiple workspaces, each bound to a real directory on disk. Browse, read, and edit workspace files inline (Monaco-based file editor) with file reference chips in harness input. Harness history, agents, and memory are isolated per workspace; documents, wikis and todos are global.
+- **Workspaces** — Multiple workspaces, each bound to a real directory on disk. Browse, read, and edit workspace files inline (CodeMirror 6 file editor with inline diff review) with file reference chips in harness input. Every write the agent makes is recorded as a reviewable change (keep / revert, with per-hunk review and full change history); the explorer keeps its expanded folders and reacts to on-disk changes live. Harness history, agents, and memory are isolated per workspace; documents, wikis and todos are global.
 - **Built-in Memory (Mnemon)** — A three-layer memory system in every workspace: runtime memory (user profile + project MEMORY, injected every turn), project documents (Markdown archives with cold/hot tiering + LRU), and long-term memory spaces (graph relations + deep recall, backed by PGlite). Exposed to the agent as 13 `mnemon_*` tools.
 - **Agent System** — Configure sub-agents per workspace with custom system prompts and tool selections; the main agent supports configurable tools and skills.
 - **Skill System** — Load custom skills from a local directory; enable/disable individual skills for harness sessions.
@@ -56,49 +56,49 @@
 
 ## Tech Stack
 
-| Layer              | Technology                                                                                                  |
-| ------------------ | ----------------------------------------------------------------------------------------------------------- |
-| Framework          | [Electron](https://www.electronjs.org/) 43                                                                  |
-| Frontend           | [React](https://react.dev/) 19 + [TypeScript](https://www.typescriptlang.org/) 5.9                          |
-| Build Tool         | [electron-vite](https://electron-vite.org/) 6 + [Vite](https://vite.dev/) 8                                 |
-| UI Library         | [Ant Design](https://ant.design/) 6 + [Tailwind CSS](https://tailwindcss.com/) 4                            |
-| Routing            | [React Router](https://reactrouter.com/) 7                                                                  |
-| Markdown Editor    | [TipTap](https://tiptap.dev/) 3 + [tiptap-markdown](https://github.com/ueberdosis/tiptap-markdown)           |
-| Markdown View      | [react-markdown](https://github.com/remarkjs/react-markdown) 10 + remark-gfm + rehype-katex/highlight       |
-| Diagram & Math     | [Mermaid](https://mermaid.js.org/) + [KaTeX](https://katex.org/) + [highlight.js](https://highlightjs.org/) |
-| Code Editor        | [Monaco Editor](https://microsoft.github.io/monaco-editor/)                                                 |
-| AI / LLM           | [LangChain](https://www.langchain.com/) + [LangGraph](https://langchain-ai.github.io/langgraph/) (explicit StateGraph runtime) |
-| Database           | [PGLite](https://pglite.dev/) (PostgreSQL in WebAssembly) + [electron-store](https://github.com/sindresorhus/electron-store) |
-| Visualization      | [ECharts](https://echarts.apache.org/) 6                                                                    |
-| Encryption         | AES-256-GCM (API keys) + MD5 (lock screen password)                                                         |
-| Icons              | [Remix Icon](https://remixicon.com/)                                                                        |
-| Animation          | [animate.css](https://animate.style/) 4                                                                     |
-| Document Import    | [mammoth](https://github.com/mwilliamson/mammoth.js) (DOCX) + [turndown](https://github.com/mixmark-io/turndown) (HTML→MD) + [Readability](https://github.com/mozilla/readability) (article extraction) |
-| Data Validation    | [zod](https://zod.dev/) + [json-llm-repair](https://github.com/jeanmarcgb/json-llm-repair)                   |
-| Audio Metadata     | [music-metadata](https://github.com/Borewit/music-metadata) 11                                              |
-| Weather            | [openmeteo](https://github.com/open-meteo/open-meteo)                                                       |
-| Logging            | [electron-log](https://github.com/megahertz/electron-log)                                                   |
-| Auto Update        | [electron-updater](https://www.electron.build/auto-update)                                                  |
-| Packaging          | [electron-builder](https://www.electron.build/)                                                             |
+| Layer           | Technology                                                                                                                                                                                              |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Framework       | [Electron](https://www.electronjs.org/) 43                                                                                                                                                              |
+| Frontend        | [React](https://react.dev/) 19 + [TypeScript](https://www.typescriptlang.org/) 5.9                                                                                                                      |
+| Build Tool      | [electron-vite](https://electron-vite.org/) 6 + [Vite](https://vite.dev/) 8                                                                                                                             |
+| UI Library      | [Ant Design](https://ant.design/) 6 + [Tailwind CSS](https://tailwindcss.com/) 4                                                                                                                        |
+| Routing         | [React Router](https://reactrouter.com/) 7                                                                                                                                                              |
+| Markdown Editor | [TipTap](https://tiptap.dev/) 3 + [tiptap-markdown](https://github.com/ueberdosis/tiptap-markdown)                                                                                                      |
+| Markdown View   | [react-markdown](https://github.com/remarkjs/react-markdown) 10 + remark-gfm + rehype-katex/highlight                                                                                                   |
+| Diagram & Math  | [Mermaid](https://mermaid.js.org/) + [KaTeX](https://katex.org/) + [highlight.js](https://highlightjs.org/)                                                                                             |
+| Code Editor     | [CodeMirror 6](https://codemirror.net/) via [@uiw/react-codemirror](https://github.com/uiwjs/react-codemirror) + [@codemirror/merge](https://codemirror.net/docs/ref/#merge)                            |
+| AI / LLM        | [LangChain](https://www.langchain.com/) + [LangGraph](https://langchain-ai.github.io/langgraph/) (explicit StateGraph runtime)                                                                          |
+| Database        | [PGLite](https://pglite.dev/) (PostgreSQL in WebAssembly) + [electron-store](https://github.com/sindresorhus/electron-store)                                                                            |
+| Visualization   | [ECharts](https://echarts.apache.org/) 6                                                                                                                                                                |
+| Encryption      | AES-256-GCM (API keys) + MD5 (lock screen password)                                                                                                                                                     |
+| Icons           | [Remix Icon](https://remixicon.com/)                                                                                                                                                                    |
+| Animation       | [animate.css](https://animate.style/) 4                                                                                                                                                                 |
+| Document Import | [mammoth](https://github.com/mwilliamson/mammoth.js) (DOCX) + [turndown](https://github.com/mixmark-io/turndown) (HTML→MD) + [Readability](https://github.com/mozilla/readability) (article extraction) |
+| Data Validation | [zod](https://zod.dev/) + [json-llm-repair](https://github.com/jeanmarcgb/json-llm-repair)                                                                                                              |
+| Audio Metadata  | [music-metadata](https://github.com/Borewit/music-metadata) 11                                                                                                                                          |
+| Weather         | [openmeteo](https://github.com/open-meteo/open-meteo)                                                                                                                                                   |
+| Logging         | [electron-log](https://github.com/megahertz/electron-log)                                                                                                                                               |
+| Auto Update     | [electron-updater](https://www.electron.build/auto-update)                                                                                                                                              |
+| Packaging       | [electron-builder](https://www.electron.build/)                                                                                                                                                         |
 
 ---
 
 ## Supported LLM Providers
 
-| Provider             | Class                            | Notes                         |
-| -------------------- | -------------------------------- | ----------------------------- |
-| OpenAI               | ChatOpenAI                       | Supports custom base URL      |
-| Anthropic            | ChatAnthropic                    | Claude models                 |
-| DeepSeek             | ChatDeepSeek                     | Includes reasoning support    |
-| Google Gemini        | ChatGoogleGenerativeAI           | Generative Language API       |
-| Google Vertex AI     | ChatVertexAI                     | Enterprise Google Cloud       |
-| Mistral AI           | ChatMistralAI                    | Mistral models                |
-| Ollama               | ChatOllama                       | Local LLM runtime             |
-| OpenRouter           | ChatOpenRouter                   | Multi-model gateway           |
-| xAI                  | ChatXAI                          | Grok models (OpenAI-compatible) |
-| AWS Bedrock          | ChatBedrockConverse              | Amazon Bedrock Converse API   |
-| Cloudflare Workers AI| ChatCloudflareWorkersAI          | Edge-deployed models          |
-| Custom / OpenAI      | ChatOpenAI (fallback)            | Any OpenAI-compatible endpoint |
+| Provider              | Class                   | Notes                           |
+| --------------------- | ----------------------- | ------------------------------- |
+| OpenAI                | ChatOpenAI              | Supports custom base URL        |
+| Anthropic             | ChatAnthropic           | Claude models                   |
+| DeepSeek              | ChatDeepSeek            | Includes reasoning support      |
+| Google Gemini         | ChatGoogleGenerativeAI  | Generative Language API         |
+| Google Vertex AI      | ChatVertexAI            | Enterprise Google Cloud         |
+| Mistral AI            | ChatMistralAI           | Mistral models                  |
+| Ollama                | ChatOllama              | Local LLM runtime               |
+| OpenRouter            | ChatOpenRouter          | Multi-model gateway             |
+| xAI                   | ChatXAI                 | Grok models (OpenAI-compatible) |
+| AWS Bedrock           | ChatBedrockConverse     | Amazon Bedrock Converse API     |
+| Cloudflare Workers AI | ChatCloudflareWorkersAI | Edge-deployed models            |
+| Custom / OpenAI       | ChatOpenAI (fallback)   | Any OpenAI-compatible endpoint  |
 
 API keys are encrypted with **AES-256-GCM** using a machine-specific key derived from hostname, username, and user data path — keys are bound to the machine where they were created.
 

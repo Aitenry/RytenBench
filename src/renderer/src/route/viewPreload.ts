@@ -4,8 +4,9 @@ import type { ComponentType } from 'react'
  * 视图 chunk 预加载
  *
  * 背景：Harness / Planner / Music 是 React.lazy 拆包页面，首次切换时才现场加载对应
- * chunk。Harness 的 chunk 含 monaco 编辑器（约 6MB），下载后还要在主线程求值，
- * 求值期间渲染进程无法绘制新画面，界面会「卡在上一页」好几秒。
+ * chunk。Harness 的 chunk 含整套代码编辑器（CodeMirror 内核 + 差异视图，语言语法
+ * 另按需分包），下载后还要在主线程求值，求值期间渲染进程无法绘制新画面，
+ * 界面会「卡在上一页」一会儿。
  *
  * 方案：
  * 1. 启动后的空闲时段分批提前 import 各 chunk（重 → 轻），首次切换时模块

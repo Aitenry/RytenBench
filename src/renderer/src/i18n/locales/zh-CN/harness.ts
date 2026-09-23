@@ -139,6 +139,9 @@ export const zhCNHarness = {
     subAgentExecuting: '智能体正在执行中…',
     silentGenerating: '正在生成…',
     taskList: '任务清单',
+    /** 段头上的改动徽标：段体折起后，这是「这一段改了哪几个文件」唯一的可见入口 */
+    changedFiles: '{{count}} 个文件已改',
+    changedFilesTip: '这一段改了 {{files}} 个文件 · {{pending}} 处待审查（点击看差异）',
     preflight: '前期探索',
     todoList: '待办清单',
     todoCompleted: '<mono>{{completed}}</mono>/<mono>{{total}}</mono> 已完成',
@@ -307,10 +310,76 @@ export const zhCNHarness = {
     loading: '加载中...',
     empty: '空文件夹',
     openFailed: '打开文件失败',
-    saveFailed: '保存文件失败'
+    saveFailed: '保存文件失败',
+    pendingReview: '{{count}} 处待审查',
+    /**
+     * 标题栏的主口径 = **文件数**。
+     *
+     * 踩过（用户 2026-09-23 原话「明明就编辑了一个文件，却显示 10 处待审查」）：
+     * 「处」在库里是**改动记录条数**——模型每次 write_file / edit_file 各记一条，
+     * 同一个文件改 10 次就是 10 条。只显示这个数字，看的人会以为动了 10 个文件。
+     */
+    pendingFiles: '{{count}} 个文件',
+    /** 「1 个文件 · 10 处改动」：文件数是主口径，改动条数退到副口径 */
+    pendingSummary: '{{files}} · {{changes}}',
+    pendingFilesTip: '有未审查模型改动的文件',
+    keepAllTip: '全部保留：清掉待审查标记，磁盘内容保持不变'
   },
   fileEditor: {
-    loading: '正在加载编辑器...'
+    loading: '正在加载编辑器...',
+    modeEdit: '编辑',
+    modeDiff: '差异',
+    wrapTip: '切换自动换行',
+    reloadTip: '从磁盘重新载入（丢弃未保存的修改）',
+    diskChanged: '磁盘已变化',
+    diskChangedTip:
+      '该文件在你编辑期间被改动过。保存会以你的版本为准；点「重新载入」可改用磁盘版本。',
+    caret: '第 {{line}} 行，第 {{column}} 列',
+    selected: '已选 {{count}} 字符',
+    lines: '共 {{count}} 行',
+    readOnly: '只读',
+    modified: '未保存',
+    saved: '已保存',
+    pendingReview: '{{count}} 处改动待审查',
+    mdRich: '富文本',
+    mdRichTip: '所见即所得编辑（正文即排版结果）',
+    mdSource: '源码',
+    mdSourceTip: '编辑 Markdown 源码',
+    mdPlaceholder: '开始写点什么…',
+    chars: '{{count}} 字'
+  },
+  fileDiff: {
+    stats: '{{count}} 处差异 · +{{added}} −{{removed}}',
+    acceptChunk: '保留',
+    rejectChunk: '撤销',
+    acceptChunkTip: '保留这一处（采用模型的写法）',
+    rejectChunkTip: '撤销这一处（还原改动前的写法）',
+    keepAll: '全部保留',
+    keepAllTip: '保留全部待审查改动，磁盘内容不变',
+    keepMixedTip: '保留全部：你已逐处取舍，这份结果会落盘并标记为已保留',
+    revertAll: '撤销全部',
+    revertAllTip: '把文件还原到最早一次改动之前的内容',
+    keepOne: '保留',
+    revertToHere: '回到此版本',
+    history: '历史（{{count}}）',
+    historyTitle: '改动历史',
+    historyEmpty: '这个文件还没有改动记录',
+    prevChunk: '上一处差异',
+    nextChunk: '下一处差异',
+    unsaved: '未落盘',
+    noSnapshot: '这次改动没有改动前快照（由命令执行或外部修改产生），无法回溯。',
+    historicalHint: '正在查看较早的一次改动；保留 / 撤销作用于最新一次待审查改动。',
+    revertFailed: '撤销失败',
+    applyFailed: '审查结果落盘失败',
+    sourceWrite: 'write_file 写入',
+    sourceEdit: 'edit_file 修改',
+    sourceExecute: '命令执行',
+    sourceExternal: '外部改动',
+    sourceReview: '审查结果',
+    statusPending: '待审查',
+    statusKept: '已保留',
+    statusReverted: '已撤销',
+    statusObsolete: '已失效'
   },
   toolDetail: {
     unavailable: '结果详情不可用（可能已随话题清理）',
