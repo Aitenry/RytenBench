@@ -8,6 +8,7 @@ import { mainFormat, mainPlural } from '../../i18n'
 import { getFsToolTexts } from '../../i18n/tool-results-fs'
 import { recordToolFacts } from './tool-result-facts'
 import { recordFileChange } from '../../workspace/file-history'
+import { changeStats } from '../../workspace/line-diff'
 import { beginToolWriteWindow, endToolWriteWindow } from '../../workspace/watcher'
 import {
   MAX_EXEC_CHARS,
@@ -86,6 +87,14 @@ async function recordWorkspaceWrite(args: {
   before: string | null
   after: string | null
   source: 'write_file' | 'edit_file'
+  /**
+   * 本次改动的差异规模（+N −M）。
+   *
+   * 由工具算好传进来，而不是让记录层再 diff 一遍：同一份数字要同时出现在
+   * **改动记录**（资源管理器徽标 / 历史列表 / 差异视图回落值）与**聊天卡片**上，
+   * 两处各算一次就是两个可能互相矛盾的口径（口径本身在 workspace/line-diff.ts）。
+   */
+  stats: { added: number; removed: number }
 }): Promise<void> {
   const root = args.options.workspacePath
   const workspaceId = args.options.workspaceId
@@ -102,7 +111,8 @@ async function recordWorkspaceWrite(args: {
       after: args.after,
       source: args.source,
       topicId,
-      callId
+      callId,
+      stats: args.stats
     })
   } catch (err) {
     logger.warn('[FsBackend] 文件改动记录失败:', err)
@@ -336,6 +346,9 @@ export function buildFsTools(options: FsBackendOptions): StructuredToolInterface
           await fs.promises.writeFile(resolved.realPath, content, 'utf-8')
           const bytes = Buffer.byteLength(content, 'utf-8')
           recordToolFacts(callId, { bytes })
+          // 卡片上的「+N −M」：与改动记录用同一份数字（见 recordWorkspaceWrite 的 stats）
+          const stats = changeStats(before, content)
+          recordToolFacts(callId, { added: stats.added, removed: stats.removed })
           // 记账在返回结果之前完成：渲染进程收到「文件已改动」时，磁盘上已经是新内容
           await recordWorkspaceWrite({
             options,
@@ -343,7 +356,8 @@ export function buildFsTools(options: FsBackendOptions): StructuredToolInterface
             realPath: resolved.realPath,
             before,
             after: content,
-            source: 'write_file'
+            source: 'write_file',
+            stats
           })
           return mainFormat(tr.write.written, { path: file_path, bytes })
         } catch (err) {
@@ -402,13 +416,18 @@ export function buildFsTools(options: FsBackendOptions): StructuredToolInterface
             : current.replace(old_string, new_string)
           fs.writeFileSync(resolved.realPath, updated, 'utf-8')
           recordToolFacts(callId, { replacements: count })
+          // 「N 处」说的是替换次数，「+N −M」说的是这个文件实际变了多少行：
+          // 一次 replace_all 可能改 3 处却动 40 行，两个数都得在卡片上（口径见 changeStats）
+          const stats = changeStats(current, updated)
+          recordToolFacts(callId, { added: stats.added, removed: stats.removed })
           await recordWorkspaceWrite({
             options,
             config,
             realPath: resolved.realPath,
             before: current,
             after: updated,
-            source: 'edit_file'
+            source: 'edit_file',
+            stats
           })
           return mainFormat(mainPlural(tr.edit.updated_one, tr.edit.updated_other, count), {
             path: file_path

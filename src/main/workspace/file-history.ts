@@ -15,7 +15,7 @@ import {
   obsoleteChangesAfter,
   type FileChangeRow
 } from '../database/mapper/file-change'
-import { diffStatByLines, looksBinary } from './line-diff'
+import { changeStats, looksBinary } from './line-diff'
 
 /**
  * 文件改动史（「模型改了什么、能不能回溯」的唯一入口）。
@@ -108,6 +108,14 @@ export interface RecordFileChangeInput {
   topicId?: number | null
   callId?: string | null
   note?: string | null
+  /**
+   * 已经算好的差异规模（可选）。
+   *
+   * 工具写入路径（fs-backend）手上正好有改动前后正文，并且**卡片也要用同一份数字**，
+   * 于是它算一次后传进来，这里不再重算；不传的调用方（文件监听、审查落盘）按
+   * `changeStats` 现算，口径完全一致。
+   */
+  stats?: { added: number; removed: number }
 }
 
 /** 最近由工具写入过的文件（路径 → 时间戳），供文件监听去重，避免同一次写入记两遍 */
@@ -272,16 +280,8 @@ export async function recordFileChange(
   const afterText = after ?? ''
   const beforeBytes = Buffer.byteLength(beforeText, 'utf-8')
   const afterBytes = Buffer.byteLength(afterText, 'utf-8')
-  let stats: { added: number; removed: number }
-  if (before === null) {
-    // 新建：整份内容都是新增
-    stats = { added: afterText.split('\n').length, removed: 0 }
-  } else if (after === null) {
-    // 删除：整份内容都是删除
-    stats = { added: 0, removed: beforeText.split('\n').length }
-  } else {
-    stats = diffStatByLines(beforeText, afterText)
-  }
+  // 口径唯一：新建/删除/修改三种语义都在 changeStats 里（调用方已算过就直接用）
+  const stats = input.stats ?? changeStats(before, after)
 
   const snapshotable = (text: string | null): boolean =>
     text !== null && text.length <= MAX_SNAPSHOT_CHARS && !looksBinary(text)

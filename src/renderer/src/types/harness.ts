@@ -27,6 +27,10 @@ export interface ToolCard {
   range?: { start: number; end: number; total: number }
   /** write_file：写入字节数 */
   bytes?: number
+  /** write_file / edit_file：本次改动新增的行数（与改动记录同源；缺失时不显示） */
+  added?: number
+  /** write_file / edit_file：本次改动删除的行数 */
+  removed?: number
   /** ls：子目录数 */
   dirs?: number
   /** ls / glob：文件数 */
@@ -148,6 +152,16 @@ export interface Message {
    * 用量行（harness_dialogue_usage.dialogue_id）靠它对上号，无需重新加载会话。
    */
   dialogueId?: number
+  /**
+   * 「最终答复」在本条消息 `blocks` 数组里的下标集合（协议层真源，渲染端只读不猜）。
+   *
+   * - `Set`：这些块是本轮的答复，渲染在任务折叠之外常显；
+   * - `null`：主进程明确说本轮没有答复（中止 / 只有工具与思考），或已撤回标记；
+   * - `undefined`：主进程没给结论（旧版本或异常路径）——保留旧的「整轮结束再摘」行为。
+   *
+   * 来源见 main/harness/service/answer-boundary.ts 与主进程下发的 `answer` chunk。
+   */
+  answer?: Set<number> | null
 }
 
 /** 附件 */

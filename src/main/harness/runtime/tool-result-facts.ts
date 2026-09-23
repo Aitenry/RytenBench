@@ -19,6 +19,15 @@ export interface ToolResultFacts {
   bytes?: number
   /** edit_file：替换处数 */
   replacements?: number
+  /**
+   * write_file / edit_file：本次落盘新增 / 删除的行数（差异规模）。
+   *
+   * 与改动记录（file_change 表）**同源**：都由 workspace/line-diff.ts 的 changeStats
+   * 算一次（工具算完既登记事实、又传给记录层），所以卡片上的「+N −M」和资源管理器徽标、
+   * 差异视图里的统计永远说同一件事。
+   */
+  added?: number
+  removed?: number
   /** read_file：文件总行数 */
   lines?: number
   /** read_file：输出是否被内联上限截断 */

@@ -27,6 +27,10 @@ import { MONO_FONT, TruncatedTooltipText } from './TruncatedTooltipText'
  * 必须一眼可辨**——它们此前和 read_file 一样是「眼睛 + 路径」，扫一眼分不出哪张是改动。
  * 现在 write_file / edit_file 用铅笔系图标 + 琥珀色强调（错误仍是红色），
  * 并在左侧加一条 2px 强调边，扫读时改动卡片自己会跳出来。
+ *
+ * 同日再追加（用户原话「并且编辑后，需要在卡片显示差异：+12 -6」）：写改卡片的右侧
+ * 多一段差异规模「+N −M」（见 DiffStat）——处数/字节数说的是「做了什么」，
+ * 差异规模说的是「这个文件实际变了多少行」，两件事都要看得见。
  */
 
 export interface ToolCardStyle {
@@ -174,13 +178,58 @@ const Mono: React.FC<{ children?: React.ReactNode }> = ({ children }) => (
   <span style={{ fontFamily: MONO_FONT }}>{children}</span>
 )
 
+/**
+ * 差异规模语义色：新增绿 / 删除红（与差异视图历史列表、资源管理器徽标同一套）。
+ * 深色下用同一族色的亮档——`#4a8f5b` / `#b3452f` 在深底上会糊成一团灰，
+ * 这两档就是 FileExplorer 的改动徽标在深色下用的那两个值。
+ */
+const DIFF_ADDED_COLOR = { light: '#4a8f5b', dark: '#9ecf8a' }
+const DIFF_REMOVED_COLOR = { light: '#b3452f', dark: '#e08a70' }
+
+/**
+ * 写改卡片上的差异规模「+N −M」。
+ *
+ * 用户 2026-09-23 要求（原话）：「并且编辑后，需要在卡片显示差异：+12 -6」。
+ *
+ * 它与卡片上原有的数字**不是一回事，两个都要**：
+ *  - 「N 处」= 这次替换了几处（edit_file 的返回值口径）；
+ *  - 「+N −M」= 这个文件实际变了多少行（与改动记录、差异视图同一份数字，见主进程 line-diff）。
+ * 一次 replace_all 替换 3 处却动了 40 行时，只看处数会让人以为这是个小改动。
+ *
+ * 数字缺失（老数据里落的卡片、写失败）或两边都是 0（内容其实没变）时**整块不渲染**：
+ * 宁可这一行短一点，也不摆一个「+0 −0」让人读不通。
+ */
+const DiffStat: React.FC<{ added?: number; removed?: number; isDarkMode: boolean }> = ({
+  added,
+  removed,
+  isDarkMode
+}) => {
+  if (typeof added !== 'number' || typeof removed !== 'number' || added + removed === 0) return null
+  return (
+    <span data-diff-stat style={{ fontFamily: MONO_FONT, marginLeft: 6 }}>
+      <span style={{ color: isDarkMode ? DIFF_ADDED_COLOR.dark : DIFF_ADDED_COLOR.light }}>
+        +{added}
+      </span>
+      <span
+        style={{
+          color: isDarkMode ? DIFF_REMOVED_COLOR.dark : DIFF_REMOVED_COLOR.light,
+          marginLeft: 4
+        }}
+      >
+        −{removed}
+      </span>
+    </span>
+  )
+}
+
 /** 卡片右侧元信息（按工具语义给出「结果有多大」） */
 const ToolCardMeta: React.FC<{
   tool: ToolCall
   card: ToolCard
   isNested: boolean
   color: string
-}> = ({ tool, card, isNested, color }) => {
+  isDarkMode: boolean
+}> = ({ tool, card, isNested, color, isDarkMode }) => {
   const { t } = useTranslation()
   // 失败且有失败原因：原因优先（egress 文本比「exit 1」更能说明问题）。
   // 没有 message 的失败态（如 execute 非零退出）继续走下面的按工具元信息——退出码不能丢。
@@ -213,6 +262,7 @@ const ToolCardMeta: React.FC<{
       return (
         <Meta isNested={isNested} color={color}>
           {card.bytes !== undefined ? formatBytes(card.bytes) : card.message}
+          <DiffStat added={card.added} removed={card.removed} isDarkMode={isDarkMode} />
         </Meta>
       )
     case 'edit_file':
@@ -227,6 +277,7 @@ const ToolCardMeta: React.FC<{
           ) : (
             card.message
           )}
+          <DiffStat added={card.added} removed={card.removed} isDarkMode={isDarkMode} />
         </Meta>
       )
     case 'ls':
@@ -350,7 +401,13 @@ export const ToolResultCard: React.FC<{
       icon={<Icon size={size} style={{ color: iconColor, flexShrink: 0 }} />}
       primary={primary}
       meta={
-        <ToolCardMeta tool={tool} card={card} isNested={isNested} color={style.colorTextTertiary} />
+        <ToolCardMeta
+          tool={tool}
+          card={card}
+          isNested={isNested}
+          color={style.colorTextTertiary}
+          isDarkMode={style.isDarkMode}
+        />
       }
       onClick={onClick}
       actionTitle={actionTitle}

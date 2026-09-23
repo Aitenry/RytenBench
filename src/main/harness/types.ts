@@ -1,3 +1,5 @@
+import type { TurnFinal } from './service/answer-boundary'
+
 export interface HarnessOptions {
   images?: string[]
   documents?: { fileName: string; filePath: string }[]
@@ -80,6 +82,16 @@ export interface ToolCard {
   range?: { start: number; end: number; total: number }
   /** write_file：写入字节数 */
   bytes?: number
+  /**
+   * write_file / edit_file：本次落盘新增的行数（差异规模；与改动记录同源）。
+   *
+   * 用户在聊天里看到的必须是「这个文件到底变了多少」，而不只是「替换了几处」：
+   * 一次 replace_all 可能替换 3 处却动了 40 行。缺失 = 拿不到可靠数字（老数据、写失败），
+   * 卡片宁可什么都不显示，也不用 0 冒充。
+   */
+  added?: number
+  /** write_file / edit_file：本次落盘删除的行数 */
+  removed?: number
   /** ls：子目录数 */
   dirs?: number
   /** ls / glob：文件数 */
@@ -134,6 +146,17 @@ export interface StructuredMessage {
   tool?: ToolCallDetail
   content?: string
   reasoning_content?: string
+  /**
+   * 本段正文/推理是否属于这一轮的**最终答复**（协议层给结论，渲染端只读不猜）。
+   *
+   * - `true`：内容到达时该轮尚无工具/子代理活动，属于这一轮交付给用户的答复；
+   * - `false`：**撤回**此前的标记（本轮已出现工具/子代理活动，前面的内容是探索途中的话）；
+   * - 省略：本次 chunk 不表态（不是内容 chunk 时一律省略，渲染端不会被误清）。
+   *
+   * 真源与判定见 service/answer-boundary.ts（`answerTrailingCount`），
+   * 随流结束的 `TurnFinal` 一起构成「最后一段任务里哪部分才是答复」的权威结论。
+   */
+  answer?: boolean
   /** 智能体活动事件 */
   subAgent?: SubAgentEvent
   /** 本轮注入的热记忆内容（Mnemon 启用且热记忆非空时，由流开头下发） */
@@ -159,6 +182,8 @@ export interface StructuredMessage {
 /** IPC 发送的流式 chunk（StructuredMessage + 主进程注入的 topicId） */
 export interface StreamChunk extends StructuredMessage {
   __topicId?: number
+  /** 本轮终局标记（仅 `harness-stream-done` 载荷使用，见 service/answer-boundary.ts） */
+  turnFinal?: TurnFinal
   /** 目标自动续跑轮的起始标记（流首 chunk；前端据此挂载新的用户消息与助手占位） */
   goalRound?: { round: number; objective: string }
 }

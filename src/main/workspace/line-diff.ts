@@ -122,6 +122,38 @@ export function diffStatByLines(before: string, after: string): LineDiffStat {
   return { added: midB.length, removed: midA.length, exact: false }
 }
 
+/**
+ * 文本的行数。
+ *
+ * `'a\nb\n'` 是 **2** 行——末尾换行是最后一行的结束符，不是多出来的一行；
+ * 空文本 0 行；末行没有换行时照样算一行。这与 git 的口径一致
+ * （`git diff --numstat` 对新建的 2 行文件报 `2 0`，不是 `3 0`）。
+ * 改前这里是 `split('\n').length`，新建文件于是**永远多报一行**：这条数字现在会长在
+ * 聊天卡片上（`+N −M`），多一行是最容易被一眼看穿的错。
+ */
+export function lineCount(text: string): number {
+  if (text === '') return 0
+  const lines = text.split('\n').length
+  return text.endsWith('\n') ? lines - 1 : lines
+}
+
+/**
+ * 一次「改动前后」的差异规模：新建 = 整份新增、删除 = 整份删除、其余走行级 diff。
+ *
+ * 这是改动规模统计的**唯一口径**：改动记录落库（file-history）与聊天里的写改卡片
+ * （fs-backend 登记 added/removed 事实）都调它。两边若各写一份，卡片上的「+N −M」
+ * 与差异视图/历史列表迟早会给出互相矛盾的数字——用户看到的将是同一个改动两套说法。
+ */
+export function changeStats(
+  before: string | null,
+  after: string | null
+): { added: number; removed: number } {
+  if (before === null) return { added: lineCount(after ?? ''), removed: 0 }
+  if (after === null) return { added: 0, removed: lineCount(before) }
+  const stat = diffStatByLines(before, after)
+  return { added: stat.added, removed: stat.removed }
+}
+
 /** 内容是否为二进制（含 NUL 即视为二进制；快照与差异对它没有意义） */
 export function looksBinary(text: string): boolean {
   return text.includes('\u0000')

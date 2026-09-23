@@ -186,7 +186,9 @@ export function buildToolProjection(params: {
         message: error ? clampLine(error) : clampLine(output),
         bytes:
           facts?.bytes ??
-          (typeof input.content_bytes === 'number' ? input.content_bytes : undefined)
+          (typeof input.content_bytes === 'number' ? input.content_bytes : undefined),
+        added: facts?.added,
+        removed: facts?.removed
       }
       return { input, output: error ? '' : output, card }
     }
@@ -199,7 +201,10 @@ export function buildToolProjection(params: {
         path,
         status: error ? 'error' : 'ok',
         message: error ? clampLine(error) : clampLine(output),
-        count: facts?.replacements
+        count: facts?.replacements,
+        // 替换处数 + 差异规模：一个说「改了几处」，一个说「文件实际变了多少行」
+        added: facts?.added,
+        removed: facts?.removed
       }
       return { input, output: error ? '' : output, card }
     }
