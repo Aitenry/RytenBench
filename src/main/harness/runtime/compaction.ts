@@ -25,12 +25,7 @@ import { HumanMessage, SystemMessage } from '@langchain/core/messages'
 import logger from 'electron-log'
 import { mainFormat } from '../../i18n'
 import { getFsToolTexts } from '../../i18n/tool-results-fs'
-import {
-  askUserToSwitchModel,
-  MODEL_RETRY_LIMIT,
-  MODEL_RETRY_DELAY_MS,
-  sleep
-} from './model-recovery'
+import { invokeWithModelRecovery } from './model-recovery'
 
 /** 历史回灌时单个工具结果的内联预算（字符） */
 export const TOOL_RESULT_PRUNE_CHARS = 4_000
@@ -179,10 +174,11 @@ export interface SummarizeRecoveryEnv {
 }
 
 /**
- * 带自动重试与「换模型继续」兜底的摘要调用（与正文 callModel 同款恢复语义）：
- * - 摘要模型请求失败（504/网络等）原地自动重试 MODEL_RETRY_LIMIT 次，每次重试前
- *   经 env.onRetry 上报进度（前端展示「正在重试（第 N/2 次）」并保持「正在压缩…」卡）；
- * - 重试耗尽且允许询问（主话题、非目标自动轮）→ 挂起弹出换模型选择，用户选定后
+ * 带自动重试与「换模型继续」兜底的摘要调用（与正文 callModel 同款恢复语义，共用同一个执行器）：
+ * - 失败先分类：永久性错误（鉴权/模型不存在/请求被拒/上下文超长/图片不支持）直接抛错，
+ *   不重试也不弹窗；瞬时错误（限流/5xx/网络/网关超时）原地自动重试各自预算内的次数，
+ *   每次重试前经 env.onRetry 上报进度（前端展示「正在重试（第 N/M 次）」并保持「正在压缩…」卡）；
+ * - 瞬时错误重试耗尽且允许询问（主话题、非目标自动轮）→ 挂起弹出换模型选择，用户选定后
  *   用新模型在原位置重新压缩（不丢弃既有 checkpoint、不静默回退截断）；
  * - 用户放弃/询问不可用 → 抛错，由调用方回退字符预算截断（旧 checkpoint 保留复用）。
  */
@@ -193,45 +189,19 @@ export async function summarizeDialoguesWithRecovery(
   env?: SummarizeRecoveryEnv
 ): Promise<string> {
   let activeModel = model
-  let attempt = 0
-  let switchOffered = false
-  for (;;) {
-    try {
-      return await summarizeDialogues(activeModel, transcript, priorSummary, env?.signal)
-    } catch (err) {
-      const error = err instanceof Error ? err : new Error(String(err))
-      if (error.name === 'AbortError' || env?.signal?.aborted) throw err
-      attempt++
-      if (attempt <= MODEL_RETRY_LIMIT) {
-        env?.onRetry?.(attempt, MODEL_RETRY_LIMIT)
-        logger.error(
-          `[Compaction] 摘要模型请求失败（第 ${attempt}/${MODEL_RETRY_LIMIT} 次重试，正在压缩早期对话…）:`,
-          error
-        )
-        await sleep(MODEL_RETRY_DELAY_MS)
-        continue
-      }
-      // 重试耗尽：主话题 + 用户轮时询问是否换模型继续压缩（仅一次）
-      if (!switchOffered && env && env.topicId > 0 && env.turnSource !== 'goal-round') {
-        switchOffered = true
-        const switched = await askUserToSwitchModel(
-          { topicId: env.topicId, turnSource: env.turnSource, signal: env.signal },
-          error
-        )
-        if (switched) {
-          activeModel = switched
-          attempt = 0
-          logger.info('[Compaction] 用户已切换模型，用新模型继续压缩早期对话')
-          continue
-        }
-        logger.warn(
-          '[Compaction] 用户放弃切换模型，摘要按失败处理（回退字符预算截断）:',
-          error.message
-        )
-      }
-      throw err
+  return await invokeWithModelRecovery({
+    label: '[Compaction]',
+    ctx: {
+      topicId: env?.topicId ?? 0,
+      turnSource: env?.turnSource,
+      signal: env?.signal
+    },
+    call: () => summarizeDialogues(activeModel, transcript, priorSummary, env?.signal),
+    onRetry: (attempt, retries) => env?.onRetry?.(attempt, retries),
+    onSwitch: (next) => {
+      activeModel = next
     }
-  }
+  })
 }
 
 /** 组装 checkpoint 落地消息（置于消息头，模型视作既定背景） */

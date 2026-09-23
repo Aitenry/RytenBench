@@ -19,6 +19,21 @@ import { TOP_K_PROVIDERS } from '../../shared/model-params'
 const TOP_K_PROVIDER_SET = new Set(TOP_K_PROVIDERS)
 
 /**
+ * 关闭 LangChain 自带的模型调用重试层。
+ *
+ * `BaseChatModel` 会用构造参数建一个 `AsyncCaller`，其 `maxRetries` **缺省是 6**：
+ * 一次 `invoke()` 失败后，框架会在后台静默重发最多 6 次（p-retry 指数退避，工装实测
+ * 一个 500 报文 = 7 个 HTTP 请求、95 秒），我们自己的「正在重试（第 N/2 次）」完全看不到
+ * 这一层；网关读超时 120 秒时，这一层就是 14 分钟的等待（2026-09-23 用户反馈
+ * 「模型不可用时报了错还一直重试」的根因之一）。Retry-After 很短、以及 5xx 之外的
+ * 4xx（AsyncCaller 的 STATUS_NO_RETRY：400/401/402/403/404/405/406/407/409）它本来就不重发。
+ *
+ * 重试预算统一交给 harness/runtime/model-recovery.ts：按失败分类决定要不要重试、重试几次，
+ * 并把进度如实报给前端。放在 `...extra` 之前展开：用户写进 extra_config 的 maxRetries 仍然优先。
+ */
+const INNER_RETRIES_DISABLED = { maxRetries: 0 }
+
+/**
  * 大模型供应商服务
  * 从数据库读取供应商配置，根据 provider 类型创建对应的 LangChain ChatModel 实例
  */
@@ -225,6 +240,7 @@ class ProviderService {
       // 长参数构建期间前端才能收到 preparing →「生成中」；LangGraph messages 模式
       // 自带聚合去重（emittedChatModelRunIds + dedupe），不会重复下发最终消息
       streaming: true,
+      ...INNER_RETRIES_DISABLED,
       ...extra
     }
     const maxTokens = this.resolveMaxTokens(config)
@@ -242,6 +258,7 @@ class ProviderService {
       // 长参数构建期间前端才能收到 preparing →「生成中」；LangGraph messages 模式
       // 自带聚合去重（emittedChatModelRunIds + dedupe），不会重复下发最终消息
       streaming: true,
+      ...INNER_RETRIES_DISABLED,
       ...extra
     }
     const maxTokens = this.resolveMaxTokens(config)
@@ -259,6 +276,7 @@ class ProviderService {
       // 长参数构建期间前端才能收到 preparing →「生成中」；LangGraph messages 模式
       // 自带聚合去重（emittedChatModelRunIds + dedupe），不会重复下发最终消息
       streaming: true,
+      ...INNER_RETRIES_DISABLED,
       ...extra
     }
     const maxTokens = this.resolveMaxTokens(config)
@@ -275,6 +293,7 @@ class ProviderService {
   ): ChatGoogleGenerativeAI {
     const fields: Record<string, unknown> = {
       streaming: true,
+      ...INNER_RETRIES_DISABLED,
       ...extra
     }
     const maxTokens = this.resolveMaxTokens(config)
@@ -292,6 +311,7 @@ class ProviderService {
       // 长参数构建期间前端才能收到 preparing →「生成中」；LangGraph messages 模式
       // 自带聚合去重（emittedChatModelRunIds + dedupe），不会重复下发最终消息
       streaming: true,
+      ...INNER_RETRIES_DISABLED,
       ...extra
     }
     const maxTokens = this.resolveMaxTokens(config)
@@ -308,6 +328,7 @@ class ProviderService {
       // 长参数构建期间前端才能收到 preparing →「生成中」；LangGraph messages 模式
       // 自带聚合去重（emittedChatModelRunIds + dedupe），不会重复下发最终消息
       streaming: true,
+      ...INNER_RETRIES_DISABLED,
       ...extra
     }
     const maxTokens = this.resolveMaxTokens(config)
@@ -325,6 +346,7 @@ class ProviderService {
       // 长参数构建期间前端才能收到 preparing →「生成中」；LangGraph messages 模式
       // 自带聚合去重（emittedChatModelRunIds + dedupe），不会重复下发最终消息
       streaming: true,
+      ...INNER_RETRIES_DISABLED,
       ...extra
     }
     const maxTokens = this.resolveMaxTokens(config)
@@ -345,6 +367,7 @@ class ProviderService {
       // 长参数构建期间前端才能收到 preparing →「生成中」；LangGraph messages 模式
       // 自带聚合去重（emittedChatModelRunIds + dedupe），不会重复下发最终消息
       streaming: true,
+      ...INNER_RETRIES_DISABLED,
       ...extra
     }
     const maxTokens = this.resolveMaxTokens(config)
@@ -363,6 +386,7 @@ class ProviderService {
       // 长参数构建期间前端才能收到 preparing →「生成中」；LangGraph messages 模式
       // 自带聚合去重（emittedChatModelRunIds + dedupe），不会重复下发最终消息
       streaming: true,
+      ...INNER_RETRIES_DISABLED,
       ...extra
     }
     const maxTokens = this.resolveMaxTokens(config)
@@ -383,6 +407,7 @@ class ProviderService {
       // 长参数构建期间前端才能收到 preparing →「生成中」；LangGraph messages 模式
       // 自带聚合去重（emittedChatModelRunIds + dedupe），不会重复下发最终消息
       streaming: true,
+      ...INNER_RETRIES_DISABLED,
       ...extra
     }
     const maxTokens = this.resolveMaxTokens(config)
@@ -406,6 +431,7 @@ class ProviderService {
     const fields: Record<string, unknown> = {
       model: config.model,
       streaming: true,
+      ...INNER_RETRIES_DISABLED,
       ...extra
     }
     if (config.api_key) fields.cloudflareApiToken = config.api_key

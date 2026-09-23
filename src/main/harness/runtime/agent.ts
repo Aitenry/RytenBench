@@ -22,12 +22,7 @@ import type { RuntimeRecord, ToolCallRecord } from './types'
 import type { AgentInjection } from '../types'
 import { formatOutput } from './fs-backend'
 import type { SpillStore } from './spill'
-import {
-  askUserToSwitchModel,
-  MODEL_RETRY_LIMIT,
-  MODEL_RETRY_DELAY_MS,
-  sleep
-} from './model-recovery'
+import { invokeWithModelRecovery } from './model-recovery'
 // 流式记录转换独立模块（可被测试脚本直接验证）：此处导入并兼容性重导出
 import { pushMessageRecords, pushRecord, type StreamMessageLike } from './stream-records'
 import { extractUsageMetadata, type ModelUsageRecord } from './usage'
@@ -381,74 +376,36 @@ export function buildAgentGraph(
     const topicId = typeof configurable.topicId === 'number' ? configurable.topicId : 0
     const turnSource =
       typeof configurable.turnSource === 'string' ? configurable.turnSource : 'user'
-    // 单次 LLM 请求的原地自动重试：失败不整轮重跑——已执行的工具结果与消息历史都在
-    // 图状态里原样保留，这里只把失败的这一次请求重新发出（最多 MODEL_RETRY_LIMIT 次）。
+    // 单次 LLM 请求的原地自动重试 + 换模型兜底：失败不整轮重跑——已执行的工具结果与消息历史
+    // 都在图状态里原样保留，这里只把失败的这一次请求重新发出。是否重试由失败分类决定
+    //（永久性错误如「模型不支持图片输入」直接报错，不再重试；见 model-recovery.ts）。
     // 子代理子图复用同一 callModel，同样原地重试，但不推送进度记录/不弹换模型提问。
-    let attempt = 0
-    let modelSwitchOffered = false
-    for (;;) {
-      try {
-        const response = await modelWithTools.invoke(messages, config)
-        // 真实用量：模型回传的 usage_metadata（工具循环会多次调用，逐次采集，落库时累加）
-        const usage = extractUsageMetadata(response)
-        if (usage && options.usageSink) {
-          options.usageSink.push({
-            usage,
-            model: resolveModelName(modelWithTools),
-            subagent: Boolean(subagentCtx)
-          })
+    const response = await invokeWithModelRecovery({
+      label: '[Agent]',
+      ctx: { topicId, turnSource, signal: config.signal, askEnabled: !subagentCtx },
+      call: () => modelWithTools.invoke(messages, config),
+      // 主代理图：把重试进度推入记录队列（前端展示「正在重试（第 N/2 次）」过渡行）
+      onRetry: (attempt, retries) => {
+        if (!subagentCtx && queue?.current) {
+          queue.current.push({ kind: 'retry_attempt', attempt, retries })
         }
-        // 注入的插话必须一起写回图状态，否则它只在这一调用里可见、下一步就丢了：
-        // 返回顺序 = 插话（人类消息）→ 模型回复，保证「用户插话 → 助手回应」在历史里顺序正确
-        return { messages: [...injectedMessages, response] }
-      } catch (err) {
-        const error = err instanceof Error ? err : new Error(String(err))
-        if (error.name === 'AbortError' || config.signal?.aborted) throw err
-        attempt++
-        if (attempt <= MODEL_RETRY_LIMIT) {
-          // 主代理图：把重试进度推入记录队列（前端展示「正在重试（第 N/2 次）」过渡行）
-          if (!subagentCtx && queue?.current) {
-            queue.current.push({
-              kind: 'retry_attempt',
-              attempt,
-              retries: MODEL_RETRY_LIMIT
-            })
-          }
-          logger.error(
-            `[Agent] 模型请求失败（第 ${attempt}/${MODEL_RETRY_LIMIT} 次重试，仅重试本次调用，不重跑工具）:`,
-            error
-          )
-          await sleep(MODEL_RETRY_DELAY_MS)
-          if (config.signal?.aborted) {
-            const abortErr = new Error('Model request aborted')
-            abortErr.name = 'AbortError'
-            throw abortErr
-          }
-          continue
-        }
-        // 自动重试耗尽：主代理 + 用户直接发起 + 话题有效时，询问用户是否换模型继续（仅一次）。
-        // 图在 model 节点挂起等待回答；选定后换新模型、重置重试计数，在原位置继续执行
-        if (!modelSwitchOffered && !subagentCtx && topicId > 0 && turnSource !== 'goal-round') {
-          modelSwitchOffered = true
-          const newModel = await askUserToSwitchModel(
-            { topicId, turnSource, signal: config?.signal },
-            error
-          )
-          if (newModel) {
-            modelWithTools = bindToolsSafely(newModel, tools)
-            attempt = 0
-            logger.info('[Agent] 已切换用户选择的新模型，重置重试计数，在原位置继续执行')
-            continue
-          }
-          logger.warn('[Agent] 用户放弃切换模型，按原错误结束本轮:', error.message)
-        }
-        logger.error(
-          `[Agent] 模型请求重试耗尽（重试 ${MODEL_RETRY_LIMIT} 次仍失败），向上抛错:`,
-          error
-        )
-        throw err
+      },
+      onSwitch: (next) => {
+        modelWithTools = bindToolsSafely(next, tools)
       }
+    })
+    // 真实用量：模型回传的 usage_metadata（工具循环会多次调用，逐次采集，落库时累加）
+    const usage = extractUsageMetadata(response)
+    if (usage && options.usageSink) {
+      options.usageSink.push({
+        usage,
+        model: resolveModelName(modelWithTools),
+        subagent: Boolean(subagentCtx)
+      })
     }
+    // 注入的插话必须一起写回图状态，否则它只在这一调用里可见、下一步就丢了：
+    // 返回顺序 = 插话（人类消息）→ 模型回复，保证「用户插话 → 助手回应」在历史里顺序正确
+    return { messages: [...injectedMessages, response] }
   }
 
   async function callTools(
