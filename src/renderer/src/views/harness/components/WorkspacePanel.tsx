@@ -3,12 +3,14 @@ import React, {
   useCallback,
   useRef,
   useEffect,
+  useMemo,
   useImperativeHandle,
   forwardRef
 } from 'react'
 import FileExplorer from './FileExplorer'
 import FileEditor, { OpenFile } from './FileEditor'
 import type { ToolDetailTab } from './ToolDetailView'
+import type { FileChangeView } from '../types/file-change'
 import type { Window } from '../../../../resource/types/window'
 import { useMessage } from '@renderer/hooks/useMessage'
 import { useTranslation } from '@renderer/i18n'
@@ -22,6 +24,14 @@ interface WorkspacePanelProps {
   colorTextSecondary: string
   colorTextTertiary: string
   onHasOpenFilesChange?: (hasOpen: boolean) => void
+  /**
+   * 待审查改动按路径分组后回传（路径 → 条数）。
+   *
+   * 往上传一层是为了**任务段头那颗改动徽标**：段折起后段内的编辑卡片会被卸载，
+   * 聊天里就只剩任务名——段头的徽标需要知道「这个文件还有几处没审」，
+   * 而这份数据的真源在面板里（`workspace-changes-pending`）。
+   */
+  onPendingByPathChange?: (pending: Map<string, number>) => void
 }
 
 /** 右侧面板的对外能力（由聊天区的工具卡片经 WorkspaceBridge 调用） */
@@ -43,6 +53,16 @@ function baseName(filePath: string): string {
   return parts[parts.length - 1] || filePath
 }
 
+/**
+ * 右侧工作区面板：资源管理器 + 文件编辑器（编辑 / 差异审查）。
+ *
+ * 文件改动审查的数据流全部在这里收敛：
+ * - 主进程每次记录改动都会推送 `workspace-change-recorded` → 刷新待审查列表，
+ *   并把**已经打开的页签**切到差异视图（用户要求：打开文件若该文件有 diff 就显示差异）；
+ * - 磁盘变化（模型写入 / 命令执行 / 外部编辑器）推送 `workspace-fs-changed` →
+ *   重新读取打开着的页签内容 + 让资源管理器刷新受影响目录（都保留展开状态）；
+ * - 审查动作（保留 / 撤销 / 落盘取舍结果）走主进程 IPC，成功后重取待审查列表。
+ */
 const WorkspacePanel = forwardRef<WorkspacePanelHandle, WorkspacePanelProps>(
   (
     {
@@ -53,7 +73,8 @@ const WorkspacePanel = forwardRef<WorkspacePanelHandle, WorkspacePanelProps>(
       colorText,
       colorTextSecondary,
       colorTextTertiary,
-      onHasOpenFilesChange
+      onHasOpenFilesChange,
+      onPendingByPathChange
     },
     ref
   ) => {
@@ -64,10 +85,18 @@ const WorkspacePanel = forwardRef<WorkspacePanelHandle, WorkspacePanelProps>(
     /** 请求资源管理器定位到的目录（真实路径 + 递增序号；序号变化即重新展开） */
     const [revealRequest, setRevealRequest] = useState<{ path: string; nonce: number } | null>(null)
     const revealNonceRef = useRef(0)
+    /** 磁盘变化事件（转发给资源管理器刷新受影响目录） */
+    const [fsEvent, setFsEvent] = useState<{ nonce: number; paths: string[] } | null>(null)
+    const fsNonceRef = useRef(0)
+    /** 当前工作区所有待审查的文件改动 */
+    const [pendingChanges, setPendingChanges] = useState<FileChangeView[]>([])
     const [explorerWidth, setExplorerWidth] = useState(220)
     const draggingRef = useRef(false)
 
     const hasOpenFiles = openFiles.length > 0
+    /** 页签状态的实时快照：事件回调里需要读最新值，不能依赖闭包捕获 */
+    const openFilesRef = useRef(openFiles)
+    openFilesRef.current = openFiles
 
     useEffect(() => {
       onHasOpenFilesChange?.(hasOpenFiles)
@@ -78,6 +107,42 @@ const WorkspacePanel = forwardRef<WorkspacePanelHandle, WorkspacePanelProps>(
       return win.api.workspace.readFile(filePath)
     }, [])
 
+    /** 待审查改动按路径分组（正序：最早在前） */
+    const pendingByPath = useMemo(() => {
+      const map = new Map<string, FileChangeView[]>()
+      for (const change of pendingChanges) {
+        const list = map.get(change.path)
+        if (list) list.push(change)
+        else map.set(change.path, [change])
+      }
+      return map
+    }, [pendingChanges])
+
+    /** 资源管理器徽标：文件路径 → 待审查条数（只算 pending，已保留的不再提示） */
+    const pendingCountByPath = useMemo(() => {
+      const map = new Map<string, number>()
+      for (const [path, list] of pendingByPath) {
+        const count = list.filter((c) => c.status === 'pending').length
+        if (count > 0) map.set(path, count)
+      }
+      return map
+    }, [pendingByPath])
+
+    /** 把「哪个文件还有几处没审」回传给上层（任务段头的改动徽标要用） */
+    useEffect(() => {
+      onPendingByPathChange?.(pendingCountByPath)
+    }, [pendingCountByPath, onPendingByPathChange])
+
+    const refreshPending = useCallback(async () => {
+      try {
+        const api = (window as unknown as Window).api
+        const rows = await api.workspace.pendingChanges()
+        setPendingChanges(rows)
+      } catch (err) {
+        console.error('Failed to load pending file changes:', err)
+      }
+    }, [])
+
     /** 打开页签（已打开则仅切换，避免重复读取文件） */
     const addTab = useCallback((tab: OpenFile) => {
       setOpenFiles((prev) => (prev.some((f) => f.path === tab.path) ? prev : [...prev, tab]))
@@ -86,20 +151,28 @@ const WorkspacePanel = forwardRef<WorkspacePanelHandle, WorkspacePanelProps>(
 
     const handleOpenFile = useCallback(
       async (filePath: string, fileName: string) => {
-        const existing = openFiles.find((f) => f.path === filePath)
+        const existing = openFilesRef.current.find((f) => f.path === filePath)
         if (existing) {
           setActiveFilePath(filePath)
           return
         }
         try {
           const content = await readFileContent(filePath)
-          addTab({ path: filePath, name: fileName, content, isDirty: false })
+          // 有未审查的模型改动 → 直接打开差异视图（用户要求：打开文件有 diff 就显示差异）
+          const hasPending = (pendingByPath.get(filePath) ?? []).some((c) => c.status === 'pending')
+          addTab({
+            path: filePath,
+            name: fileName,
+            content,
+            isDirty: false,
+            view: hasPending ? 'diff' : 'edit'
+          })
         } catch (err) {
           console.error('Failed to open file:', err)
           viewMessage('workspace-open-file', 'error', t('harness.fileExplorer.openFailed'))
         }
       },
-      [openFiles, readFileContent, addTab, viewMessage, t]
+      [readFileContent, addTab, viewMessage, t, pendingByPath]
     )
 
     /**
@@ -112,7 +185,7 @@ const WorkspacePanel = forwardRef<WorkspacePanelHandle, WorkspacePanelProps>(
     const handleOpenVirtualFile = useCallback(
       async (virtualPath: string, realPath: string | null) => {
         const key = realPath ?? virtualPath
-        const existing = openFiles.find((f) => f.path === key)
+        const existing = openFilesRef.current.find((f) => f.path === key)
         if (existing) {
           setActiveFilePath(key)
           return
@@ -136,13 +209,13 @@ const WorkspacePanel = forwardRef<WorkspacePanelHandle, WorkspacePanelProps>(
           viewMessage('workspace-open-file', 'error', t('harness.fileExplorer.openFailed'))
         }
       },
-      [openFiles, addTab, viewMessage, t]
+      [addTab, viewMessage, t]
     )
 
     const handleOpenToolDetail = useCallback(
       (tab: Omit<ToolDetailTab, 'key' | 'name'>) => {
         const key = `tool:${tab.topicId}:${tab.callId}`
-        const existing = openFiles.find((f) => f.path === key)
+        const existing = openFilesRef.current.find((f) => f.path === key)
         if (existing) {
           setActiveFilePath(key)
           return
@@ -160,7 +233,7 @@ const WorkspacePanel = forwardRef<WorkspacePanelHandle, WorkspacePanelProps>(
           tool: detail
         })
       },
-      [openFiles, addTab]
+      [addTab]
     )
 
     useImperativeHandle(
@@ -178,22 +251,18 @@ const WorkspacePanel = forwardRef<WorkspacePanelHandle, WorkspacePanelProps>(
       [handleOpenVirtualFile, handleOpenToolDetail]
     )
 
-    const handleCloseFile = useCallback(
-      (filePath: string) => {
-        setOpenFiles((prev) => {
-          const idx = prev.findIndex((f) => f.path === filePath)
-          const next = prev.filter((f) => f.path !== filePath)
-          if (activeFilePath === filePath && next.length > 0) {
-            const newIdx = Math.min(idx, next.length - 1)
-            setActiveFilePath(next[newIdx].path)
-          } else if (next.length === 0) {
-            setActiveFilePath(null)
-          }
-          return next
+    const handleCloseFile = useCallback((filePath: string) => {
+      setOpenFiles((prev) => {
+        const idx = prev.findIndex((f) => f.path === filePath)
+        const next = prev.filter((f) => f.path !== filePath)
+        setActiveFilePath((current) => {
+          if (current !== filePath) return current
+          if (next.length === 0) return null
+          return next[Math.min(idx, next.length - 1)].path
         })
-      },
-      [activeFilePath]
-    )
+        return next
+      })
+    }, [])
 
     const handleSelectFile = useCallback((filePath: string) => {
       setActiveFilePath(filePath)
@@ -207,21 +276,239 @@ const WorkspacePanel = forwardRef<WorkspacePanelHandle, WorkspacePanelProps>(
 
     const handleSaveFile = useCallback(
       async (filePath: string) => {
-        const file = openFiles.find((f) => f.path === filePath)
+        const file = openFilesRef.current.find((f) => f.path === filePath)
         if (!file || file.readOnly || file.tool) return
         try {
           const win = window as unknown as Window
           await win.api.workspace.saveFile(filePath, file.content)
           setOpenFiles((prev) =>
-            prev.map((f) => (f.path === filePath ? { ...f, isDirty: false } : f))
+            prev.map((f) =>
+              f.path === filePath ? { ...f, isDirty: false, diskChanged: false } : f
+            )
           )
         } catch (err) {
           console.error('Failed to save file:', err)
           viewMessage('workspace-save-file', 'error', t('harness.fileExplorer.saveFailed'))
         }
       },
-      [openFiles, viewMessage, t]
+      [viewMessage, t]
     )
+
+    /** 从磁盘重新读取页签内容（手动刷新 / 磁盘变化后同步） */
+    const reloadTab = useCallback(
+      async (filePath: string, options?: { force?: boolean }): Promise<void> => {
+        const file = openFilesRef.current.find((f) => f.path === filePath)
+        if (!file || file.readOnly || file.tool) return
+        if (file.isDirty && !options?.force) {
+          // 有未保存内容：不覆盖用户输入，只挂提示（保存时会以本地内容为准）
+          setOpenFiles((prev) =>
+            prev.map((f) => (f.path === filePath ? { ...f, diskChanged: true } : f))
+          )
+          return
+        }
+        try {
+          const content = await readFileContent(filePath)
+          setOpenFiles((prev) =>
+            prev.map((f) =>
+              f.path === filePath ? { ...f, content, isDirty: false, diskChanged: false } : f
+            )
+          )
+        } catch (err) {
+          console.warn('Failed to reload file:', err)
+          setOpenFiles((prev) =>
+            prev.map((f) => (f.path === filePath ? { ...f, diskChanged: true } : f))
+          )
+        }
+      },
+      [readFileContent]
+    )
+
+    const handleReloadFile = useCallback(
+      (filePath: string) => {
+        void reloadTab(filePath, { force: true })
+      },
+      [reloadTab]
+    )
+
+    // --- 审查动作 ---
+
+    const handleKeepChanges = useCallback(
+      async (ids: number[]) => {
+        if (ids.length === 0) return
+        const api = (window as unknown as Window).api
+        await api.workspace.keepChanges(ids)
+        await refreshPending()
+      },
+      [refreshPending]
+    )
+
+    const handleRevertChange = useCallback(
+      async (id: number) => {
+        const api = (window as unknown as Window).api
+        const result = await api.workspace.revertChange(id)
+        if ('error' in result) {
+          viewMessage('workspace-revert-file', 'error', t('harness.fileDiff.revertFailed'))
+          await refreshPending()
+          return
+        }
+        if (result.content === null) {
+          // 撤销的是「新建文件」→ 文件已被删除，页签关掉
+          handleCloseFile(result.path)
+        } else {
+          setOpenFiles((prev) =>
+            prev.map((f) =>
+              f.path === result.path
+                ? {
+                    ...f,
+                    content: result.content as string,
+                    isDirty: false,
+                    diskChanged: false,
+                    view: 'edit',
+                    changeId: null
+                  }
+                : f
+            )
+          )
+        }
+        await refreshPending()
+      },
+      [refreshPending, viewMessage, t, handleCloseFile]
+    )
+
+    /** 差异视图 Ctrl+S / 保留按钮：落盘取舍结果并标记已保留 */
+    const handleApplyReview = useCallback(
+      async (filePath: string, content: string) => {
+        const api = (window as unknown as Window).api
+        const result = await api.workspace.applyReview(filePath, content)
+        if ('error' in result) {
+          viewMessage('workspace-apply-review', 'error', t('harness.fileDiff.applyFailed'))
+          return
+        }
+        setOpenFiles((prev) =>
+          prev.map((f) =>
+            f.path === filePath
+              ? { ...f, content, isDirty: false, diskChanged: false, view: 'edit', changeId: null }
+              : f
+          )
+        )
+        await refreshPending()
+      },
+      [refreshPending, viewMessage, t]
+    )
+
+    const handleChangeView = useCallback((filePath: string, view: 'edit' | 'diff') => {
+      setOpenFiles((prev) => prev.map((f) => (f.path === filePath ? { ...f, view } : f)))
+    }, [])
+
+    const handleSelectChange = useCallback((filePath: string, changeId: number) => {
+      setOpenFiles((prev) =>
+        prev.map((f) => (f.path === filePath ? { ...f, view: 'diff', changeId } : f))
+      )
+    }, [])
+
+    /** Markdown 页签：所见即所得 ↔ 源码 */
+    const handleSetMarkdownSource = useCallback((filePath: string, source: boolean) => {
+      setOpenFiles((prev) =>
+        prev.map((f) => (f.path === filePath ? { ...f, markdownSource: source } : f))
+      )
+    }, [])
+
+    /**
+     * 主进程事件回调（只订阅一次，经 ref 取最新实现，避免闭包过期）。
+     */
+    const eventHandlersRef = useRef<{
+      onFsChanged: (data: {
+        changes: { path: string; exists: boolean; isDirectory: boolean }[]
+      }) => void
+      onChangeRecorded: (change: FileChangeView) => void
+      onChangesUpdated: (data: {
+        ids: number[]
+        status: string
+        path?: string
+        obsolete?: number
+      }) => void
+    }>({
+      onFsChanged: () => {},
+      onChangeRecorded: () => {},
+      onChangesUpdated: () => {}
+    })
+
+    eventHandlersRef.current.onFsChanged = (data) => {
+      const paths = data.changes.map((c) => c.path)
+      fsNonceRef.current += 1
+      setFsEvent({ nonce: fsNonceRef.current, paths })
+      for (const change of data.changes) {
+        if (change.isDirectory) continue
+        void reloadTab(change.path)
+      }
+    }
+
+    eventHandlersRef.current.onChangeRecorded = (change) => {
+      setPendingChanges((prev) => (prev.some((c) => c.id === change.id) ? prev : [...prev, change]))
+      fsNonceRef.current += 1
+      setFsEvent({ nonce: fsNonceRef.current, paths: [change.path] })
+      // 已打开的页签：内容同步为磁盘最新，并切到差异视图等用户审查
+      const file = openFilesRef.current.find((f) => f.path === change.path)
+      if (!file || file.readOnly || file.tool) return
+      if (file.isDirty) {
+        setOpenFiles((prev) =>
+          prev.map((f) => (f.path === change.path ? { ...f, diskChanged: true } : f))
+        )
+        return
+      }
+      void readFileContent(change.path)
+        .then((content) => {
+          setOpenFiles((prev) =>
+            prev.map((f) =>
+              f.path === change.path
+                ? {
+                    ...f,
+                    content,
+                    isDirty: false,
+                    diskChanged: false,
+                    view: 'diff',
+                    changeId: change.id
+                  }
+                : f
+            )
+          )
+        })
+        .catch(() => undefined)
+    }
+
+    eventHandlersRef.current.onChangesUpdated = (data) => {
+      void refreshPending()
+      // 撤销后文件内容由主进程改回，页签内容需要重新读取（revert 已单独处理内容）
+      if (data.status === 'reverted' && data.path) {
+        const file = openFilesRef.current.find((f) => f.path === data.path)
+        if (file && !file.isDirty) void reloadTab(data.path, { force: true })
+      }
+    }
+
+    useEffect(() => {
+      const api = (window as unknown as Window).api
+      const offFs = api.workspace.onFsChanged((data) => eventHandlersRef.current.onFsChanged(data))
+      const offRecorded = api.workspace.onChangeRecorded((change) =>
+        eventHandlersRef.current.onChangeRecorded(change)
+      )
+      const offUpdated = api.workspace.onChangesUpdated((data) =>
+        eventHandlersRef.current.onChangesUpdated(data)
+      )
+      void refreshPending()
+      return () => {
+        offFs()
+        offRecorded()
+        offUpdated()
+      }
+    }, [refreshPending])
+
+    // 工作区切换：清空页签与待审查列表（新工作区的文件路径完全不同）
+    useEffect(() => {
+      setOpenFiles([])
+      setActiveFilePath(null)
+      setPendingChanges([])
+      void refreshPending()
+    }, [workspacePath, refreshPending])
 
     const handleResizerMouseDown = useCallback(
       (e: React.MouseEvent) => {
@@ -280,6 +567,9 @@ const WorkspacePanel = forwardRef<WorkspacePanelHandle, WorkspacePanelProps>(
         .workspace-resizer:hover .workspace-resizer-dragger {
           background: ${isDarkMode ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.25)'};
         }
+        /* 编辑器宿主：让 CodeMirror 撑满容器（@uiw/react-codemirror 的外层 div） */
+        .cm-file-editor-host { height: 100%; }
+        .cm-file-editor-host .cm-editor { height: 100%; }
       `}</style>
         {/* When files are open → editor (flex-1) + resizer + explorer (fixed width) */}
         {/* When no files open → explorer takes full width, editor hidden */}
@@ -294,10 +584,18 @@ const WorkspacePanel = forwardRef<WorkspacePanelHandle, WorkspacePanelProps>(
                 colorText={colorText}
                 colorTextSecondary={colorTextSecondary}
                 colorTextTertiary={colorTextTertiary}
+                pendingByPath={pendingByPath}
                 onCloseFile={handleCloseFile}
                 onSelectFile={handleSelectFile}
                 onContentChange={handleContentChange}
                 onSaveFile={handleSaveFile}
+                onChangeView={handleChangeView}
+                onSelectChange={handleSelectChange}
+                onKeepChanges={handleKeepChanges}
+                onRevertChange={handleRevertChange}
+                onApplyReview={handleApplyReview}
+                onReloadFile={handleReloadFile}
+                onSetMarkdownSource={handleSetMarkdownSource}
               />
             </div>
 
@@ -323,6 +621,16 @@ const WorkspacePanel = forwardRef<WorkspacePanelHandle, WorkspacePanelProps>(
             onOpenFile={handleOpenFile}
             activeFilePath={activeFilePath}
             revealRequest={revealRequest}
+            pendingByPath={pendingCountByPath}
+            pendingTotal={pendingChanges.filter((c) => c.status === 'pending').length}
+            /* 文件数是主口径：pendingTotal 是「改动记录条数」，同一文件改多次会累加 */
+            pendingFiles={pendingCountByPath.size}
+            onKeepAllPending={() =>
+              void handleKeepChanges(
+                pendingChanges.filter((c) => c.status === 'pending').map((c) => c.id)
+              )
+            }
+            fsEvent={fsEvent}
           />
         </div>
       </div>

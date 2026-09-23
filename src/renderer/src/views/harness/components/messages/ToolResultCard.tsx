@@ -1,6 +1,12 @@
 import React, { useState } from 'react'
 import { Trans, useTranslation } from '@renderer/i18n'
-import { RiArrowRightSLine, RiErrorWarningLine, RiTerminalBoxLine } from '@remixicon/react'
+import {
+  RiArrowRightSLine,
+  RiErrorWarningLine,
+  RiFileEditLine,
+  RiPencilLine,
+  RiTerminalBoxLine
+} from '@remixicon/react'
 import { ShinyIcon } from '@renderer/components/effects/ShinyText'
 import type { ToolCall, ToolCard, ToolCardKind } from '@renderer/types/harness'
 import { useWorkspaceBridge } from '../../contexts/workspace-bridge'
@@ -16,6 +22,11 @@ import { MONO_FONT, TruncatedTooltipText } from './TruncatedTooltipText'
  *
  * 因此卡片必须自己把「这次调用干了什么、结果多大」讲清楚：
  * 路径/模式/命令一行，右侧是行数/字节/条目数/命中数/退出码，失败时显示原因。
+ *
+ * 2026-09-23 追加（用户报「明明编辑了文件，聊天里找不到编辑卡片」）：**写改类卡片
+ * 必须一眼可辨**——它们此前和 read_file 一样是「眼睛 + 路径」，扫一眼分不出哪张是改动。
+ * 现在 write_file / edit_file 用铅笔系图标 + 琥珀色强调（错误仍是红色），
+ * 并在左侧加一条 2px 强调边，扫读时改动卡片自己会跳出来。
  */
 
 export interface ToolCardStyle {
@@ -50,6 +61,15 @@ function inputSummary(name: string, input: Record<string, unknown> | undefined):
 
 /** 人类可读字节数：见 utils/toolIcons（卡片与详情页签共用） */
 
+/**
+ * 写改类卡片的强调色（左侧 2px 边 + 图标）。
+ * 琥珀色是全局唯一「未保存 / 待处理」语义色（页签的未保存圆点、状态条的「磁盘已变化」
+ * 都是它），写改卡片复用它，用户不需要再学一套新颜色。
+ */
+const MUTATE_COLOR = '#c98a2b'
+/** 写改工具：完成态必须与 read_file 一眼可分（此前全都是同一个眼睛图标） */
+const MUTATE_TOOLS = new Set(['write_file', 'edit_file'])
+
 /** 卡片外壳：图标 + 主文本（单行截断 + 悬停全文）+ 右侧元信息 + 悬停动作提示 */
 const CardShell: React.FC<{
   style: ToolCardStyle
@@ -61,13 +81,30 @@ const CardShell: React.FC<{
   onClick?: () => void
   actionTitle?: string
   primaryColor?: string
-}> = ({ style, isNested, icon, primary, meta, onClick, actionTitle, primaryColor }) => {
+  /** 工具名（落在 data 属性上，供离线工装清点「哪些工具的卡片真的渲染了」） */
+  toolName?: string
+  /** 写改类卡片：左侧 2px 强调边（扫读时自己跳出来） */
+  mutate?: boolean
+}> = ({
+  style,
+  isNested,
+  icon,
+  primary,
+  meta,
+  onClick,
+  actionTitle,
+  primaryColor,
+  toolName,
+  mutate = false
+}) => {
   const [hover, setHover] = useState(false)
   const bg = style.isDarkMode ? 'rgba(255,255,255,0.04)' : '#f9fafb'
   const hoverBg = style.isDarkMode ? 'rgba(255,255,255,0.08)' : '#f1f2f4'
   const fontSize = isNested ? '12px' : '13px'
   return (
     <div
+      data-tool-card={toolName}
+      data-tool-mutate={mutate ? '1' : '0'}
       onClick={onClick}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
@@ -75,6 +112,8 @@ const CardShell: React.FC<{
       style={{
         background: hover && onClick ? hoverBg : bg,
         border: 'var(--ant-line-width) var(--ant-line-type) var(--ant-color-border)',
+        // 只加左侧一条强调边：区分写改卡片，又不改变卡片本身的形状语言
+        borderLeft: mutate ? `2px solid ${MUTATE_COLOR}` : undefined,
         marginBottom: isNested ? '4px' : '6px',
         borderRadius: '8px',
         padding: '9px 12px',
@@ -251,9 +290,17 @@ export const ToolResultCard: React.FC<{
 
   const size = isNested ? 14 : 16
   const kind: ToolCardKind = card.kind ?? (tool.name === 'execute' ? 'command' : 'file')
-  const Icon = card.status === 'error' ? RiErrorWarningLine : TOOL_CARD_ICONS[kind]
-  const iconColor = card.status === 'error' ? '#ef4444' : style.colorTextSecondary
-
+  /**
+   * 写改类卡片：图标与颜色都换成「我改了这个文件」的一套。
+   * 此前它们落进 `kind === 'file'` 分支，跟 read_file 共用同一个眼睛图标 + 次要色，
+   * 于是聊天里**看不出哪张卡片是改动**——用户的原话就是「明明编辑了文件，找不到编辑卡片」。
+   */
+  const isMutate = MUTATE_TOOLS.has(tool.name) && card.status !== 'error'
+  const MutateIcon = tool.name === 'write_file' ? RiFileEditLine : RiPencilLine
+  const Icon =
+    card.status === 'error' ? RiErrorWarningLine : isMutate ? MutateIcon : TOOL_CARD_ICONS[kind]
+  const iconColor =
+    card.status === 'error' ? '#ef4444' : isMutate ? MUTATE_COLOR : style.colorTextSecondary
   /** 主文本：路径 / 模式 / 命令 */
   const primary =
     kind === 'command'
@@ -307,6 +354,8 @@ export const ToolResultCard: React.FC<{
       }
       onClick={onClick}
       actionTitle={actionTitle}
+      toolName={tool.name}
+      mutate={isMutate}
     />
   )
 }

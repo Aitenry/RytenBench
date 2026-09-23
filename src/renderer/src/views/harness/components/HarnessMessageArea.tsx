@@ -44,6 +44,17 @@ interface HarnessMessageAreaProps {
   onBranch: (upToIndex: number) => Promise<void>
   onLoadMoreMessages: () => void
   messagesEndRef: React.RefObject<HTMLDivElement | null>
+  /**
+   * 待审查改动（路径 → 待审查条数）。
+   *
+   * 用来在**任务段头**上标出「这一段改了哪几个文件、还有几处没审」：段一折起，
+   * 段里的编辑卡片就全被卸载了，用户只能看到一行任务名（用户 2026-09-23 报的
+   * 「明明编辑了文件，聊天里找不到编辑卡片」正是这个）。有了这个计数，
+   * 改动在段头上仍然可见、可点开。
+   */
+  pendingByPath?: Map<string, number>
+  /** 点段头上的改动徽标：打开该文件的差异视图 */
+  onOpenChangedFile?: (path: string) => void
 }
 
 /** 距离底部小于该值视为「贴底」 */
@@ -97,7 +108,9 @@ const HarnessMessageArea: React.FC<HarnessMessageAreaProps> = ({
   editingMessageId,
   onBranch,
   onLoadMoreMessages,
-  messagesEndRef
+  messagesEndRef,
+  pendingByPath,
+  onOpenChangedFile
 }) => {
   const { t } = useTranslation()
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -612,6 +625,8 @@ const HarnessMessageArea: React.FC<HarnessMessageAreaProps> = ({
                         onBranch={onBranch}
                         onCopy={onCopy}
                         onDelete={onDelete}
+                        pendingByPath={pendingByPath}
+                        onOpenChangedFile={onOpenChangedFile}
                       />
                     </div>
                   )
@@ -653,6 +668,8 @@ const HarnessMessageArea: React.FC<HarnessMessageAreaProps> = ({
                         onBranch={onBranch}
                         onCopy={onCopy}
                         onDelete={onDelete}
+                        pendingByPath={pendingByPath}
+                        onOpenChangedFile={onOpenChangedFile}
                       />
                     )}
                   </div>

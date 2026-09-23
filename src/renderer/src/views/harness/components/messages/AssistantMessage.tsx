@@ -10,6 +10,7 @@ import {
   RiCheckboxBlankCircleLine,
   RiBrain4Line,
   RiPictureInPicture2Line,
+  RiPencilLine,
   RiSparkling2Line
 } from '@remixicon/react'
 import MarkdownLoad from '@renderer/components/markdown/MarkdownLoad'
@@ -82,6 +83,16 @@ interface AssistantMessageProps {
   onBranch: (upToIndex: number) => Promise<void>
   onCopy: (text: string, id: string) => void
   onDelete: (index: number) => void
+  /**
+   * 待审查改动（文件路径 → 待审查条数），用来在**任务段头**上报「这一段改了哪几个文件」。
+   *
+   * 背景（用户 2026-09-23）：「明明编辑了文件，聊天里找不到编辑卡片」——段一折起，
+   * 段内的 write/edit 卡片连挂载都被卸载了（destroyOnHidden），段头只剩任务名 + 步数，
+   * 于是「改了什么」在聊天里彻底失联。段头这个徽标把改动重新提到折叠之外。
+   */
+  pendingByPath?: Map<string, number>
+  /** 点段头的改动徽标：在右侧面板打开该文件的差异视图 */
+  onOpenChangedFile?: (path: string) => void
 }
 
 /**
@@ -159,7 +170,9 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
     usage,
     onBranch,
     onCopy,
-    onDelete
+    onDelete,
+    pendingByPath,
+    onOpenChangedFile
   }) => {
     const { t, i18n } = useTranslation()
     const { token } = theme.useToken()
@@ -2105,6 +2118,98 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
         const blocksNode = visibleIndices.map(renderBlockAt)
         const answerNode = answerIndices.map(renderBlockAt)
 
+        /**
+         * 本段改过哪些文件（按段内 write_file / edit_file 块推导）。
+         *
+         * 这是「折叠之后改动还在不在聊天里」的答案：段体折起时卡片会被卸载，段头这个
+         * 徽标仍然在折叠之外——用户一眼能看到「这一段动了 1 个文件、还有 3 处没审」，
+         * 点一下直接打开差异视图。
+         *
+         * 计数以 `pendingByPath`（主进程的待审查列表）为准，已保留的不再计入。
+         * 注意**路径形态不一致**：块里的 `file_path` 是虚拟路径（`/frontend/README.md`），
+         * 待审查列表给的是真实绝对路径（`E:\...\frontend\README.md`），直接查是查不到的
+         * （这条踩过：徽标文字会空掉）。所以两侧都按「分隔符统一 + 小写 + 取末段」建索引。
+         */
+        const pathKey = (raw: string): string =>
+          raw.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+        const pathTail = (raw: string): string => {
+          const key = pathKey(raw)
+          const at = key.lastIndexOf('/')
+          return at >= 0 ? key.slice(at + 1) : key
+        }
+        const pendingIndex = (() => {
+          const byFull = new Map<string, number>()
+          const byTail = new Map<string, number>()
+          for (const [path, count] of pendingByPath ?? []) {
+            const full = pathKey(path)
+            byFull.set(full, count)
+            const tail = pathTail(path)
+            byTail.set(tail, (byTail.get(tail) ?? 0) + count)
+          }
+          return { byFull, byTail }
+        })()
+        const pendingFor = (path: string): number => {
+          const full = pathKey(path)
+          const direct = pendingIndex.byFull.get(full)
+          if (direct !== undefined) return direct
+          // 虚拟路径（/frontend/README.md）对不上真实路径时按文件名兜底：
+          // 同名文件可能不止一个，宁可多报一处（徽标只是提示，点开的是真差异）
+          return pendingIndex.byTail.get(pathTail(path)) ?? 0
+        }
+        const changedFiles = (() => {
+          const paths: string[] = []
+          for (const blockIndex of segment.blockIndices) {
+            const block = mergedBlocks[blockIndex]
+            if (block?.type !== 'tool') continue
+            const name = block.tool?.name
+            if (name !== 'write_file' && name !== 'edit_file') continue
+            const input = (block.tool?.input ?? {}) as { file_path?: unknown }
+            const path = typeof input.file_path === 'string' ? input.file_path : ''
+            if (path && !paths.includes(path)) paths.push(path)
+          }
+          let pendingCount = 0
+          for (const path of paths) pendingCount += pendingFor(path)
+          return { paths, pendingCount }
+        })()
+        /** 段头改动徽标：只在真有改动时出现（普通问答不该多一行装饰） */
+        const changedChip =
+          changedFiles.paths.length > 0 ? (
+            <button
+              type="button"
+              data-segment-changes={changedFiles.paths.length}
+              data-segment-pending={changedFiles.pendingCount}
+              onClick={(e) => {
+                // 别冒泡到 Collapse 标签：点徽标是「去看差异」，不是「折叠这一段」
+                e.stopPropagation()
+                const target = changedFiles.paths[changedFiles.paths.length - 1]
+                if (target) onOpenChangedFile?.(target)
+              }}
+              disabled={!onOpenChangedFile}
+              title={t('harness.assistantMessage.changedFilesTip', {
+                files: changedFiles.paths.length,
+                pending: changedFiles.pendingCount
+              })}
+              className="flex items-center border-none cursor-pointer"
+              style={{
+                flex: '0 0 auto',
+                gap: 3,
+                padding: '0 5px',
+                height: 16,
+                borderRadius: 9,
+                background: 'transparent',
+                color: changedFiles.pendingCount > 0 ? '#c98a2b' : colorTextTertiary
+              }}
+            >
+              <RiPencilLine size={12} />
+              <span style={{ fontSize: 11, lineHeight: '16px', whiteSpace: 'nowrap' }}>
+                {changedFiles.pendingCount > 0
+                  ? t('harness.assistantMessage.changedFiles', {
+                      count: changedFiles.paths.length
+                    })
+                  : null}
+              </span>
+            </button>
+          ) : null
         // ── 规划前的那一段（第一个 write_todos 之前）─────────────────────────
         // 里面有大量「思考过程 + 探索用的 read/grep」，一条 300 块的消息里能有 57 块堆在这，
         // 任务段折起来之后它就是正文里唯一剩下的那堵墙（用户：「前面有思考需要移出来」）。
@@ -2114,16 +2219,18 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
         if (!segment.task) {
           if (visibleIndices.length === 0) return answerNode
           /**
-           * 默认折叠态（无人工覆盖时）：
-           * - 段不是末段（有任务的消息里，它后面还有任务段）→ 与任务段同口径：流式中展开、结束/历史折起；
-           * - 末段且**有答复摘到折叠外** → 同样折起（答复在外面常显）；
-           * - 末段但**没有答复可摘**（整条消息以工具卡或思考结尾）→ 保持展开：否则用户只能看到
-           *   一个「前期探索」头，等于把整条消息藏了。宁可不折，也不藏内容。
+           * 默认折叠态（无人工覆盖时）——用户 2026-09-22 报的「前期探索结束后没有自动收起」
+           * 就出在这里，规则改成**按「这段还活着吗」判**，不再看「有没有答复可摘」：
+           *
+           * - 后面还有任务段（`segIndex !== lastSegIndex`）⇒ 探索阶段**已经结束**
+           *   （分段依据是 write_todos 快照，任务段一出现就意味着探索跑完了），
+           *   立刻收起——**哪怕这一轮还在流式**。旧实现只在 `!message.loading` 时收，
+           *   于是任务已经开始跑、探索段还敞着，正在干的活被挤到屏幕外面。
+           * - 段是末段：只有「本轮已结束」才收；流式中它是唯一在长内容的段，收起来等于看不见。
+           * - 末段若已把答复摘到折叠外，收起后答复仍在外面常显，不丢内容。
            */
           const isLastSegment = segIndex === lastSegIndex
-          const collapsed =
-            foldOverride[segment.key] ??
-            (!message.loading && (!isLastSegment || answerIndices.length > 0))
+          const collapsed = foldOverride[segment.key] ?? (!isLastSegment || !message.loading)
           const headLabel = (
             <span
               data-task-segment={segment.key}
@@ -2174,6 +2281,9 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                   {visibleIndices.length}
                 </span>
               </span>
+              {/* 探索段同样可能改了文件（模型常常边看边改）：段一折起，段里的编辑卡片
+                  就全被卸载了，所以改动徽标两个段头都要挂（用户 2026-09-23 报的场景） */}
+              {changedChip}
             </span>
           )
           return renderSegmentShell({
@@ -2185,9 +2295,14 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
           })
         }
 
-        const isLast = segIndex === lastSegIndex
-        // 流式中：已完成且非末段才折起；已结束/历史消息：一律折起
-        const defaultCollapsed = message.loading ? segment.status === 'completed' && !isLast : true
+        /**
+         * 流式中：只把**已经完成**的段收起；结束后/历史消息一律折起（用户要求）。
+         *
+         * 注意 `segment.status === 'completed'` 不只是「有下一个任务段」——write_todos 把
+         * 本段任务标成 completed 也算，所以「任务干完了、模型正在写总结」这一刻它会立刻收起，
+         * 不必等整轮结束。用户 2026-09-22 的「前期探索结束后没有自动收起」与这一条同源。
+         */
+        const defaultCollapsed = message.loading ? segment.status === 'completed' : true
         const collapsed = foldOverride[segment.key] ?? defaultCollapsed
         const done = segment.status === 'completed'
         const active = segment.status === 'in_progress'
@@ -2252,6 +2367,8 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                 {visibleIndices.length}
               </span>
             </span>
+            {/* 改动徽标：段体折起后段里唯一还能说明「这轮改了什么」的东西 */}
+            {changedChip}
             {segment.snapshot.length > 0 ? (
               <button
                 type="button"

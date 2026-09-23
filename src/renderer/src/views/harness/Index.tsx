@@ -99,6 +99,12 @@ const Index: React.FC = () => {
   const [hasWorkspace, setHasWorkspace] = useState<boolean | null>(null)
   const [panelOpen, setPanelOpen] = useState(false)
   const [panelHasEditor, setPanelHasEditor] = useState(false)
+  /**
+   * 待审查改动（路径 → 条数），由右侧面板回传。
+   * 用途只有一个：任务段头上的改动徽标——段折起后段里的编辑卡片会被卸载，
+   * 聊天里必须有个还看得见「这段改了什么」的地方（用户 2026-09-23 报的问题）。
+   */
+  const [pendingByPath, setPendingByPath] = useState<Map<string, number>>(new Map())
   /** 右侧工作区面板的命令式入口（工具卡片点击 → 打开文件 / 定位目录 / 结果详情页签） */
   const workspacePanelRef = useRef<WorkspacePanelHandle>(null)
 
@@ -599,6 +605,11 @@ const Index: React.FC = () => {
                   onBranch={handleBranchConversation}
                   onLoadMoreMessages={handleLoadMoreMessages}
                   messagesEndRef={messagesEndRef}
+                  pendingByPath={pendingByPath}
+                  onOpenChangedFile={(realPath) => {
+                    // 段头徽标 → 直接打开该文件的差异视图（工作区内的真实路径）
+                    runOnPanel((handle) => handle.openVirtualFile(realPath, realPath))
+                  }}
                 />
 
                 <div className="px-16 pb-8">
@@ -670,6 +681,7 @@ const Index: React.FC = () => {
                   colorTextSecondary={colorTextSecondary}
                   colorTextTertiary={colorTextTertiary}
                   onHasOpenFilesChange={setPanelHasEditor}
+                  onPendingByPathChange={setPendingByPath}
                 />
               </div>
             </>

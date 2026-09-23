@@ -404,7 +404,7 @@ const HarnessInput: React.FC<HarnessInputProps> = ({
       }
       // deps=[]：编辑器只创建一次。@tiptap/react v3 的 useEditor 每次渲染都会重新挂起
       // 一个 1ms 延迟销毁定时器（scheduleDestroy），若两次渲染间隔超过 1ms（如切页时
-      // monaco chunk 求值等重活占用主线程），定时器会先于下一次渲染触发把编辑器销毁，
+      // 编辑器 chunk 求值等重活占用主线程），定时器会先于下一次渲染触发把编辑器销毁，
       // 之后任何 view 访问都会抛「The editor view is not available」→ React 整树卸载崩溃。
       // 显式传空依赖数组让该定时器只在真正卸载时挂起，从源头消除竞态。
     },
