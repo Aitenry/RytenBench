@@ -487,7 +487,7 @@ const Index: React.FC = () => {
             className="h-full flex flex-col overflow-hidden"
             style={{
               flex: 1,
-              minWidth: 410,
+              minWidth: 420,
               background: colorBgContainer,
               borderRadius: borderRadiusLG
             }}
