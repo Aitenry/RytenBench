@@ -135,22 +135,20 @@ export const zhCN = {
     abandonDescription: '结束本轮生成（已生成内容保留在界面，不落库）'
   },
   /**
-   * 模型请求失败的收尾说明：先讲清「为什么停止重试 / 该怎么修」，
+   * 模型请求失败的收尾说明：按 HTTP 状态码讲清「为什么停止重试 / 该怎么修」，
    * 再拼上供应商原文（withReason），避免分类把真实报文吃掉了
    */
   modelFailure: {
     withReason: '{{summary}}（供应商原文：{{reason}}）',
-    imageUnsupported: '当前模型不接受图片输入，已停止重试：请移除图片附件，或切换到支持视觉的模型',
     auth: '模型鉴权失败{{status}}，已停止重试：请检查该供应商的 API Key',
     notFound: '模型不存在或接口地址有误{{status}}，已停止重试',
-    badRequest: '模型服务拒绝了该请求{{status}}，已停止重试',
-    contextOverflow: '上下文超出模型窗口上限，已停止重试：请压缩历史或改用窗口更大的模型',
-    gatewayTimeout:
-      '模型响应超过网关超时{{status}}（等待 {{seconds}} 秒仍未返回），已停止重试：模型可能未加载或响应过慢',
-    rateLimit: '模型服务限流或额度不足，重试 {{count}} 次仍失败：请检查额度或稍后再试',
-    server: '模型服务端错误，重试 {{count}} 次仍失败',
+    rejected: '模型服务拒绝了该请求{{status}}，已停止重试',
+    timeout:
+      '模型响应超时{{status}}（等待 {{seconds}} 秒仍未返回），重试 {{count}} 次仍失败：模型可能未加载或响应过慢',
+    rateLimit: '模型服务限流或额度不足{{status}}，重试 {{count}} 次仍失败：请检查额度或稍后再试',
+    server: '模型服务端错误{{status}}，重试 {{count}} 次仍失败',
     network:
-      '模型服务不可用（连接失败），重试 {{count}} 次仍失败：请确认模型服务已启动、接口地址可达',
+      '模型服务不可用（未拿到状态码）{{status}}，重试 {{count}} 次仍失败：请确认服务已启动、接口地址可达',
     other: '模型请求失败'
   }
 }
@@ -247,20 +245,17 @@ export const enUS: typeof zhCN = {
   },
   modelFailure: {
     withReason: '{{summary}} (provider said: {{reason}})',
-    imageUnsupported:
-      'The current model does not accept image input — retrying stopped. Remove the image attachment or switch to a model that supports vision',
     auth: 'Model authentication failed{{status}} — retrying stopped. Check this provider\u2019s API key',
     notFound: 'Model not found or wrong endpoint{{status}} — retrying stopped',
-    badRequest: 'The model service rejected the request{{status}} — retrying stopped',
-    contextOverflow:
-      'The context exceeds the model window — retrying stopped. Compact the history or use a model with a larger window',
-    gatewayTimeout:
-      'The model exceeded the gateway timeout{{status}} (no response after {{seconds}}s) — retrying stopped. The model may not be loaded or may be too slow',
+    rejected: 'The model service rejected the request{{status}} — retrying stopped',
+    timeout:
+      'The model timed out{{status}} (no response after {{seconds}}s) — still failing after {{count}} retries. The model may not be loaded or may be too slow',
     rateLimit:
-      'The model service is rate limiting or out of quota — still failing after {{count}} retries. Check the quota or try again later',
-    server: 'The model service returned a server error — still failing after {{count}} retries',
+      'The model service is rate limiting or out of quota{{status}} — still failing after {{count}} retries. Check the quota or try again later',
+    server:
+      'The model service returned a server error{{status}} — still failing after {{count}} retries',
     network:
-      'The model service is unavailable (connection failed) — still failing after {{count}} retries. Make sure the server is running and the base URL is reachable',
+      'The model service is unavailable (no HTTP status){{status}} — still failing after {{count}} retries. Make sure the server is running and the base URL is reachable',
     other: 'The model request failed'
   },
   weather: {
