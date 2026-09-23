@@ -96,7 +96,9 @@ export class Runtime {
     this.mnemon = opts.mnemon
     this.fsTools = buildFsTools({
       workspacePath: opts.workspacePath,
-      memoryPath: opts.memoryPath
+      memoryPath: opts.memoryPath,
+      // 文件改动史按工作区归属（模型每次写文件都要留下可追溯 / 可回溯的记录）
+      workspaceId: opts.workspaceId
     })
     this.systemPrompt = this.buildSystemPrompt()
 

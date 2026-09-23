@@ -4,6 +4,7 @@ import { settingsStore } from '../context'
 import { awaitInitialized } from '../database/instance'
 import { SystemSettings } from '../types/settings'
 import { syncTrayState } from '../tray'
+import { syncWorkspaceWatcher } from '../workspace'
 
 /** 系统设置 + 锁屏 IPC */
 export function registerSettingsIpc(): void {
@@ -95,6 +96,10 @@ export function registerSettingsIpc(): void {
       // 托盘设置变化时即时同步（关闭行为 / 菜单勾选态）；语言变化时同步托盘提示文案
       if ('tray' in updates || 'language' in updates) {
         syncTrayState()
+      }
+      // 工作区切换（新建 / 选择 / 重建）后，文件监听跟着换根目录
+      if ('harness' in updates) {
+        syncWorkspaceWatcher()
       }
       logger.info('System settings updated:', Object.keys(updates).join(', '))
       return true

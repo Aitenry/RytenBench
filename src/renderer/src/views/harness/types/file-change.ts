@@ -1,0 +1,7 @@
+/**
+ * 文件改动视图类型。
+ *
+ * 真源在主进程（`src/main/workspace/file-history.ts`，preload 也复用它），
+ * 这里只做一次转发，避免前端另起一套定义后与主进程漂移。
+ */
+export type { FileChangeView, FileChangeContent } from '../../../../../main/workspace/file-history'

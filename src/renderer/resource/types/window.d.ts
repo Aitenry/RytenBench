@@ -17,6 +17,7 @@ import { JobSnapshot } from '../../../main/harness/runtime/jobs'
 import { SubagentSessionRow } from '../../../main/harness/runtime/subagent-sessions'
 import type { StartMemoryAgentResult } from '../../../main/harness/runtime/memory-agent'
 import { PendingQuestionView } from '../../../main/harness/runtime/ask'
+import { FileChangeView, FileChangeContent } from '../../../main/workspace/file-history'
 import { SystemSettings } from '@renderer/types/settings'
 
 export interface PaginatedResult<T> {
@@ -706,6 +707,37 @@ export interface Window {
       listDir: (dirPath: string) => Promise<{ name: string; isDirectory: boolean; path: string }[]>
       readFile: (filePath: string) => Promise<string>
       saveFile: (filePath: string, content: string) => Promise<boolean>
+      /** 当前工作区待审查的文件改动（模型每改一次文件一条） */
+      pendingChanges: () => Promise<FileChangeView[]>
+      /** 单个文件的改动历史（倒序，最新在前） */
+      fileChanges: (filePath: string) => Promise<FileChangeView[]>
+      /** 某次改动的前后正文（差异视图数据源） */
+      changeContent: (id: number) => Promise<FileChangeContent | null>
+      /** 审查：保留（清除待审查标记，磁盘不动） */
+      keepChanges: (ids: number[]) => Promise<number>
+      /** 审查：撤销到某次改动之前（写回改动前快照） */
+      revertChange: (
+        id: number
+      ) => Promise<{ path: string; content: string | null } | { error: string }>
+      /** 审查：把差异视图里取舍后的内容落盘并标记已保留 */
+      applyReview: (filePath: string, content: string) => Promise<{ ok: true } | { error: string }>
+      /** 磁盘变化推送（模型写入 / 命令执行 / 外部编辑器） */
+      onFsChanged: (
+        callback: (data: {
+          changes: { path: string; relPath: string; exists: boolean; isDirectory: boolean }[]
+        }) => void
+      ) => () => void
+      /** 新增改动记录推送 */
+      onChangeRecorded: (callback: (change: FileChangeView) => void) => () => void
+      /** 改动审查状态变化推送（保留 / 撤销） */
+      onChangesUpdated: (
+        callback: (data: {
+          ids: number[]
+          status: string
+          path?: string
+          obsolete?: number
+        }) => void
+      ) => () => void
     }
     mermaid: {
       /** 全屏窗口预览 SVG（可拖拽/缩放画布） */

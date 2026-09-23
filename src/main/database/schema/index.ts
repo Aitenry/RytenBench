@@ -10,6 +10,7 @@
 export * from './common'
 export * from './workspace'
 export * from './harness'
+export * from './file-change'
 export * from './agent'
 export * from './todo'
 export * from './planner'

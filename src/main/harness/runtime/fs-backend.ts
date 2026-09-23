@@ -7,6 +7,8 @@ import logger from 'electron-log'
 import { mainFormat, mainPlural } from '../../i18n'
 import { getFsToolTexts } from '../../i18n/tool-results-fs'
 import { recordToolFacts } from './tool-result-facts'
+import { recordFileChange } from '../../workspace/file-history'
+import { beginToolWriteWindow, endToolWriteWindow } from '../../workspace/watcher'
 import {
   MAX_EXEC_CHARS,
   MAX_FILE_CHARS,
@@ -45,6 +47,16 @@ function callIdOf(config: unknown): string | undefined {
   return typeof id === 'string' ? id : undefined
 }
 
+/** 本次调用的归属信息（会话 id + 工具调用 id），改动记录与命令窗口都要用 */
+function runContextOf(config: unknown): { callId?: string; topicId?: number } {
+  const cfg = config as { configurable?: Record<string, unknown> } | undefined
+  const topicId = cfg?.configurable?.topicId
+  return {
+    callId: callIdOf(config),
+    topicId: typeof topicId === 'number' ? topicId : undefined
+  }
+}
+
 interface FsMount {
   /** 虚拟前缀，如 '/' 或 '/memories/' */
   prefix: string
@@ -57,6 +69,54 @@ export interface FsBackendOptions {
   workspacePath?: string
   /** 记忆目录（挂载为虚拟 '/memories/'） */
   memoryPath?: string
+  /** 当前工作区 ID（文件改动史按工作区归属；缺省则不记录改动） */
+  workspaceId?: number
+}
+
+/**
+ * 工作区内的写入记账（可追溯 / 可回溯的唯一入口）。
+ *
+ * 只有落在工作区挂载内的写入才记录：'/memories/...' 是记忆目录，属于模型私有数据，
+ * 不参与「文件改动审查」。记录失败绝不影响工具本身的结果。
+ */
+async function recordWorkspaceWrite(args: {
+  options: FsBackendOptions
+  config: unknown
+  realPath: string
+  before: string | null
+  after: string | null
+  source: 'write_file' | 'edit_file'
+}): Promise<void> {
+  const root = args.options.workspacePath
+  const workspaceId = args.options.workspaceId
+  if (!root || !workspaceId) return
+  const relative = path.relative(root, args.realPath)
+  if (relative.startsWith('..') || path.isAbsolute(relative)) return
+  const { callId, topicId } = runContextOf(args.config)
+  try {
+    await recordFileChange({
+      workspaceId,
+      workspaceRoot: root,
+      realPath: args.realPath,
+      before: args.before,
+      after: args.after,
+      source: args.source,
+      topicId,
+      callId
+    })
+  } catch (err) {
+    logger.warn('[FsBackend] 文件改动记录失败:', err)
+  }
+}
+
+/** 读出改动前正文；文件不存在（或不可读）返回 null（= 本次是新建） */
+function readBeforeOrNull(filePath: string): string | null {
+  try {
+    if (!fs.statSync(filePath).isFile()) return null
+    return fs.readFileSync(filePath, 'utf-8')
+  } catch {
+    return null
+  }
 }
 
 /** 由选项构建挂载表（IPC 层读取虚拟路径文件时复用同一套映射） */
@@ -271,9 +331,20 @@ export function buildFsTools(options: FsBackendOptions): StructuredToolInterface
         try {
           // 异步写（修复：同步写阻塞主进程事件循环）
           await fs.promises.mkdir(path.dirname(resolved.realPath), { recursive: true })
+          // 改动前正文（供差异视图与撤销）；新建时为 null
+          const before = readBeforeOrNull(resolved.realPath)
           await fs.promises.writeFile(resolved.realPath, content, 'utf-8')
           const bytes = Buffer.byteLength(content, 'utf-8')
           recordToolFacts(callId, { bytes })
+          // 记账在返回结果之前完成：渲染进程收到「文件已改动」时，磁盘上已经是新内容
+          await recordWorkspaceWrite({
+            options,
+            config,
+            realPath: resolved.realPath,
+            before,
+            after: content,
+            source: 'write_file'
+          })
           return mainFormat(tr.write.written, { path: file_path, bytes })
         } catch (err) {
           const failed = mainFormat(tr.write.failed, { message: (err as Error).message })
@@ -331,6 +402,14 @@ export function buildFsTools(options: FsBackendOptions): StructuredToolInterface
             : current.replace(old_string, new_string)
           fs.writeFileSync(resolved.realPath, updated, 'utf-8')
           recordToolFacts(callId, { replacements: count })
+          await recordWorkspaceWrite({
+            options,
+            config,
+            realPath: resolved.realPath,
+            before: current,
+            after: updated,
+            source: 'edit_file'
+          })
           return mainFormat(mainPlural(tr.edit.updated_one, tr.edit.updated_other, count), {
             path: file_path
           })
@@ -506,6 +585,10 @@ export function buildFsTools(options: FsBackendOptions): StructuredToolInterface
     tools.push(
       tool(
         async ({ command }, config) => {
+          const { callId, topicId } = runContextOf(config)
+          // 命令执行窗口：这期间被磁盘监听捕获的文件变化归到这次调用名下
+          // （命令没有精确的前后快照，只能如实记录「被命令改过、不可回溯」）
+          beginToolWriteWindow({ topicId, callId })
           return await new Promise<string>((resolvePromise) => {
             const child = exec(
               command,
@@ -516,6 +599,8 @@ export function buildFsTools(options: FsBackendOptions): StructuredToolInterface
                 windowsHide: true
               },
               (error, stdout, stderr) => {
+                // 命令已退出：先关窗口（后续 1.5s 宽限内的落盘仍归给它，见 watcher.ts）
+                endToolWriteWindow(callId)
                 const out = stdout || ''
                 const errOut = stderr || ''
                 const exitCode = error
@@ -548,9 +633,10 @@ export function buildFsTools(options: FsBackendOptions): StructuredToolInterface
               if (signal.aborted) onAbort()
               else signal.addEventListener('abort', onAbort, { once: true })
             }
-            // 子进程关闭后移除监听，避免 listener 泄漏
+            // 子进程关闭后移除监听，避免 listener 泄漏；同时关闭命令写入窗口
             child.on('close', () => {
               if (signal) signal.removeEventListener('abort', onAbort)
+              endToolWriteWindow(callId)
             })
           })
         },

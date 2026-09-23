@@ -5,6 +5,9 @@ import logger from 'electron-log'
 import { registerAllIpc } from './ipc'
 import { registerLifecycleHooks } from './lifecycle'
 import { configureToolOutputStore } from './harness/runtime/tool-output-store'
+import { configureFileHistory } from './workspace/file-history'
+import { syncWorkspaceWatcher } from './workspace'
+import { awaitInitialized } from './database/instance'
 import { createLoadingWindow } from './windows/loading-window'
 import { createMainWindow } from './windows/main-window'
 import { registerMermaidPreviewIpc } from './windows/mermaid-preview'
@@ -49,6 +52,19 @@ app
     // 工具结果详情存储目录（内置工具的结果不再随流下发/落库，点开卡片时按需读取）：
     // 放 userData 而不是工作区——工作区挂载为虚拟 '/'，写进去会污染用户项目
     configureToolOutputStore(join(app.getPath('userData'), 'tool-output'))
+
+    // 文件改动快照目录（模型每次改文件的「改动前/改动后」正文）：同样放 userData，
+    // 不污染用户工作区，也不会出现在模型自己的 ls/glob 结果里
+    configureFileHistory(join(app.getPath('userData'), 'file-history'))
+
+    // 工作区文件监听：数据库初始化完成（设置已加载）后跟随当前工作区启动
+    void awaitInitialized().then(() => {
+      try {
+        syncWorkspaceWatcher()
+      } catch (err) {
+        logger.warn('[Main] 工作区文件监听启动失败:', err)
+      }
+    })
 
     app.on('browser-window-created', (_, window) => {
       optimizer.watchWindowShortcuts(window)

@@ -13,6 +13,8 @@ import type { JobSnapshot } from '../main/harness/runtime/jobs'
 import type { SubagentSessionRow } from '../main/harness/runtime/subagent-sessions'
 import type { PendingQuestionView, AskAnswer } from '../main/harness/runtime/ask'
 import type { QueuedMessageView } from '../main/harness/queue-store'
+import type { FileChangeView, FileChangeContent } from '../main/workspace/file-history'
+import type { WorkspaceFsChange } from '../main/workspace/watcher'
 
 type AskAnswerItem = AskAnswer['answers'][number]
 import type { SystemSettings } from '../main/types/settings'
@@ -789,7 +791,63 @@ const api = {
     readFile: (filePath: string) =>
       ipcRenderer.invoke('workspace-read-file', filePath) as Promise<string>,
     saveFile: (filePath: string, content: string) =>
-      ipcRenderer.invoke('workspace-save-file', filePath, content) as Promise<boolean>
+      ipcRenderer.invoke('workspace-save-file', filePath, content) as Promise<boolean>,
+    // --- 文件改动史（可追溯 / 可回溯） ---
+    /** 当前工作区待审查的改动 */
+    pendingChanges: () =>
+      ipcRenderer.invoke('workspace-changes-pending') as Promise<FileChangeView[]>,
+    /** 单个文件的改动历史（倒序） */
+    fileChanges: (filePath: string) =>
+      ipcRenderer.invoke('workspace-changes-file', filePath) as Promise<FileChangeView[]>,
+    /** 某次改动的前后正文 */
+    changeContent: (id: number) =>
+      ipcRenderer.invoke('workspace-change-content', id) as Promise<FileChangeContent | null>,
+    /** 审查：保留（清除待审查标记） */
+    keepChanges: (ids: number[]) =>
+      ipcRenderer.invoke('workspace-change-keep', ids) as Promise<number>,
+    /** 审查：撤销到某次改动之前 */
+    revertChange: (id: number) =>
+      ipcRenderer.invoke('workspace-change-revert', id) as Promise<
+        { path: string; content: string | null } | { error: string }
+      >,
+    /** 审查：把差异视图里取舍后的内容落盘并标记已保留 */
+    applyReview: (filePath: string, content: string) =>
+      ipcRenderer.invoke('workspace-apply-review', filePath, content) as Promise<
+        { ok: true } | { error: string }
+      >,
+    /** 磁盘变化（模型写入 / 命令执行 / 外部编辑器）：刷新资源管理器与已打开页签 */
+    onFsChanged: (callback: (data: { changes: WorkspaceFsChange[] }) => void) => {
+      const handler = (
+        _event: Electron.IpcRendererEvent,
+        data: { changes: WorkspaceFsChange[] }
+      ): void => callback(data)
+      ipcRenderer.on('workspace-fs-changed', handler)
+      return () => {
+        ipcRenderer.off('workspace-fs-changed', handler)
+      }
+    },
+    /** 新增一条改动记录（模型改动了某个文件） */
+    onChangeRecorded: (callback: (change: FileChangeView) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, change: FileChangeView): void =>
+        callback(change)
+      ipcRenderer.on('workspace-change-recorded', handler)
+      return () => {
+        ipcRenderer.off('workspace-change-recorded', handler)
+      }
+    },
+    /** 改动审查状态变化（保留 / 撤销） */
+    onChangesUpdated: (
+      callback: (data: { ids: number[]; status: string; path?: string; obsolete?: number }) => void
+    ) => {
+      const handler = (
+        _event: Electron.IpcRendererEvent,
+        data: { ids: number[]; status: string; path?: string; obsolete?: number }
+      ): void => callback(data)
+      ipcRenderer.on('workspace-changes-updated', handler)
+      return () => {
+        ipcRenderer.off('workspace-changes-updated', handler)
+      }
+    }
   },
   mermaid: {
     preview: (svg: string) => ipcRenderer.invoke('mermaid-preview', svg) as Promise<void>
