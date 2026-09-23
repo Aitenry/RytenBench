@@ -40,7 +40,12 @@ interface Turn {
   index: number
   /** 提问文本（标题） */
   question: string
-  /** 该轮助手的最终回答（内容） */
+  /**
+   * 该轮**全部**助手段落（顺序拼接；一段 = 一条助手消息）。
+   *
+   * 一轮里助手消息不止一条：插话/停止后「继续」会切段，目标自动续跑也各占一条。
+   * 只取最后一条会让悬停卡漏掉这一轮前面写过的内容。
+   */
   answer: string
 }
 
@@ -94,7 +99,8 @@ const plainText = (t: TFunction, lang: string, raw: string | null | undefined): 
  * - 一个刻度 = 一轮提问（**只标用户消息**），等距聚合成一条短列表，整体在消息区里垂直居中；
  * - 刻度多了就地压缩间距，永远不超出可视高度；
  * - 「当前轮次」= 视口顶部往上最近的那条提问，刻度变白加长（滚动时只比偏移，不重量 DOM）；
- * - 悬停出卡片：标题是这一轮的提问，内容是该轮助手的最终回答（3 行，超出可滚动）；
+ * - 悬停出卡片：标题是这一轮的提问，内容是该轮**所有**助手段落按顺序拼起来的正文
+ *   （3 行，超出可滚动；空行分段，便于看出这轮被切过几次）；
  * - 点击平滑滚到该轮提问处。
  */
 const MessageLocator: React.FC<MessageLocatorProps> = ({
@@ -114,23 +120,33 @@ const MessageLocator: React.FC<MessageLocatorProps> = ({
   const frameRef = useRef<number | null>(null)
   const clearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  /** 一轮 = 一条用户消息 + 紧随其后、直到下一个提问之前的最后一条助手消息 */
+  /**
+   * 一轮 = 一条用户消息 + 紧随其后、直到下一个提问之前的**每一条**助手消息。
+   *
+   * 助手内容按顺序累积拼接（不是覆盖）：插话切段、停止后继续、目标自动续跑都会让
+   * 一轮里出现多条助手消息，只留最后一条会丢掉这轮先前的回答。
+   * 拼接前逐条走 plainText——按「单条原文」缓存，流式追加新段落时前面的段落仍命中缓存，
+   * 不会因为整段字符串变了而把历史长文重新正则一遍。
+   */
   const turns = useMemo<Turn[]>(() => {
     const list: Turn[] = []
     messages.forEach((message, index) => {
       if (message.role !== 'user') return
       // 目标自动续跑的横幅不是「提问」（它渲染成批次横幅、由左右切换查看），不占标尺刻度
       if (message.blocks.some((b) => b.type === 'goalRound')) return
-      let answer = ''
+      const parts: string[] = []
       for (let i = index + 1; i < messages.length; i++) {
         const next = messages[i]
         if (next.role === 'user') break
-        if (next.role === 'assistant' && (next.content ?? '').trim()) answer = next.content ?? ''
+        if (next.role !== 'assistant') continue
+        const text = plainText(t, lang, next.content)
+        if (text) parts.push(text)
       }
       list.push({
         index,
         question: plainText(t, lang, message.content),
-        answer: plainText(t, lang, answer)
+        // 空行分段：悬停卡是 whiteSpace: pre-wrap，段与段之间会断开，不会粘成一句
+        answer: parts.join('\n\n')
       })
     })
     return list
@@ -310,7 +326,7 @@ const MessageLocator: React.FC<MessageLocatorProps> = ({
         )
       })}
 
-      {/* 悬停卡：标题=这一轮的提问，内容=该轮助手的最终回答（3 行，超出滚动） */}
+      {/* 悬停卡：标题=这一轮的提问，内容=该轮每一条助手消息按顺序拼起来的正文（3 行，超出滚动） */}
       {hoveredTurn && (
         <div
           ref={cardRef}
