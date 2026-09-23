@@ -28,6 +28,8 @@ import {
   getToolStatusLabel,
   shouldShowSilenceIndicator,
   buildTaskSegments,
+  answerPhaseFrom,
+  tailContentIndices,
   type TaskSegment
 } from '@renderer/views/harness/utils/harnessHelpers'
 
@@ -218,7 +220,7 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
       return joined || message.content
     }, [message])
 
-    // 滚动容器与流式贴底：**全部交给 FoldBody 自管**（固定高度 + 展开全部 + 可打断的贴底跟随）。
+    // 滚动容器与流式贴底：**全部交给 FoldBody 自管**（固定高度 + 可打断的贴底跟随）。
     //
     // 这里原先有一个无差别的 effect：流式中每来一个 chunk 就把所有折叠容器
     // `scrollTop = scrollHeight`——不判断用户是否正在往上读，想回看前面几行会被立刻拽回底部。
@@ -1340,9 +1342,13 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                   key: blockIndex,
                   ...extra,
                   children: (
-                    /* 思考正文框：固定高度 + 展开全部 + 可打断的贴底跟随（见 FoldBody） */
+                    /* 思考正文框：固定高度 + 可打断的贴底跟随（见 FoldBody）。
+                       不加展开控件（用户 2026-09-23：「思考内容不需要，下方的展开全部内容…
+                       就是不需要这个按钮了」）：长思考就在 256px 里内滚，读全文靠滚动，
+                       框下不再摆任何按钮。 */
                     <FoldBody
                       maxHeight={256}
+                      expandable={false}
                       streaming={streamingFollow}
                       followSignal={followSignal}
                       className="text-sm px-1.5"
@@ -1442,7 +1448,8 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                   ),
                   collapsible: inProgress ? 'disabled' : undefined,
                   children: (
-                    /* 固定高度 + 可打断的贴底跟随：工具输出边长边跑，用户上滑即打断 */
+                    /* 固定高度 + 可打断的贴底跟随：工具输出边长边跑，用户上滑即打断
+                       （展开入口由工具卡自己提供，所以这里不给展开控件） */
                     <FoldBody
                       maxHeight={256}
                       expandable={false}
@@ -1596,9 +1603,11 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                           </span>
                         ),
                         children: (
-                          /* 子智能体的思考同样是「思考过程」：同款固定高度 + 展开全部 + 可打断跟随 */
+                          /* 子智能体的思考同样是「思考过程」：同款固定高度 + 可打断跟随；
+                             展开控件与顶层思考一致地不给 */
                           <FoldBody
                             maxHeight={192}
+                            expandable={false}
                             streaming={streamingFollow}
                             followSignal={followSignal}
                             className="text-xs px-1.5"
@@ -2031,6 +2040,32 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
        */
       const segments = buildTaskSegments(mergedBlocks, { streaming: Boolean(message.loading) })
       const lastSegIndex = segments.length - 1
+      /**
+       * 收尾阶段：模型自己把清单收口（最后一次 `write_todos` 至少一项 completed、无 in_progress）
+       * 时所处的位置。≥0 表示「活干完了，接下来流出的就是交付给用户的回答」，末尾那段内容
+       * 因此可以在流式期间就渲染到折叠外（判据见 harnessHelpers.answerPhaseFrom）。
+       */
+      const answerPhaseAt = answerPhaseFrom(mergedBlocks)
+      /**
+       * 折叠外要渲染的「最终回答」块：**整条消息一次算好**，段循环里只取与本段的交集。
+       *
+       * 必须按整条消息算，不能按段内的下标列表算：write_todos 块不在段的内容下标里，
+       * 段内反扫会**跨过收口写入**继续往前吃，把上一项任务那句话也算成答复
+       * （工装 C⑤/C⑦ 抓到过这个错切）。
+       */
+      const answerBlockSet = ((): Set<number> => {
+        const allBlockIndices = mergedBlocks.map((_, i) => i)
+        if (!message.loading) {
+          if (message.answer instanceof Set) return message.answer
+          // 协议层明确没有答复（中止 / 只有工具与思考）
+          if (message.answer === null) return new Set<number>()
+          // 主进程没给结论（老版本/异常路径）：退回反向扫描
+          return new Set(tailContentIndices(mergedBlocks, allBlockIndices))
+        }
+        // 流式中：只有进入收尾阶段才摘（末尾那段一定在收口写入之后）
+        if (answerPhaseAt < 0) return new Set<number>()
+        return new Set(tailContentIndices(mergedBlocks, allBlockIndices))
+      })()
 
       /**
        * 段外壳：折叠外观与「思考过程」「子代理」完全同款（antd Collapse + collapseBg + size=small）。
@@ -2038,6 +2073,7 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
        * 段内容也走 FoldBody（用户 2026-09-19：「这个内容，也要折叠啊」）——展开的段不再是一堵
        * 随任务跑越堆越高的墙，而是**固定高度 + 内部滚动**；流式时贴底跟随最新一步，用户上滑即
        * 打断、滚回底部自动继续；内容超高时框外给「展开全部」。
+       * 思考框不摆这个控件（见思考正文框处注释）：只有段内容保留。
        */
       const renderSegmentShell = (args: {
         segKey: string
@@ -2092,29 +2128,29 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
          * - 必须至少摘到一段正文才成立：整段以思考结尾（本轮被中止等）时不摘，
          *   交给折叠统一收着，避免把「没有答复的消息」整块搬到外面；
          * - **不对「有没有任务」做区分**：前期探索段现在一律包裹，普通问答同样要摘
-         *   （仿真台抓到过：摘出漏掉时普通问答的正文会整段消失）；
-         * - 流式进行中不摘——那时段本来就展开着。
+         *   （仿真台抓到过：摘出漏掉时普通问答的正文会整段消失）。
+         *
+         * **整轮结束前只在「收尾阶段」摘**（用户 2026-09-25 选定的口径）：
+         * 流式期间，只有当模型**自己把清单收口**（最后一次 `write_todos` 里至少一项 completed、
+         * 且没有 in_progress——真实会话里最终回答就紧跟在那次写入之后）时，末尾那段
+         * 「思考 + 正文」才边流边渲染到折叠外；其余情形（每项任务结束时那句话、任务进行中的
+         * 思考）一律留在任务段/前期探索折叠里，不搬出来、也不会被收回去。
+         * 判据见 `answerPhaseFrom`（纯块数据，不是猜 loading）。
+         *
+         * 整轮结束时（done）：按协议层结论定格——`message.answer` 是 `Set` 就用它；
+         * `undefined`（主进程没给结论：老版本/异常路径）退回反向扫描；`null`（明确没有答复）
+         * 不摘。这条兜底覆盖「模型忘了写收尾清单」的轮次（那时最终回答只能等整轮结束定格，
+         * 因为流式期间没有任何能把最终回答与「每项任务那句话」区分开的数据信号）。
          */
-        let answerIndices: number[] = []
-        if (segIndex === lastSegIndex && !message.loading) {
-          let cut = allIndices.length
-          let sawText = false
-          while (cut > 0) {
-            const type = mergedBlocks[allIndices[cut - 1]]?.type
-            if (type === 'text') {
-              sawText = true
-              cut -= 1
-              continue
-            }
-            if (type === 'reasoning') {
-              cut -= 1
-              continue
-            }
-            break
-          }
-          answerIndices = sawText ? allIndices.slice(cut) : []
-        }
-        const visibleIndices = allIndices.slice(0, allIndices.length - answerIndices.length)
+        const answerIndices = allIndices.filter((i) => answerBlockSet.has(i))
+        /**
+         * 切分必须**按集合过滤**，不能拿 `answerIndices.length` 去减：
+         * 协议层的答复边界是「末尾 N 块」的集合，一旦它与本段下标不连续
+         * （例如答复跨段、或标记与块的对应关系漂移），长度相减会切出负数长度、
+         * 把整段内容吞掉。用集合同步滤出两侧，任何形态都只会「少摘」不会「错切」。
+         */
+        const answerSet = new Set(answerIndices)
+        const visibleIndices = allIndices.filter((i) => !answerSet.has(i))
         const blocksNode = visibleIndices.map(renderBlockAt)
         const answerNode = answerIndices.map(renderBlockAt)
 
@@ -2296,13 +2332,21 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
         }
 
         /**
-         * 流式中：只把**已经完成**的段收起；结束后/历史消息一律折起（用户要求）。
+         * 流式中：把**已经完成、且后面还有内容在写**的段收起；结束后/历史消息一律折起。
          *
          * 注意 `segment.status === 'completed'` 不只是「有下一个任务段」——write_todos 把
          * 本段任务标成 completed 也算，所以「任务干完了、模型正在写总结」这一刻它会立刻收起，
          * 不必等整轮结束。用户 2026-09-22 的「前期探索结束后没有自动收起」与这一条同源。
+         *
+         * **末段例外**（用户 2026-09-24：答复不能从折叠里搬到外面、也不能被收回去）：
+         * 整轮结束前，答复只能待在折叠里（那时边界还没定论），所以承载它的**末段必须敞着**，
+         * 否则内容一折就看不见——到 done 落地才一次性收起并把答复定格到折叠外。
+         *
+         * `foldOverride` 仍然优先：用户手动折过/开过的段照他的来。
          */
-        const defaultCollapsed = message.loading ? segment.status === 'completed' : true
+        const defaultCollapsed = message.loading
+          ? segment.status === 'completed' && segIndex !== lastSegIndex
+          : true
         const collapsed = foldOverride[segment.key] ?? defaultCollapsed
         const done = segment.status === 'completed'
         const active = segment.status === 'in_progress'

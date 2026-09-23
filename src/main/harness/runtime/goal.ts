@@ -122,6 +122,21 @@ export class GoalStore {
     }
   }
 
+  /**
+   * 本轮结束后，驱动器还会不会自动派发下一轮？（轮次收尾类兜底的判定依据）
+   *
+   * 与 GoalRoundDriver.driveOnce 的派发门槛逐条对齐——那里的三道门是「phase === 'active'」
+   * 「isArmed」「roundsStarted < maxGoalRounds（否则标 blocked 并停止）」，等价于这里的三行。
+   * 刻意收在 store 里而不是散在调用点：目标一停，清单的「进行中」就再没人去收（用户
+   * 2026-09-23 报的「任务都完成了还显示最后一项没完成」就是这么来的），这个判定写错的代价
+   * 是前端永远转圈，所以只能有一处。工装 test/verify-todo-closeout.mjs 直接跑这个方法。
+   */
+  async willContinue(topicId: number): Promise<boolean> {
+    const goal = await this.load(topicId)
+    if (goal?.phase !== 'active' || !this.isArmed(topicId)) return false
+    return goal.roundsStarted < goal.maxGoalRounds
+  }
+
   /** 持久化并刷新缓存、广播变更 */
   private async persist(topicId: number, view: GoalView): Promise<GoalView> {
     await upsertGoal({

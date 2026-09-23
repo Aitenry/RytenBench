@@ -180,6 +180,16 @@ interface Api {
         userDialogueId?: number
         assistantDialogueId?: number
         segments?: { messageId: string; dialogueId?: number }[]
+        /** 本轮终局标记（最终答复边界 + 目标是否收口，见 main/harness/service/answer-boundary.ts） */
+        turnFinal?: {
+          settled: boolean
+          goalRound: boolean
+          round?: number
+          goalClosed?: boolean
+          goalWillContinue?: boolean
+          answerFrom: number | null
+          answerBlocks: number
+        }
       }) => void
     ) => () => void
     // ── 生成中的插话队列 ────────────────────────────────────────────────

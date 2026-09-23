@@ -353,3 +353,130 @@ export function coalesceChunks(batch: StreamChunk[]): StreamChunk[] {
   }
   return out
 }
+
+/**
+ * 「收尾阶段」判定（用户 2026-09-25 选定的口径）：
+ * 消息里**最后一个非内容块**是不是一次「收口」的 `write_todos`——清单里至少有一项
+ * `completed`、且没有任何 `in_progress`。是则返回它在块数组里的下标，否则返回 -1。
+ *
+ * 为什么用这个信号：真实会话（topic 237/292、236/282）的块序列是
+ * `write_todos(任务一) → 一句话 → write_todos(任务一完成/任务二) → 一句话 → … → 最终回答`，
+ * 每项任务结束时那句话与最终回答在流式时长得一模一样。只有「清单收口」这一次写入是模型
+ * **自己宣告「活干完了，接下来是交付给用户的回答」**的数据层事实——据此才能让最终回答
+ * 从一开始就流式渲染在折叠外，而不必把每项任务那句话也搬到外面，更不会来回搬。
+ *
+ * 判据是「最后一个非内容块」，所以模型收口后又接着调工具（自相矛盾的情形）自然不成立：
+ * 那时实时摘出的内容会被收回折叠里（这是唯一会跳的情形，且只在模型反悔时发生）。
+ *
+ * @param blocks 渲染端合并块数组（或主进程累积块，两边都按到达顺序 append）
+ */
+export function answerPhaseFrom(blocks: MessageBlock[]): number {
+  let lastNonContent = -1
+  for (let i = blocks.length - 1; i >= 0; i -= 1) {
+    const type = blocks[i]?.type
+    if (type === 'reasoning' || type === 'text') continue
+    lastNonContent = i
+    break
+  }
+  if (lastNonContent < 0) return -1
+  const block = blocks[lastNonContent]
+  if (block.type !== 'tool' || block.tool?.name !== 'write_todos') return -1
+  const todos = (block.tool.input as { todos?: { status?: string }[] } | undefined)?.todos
+  if (!Array.isArray(todos) || todos.length === 0) return -1
+  const statusOf = (item: { status?: string }): string => String(item?.status ?? '')
+  if (todos.some((item) => statusOf(item) === 'in_progress')) return -1
+  return todos.some((item) => statusOf(item) === 'completed') ? lastNonContent : -1
+}
+
+/**
+ * 段内末尾那段「思考 + 正文」（末尾连续 reasoning/text，且至少含一段正文）在块数组里的下标。
+ *
+ * 与主进程 `answerTrailingCount` / `answerTailIndices` 同口径（反向扫到第一个非内容块为止），
+ * 渲染端的两处调用共用它：整轮结束后的兜底扫描、以及收尾阶段（`answerPhaseFrom`）的实时摘出。
+ * 整段以思考结尾（没有正文可摘）时返回空数组——没有交付给用户的回答，交给折叠统一收着。
+ */
+export function tailContentIndices(
+  blocks: MessageBlock[],
+  indices: readonly number[]
+): number[] {
+  let cut = indices.length
+  let sawText = false
+  while (cut > 0) {
+    const type = blocks[indices[cut - 1]]?.type
+    if (type === 'text') {
+      sawText = true
+      cut -= 1
+      continue
+    }
+    if (type === 'reasoning') {
+      cut -= 1
+      continue
+    }
+    break
+  }
+  return sawText ? indices.slice(cut) : []
+}
+
+/**
+ * 答复边界（协议层真源）→ 渲染端的块下标集合。
+ *
+ * 主进程随内容 chunk 打 `answer` 标记、随 done 事件给 `answerBlocks` 数量
+ * （见 main/harness/service/answer-boundary.ts）。渲染端**只读不猜**：
+ * 这里把「末尾第 N 块是答复」翻译成本端合并块数组的下标集合，并且带两道守卫——
+ *   ① 数量必须落在数组范围内（协议演进/版本不一致时宁可不标，也不能错切）；
+ *   ② 被标的块必须是 reasoning/text。
+ *
+ * 返回 null = 明确没有答复（本轮中止、只有工具/思考、或主进程已撤回标记）；
+ * 返回 undefined = 主进程没给结论（老版本/异常路径）——此时渲染端保留旧行为。
+ *
+ * @param blocks 渲染端合并块数组（**必须先滤掉只在渲染端存在的过渡块**，例如 retrying）
+ */
+export function answerTailIndices(
+  blocks: MessageBlock[],
+  count: number | null | undefined
+): Set<number> | null | undefined {
+  if (count === undefined) return undefined
+  if (count === null || count <= 0) return null
+  if (count > blocks.length) return undefined
+  const start = blocks.length - count
+  const out = new Set<number>()
+  for (let i = start; i < blocks.length; i += 1) {
+    const type = blocks[i]?.type
+    if (type !== 'reasoning' && type !== 'text') return undefined
+    out.add(i)
+  }
+  return out
+}
+
+/**
+ * 从**已累积的标记**推出本端当前的答复下标集合（流式过程中每来一块重算）。
+ *
+ * 口径与主进程 `answerTrailingCount` **必须逐字一致**：末尾连续的 reasoning/text，
+ * 且**至少含一个 text 块**才算答复——只有思考的尾巴不算（本轮被中止、或思考刚流出、
+ * 正文还没到）。这条曾经漏过：渲染端只要末尾是 reasoning 就返回集合，于是末轮思考一
+ * 开始流动就被摘到折叠外，而主进程同时刻的边界是 0，两侧对同一形态给出相反结论。
+ *
+ * 用本端自己的块数组算，因此不受两侧块数差异影响（渲染端会合并相邻 reasoning、
+ * 还会有只在渲染端存在的过渡块）。返回 null = 当前没有答复（调用方据此把答复收回折叠里）。
+ */
+export function answerMarkedIndices(blocks: MessageBlock[]): Set<number> | null {
+  let start = blocks.length
+  let sawText = false
+  while (start > 0) {
+    const type = blocks[start - 1]?.type
+    if (type === 'text') {
+      sawText = true
+      start -= 1
+      continue
+    }
+    if (type === 'reasoning') {
+      start -= 1
+      continue
+    }
+    break
+  }
+  if (!sawText) return null
+  const out = new Set<number>()
+  for (let i = start; i < blocks.length; i += 1) out.add(i)
+  return out
+}

@@ -209,7 +209,16 @@ export async function produceMessages(
    *  新一轮模型输出开始（新 tool_block_start）时重置为 false。 */
   toolsStarted?: { value: boolean },
   /** 回合内插话：待注入消息的排空回调（未配置则不启用） */
-  drainInjections?: DrainInjectionsFn
+  drainInjections?: DrainInjectionsFn,
+  /**
+   * 「本段内容是否属于最终答复」标记（协议层真源，见 service/answer-boundary.ts）。
+   *
+   * 由两个生产者共享：消息流给正文/推理打标，工具流一旦开始就把标记翻成 false
+   * （本轮已经进入干活的阶段，此前流出的都是探索途中的话）。新一轮模型输出
+   * （tool_block_start）后正文会重新打 true——最后留下的那一段就是这一轮的答复。
+   * 渲染端据此把答复摆在折叠外，不再靠自己的 loading 状态猜。
+   */
+  answerMark?: { value: boolean }
 ): Promise<void> {
   // lastSent 跨所有记录共享：某些 provider 会把整段文本拆成多条重复发送
   let lastSentReasoning = ''
@@ -217,6 +226,8 @@ export async function produceMessages(
   const reasoningDelta = makeDeltaComputer()
   const contentDelta = makeDeltaComputer()
   const toolBlocks = new Map<number, { id?: string; name: string }>()
+  /** 是否出现过工具活动（含 `task` 派遣）：出现后，模型进入「工具轮之后」的回合 */
+  let sawToolActivity = false
   let lastProgressAt = 0
   const silenceWatchdog = createSilenceWatchdog('消息流')
   const drainInjectionsInto = createInjectionDrainer(toolsStarted, drainInjections)
@@ -227,22 +238,33 @@ export async function produceMessages(
       // 段落边界：本轮工具已完成下发（标志为 false）时把待注入插话并入模型并下发 steered chunk
       await drainInjectionsInto(false)
       if (rec.kind === 'reasoning') {
+        // 工具轮之后的段落：模型不会在同一段里既跑工具又给答复，所以这些内容就是答复
+        if (sawToolActivity && answerMark) answerMark.value = true
         const delta = reasoningDelta(rec.text, lastSentReasoning)
         if (delta) {
-          enqueue({ reasoning_content: delta })
+          enqueue({ reasoning_content: delta, answer: answerMark?.value ?? true })
         }
         lastSentReasoning = rec.text
       } else if (rec.kind === 'retry_attempt') {
         // 模型单次请求失败后在原调用处自动重试（不整轮重跑），转发进度给前端展示
         enqueue({ retrying: { attempt: rec.attempt, retries: rec.retries } })
       } else if (rec.kind === 'text') {
+        if (sawToolActivity && answerMark) answerMark.value = true
         const delta = contentDelta(rec.text, lastSentContent)
         if (delta) {
-          enqueue({ content: delta })
+          enqueue({ content: delta, answer: answerMark?.value ?? true })
         }
         lastSentContent = rec.text
       } else if (rec.kind === 'tool_block_start') {
-        if (rec.name === 'task') continue
+        if (rec.name === 'task') {
+          // 派遣子代理同样算「动手干活」：此前流出的正文/推理是探索途中的话
+          sawToolActivity = true
+          if (answerMark) answerMark.value = false
+          continue
+        }
+        // 本轮已进入「干活」阶段：此前流出的正文/推理都是探索途中的话，撤回答复标记
+        sawToolActivity = true
+        if (answerMark) answerMark.value = false
         // 新一轮模型输出开始：工具尚未开始执行，恢复参数构建中保活
         if (toolsStarted) toolsStarted.value = false
         toolBlocks.set(rec.index, { id: rec.id, name: rec.name })
@@ -297,7 +319,9 @@ export async function produceToolCalls(
   /** 当前话题 id：结果详情按话题分目录存放（话题删除时一并清理） */
   topicId?: number,
   /** 回合内插话：待注入消息的排空回调（未配置则不启用） */
-  drainInjections?: DrainInjectionsFn
+  drainInjections?: DrainInjectionsFn,
+  /** 「本段内容是否属于最终答复」共享标记（见 produceMessages 说明）：工具一开始执行即撤回 */
+  answerMark?: { value: boolean }
 ): Promise<void> {
   const drainInjectionsInto = createInjectionDrainer(toolsStarted, drainInjections)
   try {
@@ -305,6 +329,8 @@ export async function produceToolCalls(
       if (signal?.aborted) break
       // 模型消息已结束、系统开始执行：停止消息流的参数构建中保活（防幽灵卡）
       if (toolsStarted) toolsStarted.value = true
+      // 本轮已经动手干活：此前流出的正文/推理不是这一轮的答复，撤回标记
+      if (answerMark) answerMark.value = false
       const input = call.input as Record<string, unknown>
       // task 工具是智能体派遣器：转换为 subAgent 事件下发，前端只看到智能体块
       if (call.name === 'task') {
@@ -403,13 +429,17 @@ export async function produceSubAgents(
   markDone: MarkDoneFn,
   safeGetOutput: SafeGetOutputFn,
   /** 当前话题 id：子代理调用内置工具时，结果详情同样按话题存放 */
-  topicId?: number
+  topicId?: number,
+  /** 「本段内容是否属于最终答复」共享标记（见 produceMessages 说明）：派遣子代理也算动手干活 */
+  answerMark?: { value: boolean }
 ): Promise<void> {
   const groups = new Map<string, SubAgentGroupState>()
   const silenceWatchdog = createSilenceWatchdog('子代理流')
   try {
     for await (const rec of run.subagents as AsyncIterable<SubAgentRecord>) {
       if (signal?.aborted) break
+      // 主代理把活派给了子代理：此前流出的正文/推理是探索途中的话，撤回答复标记
+      if (answerMark) answerMark.value = false
       silenceWatchdog.reset()
       const key = `${rec.name}:${rec.causeId ?? ''}`
       let group = groups.get(key)

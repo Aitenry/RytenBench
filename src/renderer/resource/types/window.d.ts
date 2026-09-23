@@ -73,6 +73,31 @@ export interface StructuredMessage {
   __topicId?: number
   /** 目标自动续跑轮的起始标记（流首 chunk） */
   goalRound?: { round: number; objective: string }
+  /** 本段正文/推理是否属于本轮最终答复（明细见 main/harness/service/answer-boundary.ts） */
+  answer?: boolean
+  /** 本轮终局标记（仅 `harness-stream-done` 载荷使用） */
+  turnFinal?: TurnFinal
+}
+
+/**
+ * 本轮终局标记（主进程给出的权威结论，渲染端只读不猜）。
+ * 与 main/harness/service/answer-boundary.ts 的 TurnFinal 同构。
+ */
+export interface TurnFinal {
+  /** 本次流是否自然跑完（false = 用户停止 / 渲染帧失效中止） */
+  settled: boolean
+  /** 本轮是否目标自动续跑轮 */
+  goalRound: boolean
+  /** 目标轮次号（非目标轮为 undefined） */
+  round?: number
+  /** 轮次结束时目标是否已完成 */
+  goalClosed?: boolean
+  /** 是否还会自动续跑下一轮（false = 这就是最后一轮） */
+  goalWillContinue?: boolean
+  /** 最终答复在主进程累积块里的起始下标（null = 本轮没有答复） */
+  answerFrom: number | null
+  /** 最终答复包含的块数（渲染端从自己数组末尾往前数同样多块） */
+  answerBlocks: number
 }
 
 /** 生成中的插话队列条目（主进程为单一真源，广播视图不含附件正文） */
@@ -240,6 +265,8 @@ export interface Window {
           assistantDialogueId?: number
           /** 助手段落表（有插话切段时多段，每段一条库内行） */
           segments?: { messageId: string; dialogueId?: number }[]
+          /** 本轮终局标记（最终答复边界 + 目标是否收口，见 TurnFinal） */
+          turnFinal?: TurnFinal
         }) => void
       ) => () => void
       onStreamError: (callback: (error: { error: string; topicId?: number }) => void) => () => void

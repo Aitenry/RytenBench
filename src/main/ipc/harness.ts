@@ -25,7 +25,9 @@ import type { QueueAttachments } from '../harness/queue-store'
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models'
 import { getProviderService } from '../provider/service'
 import { getSubAgentDefs } from '../harness/preload-cache'
-import { todoStore, closeOutInProgress } from '../harness/runtime/todo'
+import { todoStore } from '../harness/runtime/todo'
+import { closeOutInProgress, decideCloseOutOnTurnEnd } from '../harness/runtime/todo-closeout'
+import { answerTrailingCount, type TurnFinal } from '../harness/service/answer-boundary'
 import { goalStore } from '../harness/runtime/goal'
 import { jobsRegistry } from '../harness/runtime/jobs'
 import { subagentSessions } from '../harness/runtime/subagent-sessions'
@@ -364,6 +366,30 @@ async function runHarnessTurn(
   })
   const acc = newAccumulator()
 
+  /**
+   * 本轮「最终答复」边界（协议层真源；判定见 service/answer-boundary.ts）。
+   *
+   * 内容推进它、**撤回**也由它表达：`markAnswer` 每次都用累积块重算，
+   * 结果从「有答复」变成「没答复」时下发一条显式 `answer: false` 的撤回 chunk
+   * ——否则渲染端已经把那段内容摆到折叠外了，主进程悄悄改主意它无从得知。
+   * 空内容 chunk 不表态（`undefined`），不会误清渲染端的标记。
+   */
+  let answerBlocks = 0
+  let answerHas = false
+  const markAnswer = (): void => {
+    const next = answerTrailingCount(acc.blocks)
+    // 从「有答复」变回「没答复」：显式撤回，否则渲染端已经把那段内容摆到折叠外了
+    if (next === 0 && answerHas) {
+      safeSend(event.sender, 'harness-stream-chunk', { answer: false, __topicId: topicId })
+    }
+    answerBlocks = next
+    answerHas = next > 0
+  }
+
+  /** 本轮终局标记（随 harness-stream-done 下发；渲染端据此知道「这就是最后一轮」） */
+  let goalRoundWillContinue: boolean | null = null
+  let goalRoundClosed: boolean | null = null
+
   /** 把本轮助手输出落库并登记 */
   const flushSegment = async (): Promise<void> => {
     let dialogueId: number | null = null
@@ -494,6 +520,9 @@ async function runHarnessTurn(
             acc.blocks.push({ type: 'reasoning', reasoning: rc })
           }
         }
+        // 答复边界随内容推进（内容到达即重算，不再等「整轮结束」这个渲染端猜出来的时刻）；
+        // answer=false 表示模型已经动手干活，渲染端据此把标记撤回
+        if (chunk.answer !== false) markAnswer()
       }
       if (chunk.content) {
         const c = String(chunk.content)
@@ -517,6 +546,7 @@ async function runHarnessTurn(
             acc.blocks.push({ type: 'text', text: c })
           }
         }
+        if (chunk.answer !== false) markAnswer()
       }
       if (chunk.tool) {
         if (chunk.tool.name === 'task') {
@@ -612,10 +642,11 @@ async function runHarnessTurn(
             }
           }
         }
+        // 工具卡落下即打断「答复尾巴」：边界退回最后一段非工具内容（通常是 null）
+        markAnswer()
       }
       if (chunk.subAgent) {
         const sa = chunk.subAgent
-
         // 注意：不把子智能体输出拼入 acc.content（主消息 content）。
         // 子智能体详情已持久化在 blocks 的 subAgent 块（含 children），
         // 历史重载按 blocks 渲染即可；若再拼入 content，会导致：
@@ -774,6 +805,8 @@ async function runHarnessTurn(
             }
           }
         }
+        // 派遣子代理同样打断答复尾巴（子代理块不是答复内容）
+        markAnswer()
       }
       // 发送失败（渲染帧已失效）时中止流，避免持续向死帧发送。
       // 统一走 safeSend（修复：裸 send 在帧失效窗口期不抛异常、try/catch 是死代码，
@@ -803,6 +836,10 @@ async function runHarnessTurn(
     stopMemSampling()
   }
 
+  // 3.9 本轮答复边界的终值：流已经停止追加（含被停止/出错/渲染帧失效的路径），
+  //     此刻重算一次即可给出定论。边界从「有」变回「无」时这里会补发一条撤回 chunk。
+  markAnswer()
+
   // 4. 保存本轮各段 AI 回复（流执行失败时逐段跳过：截断的不完整回复不应落库为完整消息）。
   //    落库后把新对话行 id 回传前端：流式期间的消息用的是临时 id，只有拿到库里的行 id，
   //    前端才能把用量行（按 dialogue_id 关联）当场贴到这条消息上，不必重新加载会话。
@@ -821,31 +858,68 @@ async function runHarnessTurn(
     })
   }
 
-  // 4.5 收尾任务清单：本轮正常结束时，把仍停在 in_progress 的项就地结为 completed。
+  // 4.5 收尾任务清单：本轮结束后不会再有人接手这份清单时，把仍停在 in_progress 的项结为 completed。
   //
   // 为什么需要这条兜底：清单是模型自己写的，而它的收尾书写并不可靠——2026-09-18 实例：
   // 六项工作全部做完、回答也交付了，最后一次 write_todos 仍留一项 in_progress，卡片于是
-  // 永远停在「5/6 已完成 · 1 进行中」，看起来像没更新。清单描述的是「本轮的任务」，
-  // 本轮既然正常交付，就不该再有「进行中」。
+  // 永远停在「5/6 已完成 · 1 进行中」。2026-09-23 用户再报同一现象（「明明任务已经完成了，
+  // 页面还是显示有最后一个任务没有完成」），根因是这里此前**整轮跳过**目标自动续跑轮：
+  // 目标在末轮 complete 后再也没有下一轮去收尾，那一项就永远转圈。
   //
-  // 以下情形一律不动清单（它们都意味着本轮不算「干完了」）：
-  // - 用户点了停止（aborted）；
-  // - 流执行失败（acc.failed，该段已跳过落库）；
-  // - 正挂着待回答的提问（模型在等用户，任务确实还在中途）；
-  // - 目标自动续跑轮（后面还有轮次，由模型自己继续维护清单）。
-  if (
-    !acc.failed &&
-    !abortController.signal.aborted &&
-    options?.turnMeta?.source !== 'goal-round' &&
-    !questionService.getPending(topicId)
-  ) {
-    const closed = closeOutInProgress(todoStore, topicId)
-    if (closed) {
-      logger.info(
-        `[Harness] 本轮收尾：${closed.completed}/${closed.total} 项已完成（原仍有进行中项）`
-      )
+  // 判定规则（见 runtime/todo-closeout.ts 的 decideCloseOutOnTurnEnd）只有一条：
+  // 「本轮结束后还会不会有下一轮接手」——会（目标 active + 已武装且未达轮次上限）就不动，
+  // 不会就收尾。因此用户停止、流失败、目标完成/阻塞/被 disarm/达轮次上限这几条路径同样收尾：
+  // 那时什么都没在跑，留着「进行中」是假状态（应用重开后前端还会从 store 把它读回来）。
+  // 「还会不会续跑」一律问 goalStore.willContinue（与驱动器派发门槛同一处真源，避免漂移）。
+  try {
+    const decision = await decideCloseOutOnTurnEnd({
+      isGoalRound: options?.turnMeta?.source === 'goal-round',
+      goalWillContinue: () => goalStore.willContinue(topicId),
+      hasPendingQuestion: () => questionService.getPending(topicId) != null
+    })
+    // 终局标记的两个事实顺手记下（与收尾判定同一处真源，不额外查库）：
+    // 渲染端据此知道「这是不是最后一轮、目标有没有收口」，不必再从别处推
+    if (options?.turnMeta?.source === 'goal-round') {
+      goalRoundWillContinue = await goalStore.willContinue(topicId)
+      goalRoundClosed = (await goalStore.load(topicId))?.phase === 'complete'
     }
+    if (decision.close) {
+      const closed = closeOutInProgress(todoStore, topicId)
+      if (closed) {
+        logger.info(
+          `[Harness] 本轮收尾：结掉 ${closed.closed} 项进行中 → ${closed.completed}/${closed.total} 已完成`
+        )
+      }
+    } else {
+      logger.info(`[Harness] 本轮不收尾任务清单（${decision.reason}）`)
+    }
+  } catch (err) {
+    // 收尾只是兜底：判定或广播失败不能影响落库与前端收尾通知
+    logger.warn('[Harness] 收尾任务清单失败:', err)
   }
+
+  /**
+   * 本轮终局标记（协议层权威结论，见 service/answer-boundary.ts 的 TurnFinal）。
+   *
+   * 以前这些事实只写进日志：渲染端要判断「这一轮的答复在哪、是不是最后一轮」，
+   * 只能拿自己的 loading 状态猜——而 loading 的翻转在目标续跑里被驱动器压掉了
+   * （goal-driver 是 `while (await driveOnce())`，上一轮的 done 与下一轮的 goalRound
+   * 几乎同 tick 落地）。现在结论随 done 事件一起下发。
+   */
+  const turnFinal: TurnFinal = {
+    settled: !abortController.signal.aborted && !acc.failed,
+    goalRound: options?.turnMeta?.source === 'goal-round',
+    round: options?.turnMeta?.goalRound,
+    goalClosed: goalRoundClosed ?? undefined,
+    goalWillContinue: goalRoundWillContinue ?? undefined,
+    answerFrom: answerBlocks > 0 ? acc.blocks.length - answerBlocks : null,
+    answerBlocks
+  }
+  logger.info(
+    `[Harness] 本轮终局：settled=${turnFinal.settled}, goalRound=${turnFinal.goalRound}` +
+      `${turnFinal.round != null ? `(round=${turnFinal.round}, closed=${turnFinal.goalClosed}, willContinue=${turnFinal.goalWillContinue})` : ''}` +
+      `, answer=${turnFinal.answerBlocks}块(from ${turnFinal.answerFrom}), blocks=${acc.blocks.length}`
+  )
 
   // 5. 清理并通知渲染进程流式输出已完成
   streamAbortControllers.delete(event.sender.id)
@@ -859,7 +933,9 @@ async function runHarnessTurn(
     segments: segments.map((seg) => ({
       messageId: seg.messageId,
       dialogueId: seg.dialogueId ?? undefined
-    }))
+    })),
+    // 终局标记（含最终答复边界）：渲染端只读不猜
+    turnFinal
   })
   return { topicId, cancelled: abortController.signal.aborted }
 }

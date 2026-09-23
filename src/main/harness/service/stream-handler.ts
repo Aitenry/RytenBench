@@ -140,6 +140,12 @@ export async function* runStream(
     // 防止已完成的工具卡被复活（用户报障：不要阻塞）；新一轮模型输出开始时重置
     const toolsStarted = { value: false }
 
+    // 共享标志：「本段内容是否属于这一轮的最终答复」（协议层真源）。
+    // 内容流出时默认为 true，一旦出现工具/子代理活动就翻 false（撤回），
+    // 新一轮模型输出的正文重新打 true——最后留下的那一段才是这一轮的答复。
+    // 渲染端据此把答复摆在任务折叠之外，不再靠自己的 loading 状态猜（见 answer-boundary.ts）。
+    const answerMark = { value: true }
+
     // 启动三个生产者
     const msgProducer = produceMessages(
       run,
@@ -148,7 +154,8 @@ export async function* runStream(
       markDone,
       toolsStarted,
       // 回合内插话：消息流在「本轮工具已完成下发」的段落边界排空待注入插话
-      options?.drainInjections
+      options?.drainInjections,
+      answerMark
     ).catch(() => {})
     const toolProducer = produceToolCalls(
       run,
@@ -159,7 +166,8 @@ export async function* runStream(
       toolsStarted,
       options?.topicId,
       // 每条工具调用完成下发后也排空一次（工具尚未开始执行的窗口由消息流守卫排空兜底）
-      options?.drainInjections
+      options?.drainInjections,
+      answerMark
     ).catch(() => {})
     const subAgentProducer = produceSubAgents(
       run,
@@ -167,7 +175,8 @@ export async function* runStream(
       enqueue,
       markDone,
       safeGetOutput,
-      options?.topicId
+      options?.topicId,
+      answerMark
     ).catch(() => {})
 
     // 主消费者循环：从队列中取出并 yield

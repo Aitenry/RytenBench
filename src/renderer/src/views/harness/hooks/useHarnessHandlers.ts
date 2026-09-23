@@ -12,7 +12,8 @@ import {
   computeTextDelta,
   pushBlock,
   findPlaceholderPreparingTool,
-  coalesceChunks
+  coalesceChunks,
+  answerTailIndices
 } from '../utils/harnessHelpers'
 import {
   getProviderDisplayName,
@@ -921,6 +922,15 @@ export const useHarnessHandlers = (): UseHarnessHandlersReturn => {
           }
         }
 
+        /**
+         * **流式期间不动折叠布局**（用户 2026-09-24：「还是出现内容从折叠里面移到外面，
+         * 一会又被移进去」）：主进程随 chunk 下发的 `answer` 实时标记不再驱动布局——
+         * 那时边界还没有定论（模型随时可能接着调工具，刚写的那句话就不是答复），
+         * 一摘就会出现「先露到折叠外、再被收回折叠里」的来回搬。
+         *
+         * 布局只在 done 事件（下面的 done 分支）一次性按主进程的权威结论定格：
+         * 折叠外只留**最终结果正文 + 紧挨着它的思考**，其余内容全部留在任务段/前期探索里。
+         */
         return {
           ...msg,
           content: updatedContent,
@@ -1021,7 +1031,7 @@ export const useHarnessHandlers = (): UseHarnessHandlersReturn => {
       })
 
       const doneCleanup = (window as unknown as Window).api.harness.onStreamDone(
-        ({ topicId: doneTopicId, assistantDialogueId, userDialogueId, segments }) => {
+        ({ topicId: doneTopicId, assistantDialogueId, userDialogueId, segments, turnFinal }) => {
           // 守卫：只处理本 topic 的完成事件（Set 分发可能导致旧 handler 收到其他 topic 的事件）
           if (doneTopicId !== topicId) return
 
@@ -1078,17 +1088,31 @@ export const useHarnessHandlers = (): UseHarnessHandlersReturn => {
               )
               return prev.map((msg, i) => {
                 if (msg.loading) {
+                  // 结束兜底移除「正在重试」过渡块（成功路径在首个数据 chunk 时已移除；
+                  // 此处覆盖中止/重试耗尽等未产生数据的收尾）——**先滤再算答复边界**，
+                  // 否则只在渲染端存在的过渡块会把「末尾 N 块」数错位
+                  const settledBlocks = msg.blocks.filter((b) => b.type !== 'retrying')
                   return {
                     ...msg,
                     loading: false,
+                    /**
+                     * 本轮终局：主进程在 done 事件里给出权威结论（TurnFinal）。
+                     *
+                     * `answerBlocks` 是最终答复的块数（0 = 本轮没有答复），用**数量**而不是
+                     * 下标，因为两侧块数不一致（渲染端合并相邻 reasoning、还有过渡块）；
+                     * 数量对不上本地数组时 answerTailIndices 返回 undefined，退回旧行为，
+                     * 绝不错切。缺 turnFinal（老版本主进程）时同样什么都不改。
+                     */
+                    answer:
+                      turnFinal?.answerBlocks === undefined
+                        ? msg.answer
+                        : (answerTailIndices(settledBlocks, turnFinal.answerBlocks) ?? undefined),
                     dialogueId:
                       segmentIds.get(msg.id) ??
                       (i === lastLoading
                         ? (assistantDialogueId ?? msg.dialogueId)
                         : msg.dialogueId),
-                    // 结束兜底移除「正在重试」过渡块（成功路径在首个数据 chunk 时已移除；
-                    // 此处覆盖中止/重试耗尽等未产生数据的收尾）
-                    blocks: msg.blocks.filter((b) => b.type !== 'retrying')
+                    blocks: settledBlocks
                   }
                 }
                 if (i === lastUser) {
