@@ -133,7 +133,8 @@ const CopyButton = ({
   return (
     <button
       onClick={handleCopy}
-      className={`absolute top-3 right-3 p-2 rounded-lg transition-all ${
+      style={{ top: 9, right: 9 }}
+      className={`absolute p-2 rounded-lg transition-all ${
         isDarkMode
           ? 'bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-white'
           : 'bg-gray-200 hover:bg-gray-300 text-gray-600 hover:text-gray-900'

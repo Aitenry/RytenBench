@@ -324,6 +324,35 @@ body {
   background: transparent;
 }
 
+/* ======== antd 提示气泡（Tooltip / Tour）======== */
+
+/**
+ * 亮色下把提示气泡从「黑底白字」改成与其它浮层一致的白卡观感（用户 2026-09-24：
+ * 「白色主题下是黑色的，应该是白色的才对」）。
+ *
+ * 为什么不改主题 token：气泡的底色/字色来自全局别名 token `colorBgSpotlight`（黑）与
+ * `colorTextLightSolid`（白），而这两个 token 同时被 Button 主色/危险按钮的文字、Badge、
+ * Avatar、Menu dark、Switch、Tag 等在用——改 token 会连坐一片（主按钮会变成深色字）；
+ * antd v6 也没开放气泡自己的颜色组件 token（内部 tooltipBg / tooltipColor 由上面两个
+ * 别名 token 直接写死，传 theme.components.Tooltip 不生效）。所以按组件类名覆盖，只影响气泡。
+ *
+ * 与背景的分离靠 antd 自带的 dropShadowPopover 阴影（挂在气泡根元素上的 filter）。
+ * 暗色主题（.dark）保持 antd 默认的深灰底白字。
+ *
+ * `.ant-tooltip-container` 是气泡正文的类名（antd v6 / @rc-component/tooltip 1.4 的
+ * Popup 渲染；v5 时代叫 -inner）。不确定这一点时看：改了没生效就是类名变了。
+ */
+:root:not(.dark) .ant-tooltip .ant-tooltip-container {
+  color: rgba(0, 0, 0, 0.88);
+  background-color: #fff;
+}
+
+/* 箭头跟着气泡底色走（不带箭头的提示不受影响） */
+:root:not(.dark) .ant-tooltip .ant-tooltip-arrow,
+:root:not(.dark) .ant-tooltip .ant-tooltip-arrow::before {
+  background: #fff;
+}
+
 /* 模型选择弹窗（ModelRecoveryModal）目录滚动区：
    5px 超细 + 圆角滑块，轨道隐藏；悬停滑块加深（与项目其余细滚动条同一套中性色） */
 .model-picker-scroll::-webkit-scrollbar {
