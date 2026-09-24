@@ -149,12 +149,6 @@ export const enUSHarness: typeof zhCNHarness = {
     changedFiles: '{{count}} file(s) changed',
     changedFilesTip:
       '{{files}} file(s) changed in this step · {{pending}} awaiting review (click to diff)',
-    preflight: 'Exploration',
-    todoList: 'To-do list',
-    todoCompleted: '<mono>{{completed}}</mono>/<mono>{{total}}</mono> completed',
-    todoInProgress: '· <mono>{{count}}</mono> in progress',
-    todoEmpty: 'No to-dos yet. Ask the model to plan tasks with write_todos',
-    todoFallback: 'To-do {{index}}',
     toolOpenFile: 'Open file',
     toolRevealDir: 'Reveal in explorer',
     toolViewDetail: 'View result details',
@@ -242,8 +236,7 @@ export const enUSHarness: typeof zhCNHarness = {
     elapsedTooltip: 'Time from asking to the answer finishing',
     elapsed: 'Took {{elapsed}}',
     elapsedSeconds: '{{seconds}}s',
-    elapsedMinutes: '{{minutes}}m {{seconds}}s',
-    usageTooltip: 'Usage for this turn'
+    elapsedMinutes: '{{minutes}}m {{seconds}}s'
   },
   usagePanel: {
     title: 'Usage for this turn',

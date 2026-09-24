@@ -5,18 +5,21 @@ import { useTranslation } from '@renderer/i18n'
 import type { UsageDetails } from '../../utils/usage'
 
 /**
- * 「本轮用量」面板（悬停用量徽标时弹出，位置在徽标上方）。
+ * 「本轮用量」面板（悬停用量徽标时弹出；默认挂在徽标上方，上方余量不够时翻到下方）。
  *
  * 结构：标题（左标签 / 右总量）→ 发丝线 → 提供方 / 模型（长文本单独占一行，
  * 塞进右对齐的值列会被折断）→ dt/dd 数值明细 → 输出下的推理子行。
  * 数据全部来自模型真实回传的 token（归一化见 utils/usage.ts），
  * 字段缺失的行不渲染——例如没有缓存明细就不显示「缓存命中」。
+ *
+ * 宽度由调用方给：窗口/消息区变窄时要跟着收窄，写死宽度会顶破裁剪容器
+ * （见 MessageActions 的 measureUsagePanel）。
  */
 
 /** 千分位（面板里显示精确值） */
 const exact = (value: number): string => value.toLocaleString('en-US')
 
-const UsagePanel: React.FC<{ details: UsageDetails }> = ({ details }) => {
+const UsagePanel: React.FC<{ details: UsageDetails; width: number }> = ({ details, width }) => {
   const { token } = theme.useToken()
   const { t } = useTranslation()
 
@@ -65,7 +68,7 @@ const UsagePanel: React.FC<{ details: UsageDetails }> = ({ details }) => {
       role="dialog"
       aria-label={t('harness.usagePanel.title')}
       style={{
-        width: 300,
+        width,
         background: token.colorBgElevated,
         border: `1px solid ${token.colorBorderSecondary}`,
         borderRadius: 10,

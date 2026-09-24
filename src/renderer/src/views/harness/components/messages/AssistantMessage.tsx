@@ -28,9 +28,11 @@ import {
   getToolStatusLabel,
   shouldShowSilenceIndicator,
   buildTaskSegments,
+  buildToolRuns,
   answerPhaseFrom,
   tailContentIndices,
-  type TaskSegment
+  type TaskSegment,
+  type ToolRunEntry
 } from '@renderer/views/harness/utils/harnessHelpers'
 
 /** 定制化卡片工具集：进行中/完成态共用同款卡片外形（光泽只在进行中扫过，完成后静止） */
@@ -58,10 +60,11 @@ const CARD_TOOLS = new Set([
 const COLLAPSE_HEADER_CENTERED = { header: { alignItems: 'center' } } as const
 
 /**
- * 段内容（前期探索 / 任务段）展开后的固定高度上限。
+ * 任务段内容展开后的固定高度上限。
  *
  * 比思考框的 256 高一些：段里装的是工具卡 + 思考 + 正文，单块更高（工具卡本身 30+px），
  * 320 大约能一屏看到 6~8 步，够判断「这一步在干什么」而不至于把整段铺满屏幕。
+ * 前期探索段不走这个框（用户 2026-09-25：只有任务段折叠），所以这里只服务任务段。
  */
 const SEGMENT_BODY_MAX_HEIGHT = 320
 
@@ -326,182 +329,56 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
     const codeBg = isDarkMode ? 'rgba(255,255,255,0.06)' : '#f3f4f6'
     const collapseBg = isDarkMode ? 'rgba(255,255,255,0.04)' : '#f9fafb'
 
-    /** 解析待办数组：write_todos 的 input（对象）或 read_todos 的 output（JSON 字符串）
-     *  匹配 Claude Code / deepagents 的 TodoWrite 工具 schema：
-     *    { todos: [{ content, status: "pending"|"in_progress"|"completed", activeForm }] }
-     *  也兼容 { items: [...] } 格式 */
-    const extractTodos = (
-      source: Record<string, unknown> | string | null | undefined
-    ): Record<string, unknown>[] | null => {
-      if (source == null) return null
-      try {
-        const obj =
-          typeof source === 'string' ? (JSON.parse(source) as Record<string, unknown>) : source
-        if (Array.isArray(obj.todos)) return obj.todos as Record<string, unknown>[]
-        if (Array.isArray(obj.items)) return obj.items as Record<string, unknown>[]
-        return null
-      } catch {
-        return null
-      }
-    }
-
-    /** 待办清单卡片（write_todos / read_todos 共用，非折叠）：图标 + 统计头 + 清单行 */
-    const renderTodoCard = (
-      todos: Record<string, unknown>[],
-      key: string | number,
-      isNested: boolean
-    ): React.ReactNode => {
-      const getStatus = (t: Record<string, unknown>): string => String(t.status ?? 'pending')
-
-      const isCompleted = (t: Record<string, unknown>): boolean => getStatus(t) === 'completed'
-
-      const isInProgress = (t: Record<string, unknown>): boolean => getStatus(t) === 'in_progress'
-
-      const completedCount = todos.filter(isCompleted).length
-      const inProgressCount = todos.filter(isInProgress).length
-      const total = todos.length
-      const allCompleted = total > 0 && completedCount === total
-
-      return (
-        <div
-          key={key}
+    /**
+     * 状态点 + 计数胶囊（任务段头 / 同名工具组头共用一处几何）。
+     *
+     * 用户 2026-09-25：「前面那个点应该放在数字里面，并且里面和数字居中，水平和垂直」——
+     * 点是**胶囊内部的子元素**，不再是胶囊左边独立的圆点。
+     *
+     * 居中靠 flex：胶囊自己 `inline-flex` + `align-items/justify-content: center`，
+     * 于是「点 + 数字」这一组在胶囊里水平、垂直都居中；数字用等宽字形 + 胶囊给 minWidth，
+     * 位数变化时各行数字仍对齐（等宽只用于数字）。
+     *
+     * 两处共用同一个函数：这个胶囊的几何（18px 高、9px 圆角、1px 描边、6px 点、4px 间距）
+     * 写两遍必然漂移——这个项目里「同一约束写两处」踩过不止一次。
+     */
+    const countPill = (count: number, dotColor: string, prefix = ''): React.ReactNode => (
+      <span
+        data-count-pill={count}
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 4,
+          flex: '0 0 auto',
+          boxSizing: 'border-box',
+          height: 18,
+          minWidth: 30,
+          padding: '0 6px',
+          borderRadius: 9,
+          border: `1px solid ${colorBorderSecondary}`,
+          color: colorTextTertiary,
+          fontSize: 11,
+          fontFamily: MONO_FONT
+        }}
+      >
+        <span
+          data-count-dot={dotColor}
           style={{
-            background: collapseBg,
-            marginBottom: isNested ? '4px' : '6px',
-            borderRadius: '8px',
-            padding: isNested ? '6px 10px' : '8px 12px'
+            width: 6,
+            height: 6,
+            borderRadius: '50%',
+            flex: '0 0 auto',
+            background: dotColor
           }}
-          className="rounded-lg"
-        >
-          <div className="flex items-center gap-2 mb-2">
-            <RiListCheck
-              size={isNested ? 14 : 16}
-              style={{ color: total > 0 && allCompleted ? '#52c41a' : colorTextSecondary }}
-            />
-            {total === 0 ? (
-              <span
-                style={{
-                  color: colorTextSecondary,
-                  fontSize: isNested ? '12px' : '14px',
-                  fontWeight: 500
-                }}
-              >
-                {t('harness.assistantMessage.todoList')}
-              </span>
-            ) : (
-              <span
-                style={{
-                  color: colorTextSecondary,
-                  fontSize: isNested ? '12px' : '14px',
-                  fontWeight: 500
-                }}
-              >
-                <Trans
-                  i18nKey="harness.assistantMessage.todoCompleted"
-                  values={{ completed: completedCount, total }}
-                  components={{ mono: <span style={{ fontFamily: MONO_FONT }} /> }}
-                />
-              </span>
-            )}
-            {inProgressCount > 0 && !allCompleted ? (
-              <span
-                style={{
-                  color: colorTextTertiary,
-                  fontSize: isNested ? '11px' : '12px'
-                }}
-              >
-                <Trans
-                  i18nKey="harness.assistantMessage.todoInProgress"
-                  count={inProgressCount}
-                  components={{ mono: <span style={{ fontFamily: MONO_FONT }} /> }}
-                />
-              </span>
-            ) : null}
-          </div>
-          {total === 0 ? (
-            <div style={{ color: colorTextTertiary, fontSize: isNested ? '12px' : '13px' }}>
-              {t('harness.assistantMessage.todoEmpty')}
-            </div>
-          ) : (
-            <div className="flex flex-col gap-1">
-              {todos.map((todo, i) => {
-                const status = getStatus(todo)
-                const done = status === 'completed'
-                const progressing = status === 'in_progress'
-                const title =
-                  (progressing ? (todo.activeForm as string) : undefined) ||
-                  (todo.content as string) ||
-                  (todo.title as string) ||
-                  (todo.text as string) ||
-                  (todo.name as string) ||
-                  t('harness.assistantMessage.todoFallback', { index: i + 1 })
-
-                return (
-                  <div key={i} className="flex items-start gap-2">
-                    {done ? (
-                      <RiCheckboxCircleLine
-                        size={isNested ? 14 : 16}
-                        style={{ color: '#52c41a', marginTop: '2px', flexShrink: 0 }}
-                      />
-                    ) : progressing ? (
-                      <div
-                        style={{
-                          width: isNested ? 14 : 16,
-                          height: isNested ? 14 : 16,
-                          marginTop: '2px',
-                          flexShrink: 0,
-                          borderRadius: '50%',
-                          border: `1.5px dashed ${colorTextTertiary}`
-                        }}
-                      />
-                    ) : (
-                      <RiCheckboxBlankCircleLine
-                        size={isNested ? 14 : 16}
-                        style={{ color: colorTextTertiary, marginTop: '2px', flexShrink: 0 }}
-                      />
-                    )}
-                    <span
-                      style={{
-                        color: done ? colorTextTertiary : colorText,
-                        fontSize: isNested ? '12px' : '14px',
-                        textDecoration: done ? 'line-through' : 'none',
-                        wordBreak: 'break-word'
-                      }}
-                    >
-                      {title}
-                    </span>
-                  </div>
-                )
-              })}
-            </div>
-          )}
-        </div>
-      )
-    }
-
-    /** write_todos：从入参（模型提交的整份清单）渲染卡片；空清单不渲染 */
-    const renderWriteTodos = (
-      tool: ToolCall,
-      key: string | number,
-      isNested = false
-    ): React.ReactNode => {
-      const todos = extractTodos((tool.input || {}) as Record<string, unknown>)
-      if (!todos || todos.length === 0) return null
-      return renderTodoCard(todos, key, isNested)
-    }
-
-    /** read_todos：完成后从输出（{ todos: [...] } JSON）渲染同款待办清单卡片；
-     *  未完成或解析失败返回 null，由下方通用工具折叠兜底展示原始输入输出 */
-    const renderReadTodos = (
-      tool: ToolCall,
-      key: string | number,
-      isNested = false
-    ): React.ReactNode => {
-      if (tool.status !== 'completed') return null
-      const todos = extractTodos(tool.output)
-      if (!todos) return null
-      return renderTodoCard(todos, key, isNested)
-    }
+        />
+        {/* lineHeight:1：不让行高把胶囊撑高，垂直居中交给 flex */}
+        <span style={{ lineHeight: 1 }}>
+          {prefix}
+          {count}
+        </span>
+      </span>
+    )
 
     /** 内置工具卡片（非折叠）：进行中 / 完成态共用同款外形，具体渲染在 ToolResultCard.tsx。
      *
@@ -1390,15 +1267,20 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
           )
         }
         if (block.type === 'tool' && block.tool) {
-          if (block.tool.name === 'write_todos') {
-            const todosCard = renderWriteTodos(block.tool, blockIndex)
-            if (todosCard) return todosCard
-          }
-          // read_todos 专属卡片：完成后渲染；未完成/解析失败返回 null，落到下方通用折叠
-          if (block.tool.name === 'read_todos') {
-            const readTodosCard = renderReadTodos(block.tool, blockIndex)
-            if (readTodosCard) return readTodosCard
-          }
+          /**
+           * 待办清单（write_todos / read_todos）**不进消息正文**（用户 2026-09-25：
+           * 「页面上面不要再显示这张『0/9 已完成 · 1 进行中』清单卡」）。
+           *
+           * 计划在别处已经可见，正文里再铺一张整表是重复：
+           *   - 段头按任务分好（点段头右侧的清单图标展开该段快照，见 renderTaskChecklist）；
+           *   - 输入框上方那张实时任务卡（TaskProgressCard）显示当前话题的整份清单，状态实时更新。
+           *
+           * 为什么以前只有 write_todos 不显示：分段时 write_todos 块被登记进 `writeIndices`、
+           * 不进段正文；read_todos 没被登记，它的卡片照渲染不误——第一个 write_todos 之前那段
+           * 一铺开（同日「只有任务段折叠」），它就露在消息最上面。现在两者一律跳过，
+           * 既不渲染卡片，也不落成通用工具折叠行（那是纯粹的记账动作）。
+           */
+          if (block.tool.name === 'write_todos' || block.tool.name === 'read_todos') return null
           const isPreparing = block.tool.status === 'preparing'
           const isExecuting =
             block.tool.status === 'executing' || (!block.tool.status && !block.tool.output)
@@ -1644,14 +1526,10 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                 )
               }
               if (child.type === 'tool' && child.tool) {
-                if (child.tool.name === 'write_todos') {
-                  const todosCard = renderWriteTodos(child.tool, ci, true)
-                  if (todosCard) return todosCard
-                }
-                // read_todos 专属卡片（嵌套）：完成后渲染；未完成/解析失败回退通用折叠
-                if (child.tool.name === 'read_todos') {
-                  const readTodosCard = renderReadTodos(child.tool, ci, true)
-                  if (readTodosCard) return readTodosCard
+                // 待办清单不进正文（含子代理层级，见上面 renderBlockAt 里的说明）：计划由
+                // 段头快照与输入框上方的实时任务卡承担，正文里只留干活的过程。
+                if (child.tool.name === 'write_todos' || child.tool.name === 'read_todos') {
+                  return null
                 }
                 const isPreparing = child.tool.status === 'preparing'
                 const isExecuting =
@@ -2037,6 +1915,8 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
        *   **一轮结束或从库里加载的历史消息一律折起**（用户要求：历史消息默认折叠、块结束后折叠）。
        *   注意末段里往往接着「最终答复正文」——那部分会从折叠里摘出来常显（见 answerIndices），
        *   否则一折就把答案藏了。
+       * - **折的只有任务段**（用户 2026-09-25：「只有任务才折叠」）：第一个 write_todos 之前那段
+       *   不再包一层「前期探索」折叠壳，内容原样铺开（见下面 `if (!segment.task)` 处注释）。
        */
       const segments = buildTaskSegments(mergedBlocks, { streaming: Boolean(message.loading) })
       const lastSegIndex = segments.length - 1
@@ -2115,6 +1995,115 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
         </React.Fragment>
       )
 
+      /**
+       * 同名工具组外壳（用户 2026-09-25：「连续相同的工具调用需要折叠到一起」）。
+       *
+       * 归并规则是纯函数 `buildToolRuns`（相邻同名、≥2 才成组、待办记账工具透明）。
+       * 这里只管外观与默认折叠态，与段/思考框同款：antd Collapse + FoldBody（固定高度 + 内滚 +
+       * 「展开全部」），所以展开一组十连读也不会把正文顶成一堵墙。
+       *
+       * 组头只放「哪个工具 + 几次 + 状态点」：内容一点就展开，不在这里重复卡片上的路径。
+       *
+       * 默认折叠态：**组里还有调用在进行中就不折**（同「要能看见正在干什么」这条口径——
+       * 流式时最后一组通常正开着），其余（整组完成、历史消息）一律折起。
+       */
+      const renderToolRun = (entry: Extract<ToolRunEntry, { kind: 'run' }>): React.ReactNode => {
+        const runKey = `toolrun-${entry.indices[0]}-${entry.name}`
+        const members = entry.indices.map((i) => mergedBlocks[i])
+        const activeNow =
+          Boolean(message.loading) &&
+          members.some((block) => {
+            const status = block?.tool?.status
+            return (
+              status === 'preparing' || status === 'executing' || (!status && !block?.tool?.output)
+            )
+          })
+        const allDone = members.every((block) => block?.tool?.status === 'completed')
+        const collapsed = foldOverride[runKey] ?? !activeNow
+        /**
+         * 组头图标：**认不出工具名时不能摆 `<RunIcon/>`**。
+         *
+         * `TOOL_IN_PROGRESS_ICONS` 只收录内置工具（以及 mnemon 走大脑图标），
+         * MCP/自建工具名（`mcp__…` 之类）取到的是 undefined——直接渲染 undefined 组件会抛
+         * 「Element type is invalid … Check the render method of `AssistantMessage`」，
+         * 整条消息白屏（这条踩过：工装夹具里全是 read_file / grep，恰好都在表里，漏了这条路径）。
+         * 与逐卡渲染处的兜底保持一致：内置 → 表里图标，mnemon → 大脑图标，其余 → 不摆图标。
+         */
+        const RunIcon =
+          TOOL_IN_PROGRESS_ICONS[entry.name] ??
+          (entry.name.startsWith('mnemon_') ? RiBrain4Line : undefined)
+        const headLabel = (
+          <span
+            data-tool-run={entry.name}
+            data-tool-run-count={entry.indices.length}
+            className="flex items-center min-w-0"
+            style={{ width: '100%', gap: 8 }}
+          >
+            {RunIcon ? (
+              <RunIcon size={14} style={{ color: colorTextSecondary, flex: '0 0 auto' }} />
+            ) : null}
+            <span
+              style={{
+                flex: '1 1 auto',
+                fontSize: 12,
+                lineHeight: '18px',
+                color: colorTextSecondary,
+                minWidth: 0,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                textAlign: 'left'
+              }}
+            >
+              {entry.name}
+            </span>
+            {/* 状态点 + 计数：点与数字同在胶囊里居中（见 countPill）。
+                × 前缀：这一格是「同名调用几次」，与任务段的「本段还有几步」区分开 */}
+            {countPill(
+              entry.indices.length,
+              activeNow ? token.colorPrimary : allDone ? token.colorSuccess : colorBorderSecondary,
+              '×'
+            )}
+          </span>
+        )
+        return (
+          <Collapse
+            key={runKey}
+            styles={COLLAPSE_HEADER_CENTERED}
+            items={[
+              {
+                key: runKey,
+                label: headLabel,
+                children: (
+                  <FoldBody
+                    maxHeight={SEGMENT_BODY_MAX_HEIGHT}
+                    streaming={streamingFollow}
+                    followSignal={followSignal}
+                    kind="tool-run"
+                  >
+                    {entry.indices.map(renderBlockAt)}
+                  </FoldBody>
+                )
+              }
+            ]}
+            activeKey={collapsed ? [] : [runKey]}
+            onChange={(keys) =>
+              setFoldOverride((prev) => ({ ...prev, [runKey]: !keys.includes(runKey) }))
+            }
+            destroyOnHidden
+            size="small"
+            style={{ marginBottom: '6px', background: collapseBg }}
+            className="tool-run-collapse rounded-lg border-0"
+          />
+        )
+      }
+
+      /** 正文块序列：单块照旧走块级缓存，同名工具组换成组外壳 */
+      const renderBlockSequence = (indices: number[]): React.ReactNode =>
+        buildToolRuns(mergedBlocks, indices).map((entry) =>
+          entry.kind === 'run' ? renderToolRun(entry) : renderBlockAt(entry.index)
+        )
+
       return segments.map((segment, segIndex) => {
         // 正文块：跳过 write_todos（清单另开），其余照旧走块级缓存
         const allIndices = segment.blockIndices.filter((i) => !segment.writeIndices.includes(i))
@@ -2127,14 +2116,14 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
          *   工具卡会打断回溯——被工具隔开的思考与末尾答复不连续，硬摘会打乱时序；
          * - 必须至少摘到一段正文才成立：整段以思考结尾（本轮被中止等）时不摘，
          *   交给折叠统一收着，避免把「没有答复的消息」整块搬到外面；
-         * - **不对「有没有任务」做区分**：前期探索段现在一律包裹，普通问答同样要摘
-         *   （仿真台抓到过：摘出漏掉时普通问答的正文会整段消失）。
+         * - **不对「有没有任务」做区分**：探索段（第一个 write_todos 之前）现在一律铺开，
+         *   普通问答同样要摘（仿真台抓到过：摘出漏掉时普通问答的正文会整段消失）。
          *
          * **整轮结束前只在「收尾阶段」摘**（用户 2026-09-25 选定的口径）：
          * 流式期间，只有当模型**自己把清单收口**（最后一次 `write_todos` 里至少一项 completed、
          * 且没有 in_progress——真实会话里最终回答就紧跟在那次写入之后）时，末尾那段
          * 「思考 + 正文」才边流边渲染到折叠外；其余情形（每项任务结束时那句话、任务进行中的
-         * 思考）一律留在任务段/前期探索折叠里，不搬出来、也不会被收回去。
+         * 思考）一律留在任务段折叠里 / 探索段铺开处，不搬出来、也不会被收回去。
          * 判据见 `answerPhaseFrom`（纯块数据，不是猜 loading）。
          *
          * 整轮结束时（done）：按协议层结论定格——`message.answer` 是 `Set` 就用它；
@@ -2151,7 +2140,8 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
          */
         const answerSet = new Set(answerIndices)
         const visibleIndices = allIndices.filter((i) => !answerSet.has(i))
-        const blocksNode = visibleIndices.map(renderBlockAt)
+        // 连续同名工具调用在这里被并成折叠组（见 renderBlockSequence / buildToolRuns）
+        const blocksNode = renderBlockSequence(visibleIndices)
         const answerNode = answerIndices.map(renderBlockAt)
 
         /**
@@ -2247,88 +2237,25 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
             </button>
           ) : null
         // ── 规划前的那一段（第一个 write_todos 之前）─────────────────────────
-        // 里面有大量「思考过程 + 探索用的 read/grep」，一条 300 块的消息里能有 57 块堆在这，
-        // 任务段折起来之后它就是正文里唯一剩下的那堵墙（用户：「前面有思考需要移出来」）。
-        // **不管这条消息有没有任务，这一段一律包裹**（用户 2026-09-18 要求）：普通问答的
-        // 思考过程同样收进「前期探索」，答复由 answerIndices 摘到折叠外常显。
-        // 唯一的例外：段里没有可折叠内容（整条消息只有答复正文）——那就不摆一个空的探索头。
+        // 用户 2026-09-25：「**不需要前期探索这个东西，即前面的内容不要折叠起来了。只有任务才折叠**」。
+        //
+        // 所以这一段的折叠壳（「前期探索」标签 + 步数胶囊 + 改动徽标 + 固定高度的内容框）整体去掉，
+        // 内容原样铺在消息里：思考块自己仍是可折的「思考过程」、工具卡各有自己的折叠，
+        // 铺开并不是一堵墙。
+        //
+        // 边界因此简化成一条：**任务段折，其余一律不折**。这也顺带解决了改动徽标当初存在的理由
+        // （用户 2026-09-23：段一折起，段里的编辑卡片就全被卸载了）——这一段不再折，卡片不会被卸载。
+        // 唯一例外：段里没有可展示内容（整条消息只有答复正文）——那就不留空壳，直接返回答复。
         if (!segment.task) {
           if (visibleIndices.length === 0) return answerNode
-          /**
-           * 默认折叠态（无人工覆盖时）——用户 2026-09-22 报的「前期探索结束后没有自动收起」
-           * 就出在这里，规则改成**按「这段还活着吗」判**，不再看「有没有答复可摘」：
-           *
-           * - 后面还有任务段（`segIndex !== lastSegIndex`）⇒ 探索阶段**已经结束**
-           *   （分段依据是 write_todos 快照，任务段一出现就意味着探索跑完了），
-           *   立刻收起——**哪怕这一轮还在流式**。旧实现只在 `!message.loading` 时收，
-           *   于是任务已经开始跑、探索段还敞着，正在干的活被挤到屏幕外面。
-           * - 段是末段：只有「本轮已结束」才收；流式中它是唯一在长内容的段，收起来等于看不见。
-           * - 末段若已把答复摘到折叠外，收起后答复仍在外面常显，不丢内容。
-           */
-          const isLastSegment = segIndex === lastSegIndex
-          const collapsed = foldOverride[segment.key] ?? (!isLastSegment || !message.loading)
-          const headLabel = (
-            <span
-              data-task-segment={segment.key}
-              className="flex items-center min-w-0"
-              style={{ width: '100%', gap: 8 }}
-            >
-              <span
-                style={{
-                  flex: '1 1 auto',
-                  fontSize: 12,
-                  lineHeight: '18px',
-                  color: colorTextSecondary,
-                  minWidth: 0,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                  textAlign: 'left'
-                }}
-              >
-                {t('harness.assistantMessage.preflight')}
-              </span>
-              {/* 状态点 + 计数成一组：点放在数字**前面**（用户 2026-09-19 要求），
-                  标签因此占满左侧，长任务名能多显示几个字 */}
-              <span style={{ display: 'flex', alignItems: 'center', gap: 4, flex: '0 0 auto' }}>
-                <span
-                  style={{
-                    width: 6,
-                    height: 6,
-                    borderRadius: '50%',
-                    flex: '0 0 auto',
-                    background: colorBorderSecondary
-                  }}
-                />
-                <span
-                  style={{
-                    flex: '0 0 auto',
-                    fontSize: 11,
-                    lineHeight: '16px',
-                    minWidth: 22,
-                    textAlign: 'center',
-                    padding: '0 5px',
-                    borderRadius: 9,
-                    border: `1px solid ${colorBorderSecondary}`,
-                    color: colorTextTertiary,
-                    fontFamily: MONO_FONT
-                  }}
-                >
-                  {visibleIndices.length}
-                </span>
-              </span>
-              {/* 探索段同样可能改了文件（模型常常边看边改）：段一折起，段里的编辑卡片
-                  就全被卸载了，所以改动徽标两个段头都要挂（用户 2026-09-23 报的场景） */}
-              {changedChip}
-            </span>
+          return (
+            <React.Fragment key={segment.key}>
+              <div data-segment-plain={segment.key} style={{ marginBottom: '6px' }}>
+                {blocksNode}
+              </div>
+              {answerNode}
+            </React.Fragment>
           )
-          return renderSegmentShell({
-            segKey: segment.key,
-            label: headLabel,
-            collapsed,
-            children: blocksNode,
-            tail: answerNode
-          })
         }
 
         /**
@@ -2336,7 +2263,8 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
          *
          * 注意 `segment.status === 'completed'` 不只是「有下一个任务段」——write_todos 把
          * 本段任务标成 completed 也算，所以「任务干完了、模型正在写总结」这一刻它会立刻收起，
-         * 不必等整轮结束。用户 2026-09-22 的「前期探索结束后没有自动收起」与这一条同源。
+         * 不必等整轮结束（用户 2026-09-22 报的「这一段跑完还敞着」就是这个口径；当时同源的问题
+         * 出在现已删除的探索段自动收起上）。
          *
          * **末段例外**（用户 2026-09-24：答复不能从折叠里搬到外面、也不能被收回去）：
          * 整轮结束前，答复只能待在折叠里（那时边界还没定论），所以承载它的**末段必须敞着**，
@@ -2377,40 +2305,12 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
             >
               {segment.task}
             </span>
-            {/* 状态点 + 计数成一组：点放在数字**前面**（用户 2026-09-19 要求） */}
-            <span style={{ display: 'flex', alignItems: 'center', gap: 4, flex: '0 0 auto' }}>
-              <span
-                style={{
-                  width: 6,
-                  height: 6,
-                  borderRadius: '50%',
-                  flex: '0 0 auto',
-                  // 完成 = 绿、进行中 = 主色、未开始 = 描边灰（用户要求：已完成的任务要显示绿色）
-                  background: done
-                    ? token.colorSuccess
-                    : active
-                      ? token.colorPrimary
-                      : colorBorderSecondary
-                }}
-              />
-              <span
-                style={{
-                  flex: '0 0 auto',
-                  fontSize: 11,
-                  lineHeight: '16px',
-                  // 定宽 + 居中：位数不同时各行数字也对齐（等宽字形只用于数字）
-                  minWidth: 22,
-                  textAlign: 'center',
-                  padding: '0 5px',
-                  borderRadius: 9,
-                  border: `1px solid ${colorBorderSecondary}`,
-                  color: colorTextTertiary,
-                  fontFamily: MONO_FONT
-                }}
-              >
-                {visibleIndices.length}
-              </span>
-            </span>
+            {/* 状态点 + 计数：点与数字同在胶囊里居中（见 countPill） */}
+            {countPill(
+              visibleIndices.length,
+              // 完成 = 绿、进行中 = 主色、未开始 = 描边灰（用户要求：已完成的任务要显示绿色）
+              done ? token.colorSuccess : active ? token.colorPrimary : colorBorderSecondary
+            )}
             {/* 改动徽标：段体折起后段里唯一还能说明「这轮改了什么」的东西 */}
             {changedChip}
             {segment.snapshot.length > 0 ? (

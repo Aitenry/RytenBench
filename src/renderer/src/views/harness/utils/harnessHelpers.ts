@@ -247,6 +247,64 @@ export function buildTaskSegments(
 }
 
 /**
+ * 「连续相同的工具调用折到一起」（用户 2026-09-25：「连续相同的工具调用需要折叠到一起」）。
+ *
+ * 动因：前期探索段不再折叠之后（同日另一条要求），模型一轮里连着读 10 个文件、连着 grep 5 次
+ * 就直接摊成十来个卡片，铺开的正文又变成一堵墙。归并只做一件事：把**相邻的同名工具块**
+ * 收进一个折叠组，组头写清「哪个工具、几次」，卡片本身一点就展开、内容一点没少。
+ *
+ * 规则（纯函数，便于离线断言）：
+ *  - 只认**相邻**同名（`read_file → read_file`）。中间夹了别的工具、正文或思考就断开——
+ *    那已经是两个步骤，合起来会掩盖执行顺序；
+ *  - 长度 ≥ `TOOL_RUN_MIN` 才成组，单次调用保持原样（不为一次调用多摆一层折叠）；
+ *  - 待办记账工具（write_todos / read_todos）**既不参与也不打断**：它们在正文里不渲染
+ *    （见 AssistantMessage 的说明），视觉上本来就是透明的，让它们把一串读文件切成两半不对；
+ *  - 非工具块原样按顺序返回，调用方照旧走块级缓存渲染。
+ */
+const HIDDEN_INLINE_TOOLS = new Set(['write_todos', 'read_todos'])
+
+/** 成组的最小长度：2 = 相邻两次同名就并成一组 */
+export const TOOL_RUN_MIN = 2
+
+export type ToolRunEntry =
+  { kind: 'block'; index: number } | { kind: 'run'; name: string; indices: number[] }
+
+/** 把一段块下标序列归并成「单块 / 同名工具组」的渲染序列（保持原顺序） */
+export function buildToolRuns(items: MessageBlock[], indices: number[]): ToolRunEntry[] {
+  const out: ToolRunEntry[] = []
+  let runName = ''
+  let runIndices: number[] = []
+  const flush = (): void => {
+    if (runIndices.length >= TOOL_RUN_MIN) {
+      out.push({ kind: 'run', name: runName, indices: runIndices })
+    } else {
+      for (const index of runIndices) out.push({ kind: 'block', index })
+    }
+    runName = ''
+    runIndices = []
+  }
+
+  for (const index of indices) {
+    const block = items[index]
+    const name = block?.type === 'tool' ? block.tool?.name : undefined
+    if (name && HIDDEN_INLINE_TOOLS.has(name)) continue
+    if (name && name === runName) {
+      runIndices.push(index)
+      continue
+    }
+    flush()
+    if (name) {
+      runName = name
+      runIndices = [index]
+    } else {
+      out.push({ kind: 'block', index })
+    }
+  }
+  flush()
+  return out
+}
+
+/**
  * 目标原文：从「目标续跑」消息里取出人类可读的目标描述。
  *
  * 主进程下发的 goalRound 消息，content 有两种形态：
@@ -395,10 +453,7 @@ export function answerPhaseFrom(blocks: MessageBlock[]): number {
  * 渲染端的两处调用共用它：整轮结束后的兜底扫描、以及收尾阶段（`answerPhaseFrom`）的实时摘出。
  * 整段以思考结尾（没有正文可摘）时返回空数组——没有交付给用户的回答，交给折叠统一收着。
  */
-export function tailContentIndices(
-  blocks: MessageBlock[],
-  indices: readonly number[]
-): number[] {
+export function tailContentIndices(blocks: MessageBlock[], indices: readonly number[]): number[] {
   let cut = indices.length
   let sawText = false
   while (cut > 0) {

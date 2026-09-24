@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { theme, Tooltip, App } from 'antd'
 import {
   RiFileCopyLine,
@@ -53,6 +53,52 @@ function readFeedback(key: string): Feedback {
   }
 }
 
+/* ──────────── 「本轮用量」面板的自适应定位 ──────────── */
+
+/** 面板默认宽度（放得下就用它）与距裁剪容器边缘的留白 */
+const USAGE_PANEL_W = 300
+const USAGE_EDGE_GAP = 12
+
+/** 裁剪容器的四边（视口坐标） */
+interface Bounds {
+  left: number
+  right: number
+  top: number
+  bottom: number
+}
+
+/**
+ * 用量面板可用的范围（视口坐标）。
+ *
+ * 面板是绝对定位挂在用量徽标上的（见下方悬停块）。它一旦探出**裁剪容器**的边缘，消息区
+ * 就会被顶出滚动条——滚动容器是 `overflow-y-scroll`，而按规范另一轴的 visible 会被
+ * 计算成 auto，窗口一窄横向滚动条就冒出来（用户 2026-09-24 报的现象），纵向则是面板
+ * 被裁掉半截。
+ *
+ * 所以这里向上找最近的裁剪祖先，取它的**内容盒**当边界：`clientLeft / clientWidth /
+ * clientHeight` 已经扣掉边框和滚动条，不必再去猜滚动条占多宽。找不到（异常路径）退回窗口。
+ */
+const clipBounds = (el: HTMLElement): Bounds => {
+  for (let node = el.parentElement; node && node !== document.body; node = node.parentElement) {
+    const style = window.getComputedStyle(node)
+    if (style.overflowX !== 'visible' || style.overflowY !== 'visible') {
+      const rect = node.getBoundingClientRect()
+      return {
+        left: rect.left + node.clientLeft,
+        right: rect.left + node.clientLeft + node.clientWidth,
+        top: rect.top + node.clientTop,
+        bottom: rect.top + node.clientTop + node.clientHeight
+      }
+    }
+  }
+  return {
+    left: 0,
+    right: document.documentElement.clientWidth,
+    top: 0,
+    bottom: document.documentElement.clientHeight
+  }
+}
+
 /**
  * 助手消息操作栏：复制 / 评价 / 存入记忆 / 分支到新对话 / 用量 / 用时 / 时间。
  *
@@ -87,6 +133,57 @@ const MessageActions: React.FC<MessageActionsProps> = ({
   const [savingMemory, setSavingMemory] = useState(false)
   const [branching, setBranching] = useState(false)
   const [usageOpen, setUsageOpen] = useState(false)
+  /** 用量面板的实测布局：宽度按可用空间收窄，水平偏移 + 上下翻转保证不越出裁剪容器 */
+  const [usageLayout, setUsageLayout] = useState({ width: USAGE_PANEL_W, offset: 0, above: true })
+  const usageAnchorRef = useRef<HTMLSpanElement>(null)
+  const usagePanelRef = useRef<HTMLSpanElement>(null)
+
+  /**
+   * 量一次用量面板的布局：
+   * - 宽度 = min(默认宽, 可用宽)；
+   * - 横向默认左缘对齐徽标，右侧放不下就往左挪、挪到边界为止；
+   * - 纵向默认挂上方（用户 2026-09-19 的要求），上方放不下才翻到下方。
+   * 目标是整块面板落在裁剪容器里：既不把消息区顶出滚动条，也不被裁掉半截。
+   */
+  const measureUsagePanel = useCallback((): void => {
+    const anchorEl = usageAnchorRef.current
+    if (!anchorEl) return
+    const anchor = anchorEl.getBoundingClientRect()
+    const { left, right, top, bottom } = clipBounds(anchorEl)
+    const width = Math.min(USAGE_PANEL_W, Math.max(0, right - left - USAGE_EDGE_GAP * 2))
+    const preferred = Math.min(anchor.left, right - USAGE_EDGE_GAP - width)
+    const offset = Math.max(left + USAGE_EDGE_GAP, preferred) - anchor.left
+    /**
+     * 上下翻转：面板还没挂上时高度量不到（0），此时保持「挂上方」——
+     * 挂上后的那一趟 layout effect 会带着真实高度重来一次。
+     * 两边的余量都比面板矮时选余量大的那边（总会被裁，至少裁得少）。
+     */
+    const height = usagePanelRef.current?.offsetHeight ?? 0
+    const roomAbove = anchor.top - top - USAGE_EDGE_GAP
+    const roomBelow = bottom - anchor.bottom - USAGE_EDGE_GAP
+    const above = height <= roomAbove || roomBelow <= roomAbove
+    setUsageLayout((prev) =>
+      prev.width === width && prev.offset === offset && prev.above === above
+        ? prev
+        : { width, offset, above }
+    )
+  }, [])
+
+  /**
+   * 面板挂上后量一次（layout 阶段，早于绘制）：翻面/收窄都发生在首帧之前，不会闪。
+   * 依赖 width 是因为收窄会改变折行、进而改变高度——换宽后要按新高度重判上下。
+   */
+  useLayoutEffect(() => {
+    if (usageOpen) measureUsagePanel()
+  }, [usageOpen, usageLayout.width, measureUsagePanel])
+
+  /* 面板开着时窗口尺寸变化（拖动窗口）→ 重量一次，别又探出边界 */
+  useEffect(() => {
+    if (!usageOpen) return
+    const onResize = (): void => measureUsagePanel()
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [usageOpen, measureUsagePanel])
 
   useEffect(() => {
     setFeedback(readFeedback(feedbackKey))
@@ -270,8 +367,15 @@ const MessageActions: React.FC<MessageActionsProps> = ({
     </Tooltip>
   )
 
-  const chip = (icon: React.ReactNode, text: string, title?: string): React.ReactNode => (
-    <Tooltip title={title ?? ''} {...tooltipCommon}>
+  /**
+   * 徽标：图标 + 文本。
+   *
+   * 只读元信息（时间 / 用时 / 用量）本身没有可点的动作，所以提示是可选的：给了 title
+   * 才挂一行提示。用量徽标不挂——它的悬停已经弹出「本轮用量」明细面板，再叠一个黑框提示
+   * 只是重复（用户 2026-09-24：「移除『本轮用量』这个东西」，指的正是那个 antd 提示框）。
+   */
+  const chip = (icon: React.ReactNode, text: string, title?: string): React.ReactNode => {
+    const pill = (
       <span
         style={{
           display: 'inline-flex',
@@ -289,8 +393,15 @@ const MessageActions: React.FC<MessageActionsProps> = ({
         {icon}
         {text}
       </span>
-    </Tooltip>
-  )
+    )
+    return title ? (
+      <Tooltip title={title} {...tooltipCommon}>
+        {pill}
+      </Tooltip>
+    ) : (
+      pill
+    )
+  }
 
   return (
     <div className="flex items-center gap-1 mt-2 flex-wrap">
@@ -362,24 +473,30 @@ const MessageActions: React.FC<MessageActionsProps> = ({
       {usageText && usageDetails && (
         /* 悬停出「本轮用量」面板：结构与 DSH 一致——标题（左标签 / 右总量）+ 发丝线 + dt/dd 明细 */
         <span
+          ref={usageAnchorRef}
           style={{ position: 'relative', display: 'inline-flex' }}
           onMouseEnter={() => setUsageOpen(true)}
           onMouseLeave={() => setUsageOpen(false)}
         >
-          {chip(<RiDatabase2Line size={12} />, usageText, t('harness.messageActions.usageTooltip'))}
+          {/* 用量徽标不挂 antd 提示：悬停直接出「本轮用量」明细面板（见下方），提示框是多余的重复 */}
+          {chip(<RiDatabase2Line size={12} />, usageText)}
           {usageOpen && (
             <span
+              ref={usagePanelRef}
               style={{
                 position: 'absolute',
-                // 用量面板**挂上方**（用户 2026-09-19：「这个提示内容不需要放在下面啊」）：
-                // 它有 7 行明细，挂下面会压住下一条消息；而按钮那种一行提示统一在下方。
-                bottom: 'calc(100% + 4px)',
-                left: 0,
+                // 用量面板**默认挂上方**（用户 2026-09-19：「这个提示内容不需要放在下面啊」）：
+                // 它有 7 行明细，挂下面会压住下一条消息；上方余量不够时按量好的结果翻到下方。
+                ...(usageLayout.above
+                  ? { bottom: 'calc(100% + 4px)' }
+                  : { top: 'calc(100% + 4px)' }),
+                // 左缘默认对齐徽标；右侧放不下就按量好的偏移往左挪（宽度同步收窄，见 measureUsagePanel）
+                left: usageLayout.offset,
                 zIndex: 30,
                 display: 'block'
               }}
             >
-              <UsagePanel details={usageDetails} />
+              <UsagePanel details={usageDetails} width={usageLayout.width} />
             </span>
           )}
         </span>

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { theme } from 'antd'
 import type { TFunction } from 'i18next'
 import { useTranslation } from '@renderer/i18n'
+import { tailContentIndices } from '@renderer/views/harness/utils/harnessHelpers'
 import type { Message } from '@renderer/types/harness'
 
 interface MessageLocatorProps {
@@ -41,10 +42,10 @@ interface Turn {
   /** 提问文本（标题） */
   question: string
   /**
-   * 该轮**全部**助手段落（顺序拼接；一段 = 一条助手消息）。
+   * 该轮**结论**（各助手消息的最终答复，顺序拼接；一段 = 一条助手消息）。
    *
    * 一轮里助手消息不止一条：插话/停止后「继续」会切段，目标自动续跑也各占一条。
-   * 只取最后一条会让悬停卡漏掉这一轮前面写过的内容。
+   * 每条消息只贡献自己的最终答复——夹在工具调用之间的过程叙述不进卡片。
    */
   answer: string
 }
@@ -94,13 +95,46 @@ const plainText = (t: TFunction, lang: string, raw: string | null | undefined): 
 }
 
 /**
+ * 一条助手消息里的**结论**正文（本轮交付给用户的最终答复）。
+ *
+ * 为什么不直接用 `message.content`：它是这条消息**全部**正文的累积，夹在工具调用之间的
+ * 过程叙述（「让我先看一下…」「现在开始改…」）也在里面，预览卡于是变成一整篇流水账。
+ * 边界取协议层真源（见 main/harness/service/answer-boundary.ts）：
+ *   - `Set`：这些块是本轮答复（下标就指本条消息的 blocks）；
+ *   - `null`：明确没有答复（中止 / 只有工具与思考）；
+ *   - `undefined`：主进程没给结论（流式进行中 / 历史消息 / 老版本），退回与聊天区同款的
+ *     反向扫描（tailContentIndices：末尾连续的「思考 + 正文」，至少含一段正文才算结论）。
+ * 只取 text 块：思考是答复的来源，但不是结论本身，预览卡里不铺开。
+ */
+const answerTextOf = (t: TFunction, lang: string, message: Message): string => {
+  const blocks = message.blocks
+  // 无块消息（历史/异常路径）：整条正文就是唯一可用的内容
+  if (blocks.length === 0) return plainText(t, lang, message.content)
+  if (message.answer === null) return ''
+  const indices =
+    message.answer instanceof Set
+      ? [...message.answer].sort((a, b) => a - b)
+      : tailContentIndices(
+          blocks,
+          blocks.map((_, i) => i)
+        )
+  const parts: string[] = []
+  for (const index of indices) {
+    const block = blocks[index]
+    if (block?.type === 'text' && block.text) parts.push(block.text)
+  }
+  return plainText(t, lang, parts.join('\n\n'))
+}
+
+/**
  * 轮次导航（对话消息定位）。
  *
  * - 一个刻度 = 一轮提问（**只标用户消息**），等距聚合成一条短列表，整体在消息区里垂直居中；
  * - 刻度多了就地压缩间距，永远不超出可视高度；
  * - 「当前轮次」= 视口顶部往上最近的那条提问，刻度变白加长（滚动时只比偏移，不重量 DOM）；
- * - 悬停出卡片：标题是这一轮的提问，内容是该轮**所有**助手段落按顺序拼起来的正文
- *   （3 行，超出可滚动；空行分段，便于看出这轮被切过几次）；
+ * - 悬停出卡片：标题是这一轮的提问，内容是该轮各助手消息的**结论**（最终答复）按顺序
+ *   拼起来的正文——过程叙述、工具调用、思考都不进卡片（3 行，超出可滚动；空行分段，
+ *   便于看出这轮被切过几次）；
  * - 点击平滑滚到该轮提问处。
  */
 const MessageLocator: React.FC<MessageLocatorProps> = ({
@@ -121,11 +155,12 @@ const MessageLocator: React.FC<MessageLocatorProps> = ({
   const clearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   /**
-   * 一轮 = 一条用户消息 + 紧随其后、直到下一个提问之前的**每一条**助手消息。
+   * 一轮 = 一条用户消息 + 紧随其后、直到下一个提问之前的每一条助手消息。
    *
-   * 助手内容按顺序累积拼接（不是覆盖）：插话切段、停止后继续、目标自动续跑都会让
-   * 一轮里出现多条助手消息，只留最后一条会丢掉这轮先前的回答。
-   * 拼接前逐条走 plainText——按「单条原文」缓存，流式追加新段落时前面的段落仍命中缓存，
+   * 每条助手消息只贡献自己的**结论**（answerTextOf）：只留过程叙述会变成流水账，
+   * 只留最后一条又会把这轮先前的结论丢掉。多条按顺序拼接（不是覆盖）——插话切段、
+   * 停止后继续会让一轮里出现多条助手消息，后一条往往是前一条答复的续写。
+   * 拼接前逐条走 plainText——按「单条结论」缓存，流式追加新段落时前面的段落仍命中缓存，
    * 不会因为整段字符串变了而把历史长文重新正则一遍。
    */
   const turns = useMemo<Turn[]>(() => {
@@ -139,7 +174,7 @@ const MessageLocator: React.FC<MessageLocatorProps> = ({
         const next = messages[i]
         if (next.role === 'user') break
         if (next.role !== 'assistant') continue
-        const text = plainText(t, lang, next.content)
+        const text = answerTextOf(t, lang, next)
         if (text) parts.push(text)
       }
       list.push({
@@ -326,7 +361,7 @@ const MessageLocator: React.FC<MessageLocatorProps> = ({
         )
       })}
 
-      {/* 悬停卡：标题=这一轮的提问，内容=该轮每一条助手消息按顺序拼起来的正文（3 行，超出滚动） */}
+      {/* 悬停卡：标题=这一轮的提问，内容=该轮各条助手消息的结论（最终答复）拼起来的正文（3 行，超出滚动） */}
       {hoveredTurn && (
         <div
           ref={cardRef}

@@ -142,12 +142,6 @@ export const zhCNHarness = {
     /** 段头上的改动徽标：段体折起后，这是「这一段改了哪几个文件」唯一的可见入口 */
     changedFiles: '{{count}} 个文件已改',
     changedFilesTip: '这一段改了 {{files}} 个文件 · {{pending}} 处待审查（点击看差异）',
-    preflight: '前期探索',
-    todoList: '待办清单',
-    todoCompleted: '<mono>{{completed}}</mono>/<mono>{{total}}</mono> 已完成',
-    todoInProgress: '· <mono>{{count}}</mono> 进行中',
-    todoEmpty: '暂无待办，可先让模型用 write_todos 制定任务计划',
-    todoFallback: '待办 {{index}}',
     toolOpenFile: '打开文件',
     toolRevealDir: '在资源管理器中定位',
     toolViewDetail: '查看结果详情',
@@ -235,8 +229,7 @@ export const zhCNHarness = {
     elapsedTooltip: '本轮提问到回答结束的耗时',
     elapsed: '用时 {{elapsed}}',
     elapsedSeconds: '{{seconds}}秒',
-    elapsedMinutes: '{{minutes}}分{{seconds}}秒',
-    usageTooltip: '本轮用量'
+    elapsedMinutes: '{{minutes}}分{{seconds}}秒'
   },
   usagePanel: {
     title: '本轮用量',
