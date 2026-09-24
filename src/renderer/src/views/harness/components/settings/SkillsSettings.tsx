@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { theme, Button, Input, Switch, Spin, Pagination } from 'antd'
-import { LoadingOutlined, FolderOutlined } from '@ant-design/icons'
+import { theme, Button, Input, Switch, Pagination } from 'antd'
+import { FolderOutlined } from '@ant-design/icons'
+import { SkeletonSettingRows } from '@renderer/components/system/Skeleton'
 import { useMessage } from '@renderer/hooks/useMessage'
 import { useTranslation } from '@renderer/i18n'
 import { Window } from '../../../../../resource/types/window'
@@ -199,10 +200,9 @@ const SkillsSettings: React.FC = () => {
 
       {/* 技能列表 */}
       {loadingSkills ? (
-        <div className="flex items-center justify-center" style={{ padding: '40px 0' }}>
-          <Spin
-            indicator={<LoadingOutlined spin style={{ fontSize: 20, color: colorTextTertiary }} />}
-          />
+        /* 技能行与 SettingRow 同构：左标题 + 描述，右开关 */
+        <div style={{ padding: '4px 0' }}>
+          <SkeletonSettingRows rows={5} />
         </div>
       ) : skills.length > 0 ? (
         <SettingsSection title={t('skillsSettings.listTitle', { count: skills.length })}>

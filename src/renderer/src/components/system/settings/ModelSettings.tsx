@@ -4,7 +4,6 @@ import {
   theme,
   App,
   Tree,
-  Spin,
   Button,
   Modal,
   Form,
@@ -21,6 +20,7 @@ import {
   Collapse,
   type TreeDataNode
 } from 'antd'
+import { SkeletonSettingRows } from '@renderer/components/system/Skeleton'
 import {
   PlusOutlined,
   EditOutlined,
@@ -1228,28 +1228,31 @@ const ModelSettings: React.FC = () => {
             </Space>
           )}
         </div>
-        <Spin spinning={loading}>
-          {providers.length === 0 ? (
-            <div className="py-12 text-center" style={{ color: colorTextSecondary }}>
-              {t('modelSettings.empty.noModels')}
-            </div>
-          ) : (
-            <Tree
-              checkable
-              selectable={false}
-              blockNode
-              showLine={{ showLeafIcon: false }}
-              treeData={treeData}
-              checkedKeys={checkedKeys}
-              onCheck={(keys) => setCheckedKeys(Array.isArray(keys) ? keys : keys.checked)}
-              expandedKeys={expandedKeys}
-              onExpand={(keys) => setExpandedKeys(keys)}
-              titleRender={(node) => renderTreeNodeTitle(node as ProviderTreeNode)}
-              className="provider-directory-tree"
-              style={{ padding: '8px 8px 12px 4px' }}
-            />
-          )}
-        </Spin>
+        {loading ? (
+          /* 厂商 / 模型是树形目录：先按行铺骨架，避免空白之后一次性「长出」整棵树 */
+          <div style={{ padding: '8px 0' }}>
+            <SkeletonSettingRows rows={6} />
+          </div>
+        ) : providers.length === 0 ? (
+          <div className="py-12 text-center" style={{ color: colorTextSecondary }}>
+            {t('modelSettings.empty.noModels')}
+          </div>
+        ) : (
+          <Tree
+            checkable
+            selectable={false}
+            blockNode
+            showLine={{ showLeafIcon: false }}
+            treeData={treeData}
+            checkedKeys={checkedKeys}
+            onCheck={(keys) => setCheckedKeys(Array.isArray(keys) ? keys : keys.checked)}
+            expandedKeys={expandedKeys}
+            onExpand={(keys) => setExpandedKeys(keys)}
+            titleRender={(node) => renderTreeNodeTitle(node as ProviderTreeNode)}
+            className="provider-directory-tree"
+            style={{ padding: '8px 8px 12px 4px' }}
+          />
+        )}
       </SettingsSection>
 
       <Modal

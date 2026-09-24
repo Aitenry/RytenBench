@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react'
-import { Spin } from 'antd'
+import { SkeletonTextLines } from '@renderer/components/system/Skeleton'
 import { RiArrowRightSLine, RiFileLine, RiFolder3Line, RiTerminalBoxLine } from '@remixicon/react'
 import { Trans, useTranslation } from '@renderer/i18n'
 import type { ToolCardKind } from '@renderer/types/harness'
@@ -197,9 +197,10 @@ const ToolDetailView: React.FC<{ tab: ToolDetailTab; style: ToolDetailStyle }> =
 
   const body = (): React.ReactNode => {
     if (loading) {
+      /* 输出是等宽文本，按行铺骨架；配色跟这块面板自己的暗色皮肤走，不读 antd token */
       return (
-        <div className="flex items-center justify-center h-full">
-          <Spin size="small" />
+        <div className="p-3 h-full">
+          <SkeletonTextLines lines={12} dark={style.isDarkMode} />
         </div>
       )
     }

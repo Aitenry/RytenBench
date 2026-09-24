@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useLayoutEffect, useCallback, useMemo, useState } from 'react'
-import { Spin } from 'antd'
+import { SkeletonMessages } from '@renderer/components/system/Skeleton'
 import { useTranslation } from '@renderer/i18n'
 import type { Message } from '@renderer/types/harness'
 import { Window } from '../../../../resource/types/window'
@@ -541,8 +541,9 @@ const HarnessMessageArea: React.FC<HarnessMessageAreaProps> = ({
           ) : (
             <>
               {isLoadingMoreMessages && (
-                <div className="flex justify-center py-3">
-                  <Spin size="small" />
+                /* 更早的消息在上方，用一个气泡轮廓占位；居中转圈会让人以为「正在发消息」 */
+                <div className="py-2">
+                  <SkeletonMessages rows={2} />
                 </div>
               )}
               {hiddenCount > 0 && (

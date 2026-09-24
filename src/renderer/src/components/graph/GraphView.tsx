@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { Button, Empty, Flex, Modal, Spin, theme } from 'antd'
+import { Button, Empty, Flex, Modal, theme } from 'antd'
+import { SkeletonGraph } from '@renderer/components/system/Skeleton'
 import { PlayCircleOutlined } from '@ant-design/icons'
 import { Window } from '../../../resource/types/window'
 import { useMessage } from '@renderer/hooks/useMessage'
@@ -315,11 +316,7 @@ const GraphView: React.FC<GraphViewProps> = ({
             }}
           >
             {isGraphLoading ? (
-              <Flex vertical align="center" justify="center" style={{ height: '100%' }} gap={16}>
-                <Spin size="large">
-                  <div style={{ padding: 50 }} />
-                </Spin>
-              </Flex>
+              <SkeletonGraph />
             ) : graphChartData && graphChartData.nodes.length > 0 ? (
               <GraphCanvas
                 data={graphChartData}

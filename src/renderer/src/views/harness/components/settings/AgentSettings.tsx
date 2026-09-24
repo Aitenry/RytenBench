@@ -3,7 +3,6 @@ import {
   theme,
   Button,
   Switch,
-  Spin,
   Modal,
   Form,
   Input,
@@ -14,7 +13,6 @@ import {
   App
 } from 'antd'
 import {
-  LoadingOutlined,
   PlusOutlined,
   EditOutlined,
   DeleteOutlined,
@@ -22,6 +20,7 @@ import {
   RobotOutlined,
   TeamOutlined
 } from '@ant-design/icons'
+import { SkeletonSettingRows } from '@renderer/components/system/Skeleton'
 import { useMessage } from '@renderer/hooks/useMessage'
 import { useTranslation } from '@renderer/i18n'
 import { Window } from '../../../../../resource/types/window'
@@ -603,12 +602,9 @@ const AgentSettings: React.FC = () => {
         }
       >
         {loading ? (
-          <div className="flex items-center justify-center" style={{ padding: '36px 0' }}>
-            <Spin
-              indicator={
-                <LoadingOutlined spin style={{ fontSize: 20, color: colorTextTertiary }} />
-              }
-            />
+          /* 助手行与 SettingRow 同构：左标题 + 描述，右「开关 + 编辑 + 删除」 */
+          <div style={{ padding: '4px 0' }}>
+            <SkeletonSettingRows rows={4} />
           </div>
         ) : agents.length > 0 ? (
           <>

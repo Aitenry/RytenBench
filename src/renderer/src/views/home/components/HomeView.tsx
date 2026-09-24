@@ -1,5 +1,5 @@
 import React, { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { theme, Spin, App } from 'antd'
+import { theme, App } from 'antd'
 import type { Editor } from '@tiptap/react'
 import { Window } from '../../../../resource/types/window'
 import { useMessage } from '@renderer/hooks/useMessage'
@@ -12,6 +12,7 @@ import BreadcrumbBar, { type BreadcrumbItem } from './BreadcrumbBar'
 import DocEditorPane, { type DocMeta } from './DocEditorPane'
 import TodoPane from './TodoPane'
 import EmptyDashboard from './EmptyDashboard'
+import { SkeletonDashboard, SkeletonGraph } from '@renderer/components/system/Skeleton'
 import OutlinePanel from './OutlinePanel'
 import ArchiveDocModal from './ArchiveDocModal'
 // 知识图谱按需加载（echarts 体积较大，避免拖慢首屏）
@@ -554,18 +555,8 @@ const HomeView: React.FC = () => {
   /* ── 中间主区内容 ── */
   const renderCenter = (): React.ReactNode => {
     if (loading) {
-      return (
-        <div
-          style={{
-            flex: 1,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center'
-          }}
-        >
-          <Spin size="large" />
-        </div>
-      )
+      /* 首屏（文档 / 待办 / 知识库都还没到位）走仪表盘骨架，结构与 EmptyDashboard 对齐 */
+      return <SkeletonDashboard />
     }
     if (!selection) {
       return (
@@ -616,21 +607,7 @@ const HomeView: React.FC = () => {
       /* 文档级子图：带 initialDocFilter，key 用 docId 保证切换文档时重建筛选 */
       return (
         <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
-          <Suspense
-            fallback={
-              <div
-                style={{
-                  flex: 1,
-                  minHeight: 0,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center'
-                }}
-              >
-                <Spin size="small" />
-              </div>
-            }
-          >
+          <Suspense fallback={<SkeletonGraph />}>
             <GraphView
               key={
                 selection.kind === 'doc-graph'

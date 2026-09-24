@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { theme, Tooltip, Empty, Spin, Dropdown, Modal, Input, App } from 'antd'
+import { theme, Tooltip, Empty, Dropdown, Modal, Input, App } from 'antd'
+import { SkeletonBlock } from '@renderer/components/system/Skeleton'
 import type { MenuProps } from 'antd'
 import {
   RiFileTextLine,
@@ -1331,7 +1332,8 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
                           {w.title}
                         </span>
                         {isLoading ? (
-                          <Spin size="small" />
+                          /* 行尾就是「…」菜单的位置：占位块与它同宽同高，树不会因载入而抖 */
+                          <SkeletonBlock w={26} h={13} r={4} />
                         ) : (
                           rowMenu([
                             {

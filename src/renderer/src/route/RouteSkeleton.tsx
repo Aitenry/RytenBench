@@ -1,20 +1,20 @@
 import React from 'react'
 import { theme } from 'antd'
-import { useTheme } from '@renderer/contexts/useTheme'
 import { useTranslation } from '@renderer/i18n'
+import { SkeletonBlock } from '@renderer/components/system/Skeleton'
+import {
+  SKELETON_CSS,
+  skeletonVars,
+  useSkeletonPalette
+} from '@renderer/components/system/skeleton-palette'
 
 export type RouteSkeletonVariant = 'harness' | 'planner' | 'music'
 
 const MONO_FONT = "'JetBrains Mono', 'Cascadia Code', Consolas, 'Courier New', monospace"
 
-const SKELETON_CSS = `
-.rb-skel-block {
-  animation: rb-skel-pulse 1.8s ease-in-out infinite;
-}
-@keyframes rb-skel-pulse {
-  0%, 100% { opacity: 0.55; }
-  50% { opacity: 1; }
-}
+/* 骨架块本身的脉动与取色在 components/system/Skeleton.tsx（组件级骨架共用同一套），
+   这里只剩路由级专有的右下角等宽标签 */
+const TAG_CSS = `
 .rb-skel-tag {
   position: absolute;
   right: 12px;
@@ -45,8 +45,14 @@ const SKELETON_CSS = `
  * 骨架结构（话题栏 / 甘特图 / 歌单），替代原来的居中转圈与「卡在上一页」。
  * 颜色取自 antd token，浅色 / 深色主题自动适配；右下角一枚等宽「LOADING」
  * 标签呼应编辑部的等宽标签语言。
+ *
+ * 页面内部的「数据加载」也可以复用它占位（如 planner 载入任务树），
+ * 那种场景传 `showTag={false}`——标签文案是路由语义，别用在数据加载上。
  */
-const RouteSkeleton: React.FC<{ variant: RouteSkeletonVariant }> = ({ variant }) => {
+const RouteSkeleton: React.FC<{ variant: RouteSkeletonVariant; showTag?: boolean }> = ({
+  variant,
+  showTag = true
+}) => {
   const {
     token: {
       colorBgContainer,
@@ -56,23 +62,11 @@ const RouteSkeleton: React.FC<{ variant: RouteSkeletonVariant }> = ({ variant })
       colorTextTertiary
     }
   } = theme.useToken()
-  const { effectiveTheme } = useTheme()
   const { t } = useTranslation()
-  const isDark = effectiveTheme === 'dark'
+  const palette = useSkeletonPalette()
 
-  const blockColor = isDark ? 'rgba(255,255,255,0.09)' : 'rgba(0,0,0,0.06)'
-  const trackColor = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)'
-
-  const block = (
-    w: number | string,
-    h: number,
-    r = 6,
-    color: string = blockColor
-  ): React.ReactElement => (
-    <div
-      className="rb-skel-block"
-      style={{ width: w, height: h, borderRadius: r, background: color, flexShrink: 0 }}
-    />
+  const block = (w: number | string, h: number, r = 6, color?: string): React.ReactElement => (
+    <SkeletonBlock w={w} h={h} r={r} color={color} />
   )
 
   let content: React.ReactNode
@@ -160,7 +154,7 @@ const RouteSkeleton: React.FC<{ variant: RouteSkeletonVariant }> = ({ variant })
                   style={{
                     height: 30,
                     borderRadius: 6,
-                    background: trackColor,
+                    background: palette.track,
                     overflow: 'hidden'
                   }}
                 >
@@ -171,7 +165,7 @@ const RouteSkeleton: React.FC<{ variant: RouteSkeletonVariant }> = ({ variant })
                       width: `${32 + ((i * 13) % 55)}%`,
                       height: '100%',
                       borderRadius: 6,
-                      background: `color-mix(in srgb, ${colorPrimary} 30%, transparent)`
+                      background: palette.accent
                     }}
                   />
                 </div>
@@ -244,13 +238,16 @@ const RouteSkeleton: React.FC<{ variant: RouteSkeletonVariant }> = ({ variant })
   }
 
   return (
-    <div className="relative h-full w-full min-h-0 overflow-hidden">
+    <div className="relative h-full w-full min-h-0 overflow-hidden" style={skeletonVars(palette)}>
       <style>{SKELETON_CSS}</style>
+      <style>{TAG_CSS}</style>
       {content}
-      <div className="rb-skel-tag" style={{ color: colorTextTertiary }}>
-        <span className="rb-skel-tag-dot" style={{ background: colorPrimary }} />
-        {t('shell.routing.loading')}
-      </div>
+      {showTag && (
+        <div className="rb-skel-tag" style={{ color: colorTextTertiary }}>
+          <span className="rb-skel-tag-dot" style={{ background: colorPrimary }} />
+          {t('shell.routing.loading')}
+        </div>
+      )}
     </div>
   )
 }

@@ -1,5 +1,6 @@
 import React, { useRef, useEffect, useCallback, useState } from 'react'
-import { App, Dropdown, Input, Modal, Spin, theme } from 'antd'
+import { App, Dropdown, Input, Modal, theme } from 'antd'
+import { SkeletonListRows, SkeletonTextLines } from '@renderer/components/system/Skeleton'
 import type { InputRef } from 'antd'
 import {
   RiAddLine,
@@ -727,8 +728,8 @@ const HarnessSidebar: React.FC<HarnessSidebarProps> = ({
         {expanded && (
           <div className="pb-1">
             {loading && list.length === 0 ? (
-              <div className="flex justify-center py-3">
-                <Spin size="small" />
+              <div className="py-1">
+                <SkeletonListRows rows={5} variant="stacked" />
               </div>
             ) : list.length === 0 ? (
               /* 空态与上面的 loading 一样在整栏居中：不能再加左侧缩进，
@@ -744,8 +745,9 @@ const HarnessSidebar: React.FC<HarnessSidebarProps> = ({
                   isLoadingMoreTopics &&
                   !isRefreshingTopics &&
                   hasMoreTopics && (
-                    <div className="flex justify-center py-3">
-                      <Spin size="small" />
+                    /* 滚动分页的落点是「下面还会长出话题」，所以铺两行话题骨架而不是居中转圈 */
+                    <div className="py-1">
+                      <SkeletonListRows rows={2} variant="stacked" />
                     </div>
                   )}
               </>
@@ -858,8 +860,8 @@ const HarnessSidebar: React.FC<HarnessSidebarProps> = ({
         {memoryExpanded && (
           <div className="overflow-y-auto history-scrollbar px-3 pb-3" style={{ maxHeight: 300 }}>
             {memoryLoading ? (
-              <div className="flex justify-center py-5">
-                <Spin size="small" />
+              <div className="px-1 py-2">
+                <SkeletonTextLines lines={5} />
               </div>
             ) : !memorySnap?.configured ? (
               <div className="pt-2">

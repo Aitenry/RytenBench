@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { Modal, Spin, Empty, theme } from 'antd'
+import { Modal, Empty, theme } from 'antd'
+import { SkeletonListRows } from '@renderer/components/system/Skeleton'
 import { RiBook2Line, RiFolder2Line } from '@remixicon/react'
 import { Window } from '../../../../resource/types/window'
 import { useMessage } from '@renderer/hooks/useMessage'
@@ -157,9 +158,8 @@ const ArchiveDocModal: React.FC<ArchiveDocModalProps> = ({
               {t('home.archive.selectWikiFirst')}
             </div>
           ) : dirsLoading ? (
-            <div style={{ display: 'flex', justifyContent: 'center', padding: 24 }}>
-              <Spin size="small" />
-            </div>
+            /* 目录行与最终列表同高，读盘期间不再出现「居中转圈 → 突然长出列表」的跳动 */
+            <SkeletonListRows rows={4} icon />
           ) : directories.length === 0 ? (
             <div style={{ color: token.colorTextTertiary, fontSize: 12.5 }}>
               {t('home.archive.noDirectories')}

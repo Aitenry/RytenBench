@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { theme, Input, Spin, Empty, Tag } from 'antd'
+import { theme, Input, Empty, Tag } from 'antd'
+import { SkeletonDocPane } from '@renderer/components/system/Skeleton'
 import type { InputRef } from 'antd'
 import {
   RiCheckLine,
@@ -329,18 +330,8 @@ const DocEditorPane: React.FC<DocEditorPaneProps> = ({
   if (loading) {
     return (
       <PaneShell>
-        <div
-          style={{
-            flex: 1,
-            width: '100%',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            height: '100%'
-          }}
-        >
-          <Spin size="large" />
-        </div>
+        {/* 标题 / 元信息 / 段落先铺出来，文档到位后原地替换，避免整块空白 */}
+        <SkeletonDocPane />
       </PaneShell>
     )
   }

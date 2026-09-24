@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { theme, Input, Spin, Empty, Tag, Tooltip } from 'antd'
+import { theme, Input, Empty, Tag, Tooltip } from 'antd'
+import { SkeletonTodoPane } from '@renderer/components/system/Skeleton'
 import {
   RiPlayLine,
   RiCheckLine,
@@ -246,16 +247,8 @@ const TodoPane: React.FC<TodoPaneProps> = ({
   if (loading) {
     return (
       <PaneShell>
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            height: '100%'
-          }}
-        >
-          <Spin size="large" />
-        </div>
+        {/* 勾选位 / 标题 / 字段胶囊 / 正文先铺出来，待办到位后原地替换 */}
+        <SkeletonTodoPane />
       </PaneShell>
     )
   }

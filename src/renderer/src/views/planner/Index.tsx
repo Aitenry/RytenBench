@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react'
-import { theme, Spin } from 'antd'
+import { theme } from 'antd'
+import RouteSkeleton from '@renderer/route/RouteSkeleton'
 import Toolbar from './components/Toolbar'
 import TaskTree from './components/TaskTree'
 import TaskListView from './components/TaskListView'
@@ -104,11 +105,9 @@ const Index: React.FC = () => {
   )
 
   if (loading) {
-    return (
-      <div className="h-full flex-1 flex items-center justify-center">
-        <Spin size="large" />
-      </div>
-    )
+    /* 任务树未到位时先铺「工具栏 + 任务树 + 甘特图」的骨架，免掉居中转圈的空白跳变；
+       标签文案是路由语义（切页），这里是数据加载，所以关掉 */
+    return <RouteSkeleton variant="planner" showTag={false} />
   }
 
   return (
