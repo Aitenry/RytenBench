@@ -2,11 +2,7 @@ import { app, BrowserWindow, ipcMain, crashReporter } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer } from '@electron-toolkit/utils'
 import logger from 'electron-log'
-import {
-  initBuiltinPluginIpcs,
-  pushExternalPluginChannels,
-  syncBuiltinPluginIpcs
-} from './plugins/host'
+import { initBuiltinPluginIpcs, pushPluginChannels, syncBuiltinPluginIpcs } from './plugins/host'
 import { registerPluginScheme, registerPluginProtocolHandler } from './plugins/protocol'
 import { setPluginStateSyncHook } from './ipc/plugins'
 import { registerLifecycleHooks } from './lifecycle'
@@ -80,8 +76,8 @@ app
 
     app.on('browser-window-created', (_, window) => {
       optimizer.watchWindowShortcuts(window)
-      // 外部插件通道白名单：启动期推送早于窗口创建（必然丢包），窗口加载完成后补推一次
-      window.webContents.on('did-finish-load', () => pushExternalPluginChannels())
+      // 插件通道白名单：启动期推送早于窗口创建（必然丢包），窗口加载完成后补推一次
+      window.webContents.on('did-finish-load', () => pushPluginChannels())
     })
 
     // 注册 IPC：core 组常驻，插件组（home/planner/music/harness）随启用态注册/注销

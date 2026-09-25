@@ -5,6 +5,13 @@ import tailwindcss from '@tailwindcss/vite'
 
 export default defineConfig({
   main: {
+    resolve: {
+      alias: {
+        // 自包含插件目录（主进程侧：src/plugins/<id>/main、shared）
+        '@plugins': resolve('src/plugins'),
+        '@shared': resolve('src/shared')
+      }
+    },
     build: {
       // electron-vite v5: 使用 build.externalizeDeps 替代已弃用的 externalizeDepsPlugin
       externalizeDeps: true

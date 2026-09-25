@@ -1,4 +1,4 @@
-import { ipcMain, BrowserWindow } from 'electron'
+import { BrowserWindow } from 'electron'
 import * as fs from 'fs'
 import * as path from 'path'
 import logger from 'electron-log'
@@ -6,47 +6,96 @@ import { getEnabledOverride } from './store'
 import { captureIpc } from './ipc-capture'
 import { findExternalPlugin, scanExternalPlugins } from './scanner'
 import { builtinIpcGroups, CORE_IPC_GROUP } from '../ipc'
+import { builtinMainModules } from './builtin'
+import { MainPluginContextImpl } from './context'
 import { IPC_PLUGIN_CHANNELS_UPDATED } from '../../shared/plugin/protocol'
 
 /**
- * 主进程插件宿主（内置插件 IPC 生命周期）。
+ * 主进程插件宿主。
  *
- * - core 组（misc/settings/dialog/provider/workspace/graph/plugins）始终注册；
- * - home / planner / music / harness 组随插件启用注册、随停用注销
- *   （captureIpc 捕获登记期内全部通道，dispose 时 removeHandler/removeListener）；
- * - plugins.ts 的启停处理器通过 setPluginStateSyncHook 把状态变化同步到这里。
+ * 两条装载路径（目标是合并成一条，见 src/plugins/README.md）：
+ * - **新契约**：`src/plugins/<id>/main/index.ts` 导出 `install(ctx)`，通道经
+ *   `ctx.registerIpc({ 'plugin:<ns>:...': handler })` 注册，停用时 ctx.dispose() 一次性回滚
+ *   （内置与外部插件走的是同一个 `MainPluginContextImpl`）；
+ * - **旧路径（待迁移）**：`src/main/ipc/index.ts` 的 builtinIpcGroups + captureIpc 猴补丁，
+ *   仍按插件 id 分组注册/注销，但内容还散在 src/main/ipc、src/main/database 等目录里。
  *
- * 归属依据（方案 5.1 表）：
- * - graph 属于 core：常驻 BuildProgressProvider 订阅其构建进度事件；
- * - node-position/todo/document/wiki 归属 home；mnemon 归属 harness。
+ * core 组（misc/settings/dialog/provider/workspace/graph/plugins）始终注册：
+ * graph 常驻是因为 BuildProgressProvider 无条件订阅其构建进度事件。
  */
 
-const disposers = new Map<string, () => void>()
+/** 已装配的内置插件主模块（新契约） */
+const builtinPlugins = new Map<string, { ctx: MainPluginContextImpl; teardown: () => void }>()
+
+/** 旧路径的注销函数（未迁移插件 + core），逐步删除 */
+const legacyDisposers = new Map<string, () => void>()
+
+/** 已装载的外部插件主模块 */
+const externalMains = new Map<string, { ctx: MainPluginContextImpl; teardown: () => void }>()
 
 /** 内置插件组的启用默认值（内置默认启用） */
 export function isBuiltinPluginEnabled(id: string): boolean {
   return getEnabledOverride(id) ?? true
 }
 
-/** 注册某插件组的 IPC（幂等） */
+/** 注册某插件的主模块/IPC 组（幂等） */
 export function registerPluginIpc(id: string): void {
-  if (disposers.has(id)) return
-  const group = builtinIpcGroups[id]
-  if (!group) {
-    logger.warn(`[Plugins] 无内置 IPC 组: ${id}`)
+  if (builtinPlugins.has(id) || legacyDisposers.has(id)) return
+
+  const module = builtinMainModules[id]
+  if (module) {
+    const ctx = new MainPluginContextImpl(id)
+    let dispose: void | (() => void)
+    try {
+      dispose = module.install(ctx)
+    } catch (err) {
+      ctx.dispose()
+      logger.error(`[Plugins] ${id} 主模块装载失败:`, err)
+      throw err
+    }
+    builtinPlugins.set(id, { ctx, teardown: () => runTeardown(id, dispose, ctx) })
+    logger.info(`[Plugins] 主模块装载: ${id}（通道 ${ctx.channels.length} 个）`)
+    pushPluginChannels()
     return
   }
-  disposers.set(id, captureIpc(group))
-  logger.info(`[Plugins] IPC 组注册: ${id}`)
+
+  const group = builtinIpcGroups[id]
+  if (!group) {
+    logger.warn(`[Plugins] 无内置主模块/IPC 组: ${id}`)
+    return
+  }
+  legacyDisposers.set(id, captureIpc(group))
+  logger.info(`[Plugins] IPC 组注册（旧路径）: ${id}`)
 }
 
-/** 注销某插件组的 IPC（幂等） */
+/** 注销某插件的主模块/IPC 组（幂等） */
 export function disposePluginIpc(id: string): void {
-  const dispose = disposers.get(id)
-  if (!dispose) return
-  dispose()
-  disposers.delete(id)
-  logger.info(`[Plugins] IPC 组注销: ${id}`)
+  const entry = builtinPlugins.get(id)
+  if (entry) {
+    entry.teardown()
+    builtinPlugins.delete(id)
+    logger.info(`[Plugins] 主模块卸载: ${id}`)
+    pushPluginChannels()
+    return
+  }
+  const legacy = legacyDisposers.get(id)
+  if (legacy) {
+    legacy()
+    legacyDisposers.delete(id)
+    logger.info(`[Plugins] IPC 组注销（旧路径）: ${id}`)
+  }
+}
+
+/** install 返回的 dispose 先跑，再回滚 ctx.effect 登记的效果与通道 */
+function runTeardown(id: string, dispose: void | (() => void), ctx: MainPluginContextImpl): void {
+  if (typeof dispose === 'function') {
+    try {
+      dispose()
+    } catch (err) {
+      logger.warn(`[Plugins] ${id} install dispose 异常:`, err)
+    }
+  }
+  ctx.dispose()
 }
 
 /** diff 同步：enabled → 注册；disabled → 注销（core 组不受影响） */
@@ -58,48 +107,42 @@ export function syncBuiltinPluginIpcs(next: Record<string, boolean>, ids: string
   }
 }
 
-/** 应用启动：注册 core 组 + 按持久化启用态注册插件组 + 装载已启用的外部插件主模块 */
+/** 应用启动：注册 core 组 + 按持久化启用态注册插件 + 装载已启用的外部插件主模块 */
 export function initBuiltinPluginIpcs(): void {
-  disposers.set(CORE_IPC_GROUP, captureIpc(builtinIpcGroups[CORE_IPC_GROUP]))
-  for (const id of Object.keys(builtinIpcGroups)) {
+  legacyDisposers.set(CORE_IPC_GROUP, captureIpc(builtinIpcGroups[CORE_IPC_GROUP]))
+  const ids = new Set([...Object.keys(builtinIpcGroups), ...Object.keys(builtinMainModules)])
+  for (const id of ids) {
     if (id === CORE_IPC_GROUP) continue
-    if (isBuiltinPluginEnabled(id)) registerPluginIpc(id)
+    if (!isBuiltinPluginEnabled(id)) continue
+    try {
+      registerPluginIpc(id)
+    } catch (err) {
+      // 单个插件装配失败不拖垮启动：渲染层拿到的是「已启用但通道不存在」，
+      // 插件面板里会显示该插件状态；运行期启停走 plugins-set-enabled（错误会回抛给界面）
+      logger.error(`[Plugins] ${id} 启动装配失败:`, err)
+    }
   }
   initExternalMains()
 }
 
-// ---------- 外部插件主进程模块 ----------
+// ---------- 通道清单（preload 白名单 + 事件订阅门控） ----------
 
-/** 外部插件主进程 ctx（install(ctx) 的入参） */
-export interface MainPluginCtx {
-  /** 注册 IPC 通道（须以 plugin:<id>: 开头）；返回注销函数（宿主卸载时统一再走一遍） */
-  registerIpc: (
-    channels: string[],
-    handlers: Record<string, (...args: unknown[]) => unknown | Promise<unknown>>
-  ) => () => void
-}
-
-interface ExternalMainRecord {
-  channels: string[]
-  dispose: () => void
-}
-
-/** 已装载（=已启用且主模块加载成功）的外部插件主模块 */
-const externalMains = new Map<string, ExternalMainRecord>()
-
-/** 当前全部已启用外部插件通道（推送给 preload 做白名单缓存） */
-export function activeExternalChannels(): string[] {
-  return [...externalMains.values()].flatMap((r) => [...r.channels])
+/** 当前全部已启用插件（内置 + 外部）占用的通道 */
+export function activePluginChannels(): string[] {
+  return [
+    ...[...builtinPlugins.values()].flatMap((e) => e.ctx.channels),
+    ...[...externalMains.values()].flatMap((e) => e.ctx.channels)
+  ]
 }
 
 /**
- * 把已启用外部插件通道推给渲染层（preload 白名单缓存）。
+ * 把已启用插件通道推给渲染层（preload 白名单缓存）。
  *
  * 注意：启动期 `initBuiltinPluginIpcs()` 早于任何窗口创建，此时推送等于丢掉；
  * 因此窗口 `did-finish-load` 之后必须再推一次（见 main/index.ts 的 browser-window-created）。
  */
-export function pushExternalPluginChannels(): void {
-  const list = activeExternalChannels()
+export function pushPluginChannels(): void {
+  const list = activePluginChannels()
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) {
       win.webContents.send(IPC_PLUGIN_CHANNELS_UPDATED, list)
@@ -107,19 +150,9 @@ export function pushExternalPluginChannels(): void {
   }
 }
 
-/**
- * 通道命名空间：外部插件 id 的惯例是 `plugin.<author>.<name>`，而通道名已带 `plugin:` 前缀，
- * 若直接用整个 id 会得到 `plugin:plugin.demo:*`（与示例插件、文档里的 `plugin:demo:*` 不一致）。
- * 这里统一剥掉 id 开头的 `plugin.` 段：plugin.demo → plugin:demo:*。
- */
-function channelNamespace(id: string): string {
-  return id.startsWith('plugin.') ? id.slice('plugin.'.length) : id
-}
+// ---------- 外部插件主进程模块 ----------
 
-/** 已占用的通道命名空间 → 插件 id（防 'demo' 与 'plugin.demo' 抢同一命名空间） */
-const namespaceOwners = new Map<string, string>()
-
-/** 装载外部插件主进程模块（require CJS，导出的 install 或 {install}） */
+/** 装载外部插件主进程模块（require CJS，导出的 install 或 { install }） */
 export function loadExternalMain(id: string): void {
   if (externalMains.has(id)) return
   const scanned = findExternalPlugin(id)
@@ -128,13 +161,7 @@ export function loadExternalMain(id: string): void {
   const abs = path.join(scanned.dir, entryRel)
   if (!fs.existsSync(abs)) return // 允许纯渲染层插件（无主进程代码）
 
-  const ns = channelNamespace(id)
-  const owner = namespaceOwners.get(ns)
-  if (owner && owner !== id) {
-    throw new Error(`通道命名空间 'plugin:${ns}:' 已被插件 '${owner}' 占用`)
-  }
-
-  // 动态 require 外部文件（out/main 为 CJS 产物，M0 已确认）
+  // 动态 require 外部文件（out/main 为 CJS 产物）
   // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports
   const mod = require(abs) as unknown
   const install: unknown =
@@ -143,72 +170,28 @@ export function loadExternalMain(id: string): void {
     throw new Error(`外部插件 '${id}' 主进程入口需导出 install(ctx)`)
   }
 
-  const channels: string[] = []
-  const registerIpc: MainPluginCtx['registerIpc'] = (channelList, handlers) => {
-    for (const channel of channelList) {
-      // 权威校验：通道必须归属当前插件命名空间（配合 preload 白名单）
-      if (!channel.startsWith(`plugin:${ns}:`)) {
-        throw new Error(`通道 '${channel}' 必须以 plugin:${ns}: 开头`)
-      }
-      const handler = handlers[channel]
-      if (!handler) continue
-      channels.push(channel)
-      ipcMain.handle(channel, async (_event, ...args: unknown[]) => handler(...args))
-    }
-    // 注销由外部记录统一执行（dispose），此处幂等空实现
-    return () => {}
-  }
-  const ctx: MainPluginCtx = { registerIpc }
-  namespaceOwners.set(ns, id)
-
-  let dispose: (() => void) | undefined
+  const ctx = new MainPluginContextImpl(id)
+  let dispose: void | (() => void)
   try {
-    const ret = (install as (ctx: MainPluginCtx) => void | (() => void))(ctx)
-    if (typeof ret === 'function') dispose = ret
+    dispose = (install as (c: MainPluginContextImpl) => void | (() => void))(ctx)
   } catch (err) {
-    for (const c of channels) {
-      try {
-        ipcMain.removeHandler(c)
-      } catch {
-        // 忽略
-      }
-    }
-    namespaceOwners.delete(ns)
+    ctx.dispose()
     throw err
   }
 
-  externalMains.set(id, {
-    channels,
-    dispose: () => {
-      if (dispose) {
-        try {
-          dispose()
-        } catch (err) {
-          logger.warn(`[Plugins] 外部插件 '${id}' dispose 异常:`, err)
-        }
-      }
-      for (const c of channels) {
-        try {
-          ipcMain.removeHandler(c)
-        } catch {
-          // 忽略
-        }
-      }
-      if (namespaceOwners.get(ns) === id) namespaceOwners.delete(ns)
-    }
-  })
-  logger.info(`[Plugins] 外部插件主模块装载: ${id}（通道 ${channels.length} 个）`)
-  pushExternalPluginChannels()
+  externalMains.set(id, { ctx, teardown: () => runTeardown(id, dispose, ctx) })
+  logger.info(`[Plugins] 外部插件主模块装载: ${id}（通道 ${ctx.channels.length} 个）`)
+  pushPluginChannels()
 }
 
 /** 卸载外部插件主进程模块（注销 IPC + 通道清单推送刷新） */
 export function unloadExternalMain(id: string): void {
   const record = externalMains.get(id)
   if (!record) return
-  record.dispose()
+  record.teardown()
   externalMains.delete(id)
   logger.info(`[Plugins] 外部插件主模块卸载: ${id}`)
-  pushExternalPluginChannels()
+  pushPluginChannels()
 }
 
 /** 启动时装载所有已启用的外部插件主模块 */
