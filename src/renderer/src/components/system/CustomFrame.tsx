@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback, useMemo, useSyncExternalStore } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { theme } from 'antd'
-import { useTheme } from '@renderer/contexts/useTheme'
+import { useTheme } from '@renderer/hooks/useTheme'
 import { useTranslation } from '@renderer/i18n'
 import { Window } from '../../../resource/types/window'
 import MainRoutes from '@renderer/route/MainRoutes'

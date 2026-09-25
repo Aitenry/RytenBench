@@ -58,3 +58,23 @@ preload 976 行单文件里装着全部插件的 API 命名空间。渲染层 17
     留在 core（共享 UI/工具），但**不得**反向 import 任何插件。
 - **preload 白名单**：白名单推送早于窗口创建会丢包，已用 `did-finish-load` 补推（`pushPluginChannels`）；
   新增插件通道后不需要额外配置，但内置插件的**事件**订阅也受白名单门控，测试要覆盖。
+- **graph 曾常驻 core 组**：`BuildProgressProvider` 是无条件挂载的外壳 Provider，图谱通道搬进 home 后
+  停用 home 会失去事件来源 → 订阅必须 try/catch 降级为空闲（否则异常从 useEffect 逃逸会卸载 Provider、整树白屏）；
+  另外 `graph-build-start` 原本是 `ipcMain.on`（fire-and-forget），新契约只有 `handle`，改成 invoke 后
+  渲染层调用点要 await 才能捕获 rejection。
+- **审计口径**：`node test/audit-plugin-layout.mjs` 的「旧路径残留」指标会过滤 `src/plugins/` 命中——
+  它衡量的是「还没搬走的旧位置」，插件自己新写的 `main/db/mapper/...` 不该计入。
+
+## 迁移进度（每轮更新，权威版本在 `src/plugins/README.md` 的勾选表）
+
+| 步骤 | 提交 | 内容 |
+| --- | --- | --- |
+| 宿主 + 注册表 | `9cf1c55` | 渲染层 plugin-host、注册表、外部插件机制、设置面板 |
+| 主进程契约 | `104b51d` | `MainPluginContext`（registerIpc/registerEvent/effect）、命名空间独占、单一路径装载 |
+| music | `c673c4e` | 19 通道 → `plugin:music:*`；AudioProvider 随插件；新增通用 `bottomBar` 插槽；preload 删 `api.music` |
+| planner | `449faa0` | 10 通道 → `plugin:planner:*`；DTO 进 shared；`plannerApi` 取代 `api.planner` |
+| home 主进程 | `bfc65b8` | 50 通道 → `plugin:home:*`；表/mapper/图谱服务进 main/**；graph 移出 core 组 + 降级防线 |
+| home 渲染层 | 进行中 | 视图/组件/类型/词条搬运，preload 六命名空间收口 |
+| harness | 待做 | 70 文件 / 41 通道；先补 `ctx.provide/useOptional` 再做工具解耦 |
+| core 收尾 | 待做 | 删 `builtinIpcGroups`/`ipc-capture`/`builtin-catalog`/preload 残留命名空间；外壳局部状态外置 |
+

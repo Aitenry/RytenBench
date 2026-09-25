@@ -1,5 +1,5 @@
 import React from 'react'
-import { useTheme } from '@renderer/contexts/useTheme'
+import { useTheme } from '@renderer/hooks/useTheme'
 import { getProviderColor, getProviderMonogram } from '@renderer/utils/providerMeta'
 
 /**

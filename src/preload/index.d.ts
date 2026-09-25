@@ -1,21 +1,9 @@
 import { ElectronAPI } from '@electron-toolkit/preload'
-// home 插件已收进 src/plugins/home/main/**：行类型 import 改指新位置（纯路径搬运）
-import { TodoItemRow } from '../plugins/home/main/db/mapper/todo'
-import type {
-  TaskDependencyRow,
-  TaskWithDependencies
-} from '../plugins/home/main/db/mapper/todo-dependencies'
-import {
-  DocRow,
-  DocListItem,
-  DocWithContent,
-  PaginatedResult
-} from '../plugins/home/main/db/mapper/document'
-import { WikiRow, WikiDirectoryRow } from '../plugins/home/main/db/mapper/wiki'
 import { HarnessTopicRow, HarnessDialogueRow } from '../main/database/mapper/harness'
 import type { LlmProviderInput, LlmProviderConfig } from '../main/database/mapper/provider'
 import type { SystemSettings } from '../main/types/settings'
 import type {
+  PaginatedResult,
   StructuredMessage,
   ToolInfo,
   QueuedMessageView
@@ -53,78 +41,6 @@ interface SubagentSessionOutputView {
 }
 
 interface Api {
-  todoItems: {
-    getById: (id: number) => Promise<TodoItemRow[]>
-    getByTitle: (title: string) => Promise<TodoItemRow[]>
-    getByPriority: (priority: number) => Promise<TodoItemRow[]>
-    getByCompletedStatus: (status: number | boolean) => Promise<TodoItemRow[]>
-    getAll: () => Promise<TodoItemRow[]>
-    getAllPaginated: (page?: number, pageSize?: number) => Promise<PaginatedResult<TodoItemRow>>
-    getByDueDate: (dueDate: string) => Promise<TodoItemRow[]>
-    add: (todoItem: Omit<TodoItemRow, 'id'>) => Promise<number>
-    update: (id: number, updates: Partial<Omit<TodoItemRow, 'id'>>) => Promise<boolean>
-    delete: (id: number) => Promise<boolean>
-  }
-  taskDependencies: {
-    add: (taskId: number, dependsOnTaskId: number) => Promise<number>
-    delete: (taskId: number, dependsOnTaskId: number) => Promise<boolean>
-    getAll: () => Promise<TaskDependencyRow[]>
-    getTasksWithDeps: () => Promise<TaskWithDependencies[]>
-  }
-  docs: {
-    getById: (id: number) => Promise<DocWithContent | null>
-    getAll: (
-      page?: number,
-      pageSize?: number,
-      excludeWikiId?: number,
-      search?: string
-    ) => Promise<PaginatedResult<DocListItem>>
-    getPage: (
-      query: string,
-      page?: number,
-      pageSize?: number
-    ) => Promise<PaginatedResult<DocListItem>>
-    add: (
-      doc: Omit<DocRow, 'id' | 'created_at' | 'updated_at' | 'version'> & {
-        image?: string | null
-        content?: string | null
-      }
-    ) => Promise<number>
-    update: (
-      id: number,
-      updates: Partial<Omit<DocRow, 'id' | 'created_at'>> & {
-        image?: string | null
-        content?: string | null
-      }
-    ) => Promise<boolean>
-    delete: (id: number) => Promise<boolean>
-    deleteByTimeRange: (startTime: string, endTime: string) => Promise<number>
-    importDocument: () => Promise<{ title: string; content: string } | null>
-    exportDocument: (id: number) => Promise<boolean>
-  }
-  wikis: {
-    getById: (id: number) => Promise<WikiRow | null>
-    getAll: (page?: number, pageSize?: number) => Promise<PaginatedResult<WikiRow>>
-    add: (wiki: Omit<WikiRow, 'id' | 'doc_count' | 'created_at' | 'updated_at'>) => Promise<number>
-    update: (
-      id: number,
-      updates: Partial<Omit<WikiRow, 'id' | 'doc_count' | 'created_at'>>
-    ) => Promise<boolean>
-    delete: (id: number) => Promise<boolean>
-    getDirectories: (wikiId: number) => Promise<WikiDirectoryRow[]>
-    addDirectory: (
-      directory: Omit<WikiDirectoryRow, 'id' | 'created_at' | 'updated_at'>
-    ) => Promise<number>
-    updateDirectory: (
-      id: number,
-      updates: Partial<Omit<WikiDirectoryRow, 'id' | 'created_at'>>
-    ) => Promise<boolean>
-    deleteDirectory: (id: number) => Promise<boolean>
-    getNotesByDirectory: (directoryId: number) => Promise<{ doc_id: number; sort_order: number }[]>
-    addNoteToDirectory: (directoryId: number, noteId: number, sortOrder?: number) => Promise<number>
-    removeNoteFromDirectory: (directoryId: number, noteId: number) => Promise<boolean>
-    getDirectoriesByNote: (noteId: number) => Promise<WikiDirectoryRow[]>
-  }
   file: {
     selectImageFile: (
       allowImages?: boolean
@@ -205,6 +121,14 @@ interface Api {
     onAgentsUpdated: (
       callback: (data: { topicId: number; rows: SubagentSessionRowView[] }) => void
     ) => () => void
+    /**
+     * 文档被聊天工具修改/删除（首页编辑器据此同步，防覆盖工具写入）。
+     * 消费方是 home 插件的 DocEditorPane——**跨插件订阅**：harness 的 preload 命名空间
+     * 迁移时要一并处理（见 test/plugin-coupling-notes.md）。
+     */
+    onDocChanged: (
+      callback: (data: { docId: number; action: 'updated' | 'deleted' }) => void
+    ) => () => void
     /** 监听/停止监听某 agent 的输出推送（打开弹窗 watch，关闭取消） */
     watchAgentOutput: (topicId: number, agentId: string, watch: boolean) => void
     /** 后端推送：agent 输出有更新（运行中增量 / 终态最终输出），弹窗据此自动刷新 */
@@ -261,12 +185,6 @@ interface Api {
   systemSettings: {
     getAll: () => Promise<SystemSettings>
     update: (updates: Partial<SystemSettings>) => Promise<boolean>
-  }
-  nodePositions: {
-    getAll: () => Promise<{ node_id: string; x: number; y: number; updated_at: string }[]>
-    save: (nodeId: string, x: number, y: number) => Promise<void>
-    saveBatch: (positions: { node_id: string; x: number; y: number }[]) => Promise<void>
-    delete: (nodeId: string) => Promise<boolean>
   }
   window: {
     minimize: () => void

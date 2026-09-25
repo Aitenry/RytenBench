@@ -1,8 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react'
-import { Window } from '../../resource/types/window'
-import BuildProgress from '@renderer/components/graph/BuildProgress'
+import { useIsPluginEnabled } from '@renderer/plugin-host/PluginHostContext'
 import { BuildProgressContext } from './BuildProgressContext'
-import { useNotification } from '@renderer/contexts/useNotification'
+import { useNotification } from '@renderer/hooks/useNotification'
 import { useTranslation } from '@renderer/i18n'
 import type { TFunction } from 'i18next'
 import type { BuildProgressState } from '@renderer/types/build-progress'
@@ -11,6 +10,18 @@ import type { BuildProgressProviderProps } from '@renderer/types/components'
 
 /** 全局事件：请求打开某知识库的图谱视图（首页 HomeView 监听并切换选中） */
 export const OPEN_WIKI_GRAPH_EVENT = 'open-wiki-graph'
+
+/**
+ * home 插件声明的图谱构建事件通道（主进程 → 渲染层）。
+ *
+ * 这里走 preload 的**通用桥**（`window.api.plugin.on`）而不是 import 插件的
+ * `renderer/api.ts`：外壳不得 import 插件实现（插件停用即崩）。代价是这三个通道名
+ * 写在 core 里——图谱构建进度是唯一「数据属于插件、UI 属于外壳」的交叉点，
+ * 后续若要彻底解耦，应把进度订阅也做成插槽（见 test/plugin-coupling-notes.md §2）。
+ */
+const GRAPH_BUILD_PROGRESS_CHANNEL = 'plugin:home:graph-build-progress'
+const GRAPH_BUILD_COMPLETE_CHANNEL = 'plugin:home:graph-build-complete'
+const GRAPH_BUILD_ERROR_CHANNEL = 'plugin:home:graph-build-error'
 
 /** 构建进度通知的文案组装：普通函数，t 由调用方注入（内部不调 hook） */
 const buildStateToNotification = (
@@ -53,6 +64,8 @@ export const BuildProgressProvider: React.FC<BuildProgressProviderProps> = ({ ch
   const refreshCallbacks = useRef<Map<number, Set<() => void>>>(new Map())
   const { addNotification, updateNotification, removeNotification } = useNotification()
   const { t } = useTranslation()
+  // home 启停会决定这三个事件通道是否存在：重新启用时效果需重跑，否则订阅停在首次的失败态
+  const homeEnabled = useIsPluginEnabled()('home')
 
   const subscribeToRefresh = (wikiId: number, callback: () => void): (() => void) => {
     const callbacks = refreshCallbacks.current.get(wikiId) || new Set()
@@ -212,24 +225,30 @@ export const BuildProgressProvider: React.FC<BuildProgressProviderProps> = ({ ch
   }
 
   /**
+   * 事件回调进 ref：订阅只在 home 启停时重建，不因每次渲染的新函数反复退订重订，
+   * 同时避免回调闭包停在首次渲染（语言切换后通知文案仍取最新 `t`）。
+   */
+  const handlersRef = useRef({ handleProgress, handleComplete, handleError })
+  handlersRef.current = { handleProgress, handleComplete, handleError }
+
+  /**
    * 订阅图谱构建事件（主进程 → 渲染层）。
    *
    * 迁移说明：图谱通道已随 home 插件收进 `plugin:home:graph-build-*`，并随插件启停注册/摘除。
-   * 本 Provider 是无条件挂载的外壳 Provider，**停用 home 插件时通道不存在**：
-   * - preload 的 `api.graph.onBuild*` 直接 `ipcRenderer.on`，通常不抛；
-   * - 走通用桥 `window.api.plugin.on` 时白名单会拒（抛「插件通道未启用」）。
+   * 本 Provider 是无条件挂载的外壳 Provider，经通用桥订阅时 preload 会按白名单门控：
+   * **停用 home 时通道不存在**（`window.api.plugin.on` 直接抛「插件通道未启用」）。
    * 旧代码让异常从 useEffect 逃逸 → Provider 卸载 → 整棵应用树崩掉（白屏）。
-   * 这里统一 try/catch，订阅失败只是「没有进度事件」，不再影响外壳渲染。
+   * 这里统一 try/catch，订阅失败只是「没有进度事件」，不再影响外壳渲染；
+   * 重新启用 home 时 `homeEnabled` 变化会让本效果重跑，订阅随之恢复。
    */
   useEffect(() => {
-    const api = (window as unknown as Window).api
     const subscribe = <T,>(
       label: string,
-      run: (cb: (payload: T) => void) => () => void,
+      channel: string,
       cb: (payload: T) => void
     ): (() => void) => {
       try {
-        return run(cb)
+        return window.api.plugin.on(channel, (data) => cb(data as T))
       } catch (error) {
         console.warn(
           `[BuildProgress] 订阅 ${label} 失败（home 插件可能未启用），已降级为空闲：`,
@@ -241,22 +260,27 @@ export const BuildProgressProvider: React.FC<BuildProgressProviderProps> = ({ ch
 
     const cleanupProgress = subscribe(
       'graph-build-progress',
-      api.graph.onBuildProgress,
-      handleProgress
+      GRAPH_BUILD_PROGRESS_CHANNEL,
+      (payload: Parameters<typeof handleProgress>[0]) => handlersRef.current.handleProgress(payload)
     )
     const cleanupComplete = subscribe(
       'graph-build-complete',
-      api.graph.onBuildComplete,
-      handleComplete
+      GRAPH_BUILD_COMPLETE_CHANNEL,
+      (payload: { wikiId: number; entityCount: number; relationCount: number }) =>
+        handlersRef.current.handleComplete(payload)
     )
-    const cleanupError = subscribe('graph-build-error', api.graph.onBuildError, handleError)
+    const cleanupError = subscribe(
+      'graph-build-error',
+      GRAPH_BUILD_ERROR_CHANNEL,
+      (payload: { wikiId: number; error: string }) => handlersRef.current.handleError(payload)
+    )
 
     return () => {
       cleanupProgress()
       cleanupComplete()
       cleanupError()
     }
-  }, [])
+  }, [homeEnabled])
 
   // 同步 buildMap 变更到通知系统
   useEffect(() => {
@@ -277,31 +301,16 @@ export const BuildProgressProvider: React.FC<BuildProgressProviderProps> = ({ ch
 
   return (
     <BuildProgressContext.Provider
-      value={{ startBuild, restoreBuild, navigateToGraph, subscribeToRefresh }}
+      value={{
+        builds: activeBuilds,
+        startBuild,
+        restoreBuild,
+        minimizeBuild: handleMinimize,
+        navigateToGraph,
+        subscribeToRefresh
+      }}
     >
       {children}
-
-      {activeBuilds
-        .filter((state) => !state.completed)
-        .map((state) => (
-          <BuildProgress
-            key={state.wikiId}
-            open={!state.minimized}
-            wikiId={state.wikiId}
-            wikiTitle={state.wikiTitle}
-            phaseLabel={state.phaseLabel}
-            phaseProgress={state.phaseProgress}
-            overallProgress={state.overallProgress}
-            processedDocs={state.processedDocs}
-            totalDocs={state.totalDocs}
-            processedChunks={state.processedChunks}
-            totalChunks={state.totalChunks}
-            entityCount={state.entityCount}
-            relationCount={state.relationCount}
-            message={state.message}
-            onMinimize={() => handleMinimize(state.wikiId)}
-          />
-        ))}
     </BuildProgressContext.Provider>
   )
 }

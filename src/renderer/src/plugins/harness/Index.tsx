@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { theme, Button } from 'antd'
 import { RiChatAiLine, RiFoldersLine, RiListSettingsLine } from '@remixicon/react'
-import { useTheme } from '@renderer/contexts/useTheme'
+import { useTheme } from '@renderer/hooks/useTheme'
 import { useTranslation } from '@renderer/i18n'
 import { useHarness } from './contexts/HarnessContextCore'
 import type { Window } from '../../../resource/types/window'

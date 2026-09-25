@@ -4,7 +4,7 @@ import zhCN from 'antd/locale/zh_CN'
 import enUS from 'antd/locale/en_US'
 import type { ThemeMode } from '@renderer/types/settings'
 import { Window } from '../../resource/types/window'
-import { useLanguage } from './useLanguage'
+import { useLanguage } from '../hooks/useLanguage'
 import { ThemeContext, type ThemeContextType } from './ThemeContextCore'
 
 const { defaultAlgorithm, darkAlgorithm } = theme

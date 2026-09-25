@@ -1,6 +1,6 @@
 import { theme } from 'antd'
 import type { CSSProperties } from 'react'
-import { useTheme } from '../../contexts/useTheme'
+import { useTheme } from '../../hooks/useTheme'
 
 /**
  * 骨架屏的节奏与取色（不含任何 JSX 物料，见同目录 Skeleton.tsx）。

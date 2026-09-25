@@ -1,8 +1,19 @@
 import type React from 'react'
 import type { MenuProps } from 'antd'
 import type { MessageInstance } from 'antd/es/message/interface'
-import type { DocItem, WikiRow, TodoItem, DocOption } from './models'
-import type { GraphEntity, GraphRelation, GraphChartData, WikiEditData } from './knowledge'
+
+/**
+ * core 共享的组件 props / 上下文类型。
+ *
+ * 归属划分（home 插件迁移时清理）：**插件自己的 props 不放这里**——core 反向 import
+ * 插件类型会让「插件可停用」的边界失真。home 的 props（`GraphViewProps` /
+ * `GraphCanvasProps` / `GraphToolbarProps` / `EntityDetailProps` / `BuildProgressProps` /
+ * `WikiEditModalProps` / `WikiCardProps` / `DocPreviewModalProps` / `TodoListProps`）
+ * 已搬进 `src/plugins/home/renderer/types.ts`。
+ *
+ * 留在这里的是外壳与共享 UI：markdown 渲染、锁屏/侧栏/路由、消息与构建进度 Provider、
+ * 底栏天气卡、模型 Provider 选项（图谱设置页与 harness 智能体设置页共用）。
+ */
 
 /* ── Markdown ── */
 
@@ -30,34 +41,6 @@ export interface TableOfContentsProps {
   headings: HeadingItem[]
   isDarkMode?: boolean
   onNavigate: (id: string) => void
-}
-
-/* ── Doc ── */
-
-export interface DocPreviewModalProps {
-  open: boolean
-  onCancel: () => void
-  currentDoc: DocItem | null
-}
-
-/* ── Wiki ── */
-
-export interface WikiEditModalProps {
-  open: boolean
-  isNew: boolean
-  initialTitle?: string
-  initialSummary?: string
-  initialTags?: string
-  initialImage?: string | null
-  onSave: (data: WikiEditData) => Promise<void>
-  onCancel: () => void
-}
-
-export interface WikiCardProps {
-  item: WikiRow
-  onSelect: () => void
-  onEdit?: () => void
-  onDelete?: () => void
 }
 
 /* ── Lock Screen ── */
@@ -100,72 +83,7 @@ export interface BuildProgressProviderProps {
   children: React.ReactNode
 }
 
-/* ── Build Progress ── */
-
-export interface BuildProgressProps {
-  open: boolean
-  wikiId: number
-  wikiTitle: string
-  phaseLabel: string
-  phaseProgress: number
-  overallProgress: number
-  processedDocs: number
-  totalDocs: number
-  processedChunks: number
-  totalChunks: number
-  entityCount: number
-  relationCount: number
-  message: string
-  onMinimize: () => void
-}
-
-/* ── Knowledge Graph ── */
-
-export interface GraphCanvasProps {
-  data: GraphChartData
-  onEntityClick: (entity: GraphEntity) => void
-  onEntityDblClick?: (entity: GraphEntity) => void
-  searchQuery?: string
-}
-
-export interface GraphToolbarProps {
-  wikiTitle: string
-  isLoading: boolean
-  searchQuery: string
-  typeFilter: string | undefined
-  entityCount: number
-  relationCount: number
-  docs: DocOption[]
-  addedDocIds: Set<number>
-  isAppending: boolean
-  docFilter: number[]
-  /** 文档级子图模式：隐藏搜索框右侧的文档筛选/追加/重建操作 */
-  isDocGraph?: boolean
-  onSearchChange: (value: string) => void
-  onTypeFilterChange: (value: string | undefined) => void
-  onAppendDocs: (docIds: number[]) => void
-  onDocFilterChange: (docIds: number[]) => void
-  onBuildGraph: () => void
-}
-
-export interface EntityDetailProps {
-  entity: GraphEntity | null
-  entities: GraphEntity[]
-  relations: GraphRelation[]
-  onRelationClick?: (entityId: number) => void
-  onDocClick?: (docId: number) => void
-  onClose?: () => void
-}
-
-export interface GraphViewProps {
-  selectedWiki: WikiRow
-  /** 点击来源文档时直接打开文档编辑器（由宿主传入；不传则回退预览弹窗） */
-  onOpenDocInEditor?: (docId: number) => void
-  /** 初始文档筛选（文档级子图：只显示指定文档抽取的实体） */
-  initialDocFilter?: number[]
-}
-
-/* ── Home / Dashboard ── */
+/* ── Home / Dashboard（外壳底栏的天气卡，与 home 插件无关） ── */
 
 export interface WeatherData {
   city: string
@@ -189,16 +107,12 @@ export interface CardItemProps {
   workTimeData: WorkTimeData
 }
 
-export interface TodoListProps {
-  initialTodos?: TodoItem[]
-}
-
 export interface StatusOption {
   value: number
   label: string
 }
 
-/* ── Settings ── */
+/* ── Settings（模型 Provider 选项：图谱设置页与 harness 智能体设置页共用） ── */
 
 export interface ProviderOption {
   id: number

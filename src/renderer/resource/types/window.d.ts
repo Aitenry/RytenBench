@@ -1,14 +1,9 @@
-// home 插件已收进 src/plugins/home/main/**：行类型 import 改指新位置（纯路径搬运，渲染层不动）
-import { TodoItemRow } from '../../../plugins/home/main/db/mapper/todo'
-import { DocRow, DocListItem, DocWithContent } from '../../../plugins/home/main/db/mapper/document'
-import { WikiRow, WikiDirectoryRow } from '../../../plugins/home/main/db/mapper/wiki'
 import {
   HarnessTopicRow,
   HarnessDialogueRow,
   HarnessDialogueUsageRow,
   WorkspaceRow
 } from '../../../main/database/mapper/harness'
-import { GraphEntity, GraphBuildJob, GraphData } from '../../../plugins/home/main/db/mapper/graph'
 import { Lock } from '@renderer/types/settings'
 import { LlmProviderInput, LlmProviderConfig } from '../../../main/database/mapper/provider'
 import { AgentConfigRow, AgentConfigInput } from '../../../main/database/mapper/agent'
@@ -154,54 +149,6 @@ export interface Window {
     getAppVersion: () => Promise<string>
   }
   api: {
-    todoItems: {
-      getById: (id: number) => Promise<TodoItemRow[]>
-      getByTitle: (title: string) => Promise<TodoItemRow[]>
-      getByPriority: (priority: number) => Promise<TodoItemRow[]>
-      getByCompletedStatus: (status: number | boolean) => Promise<TodoItemRow[]>
-      getAll: () => Promise<TodoItemRow[]>
-      getAllPaginated: (page?: number, pageSize?: number) => Promise<PaginatedResult<TodoItemRow>>
-      getByDueDate: (dueDate: string) => Promise<TodoItemRow[]>
-      add: (
-        todoItem: Omit<
-          TodoItemRow,
-          'id' | 'created_at' | 'updated_at' | 'completed_at' | 'started_at'
-        >
-      ) => Promise<number>
-      update: (id: number, updates: Partial<Omit<TodoItemRow, 'id'>>) => Promise<boolean>
-      delete: (id: number) => Promise<boolean>
-    }
-    docs: {
-      getById: (id: number) => Promise<DocWithContent | null>
-      getAll: (
-        page?: number,
-        pageSize?: number,
-        excludeWikiId?: number,
-        search?: string
-      ) => Promise<PaginatedResult<DocListItem>>
-      getPage: (
-        query: string,
-        page?: number,
-        pageSize?: number
-      ) => Promise<PaginatedResult<DocListItem>>
-      add: (
-        doc: Omit<DocRow, 'id' | 'created_at' | 'updated_at' | 'version'> & {
-          image?: string | null
-          content?: string | null
-        }
-      ) => Promise<number>
-      update: (
-        id: number,
-        updates: Partial<Omit<DocRow, 'id' | 'created_at'>> & {
-          image?: string | null
-          content?: string | null
-        }
-      ) => Promise<boolean>
-      delete: (id: number) => Promise<boolean>
-      deleteByTimeRange: (startTime: string, endTime: string) => Promise<number>
-      importDocument: () => Promise<{ title: string; content: string } | null>
-      exportDocument: (id: number) => Promise<boolean>
-    }
     file: {
       selectImageFile: (allowImages?: boolean) => Promise<{
         dataUrl: string
@@ -214,34 +161,6 @@ export interface Window {
       } | null>
       /** 取剪贴板/拖拽 File 的真实磁盘路径；无磁盘文件来源（如网页复制的图片）返回空串 */
       getPathForFile: (file: File) => string
-    }
-    wikis: {
-      getById: (id: number) => Promise<WikiRow | null>
-      getAll: (page?: number, pageSize?: number) => Promise<PaginatedResult<WikiRow>>
-      add: (
-        wiki: Omit<WikiRow, 'id' | 'doc_count' | 'tags' | 'created_at' | 'updated_at'>
-      ) => Promise<number>
-      update: (id: number, updates: Partial<Omit<WikiRow, 'id' | 'created_at'>>) => Promise<boolean>
-      delete: (id: number) => Promise<boolean>
-      getDirectories: (wikiId: number) => Promise<WikiDirectoryRow[]>
-      addDirectory: (
-        directory: Omit<WikiDirectoryRow, 'id' | 'created_at' | 'updated_at'>
-      ) => Promise<number>
-      updateDirectory: (
-        id: number,
-        updates: Partial<Omit<WikiDirectoryRow, 'id' | 'created_at'>>
-      ) => Promise<boolean>
-      deleteDirectory: (id: number) => Promise<boolean>
-      getNotesByDirectory: (
-        directoryId: number
-      ) => Promise<{ doc_id: number; sort_order: number }[]>
-      addNoteToDirectory: (
-        directoryId: number,
-        noteId: number,
-        sortOrder?: number
-      ) => Promise<number>
-      removeNoteFromDirectory: (directoryId: number, noteId: number) => Promise<boolean>
-      getDirectoriesByNote: (noteId: number) => Promise<WikiDirectoryRow[]>
     }
     setting: {
       getLockScreenCode: () => Promise<Lock>
@@ -537,46 +456,6 @@ export interface Window {
       /** 按虚拟路径读取文本文件（卡片「打开文件」；工作区与记忆挂载都可读） */
       readVirtualFile: (virtualPath: string) => Promise<{ content: string } | { error: string }>
     }
-    graph: {
-      getData: (wikiId: number, typeFilter?: string, docIds?: number[]) => Promise<GraphData>
-      getEntity: (entityId: number) => Promise<GraphEntity | null>
-      searchEntities: (wikiId: number, query: string) => Promise<GraphEntity[]>
-      updateEntity: (id: number, updates: Record<string, unknown>) => Promise<boolean>
-      deleteEntity: (id: number) => Promise<boolean>
-      deleteRelation: (id: number) => Promise<boolean>
-      getBuildStatus: (wikiId: number) => Promise<GraphBuildJob | null>
-      appendDocs: (
-        wikiId: number,
-        docIds: number[]
-      ) => Promise<{
-        entitiesAdded: number
-        relationsAdded: number
-      }>
-      getProcessedDocIds: (wikiId: number) => Promise<number[]>
-      /** 迁移说明：主进程侧改为普通 invoke 通道（原 ipcMain.on），返回 promise */
-      buildGraph: (wikiId: number, config?: Record<string, unknown>) => Promise<void>
-      onBuildProgress: (
-        callback: (progress: {
-          wikiId: number
-          phase: string
-          phaseLabel: string
-          phaseProgress: number
-          overallProgress: number
-          processedDocs: number
-          totalDocs: number
-          processedChunks: number
-          totalChunks: number
-          entityCount: number
-          relationCount: number
-          message: string
-          needsRefresh?: boolean
-        }) => void
-      ) => () => void
-      onBuildComplete: (
-        callback: (result: { wikiId: number; entityCount: number; relationCount: number }) => void
-      ) => () => void
-      onBuildError: (callback: (error: { wikiId: number; error: string }) => void) => () => void
-    }
     providers: {
       getAll: () => Promise<LlmProviderConfig[]>
       getById: (id: number) => Promise<LlmProviderConfig | null>
@@ -622,12 +501,6 @@ export interface Window {
     systemSettings: {
       getAll: () => Promise<SystemSettings>
       update: (updates: Partial<SystemSettings>) => Promise<boolean>
-    }
-    nodePositions: {
-      getAll: () => Promise<{ node_id: string; x: number; y: number; updated_at: string }[]>
-      save: (nodeId: string, x: number, y: number) => Promise<void>
-      saveBatch: (positions: { node_id: string; x: number; y: number }[]) => Promise<void>
-      delete: (nodeId: string) => Promise<boolean>
     }
     window: {
       minimize: () => void

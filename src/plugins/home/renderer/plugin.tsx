@@ -1,0 +1,49 @@
+import { RiDashboardLine, RiMindMap } from '@remixicon/react'
+import type { Plugin } from '@renderer/plugin-host/types'
+import manifest from '../manifest'
+import { homeLocales } from '../locales'
+import GraphSettings from './settings/GraphSettings'
+import BuildProgressOverlay from './providers/BuildProgressOverlay'
+import HomeIndex from './Index'
+
+/**
+ * home 插件（渲染层入口）：思源笔记风格首页（文档树 / 编辑器 / 待办 / Wiki / 图谱）。
+ *
+ * 注册点：route（**首屏即用**：直接挂组件，不走懒加载 chunk——首页是默认落点）、
+ * menu（侧栏，order 10）、settingsSection（图谱设置页，归属首页）、
+ * appProvider（图谱构建进度浮层，弹窗组件随插件装卸，外壳不再 import 首页组件）、
+ * i18n（词条随插件注册：`home` / `graph` / `graphSettings` 三个顶层键停用即消失）。
+ *
+ * 知识图谱视图（2.7MB chunk，含 echarts/cytoscape）仍由 HomeView 用
+ * `React.lazy(() => import('./graph/GraphView'))` 按需加载，不随首屏打包。
+ */
+const plugin: Plugin = {
+  // id/name/version/description 的单一真源在 ../manifest.ts（主进程 plugins-list 同源）
+  manifest,
+  install(ctx) {
+    ctx.use('route').register({
+      path: '/home',
+      Component: HomeIndex
+    })
+    ctx.use('menu').register({
+      key: 'home',
+      labelKey: 'shell.menu.home',
+      icon: <RiDashboardLine size={16} />,
+      order: 10
+    })
+    ctx.use('settingsSection').register({
+      tabKey: 'graph',
+      labelKey: 'settings.nav.graph',
+      icon: <RiMindMap size={16} />,
+      group: 'general',
+      order: 40,
+      Component: GraphSettings
+    })
+    // 图谱构建进度浮层随插件注册：Provider 增删即「插件启用/停用」的重构
+    ctx.use('appProvider').register({ Provider: BuildProgressOverlay, order: 10 })
+    // 词条随插件注册：停用即不再注册这些键（原先由中央 locales 无条件打包进首屏）
+    ctx.use('i18n').addResources('translation', homeLocales)
+  }
+}
+
+export default plugin

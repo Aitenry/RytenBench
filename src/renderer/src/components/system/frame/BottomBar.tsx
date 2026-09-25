@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef, useCallback, useReducer } from 'react'
 import { RiRefreshLine, RiSunCloudyLine } from '@remixicon/react'
-import { useTheme } from '@renderer/contexts/useTheme'
+import { useTheme } from '@renderer/hooks/useTheme'
 import { useTranslation } from '@renderer/i18n'
 import { useBottomBarItems } from '@renderer/plugin-host/PluginHostContext'
 import type { BottomBarItemRegistration } from '@renderer/plugin-host/types'

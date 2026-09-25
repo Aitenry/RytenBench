@@ -114,7 +114,10 @@ export default {
 - [x] planner（main/db/renderer/locales/preload 通道全量收进 src/plugins/planner；
       10 个 `plugin:planner:*` 通道、无事件通道、词条随插件注册、
       `window.api.planner` 命名空间删除并由 `renderer/api.ts` 的 `plannerApi` 取代）
-- [ ] home（含 graph / document / wiki / todo 与知识图谱组件）
+- [x] home（含 graph / document / wiki / todo 与知识图谱组件）：main/db/renderer/shared/locales 全量收进
+      `src/plugins/home/**`；preload 的六个命名空间（`todoItems` / `taskDependencies` / `docs` / `wikis` /
+      `graph` / `nodePositions`）删除，渲染层改用 `renderer/api.ts` 的 `homeApi`（通用桥 `plugin:home:*`）；
+      知识图谱视图仍由 HomeView `React.lazy` 按需加载（2.7MB chunk 不进外壳）
 - [ ] harness（含 runtime、service、tools、workspace 文件历史）
 - [ ] core 收尾：删除旧路径（`src/main/ipc/index.ts` 的 builtinIpcGroups、ipc-capture、preload 各插件命名空间）
 

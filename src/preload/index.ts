@@ -1,8 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
-import { TodoItemRow } from '../plugins/home/main/db/mapper/todo'
-import { DocRow } from '../plugins/home/main/db/mapper/document'
-import { WikiRow, WikiDirectoryRow } from '../plugins/home/main/db/mapper/wiki'
 import { HarnessTopicRow, HarnessDialogueRow, WorkspaceRow } from '../main/database/mapper/harness'
 import type { LlmProviderInput, LlmProviderConfig } from '../main/database/mapper/provider'
 import type { AgentConfigRow, AgentConfigInput } from '../main/database/mapper/agent'
@@ -92,92 +89,10 @@ ipcRenderer.on('harness-stream-error', (_event, error) => {
 })
 
 // Custom APIs for renderer
-// 迁移过渡（home 本轮只做主进程 + 通道）：六个 home 命名空间暂时保留，渲染层下一轮再
-// 改走 `window.api.plugin.invoke`；这里所有通道字面量已改成 `plugin:home:*`，
-// 主进程侧由 src/plugins/home/main/index.ts 经 ctx.registerIpc 注册、随插件启停摘除。
+// home 插件的六个命名空间（todoItems / taskDependencies / docs / wikis / graph /
+// nodePositions）已删除：改由插件自己的 src/plugins/home/renderer/api.ts 走通用桥
+// window.api.plugin.invoke/on（通道 plugin:home:*）。
 const api = {
-  // TodoItems 相关 API
-  todoItems: {
-    getById: (id: number) => ipcRenderer.invoke('plugin:home:todo-items-get-by-id', id),
-    getByTitle: (title: string) => ipcRenderer.invoke('plugin:home:todo-items-get-by-title', title),
-    getByPriority: (priority: number) =>
-      ipcRenderer.invoke('plugin:home:todo-items-get-by-priority', priority),
-    getByCompletedStatus: (status: number) =>
-      ipcRenderer.invoke('plugin:home:todo-items-get-by-completed-status', status),
-    getAll: () => ipcRenderer.invoke('plugin:home:todo-items-get-schedule'),
-    getAllPaginated: (page?: number, pageSize?: number) =>
-      ipcRenderer.invoke('plugin:home:todo-items-get-paginated', page, pageSize),
-    getByDueDate: (dueDate: string) =>
-      ipcRenderer.invoke('plugin:home:todo-items-get-by-due-date', dueDate),
-    add: (todoItem: Omit<TodoItemRow, 'id'>) =>
-      ipcRenderer.invoke('plugin:home:todo-items-add', todoItem),
-    update: (id: number, updates: Partial<Omit<TodoItemRow, 'id'>>) =>
-      ipcRenderer.invoke('plugin:home:todo-items-update', id, updates),
-    delete: (id: number) => ipcRenderer.invoke('plugin:home:todo-items-delete', id)
-  },
-  taskDependencies: {
-    add: (taskId: number, dependsOnTaskId: number) =>
-      ipcRenderer.invoke('plugin:home:task-deps-add', taskId, dependsOnTaskId),
-    delete: (taskId: number, dependsOnTaskId: number) =>
-      ipcRenderer.invoke('plugin:home:task-deps-delete', taskId, dependsOnTaskId),
-    getAll: () => ipcRenderer.invoke('plugin:home:task-deps-get-all'),
-    getTasksWithDeps: () => ipcRenderer.invoke('plugin:home:task-deps-get-with-tasks')
-  },
-  docs: {
-    getById: (id: number) => ipcRenderer.invoke('plugin:home:doc-get-by-id', id),
-    getAll: (page?: number, pageSize?: number, excludeWikiId?: number, search?: string) =>
-      ipcRenderer.invoke('plugin:home:doc-get-all', page, pageSize, excludeWikiId, search),
-    getPage: (query: string, page?: number, pageSize?: number) =>
-      ipcRenderer.invoke('plugin:home:doc-page-get', query, page, pageSize),
-    add: (
-      doc: Omit<DocRow, 'id' | 'created_at' | 'updated_at'> & {
-        image?: string | null
-        content?: string | null
-      }
-    ) => ipcRenderer.invoke('plugin:home:doc-add', doc),
-    update: (
-      id: number,
-      updates: Partial<Omit<DocRow, 'id' | 'created_at'>> & {
-        image?: string | null
-        content?: string | null
-      }
-    ) => ipcRenderer.invoke('plugin:home:doc-update', id, updates),
-    delete: (id: number) => ipcRenderer.invoke('plugin:home:doc-delete', id),
-    deleteByTimeRange: (startTime: string, endTime: string) =>
-      ipcRenderer.invoke('plugin:home:doc-delete-by-time-range', startTime, endTime),
-    importDocument: () =>
-      ipcRenderer.invoke('plugin:home:doc-import') as Promise<{
-        title: string
-        content: string
-      } | null>,
-    exportDocument: (id: number) =>
-      ipcRenderer.invoke('plugin:home:doc-export', id) as Promise<boolean>
-  },
-  wikis: {
-    getById: (id: number) => ipcRenderer.invoke('plugin:home:wiki-get-by-id', id),
-    getAll: (page?: number, pageSize?: number) =>
-      ipcRenderer.invoke('plugin:home:wiki-get-all', page, pageSize),
-    add: (wiki: Omit<WikiRow, 'id' | 'doc_count' | 'created_at' | 'updated_at'>) =>
-      ipcRenderer.invoke('plugin:home:wiki-add', wiki),
-    update: (id: number, updates: Partial<Omit<WikiRow, 'id' | 'doc_count' | 'created_at'>>) =>
-      ipcRenderer.invoke('plugin:home:wiki-update', id, updates),
-    delete: (id: number) => ipcRenderer.invoke('plugin:home:wiki-delete', id),
-    getDirectories: (wikiId: number) =>
-      ipcRenderer.invoke('plugin:home:wiki-directories-get', wikiId),
-    addDirectory: (directory: Omit<WikiDirectoryRow, 'id' | 'created_at' | 'updated_at'>) =>
-      ipcRenderer.invoke('plugin:home:wiki-directory-add', directory),
-    updateDirectory: (id: number, updates: Partial<Omit<WikiDirectoryRow, 'id' | 'created_at'>>) =>
-      ipcRenderer.invoke('plugin:home:wiki-directory-update', id, updates),
-    deleteDirectory: (id: number) => ipcRenderer.invoke('plugin:home:wiki-directory-delete', id),
-    getNotesByDirectory: (directoryId: number) =>
-      ipcRenderer.invoke('plugin:home:wiki-directory-docs-get', directoryId),
-    addNoteToDirectory: (directoryId: number, noteId: number, sortOrder?: number) =>
-      ipcRenderer.invoke('plugin:home:wiki-directory-note-add', directoryId, noteId, sortOrder),
-    removeNoteFromDirectory: (directoryId: number, noteId: number) =>
-      ipcRenderer.invoke('plugin:home:wiki-directory-doc-remove', directoryId, noteId),
-    getDirectoriesByNote: (noteId: number) =>
-      ipcRenderer.invoke('plugin:home:wiki-doc-directories-get', noteId)
-  },
   file: {
     selectImageFile: (allowImages?: boolean) =>
       ipcRenderer.invoke('select-image-file', allowImages),
@@ -492,102 +407,6 @@ const api = {
         { content: string } | { error: string }
       >
   },
-  graph: {
-    getData: (wikiId: number, typeFilter?: string, docIds?: number[]) =>
-      ipcRenderer.invoke('plugin:home:graph-data-get', wikiId, typeFilter, docIds),
-    getEntity: (entityId: number) => ipcRenderer.invoke('plugin:home:graph-entity-get', entityId),
-    searchEntities: (wikiId: number, query: string) =>
-      ipcRenderer.invoke('plugin:home:graph-entity-search', wikiId, query),
-    updateEntity: (id: number, updates: Record<string, unknown>) =>
-      ipcRenderer.invoke('plugin:home:graph-entity-update', id, updates),
-    deleteEntity: (id: number) => ipcRenderer.invoke('plugin:home:graph-entity-delete', id),
-    deleteRelation: (id: number) => ipcRenderer.invoke('plugin:home:graph-relation-delete', id),
-    getBuildStatus: (wikiId: number) =>
-      ipcRenderer.invoke('plugin:home:graph-build-status', wikiId),
-    appendDocs: (wikiId: number, docIds: number[]) =>
-      ipcRenderer.invoke('plugin:home:graph-docs-append', wikiId, docIds),
-    getProcessedDocIds: (wikiId: number) =>
-      ipcRenderer.invoke('plugin:home:graph-processed-docs-get', wikiId) as Promise<number[]>,
-    /**
-     * 启动图谱构建。迁移说明：主进程侧原为 `ipcMain.on('graph-build-start')`，
-     * 现统一走 ctx.registerIpc（只有 handle），因此这里从 send 改为 invoke；
-     * 进度/完成/错误仍由三个 plugin:home:graph-build-* 事件通道下发。
-     */
-    buildGraph: (wikiId: number, config?: Record<string, unknown>) =>
-      ipcRenderer.invoke('plugin:home:graph-build-start', wikiId, config) as Promise<void>,
-    onBuildProgress: (
-      callback: (progress: {
-        wikiId: number
-        phase: string
-        phaseLabel: string
-        phaseProgress: number
-        overallProgress: number
-        processedDocs: number
-        totalDocs: number
-        processedChunks: number
-        totalChunks: number
-        entityCount: number
-        relationCount: number
-        message: string
-        needsRefresh?: boolean
-      }) => void
-    ) => {
-      const handler = (
-        _event: Electron.IpcRendererEvent,
-        progress: {
-          wikiId: number
-          phase: string
-          phaseLabel: string
-          phaseProgress: number
-          overallProgress: number
-          processedDocs: number
-          totalDocs: number
-          processedChunks: number
-          totalChunks: number
-          entityCount: number
-          relationCount: number
-          message: string
-          needsRefresh?: boolean
-        }
-      ): void => {
-        callback(progress)
-      }
-      ipcRenderer.on('plugin:home:graph-build-progress', handler)
-      return () => {
-        ipcRenderer.off('plugin:home:graph-build-progress', handler)
-      }
-    },
-    onBuildComplete: (
-      callback: (result: { wikiId: number; entityCount: number; relationCount: number }) => void
-    ) => {
-      const handler = (
-        _event: Electron.IpcRendererEvent,
-        result: {
-          wikiId: number
-          entityCount: number
-          relationCount: number
-        }
-      ): void => {
-        callback(result)
-      }
-      ipcRenderer.on('plugin:home:graph-build-complete', handler)
-      return () => {
-        ipcRenderer.off('plugin:home:graph-build-complete', handler)
-      }
-    },
-    onBuildError: (callback: (error: { wikiId: number; error: string }) => void) => {
-      const handler = (
-        _event: Electron.IpcRendererEvent,
-        error: { wikiId: number; error: string }
-      ): void => {
-        callback(error)
-      }
-      ipcRenderer.on('plugin:home:graph-build-error', handler)
-      return () => {
-        ipcRenderer.off('plugin:home:graph-build-error', handler)
-      }
-    }
-  },
   providers: {
     getAll: () => ipcRenderer.invoke('provider-get-all') as Promise<LlmProviderConfig[]>,
     getById: (id: number) =>
@@ -653,15 +472,6 @@ const api = {
     getAll: () => ipcRenderer.invoke('system-settings-get-all') as Promise<SystemSettings>,
     update: (updates: Partial<SystemSettings>) =>
       ipcRenderer.invoke('system-settings-update', updates) as Promise<boolean>
-  },
-  nodePositions: {
-    getAll: (): Promise<{ node_id: string; x: number; y: number; updated_at: string }[]> =>
-      ipcRenderer.invoke('plugin:home:node-positions-get-all'),
-    save: (nodeId: string, x: number, y: number) =>
-      ipcRenderer.invoke('plugin:home:node-position-save', nodeId, x, y),
-    saveBatch: (positions: { node_id: string; x: number; y: number }[]) =>
-      ipcRenderer.invoke('plugin:home:node-positions-save-batch', positions),
-    delete: (nodeId: string) => ipcRenderer.invoke('plugin:home:node-position-delete', nodeId)
   },
   window: {
     minimize: () => ipcRenderer.send('window-minimize'),

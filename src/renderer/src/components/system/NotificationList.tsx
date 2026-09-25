@@ -1,6 +1,6 @@
 import React from 'react'
 import { Progress, Tag, Typography } from 'antd'
-import { useNotification } from '@renderer/contexts/useNotification'
+import { useNotification } from '@renderer/hooks/useNotification'
 import { useTranslation } from '@renderer/i18n'
 import type { BuildProgressNotification } from '@renderer/types/notification'
 

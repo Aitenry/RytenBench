@@ -3,7 +3,7 @@ import * as antd from 'antd'
 import * as RemixIcons from '@remixicon/react'
 import type { Plugin } from '@renderer/plugin-host/types'
 // 已迁移的插件从自包含目录 @plugins 引入；未迁移的仍在 @renderer/plugins 下
-import home from '@renderer/plugins/home/plugin'
+import home from '@plugins/home/renderer/plugin'
 import music from '@plugins/music/renderer/plugin'
 import planner from '@plugins/planner/renderer/plugin'
 import harness from '@renderer/plugins/harness/plugin'
