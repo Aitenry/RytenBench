@@ -4,7 +4,7 @@ import { RiAiAgentLine } from '@remixicon/react'
 import type { TFunction } from 'i18next'
 import { useTranslation } from '@renderer/i18n'
 import type { Window } from '../../../../resource/types/window'
-import type { SubagentSessionRow } from '../../../../../main/harness/runtime/subagent-sessions'
+import type { SubagentSessionRow } from '../../../../../plugins/harness/main/runtime/subagent-sessions'
 
 /**
  * 顶部栏「后台子智能体」入口（最右端）：

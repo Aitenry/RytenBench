@@ -15,7 +15,9 @@ import { getMainLanguage, mainMessages } from '../i18n'
 import { GraphSettings, HarnessSettings, TraySettings } from '../types/settings'
 import { getIp } from '../address'
 import { startWeatherAutoRefresh } from '../weather'
-import { preloadHarnessData } from '../harness/preload-cache'
+// 过渡期：加载页预取的数据属 harness 插件（子代理定义 + 话题首页），实现已随插件搬到
+// src/plugins/harness/main/preload-cache.ts；core → 插件的这处依赖随 core 收尾一并处理
+import { preloadHarnessData } from '../../plugins/harness/main/preload-cache'
 import { getLoadingWindow, markInitComplete, setLoadingWindow } from './window-manager'
 
 /** 加载窗口初始化进度（步骤名 + 细粒度百分比，逐步推进） */

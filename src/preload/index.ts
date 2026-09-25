@@ -1,17 +1,24 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
-import { HarnessTopicRow, HarnessDialogueRow, WorkspaceRow } from '../main/database/mapper/harness'
+import {
+  HarnessTopicRow,
+  HarnessDialogueRow,
+  WorkspaceRow
+} from '../plugins/harness/main/db/mapper/harness'
 import type { LlmProviderInput, LlmProviderConfig } from '../main/database/mapper/provider'
-import type { AgentConfigRow, AgentConfigInput } from '../main/database/mapper/agent'
-import type { PaginatedResult as AgentPaginatedResult } from '../main/database/mapper/agent'
-import type { TodoItem } from '../main/harness/runtime/todo'
-import type { GoalView } from '../main/harness/runtime/goal'
-import type { JobSnapshot } from '../main/harness/runtime/jobs'
-import type { SubagentSessionRow } from '../main/harness/runtime/subagent-sessions'
-import type { PendingQuestionView, AskAnswer } from '../main/harness/runtime/ask'
-import type { QueuedMessageView } from '../main/harness/queue-store'
-import type { FileChangeView, FileChangeContent } from '../main/workspace/file-history'
-import type { WorkspaceFsChange } from '../main/workspace/watcher'
+import type { AgentConfigRow, AgentConfigInput } from '../plugins/harness/main/db/mapper/agent'
+import type { PaginatedResult as AgentPaginatedResult } from '../plugins/harness/main/db/mapper/agent'
+import type { TodoItem } from '../plugins/harness/main/runtime/todo'
+import type { GoalView } from '../plugins/harness/main/runtime/goal'
+import type { JobSnapshot } from '../plugins/harness/main/runtime/jobs'
+import type { SubagentSessionRow } from '../plugins/harness/main/runtime/subagent-sessions'
+import type { PendingQuestionView, AskAnswer } from '../plugins/harness/main/runtime/ask'
+import type { QueuedMessageView } from '../plugins/harness/main/queue-store'
+import type {
+  FileChangeView,
+  FileChangeContent
+} from '../plugins/harness/main/workspace/file-history'
+import type { WorkspaceFsChange } from '../plugins/harness/main/workspace/watcher'
 
 type AskAnswerItem = AskAnswer['answers'][number]
 import type { SystemSettings } from '../main/types/settings'
@@ -70,19 +77,19 @@ const streamDoneHandlers = new Set<(result: { topicId: number }) => void>()
 const streamErrorHandlers = new Set<(error: { error: string; topicId?: number }) => void>()
 
 // 注册全局 IPC 监听器，分发到所有注册的回调
-ipcRenderer.on('harness-stream-chunk', (_event, chunk) => {
+ipcRenderer.on('plugin:harness:harness-stream-chunk', (_event, chunk) => {
   for (const handler of streamChunkHandlers) {
     handler(chunk)
   }
 })
 
-ipcRenderer.on('harness-stream-done', (_event, result) => {
+ipcRenderer.on('plugin:harness:harness-stream-done', (_event, result) => {
   for (const handler of streamDoneHandlers) {
     handler(result)
   }
 })
 
-ipcRenderer.on('harness-stream-error', (_event, error) => {
+ipcRenderer.on('plugin:harness:harness-stream-error', (_event, error) => {
   for (const handler of streamErrorHandlers) {
     handler(error)
   }
@@ -120,7 +127,7 @@ const api = {
       options?: {
         providerId?: number
       }
-    ) => ipcRenderer.invoke('harness-send-message', message, options),
+    ) => ipcRenderer.invoke('plugin:harness:harness-send-message', message, options),
     startMessageStream: (
       message: string,
       options?: {
@@ -134,7 +141,8 @@ const api = {
         messageId?: string
       }
     ) => {
-      ipcRenderer.send('harness-start-stream', message, options)
+      // harness-start-stream 已从 ipcMain.on 改成 invoke 通道（见插件 main/index.ts）
+      void ipcRenderer.invoke('plugin:harness:harness-start-stream', message, options)
     },
     // ── 生成中的插话队列 ──────────────────────────────────────────────
     /** 生成中发消息：主进程裁决——有回合在跑则入队（queued=true），否则直接开新一轮 */
@@ -145,16 +153,28 @@ const api = {
         images?: string[]
         documents?: { fileName: string; filePath: string }[]
       }
-    }) => ipcRenderer.invoke('harness-queue-enqueue', payload) as Promise<{ queued: boolean }>,
+    }) =>
+      ipcRenderer.invoke('plugin:harness:harness-queue-enqueue', payload) as Promise<{
+        queued: boolean
+      }>,
     listQueuedMessages: (topicId: number) =>
-      ipcRenderer.invoke('harness-queue-list', topicId) as Promise<QueuedMessageView[]>,
+      ipcRenderer.invoke('plugin:harness:harness-queue-list', topicId) as Promise<
+        QueuedMessageView[]
+      >,
     removeQueuedMessage: (topicId: number, itemId: string) =>
-      ipcRenderer.invoke('harness-queue-remove', { topicId, itemId }) as Promise<boolean>,
+      ipcRenderer.invoke('plugin:harness:harness-queue-remove', {
+        topicId,
+        itemId
+      }) as Promise<boolean>,
     updateQueuedMessage: (topicId: number, itemId: string, text: string) =>
-      ipcRenderer.invoke('harness-queue-update', { topicId, itemId, text }) as Promise<boolean>,
+      ipcRenderer.invoke('plugin:harness:harness-queue-update', {
+        topicId,
+        itemId,
+        text
+      }) as Promise<boolean>,
     /** 立即插话：把这条排队消息注入正在运行的回合（下一个工具节点边界生效） */
     steerQueuedMessage: (topicId: number, itemId: string) =>
-      ipcRenderer.invoke('harness-queue-steer', { topicId, itemId }) as Promise<{
+      ipcRenderer.invoke('plugin:harness:harness-queue-steer', { topicId, itemId }) as Promise<{
         accepted: boolean
       }>,
     onQueueUpdated: (callback: (data: { topicId: number; queue: QueuedMessageView[] }) => void) => {
@@ -164,9 +184,9 @@ const api = {
       ): void => {
         callback(data)
       }
-      ipcRenderer.on('harness-queue-updated', listener)
+      ipcRenderer.on('plugin:harness:harness-queue-updated', listener)
       return () => {
-        ipcRenderer.removeListener('harness-queue-updated', listener)
+        ipcRenderer.removeListener('plugin:harness:harness-queue-updated', listener)
       }
     },
     onQueueSteered: (
@@ -178,12 +198,12 @@ const api = {
       ): void => {
         callback(data)
       }
-      ipcRenderer.on('harness-queue-steered', listener)
+      ipcRenderer.on('plugin:harness:harness-queue-steered', listener)
       return () => {
-        ipcRenderer.removeListener('harness-queue-steered', listener)
+        ipcRenderer.removeListener('plugin:harness:harness-queue-steered', listener)
       }
     },
-    getTools: () => ipcRenderer.invoke('harness-get-tools'),
+    getTools: () => ipcRenderer.invoke('plugin:harness:harness-get-tools'),
     onStreamChunk: (callback: (chunk: Record<string, unknown>) => void) => {
       streamChunkHandlers.add(callback)
       return () => {
@@ -218,12 +238,13 @@ const api = {
       ): void => {
         callback(data)
       }
-      ipcRenderer.on('harness-doc-changed', listener)
+      ipcRenderer.on('plugin:harness:harness-doc-changed', listener)
       return () => {
-        ipcRenderer.removeListener('harness-doc-changed', listener)
+        ipcRenderer.removeListener('plugin:harness:harness-doc-changed', listener)
       }
     },
-    getHarnessTodos: (topicId: number) => ipcRenderer.invoke('harness-todos-get', topicId),
+    getHarnessTodos: (topicId: number) =>
+      ipcRenderer.invoke('plugin:harness:harness-todos-get', topicId),
     onHarnessTodosUpdated: (callback: (data: { topicId: number; todos: TodoItem[] }) => void) => {
       const listener = (
         _event: Electron.IpcRendererEvent,
@@ -231,13 +252,13 @@ const api = {
       ): void => {
         callback(data)
       }
-      ipcRenderer.on('harness-todos-updated', listener)
+      ipcRenderer.on('plugin:harness:harness-todos-updated', listener)
       return () => {
-        ipcRenderer.removeListener('harness-todos-updated', listener)
+        ipcRenderer.removeListener('plugin:harness:harness-todos-updated', listener)
       }
     },
     // 目标系统（goal）
-    getGoal: (topicId: number) => ipcRenderer.invoke('harness-goal-get', topicId),
+    getGoal: (topicId: number) => ipcRenderer.invoke('plugin:harness:harness-goal-get', topicId),
     onGoalUpdated: (callback: (data: { topicId: number; goal: GoalView | null }) => void) => {
       const listener = (
         _event: Electron.IpcRendererEvent,
@@ -245,9 +266,9 @@ const api = {
       ): void => {
         callback(data)
       }
-      ipcRenderer.on('harness-goal-updated', listener)
+      ipcRenderer.on('plugin:harness:harness-goal-updated', listener)
       return () => {
-        ipcRenderer.removeListener('harness-goal-updated', listener)
+        ipcRenderer.removeListener('plugin:harness:harness-goal-updated', listener)
       }
     },
     // 后台任务系统（jobs）
@@ -258,15 +279,16 @@ const api = {
       ): void => {
         callback(data)
       }
-      ipcRenderer.on('harness-jobs-updated', listener)
+      ipcRenderer.on('plugin:harness:harness-jobs-updated', listener)
       return () => {
-        ipcRenderer.removeListener('harness-jobs-updated', listener)
+        ipcRenderer.removeListener('plugin:harness:harness-jobs-updated', listener)
       }
     },
     // 后台子代理会话（顶部栏列表：进行中 > 已完成，点开查看结果）
-    listAgents: (topicId: number) => ipcRenderer.invoke('harness-agents-list', topicId),
+    listAgents: (topicId: number) =>
+      ipcRenderer.invoke('plugin:harness:harness-agents-list', topicId),
     agentOutput: (topicId: number, agentId: string) =>
-      ipcRenderer.invoke('harness-agent-output', topicId, agentId),
+      ipcRenderer.invoke('plugin:harness:harness-agent-output', topicId, agentId),
     /**
      * 存入记忆：起一个后台「记忆整理」子代理，由它自己总结后写入 Mnemon，立即返回。
      * 进度与结果走顶部栏后台代理入口（onAgentsUpdated / agentOutput），不等它跑完。
@@ -276,7 +298,7 @@ const api = {
       answer: string
       dialogueId?: number
       providerId?: number
-    }) => ipcRenderer.invoke('harness-memory-agent-start', payload),
+    }) => ipcRenderer.invoke('plugin:harness:harness-memory-agent-start', payload),
     onAgentsUpdated: (
       callback: (data: { topicId: number; rows: SubagentSessionRow[] }) => void
     ) => {
@@ -286,13 +308,13 @@ const api = {
       ): void => {
         callback(data)
       }
-      ipcRenderer.on('harness-agents-updated', listener)
+      ipcRenderer.on('plugin:harness:harness-agents-updated', listener)
       return () => {
-        ipcRenderer.removeListener('harness-agents-updated', listener)
+        ipcRenderer.removeListener('plugin:harness:harness-agents-updated', listener)
       }
     },
     watchAgentOutput: (topicId: number, agentId: string, watch: boolean) => {
-      ipcRenderer.send('harness-agent-watch', topicId, agentId, watch)
+      void ipcRenderer.invoke('plugin:harness:harness-agent-watch', topicId, agentId, watch)
     },
     onAgentOutputUpdated: (
       callback: (data: {
@@ -321,9 +343,9 @@ const api = {
       ): void => {
         callback(data)
       }
-      ipcRenderer.on('harness-agent-output-updated', listener)
+      ipcRenderer.on('plugin:harness:harness-agent-output-updated', listener)
       return () => {
-        ipcRenderer.removeListener('harness-agent-output-updated', listener)
+        ipcRenderer.removeListener('plugin:harness:harness-agent-output-updated', listener)
       }
     },
     // 向用户提问（ask_user_question）
@@ -331,79 +353,101 @@ const api = {
       const listener = (_event: Electron.IpcRendererEvent, pending: PendingQuestionView): void => {
         callback(pending)
       }
-      ipcRenderer.on('harness-question-asked', listener)
+      ipcRenderer.on('plugin:harness:harness-question-asked', listener)
       return () => {
-        ipcRenderer.removeListener('harness-question-asked', listener)
+        ipcRenderer.removeListener('plugin:harness:harness-question-asked', listener)
       }
     },
     answerQuestion: (requestId: string, answers: AskAnswerItem[]) =>
-      ipcRenderer.invoke('harness-question-answer', requestId, answers),
-    getQuestion: (topicId: number) => ipcRenderer.invoke('harness-question-get', topicId),
+      ipcRenderer.invoke('plugin:harness:harness-question-answer', requestId, answers),
+    getQuestion: (topicId: number) =>
+      ipcRenderer.invoke('plugin:harness:harness-question-get', topicId),
     cancelStream: () => {
-      ipcRenderer.send('harness-cancel-stream')
+      void ipcRenderer.invoke('plugin:harness:harness-cancel-stream')
     },
-    selectSkillsDirectory: () => ipcRenderer.invoke('harness-select-skills-directory'),
-    selectWorkspace: () => ipcRenderer.invoke('harness-select-workspace') as Promise<string | null>,
-    listSkills: () => ipcRenderer.invoke('harness-list-skills'),
+    selectSkillsDirectory: () =>
+      ipcRenderer.invoke('plugin:harness:harness-select-skills-directory'),
+    selectWorkspace: () =>
+      ipcRenderer.invoke('plugin:harness:harness-select-workspace') as Promise<string | null>,
+    listSkills: () => ipcRenderer.invoke('plugin:harness:harness-list-skills'),
     // 记忆管理（Mnemon 三层记忆）
-    selectMemoryDirectory: () => ipcRenderer.invoke('harness-select-memory-directory'),
+    selectMemoryDirectory: () =>
+      ipcRenderer.invoke('plugin:harness:harness-select-memory-directory'),
     // Mnemon 记忆系统
-    mnemonSnapshot: () => ipcRenderer.invoke('mnemon-snapshot'),
+    mnemonSnapshot: () => ipcRenderer.invoke('plugin:harness:mnemon-snapshot'),
     mnemonRuntimeMutate: (request: {
       action: string
       target: string
       content?: string
       old_text?: string
       importance?: string
-    }) => ipcRenderer.invoke('mnemon-runtime-mutate', request),
-    mnemonBodies: () => ipcRenderer.invoke('mnemon-bodies'),
+    }) => ipcRenderer.invoke('plugin:harness:mnemon-runtime-mutate', request),
+    mnemonBodies: () => ipcRenderer.invoke('plugin:harness:mnemon-bodies'),
     mnemonBodyCreate: (name: string, description: string) =>
-      ipcRenderer.invoke('mnemon-body-create', { name, description }),
+      ipcRenderer.invoke('plugin:harness:mnemon-body-create', { name, description }),
     mnemonBodyUpdate: (
       id: string,
       request: { name?: string; description?: string; active?: boolean }
-    ) => ipcRenderer.invoke('mnemon-body-update', id, request),
+    ) => ipcRenderer.invoke('plugin:harness:mnemon-body-update', id, request),
     mnemonBodyList: (memoryBodyIds?: string[]) =>
-      ipcRenderer.invoke('mnemon-body-list', memoryBodyIds),
-    mnemonDocumentSnapshot: () => ipcRenderer.invoke('mnemon-document-snapshot'),
+      ipcRenderer.invoke('plugin:harness:mnemon-body-list', memoryBodyIds),
+    mnemonDocumentSnapshot: () => ipcRenderer.invoke('plugin:harness:mnemon-document-snapshot'),
     // 工作区管理
-    getAllWorkspaces: () => ipcRenderer.invoke('workspace-get-all') as Promise<WorkspaceRow[]>,
+    getAllWorkspaces: () =>
+      ipcRenderer.invoke('plugin:harness:workspace-get-all') as Promise<WorkspaceRow[]>,
     createWorkspace: (name: string, path: string) =>
-      ipcRenderer.invoke('workspace-create', name, path) as Promise<number>,
+      ipcRenderer.invoke('plugin:harness:workspace-create', name, path) as Promise<number>,
     updateWorkspace: (id: number, updates: { name: string }) =>
-      ipcRenderer.invoke('workspace-update', id, updates) as Promise<boolean>,
-    deleteWorkspace: (id: number) => ipcRenderer.invoke('workspace-delete', id) as Promise<boolean>,
+      ipcRenderer.invoke('plugin:harness:workspace-update', id, updates) as Promise<boolean>,
+    deleteWorkspace: (id: number) =>
+      ipcRenderer.invoke('plugin:harness:workspace-delete', id) as Promise<boolean>,
     // 话题管理
-    getAllTopics: (workspaceId: number) => ipcRenderer.invoke('harness-topic-get-all', workspaceId),
+    getAllTopics: (workspaceId: number) =>
+      ipcRenderer.invoke('plugin:harness:harness-topic-get-all', workspaceId),
     getAllTopicsPaginated: (workspaceId: number, page: number, pageSize: number) =>
-      ipcRenderer.invoke('harness-topic-get-paginated', workspaceId, page, pageSize),
-    getTopicById: (id: number) => ipcRenderer.invoke('harness-topic-get-by-id', id),
+      ipcRenderer.invoke('plugin:harness:harness-topic-get-paginated', workspaceId, page, pageSize),
+    getTopicById: (id: number) => ipcRenderer.invoke('plugin:harness:harness-topic-get-by-id', id),
     createTopic: (workspaceId: number, title: string, model?: string, selectedTools?: string) =>
-      ipcRenderer.invoke('harness-topic-create', workspaceId, title, model, selectedTools),
+      ipcRenderer.invoke(
+        'plugin:harness:harness-topic-create',
+        workspaceId,
+        title,
+        model,
+        selectedTools
+      ),
     updateTopic: (
       id: number,
       updates: Partial<Pick<HarnessTopicRow, 'title' | 'model' | 'selected_tools'>>
-    ) => ipcRenderer.invoke('harness-topic-update', id, updates),
-    deleteTopic: (id: number) => ipcRenderer.invoke('harness-topic-delete', id),
+    ) => ipcRenderer.invoke('plugin:harness:harness-topic-update', id, updates),
+    deleteTopic: (id: number) => ipcRenderer.invoke('plugin:harness:harness-topic-delete', id),
     // 消息管理
     getDialoguesByTopic: (topicId: number) =>
-      ipcRenderer.invoke('harness-dialogue-get-by-topic', topicId),
+      ipcRenderer.invoke('plugin:harness:harness-dialogue-get-by-topic', topicId),
     getDialoguesByTopicPaginated: (topicId: number, page: number, pageSize: number) =>
-      ipcRenderer.invoke('harness-dialogue-get-by-topic-paginated', topicId, page, pageSize),
+      ipcRenderer.invoke(
+        'plugin:harness:harness-dialogue-get-by-topic-paginated',
+        topicId,
+        page,
+        pageSize
+      ),
     addDialogue: (dialogue: Omit<HarnessDialogueRow, 'id' | 'created_at'>) =>
-      ipcRenderer.invoke('harness-dialogue-add', dialogue),
+      ipcRenderer.invoke('plugin:harness:harness-dialogue-add', dialogue),
     deleteDialoguesByTopic: (topicId: number) =>
-      ipcRenderer.invoke('harness-dialogue-delete-by-topic', topicId),
-    deleteDialogue: (id: number) => ipcRenderer.invoke('harness-dialogue-delete', id),
+      ipcRenderer.invoke('plugin:harness:harness-dialogue-delete-by-topic', topicId),
+    deleteDialogue: (id: number) =>
+      ipcRenderer.invoke('plugin:harness:harness-dialogue-delete', id),
     // 对话真实用量（一条助手回复一行）
-    getUsageByTopic: (topicId: number) => ipcRenderer.invoke('harness-usage-get-by-topic', topicId),
+    getUsageByTopic: (topicId: number) =>
+      ipcRenderer.invoke('plugin:harness:harness-usage-get-by-topic', topicId),
     // 工具结果按需读取：内置工具（read_file/execute 等）的结果不再随流下发，
     // 聊天卡片点开时才取（ls/glob/grep/execute 的详情按 topicId+callId 取回）
     getToolOutput: (topicId: number, callId: string) =>
-      ipcRenderer.invoke('harness-tool-output-get', topicId, callId) as Promise<string | null>,
+      ipcRenderer.invoke('plugin:harness:harness-tool-output-get', topicId, callId) as Promise<
+        string | null
+      >,
     // 按虚拟路径读取文本文件（卡片「打开文件」；工作区与记忆挂载都可读）
     readVirtualFile: (virtualPath: string) =>
-      ipcRenderer.invoke('harness-vfs-read', virtualPath) as Promise<
+      ipcRenderer.invoke('plugin:harness:harness-vfs-read', virtualPath) as Promise<
         { content: string } | { error: string }
       >
   },
@@ -448,25 +492,40 @@ const api = {
   },
   agents: {
     getAll: (workspaceId: number) =>
-      ipcRenderer.invoke('agent-get-all', workspaceId) as Promise<AgentConfigRow[]>,
+      ipcRenderer.invoke('plugin:harness:agent-get-all', workspaceId) as Promise<AgentConfigRow[]>,
     getPaginated: (workspaceId: number, page: number, pageSize: number) =>
-      ipcRenderer.invoke('agent-get-paginated', workspaceId, page, pageSize) as Promise<
-        AgentPaginatedResult<AgentConfigRow>
-      >,
+      ipcRenderer.invoke(
+        'plugin:harness:agent-get-paginated',
+        workspaceId,
+        page,
+        pageSize
+      ) as Promise<AgentPaginatedResult<AgentConfigRow>>,
     getById: (workspaceId: number, id: number) =>
-      ipcRenderer.invoke('agent-get-by-id', workspaceId, id) as Promise<AgentConfigRow | null>,
+      ipcRenderer.invoke(
+        'plugin:harness:agent-get-by-id',
+        workspaceId,
+        id
+      ) as Promise<AgentConfigRow | null>,
     create: (input: AgentConfigInput) =>
-      ipcRenderer.invoke('agent-create', input) as Promise<number>,
+      ipcRenderer.invoke('plugin:harness:agent-create', input) as Promise<number>,
     update: (workspaceId: number, id: number, updates: Partial<AgentConfigInput>) =>
-      ipcRenderer.invoke('agent-update', workspaceId, id, updates) as Promise<boolean>,
+      ipcRenderer.invoke(
+        'plugin:harness:agent-update',
+        workspaceId,
+        id,
+        updates
+      ) as Promise<boolean>,
     delete: (workspaceId: number, id: number) =>
-      ipcRenderer.invoke('agent-delete', workspaceId, id) as Promise<boolean>
+      ipcRenderer.invoke('plugin:harness:agent-delete', workspaceId, id) as Promise<boolean>
   },
   mainAgent: {
     get: () =>
-      ipcRenderer.invoke('main-agent-get') as Promise<{ tools: string[]; skills: string[] }>,
+      ipcRenderer.invoke('plugin:harness:main-agent-get') as Promise<{
+        tools: string[]
+        skills: string[]
+      }>,
     update: (config: { tools: string[]; skills: string[] }) =>
-      ipcRenderer.invoke('main-agent-update', config) as Promise<boolean>
+      ipcRenderer.invoke('plugin:harness:main-agent-update', config) as Promise<boolean>
   },
   systemSettings: {
     getAll: () => ipcRenderer.invoke('system-settings-get-all') as Promise<SystemSettings>,
@@ -490,34 +549,43 @@ const api = {
   },
   workspace: {
     listDir: (dirPath: string) =>
-      ipcRenderer.invoke('workspace-list-dir', dirPath) as Promise<
+      ipcRenderer.invoke('plugin:harness:workspace-list-dir', dirPath) as Promise<
         { name: string; isDirectory: boolean; path: string }[]
       >,
     readFile: (filePath: string) =>
-      ipcRenderer.invoke('workspace-read-file', filePath) as Promise<string>,
+      ipcRenderer.invoke('plugin:harness:workspace-read-file', filePath) as Promise<string>,
     saveFile: (filePath: string, content: string) =>
-      ipcRenderer.invoke('workspace-save-file', filePath, content) as Promise<boolean>,
+      ipcRenderer.invoke(
+        'plugin:harness:workspace-save-file',
+        filePath,
+        content
+      ) as Promise<boolean>,
     // --- 文件改动史（可追溯 / 可回溯） ---
     /** 当前工作区待审查的改动 */
     pendingChanges: () =>
-      ipcRenderer.invoke('workspace-changes-pending') as Promise<FileChangeView[]>,
+      ipcRenderer.invoke('plugin:harness:workspace-changes-pending') as Promise<FileChangeView[]>,
     /** 单个文件的改动历史（倒序） */
     fileChanges: (filePath: string) =>
-      ipcRenderer.invoke('workspace-changes-file', filePath) as Promise<FileChangeView[]>,
+      ipcRenderer.invoke('plugin:harness:workspace-changes-file', filePath) as Promise<
+        FileChangeView[]
+      >,
     /** 某次改动的前后正文 */
     changeContent: (id: number) =>
-      ipcRenderer.invoke('workspace-change-content', id) as Promise<FileChangeContent | null>,
+      ipcRenderer.invoke(
+        'plugin:harness:workspace-change-content',
+        id
+      ) as Promise<FileChangeContent | null>,
     /** 审查：保留（清除待审查标记） */
     keepChanges: (ids: number[]) =>
-      ipcRenderer.invoke('workspace-change-keep', ids) as Promise<number>,
+      ipcRenderer.invoke('plugin:harness:workspace-change-keep', ids) as Promise<number>,
     /** 审查：撤销到某次改动之前 */
     revertChange: (id: number) =>
-      ipcRenderer.invoke('workspace-change-revert', id) as Promise<
+      ipcRenderer.invoke('plugin:harness:workspace-change-revert', id) as Promise<
         { path: string; content: string | null } | { error: string }
       >,
     /** 审查：把差异视图里取舍后的内容落盘并标记已保留 */
     applyReview: (filePath: string, content: string) =>
-      ipcRenderer.invoke('workspace-apply-review', filePath, content) as Promise<
+      ipcRenderer.invoke('plugin:harness:workspace-apply-review', filePath, content) as Promise<
         { ok: true } | { error: string }
       >,
     /** 磁盘变化（模型写入 / 命令执行 / 外部编辑器）：刷新资源管理器与已打开页签 */
@@ -526,18 +594,18 @@ const api = {
         _event: Electron.IpcRendererEvent,
         data: { changes: WorkspaceFsChange[] }
       ): void => callback(data)
-      ipcRenderer.on('workspace-fs-changed', handler)
+      ipcRenderer.on('plugin:harness:workspace-fs-changed', handler)
       return () => {
-        ipcRenderer.off('workspace-fs-changed', handler)
+        ipcRenderer.off('plugin:harness:workspace-fs-changed', handler)
       }
     },
     /** 新增一条改动记录（模型改动了某个文件） */
     onChangeRecorded: (callback: (change: FileChangeView) => void) => {
       const handler = (_event: Electron.IpcRendererEvent, change: FileChangeView): void =>
         callback(change)
-      ipcRenderer.on('workspace-change-recorded', handler)
+      ipcRenderer.on('plugin:harness:workspace-change-recorded', handler)
       return () => {
-        ipcRenderer.off('workspace-change-recorded', handler)
+        ipcRenderer.off('plugin:harness:workspace-change-recorded', handler)
       }
     },
     /** 改动审查状态变化（保留 / 撤销） */
@@ -548,9 +616,9 @@ const api = {
         _event: Electron.IpcRendererEvent,
         data: { ids: number[]; status: string; path?: string; obsolete?: number }
       ): void => callback(data)
-      ipcRenderer.on('workspace-changes-updated', handler)
+      ipcRenderer.on('plugin:harness:workspace-changes-updated', handler)
       return () => {
-        ipcRenderer.off('workspace-changes-updated', handler)
+        ipcRenderer.off('plugin:harness:workspace-changes-updated', handler)
       }
     }
   },

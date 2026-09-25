@@ -1,10 +1,7 @@
 import { BrowserWindow, ipcMain } from 'electron'
-import * as fs from 'fs'
-import { join } from 'path'
 import logger from 'electron-log'
 import { safeSend } from '../safe-send'
 import { mainFormat, mainMessages } from '../i18n'
-import { settingsStore } from '../context'
 import { getProviderService } from '../provider/service'
 import {
   type FetchedModelInfo,
@@ -12,15 +9,13 @@ import {
   geminiModelId,
   resolveFetchedModelMetadata
 } from '../provider/model-tags'
-import { HarnessSettings } from '../types/settings'
 import {
   clearProviderCache,
-  clearAgentCache,
   getCachedEnabledProviders,
   setCachedEnabledProviders,
   getCachedDefaultProvider,
   setCachedDefaultProvider
-} from '../harness/preload-cache'
+} from '../provider/cache'
 import {
   getAllProviderList,
   getProviderById,
@@ -35,16 +30,6 @@ import {
   LlmProviderConfig,
   LlmProviderInput
 } from '../database/mapper/provider'
-import {
-  getAllAgents,
-  getAgentsPaginated,
-  getAgentById,
-  createAgent,
-  updateAgent,
-  deleteAgent,
-  AgentConfigInput
-} from '../database/mapper/agent'
-import { getAllWorkspaces } from '../database/mapper/harness'
 
 /** 通知所有窗口供应商列表已变更 */
 function broadcastProvidersChanged(): void {
@@ -67,7 +52,16 @@ function stripApiKeys(list: LlmProviderConfig[]): LlmProviderConfig[] {
   return list.map((c) => ({ ...c, api_key: null }))
 }
 
-/** 模型供应商 + 智能体 + 主智能体配置 IPC */
+/**
+ * 模型 Provider IPC（core 的 provider-* 通道：列表/增删改/默认/模型档案/拉取模型）。
+ *
+ * 归属变更（harness 轮）：原先混在本文件里的 8 个智能体通道
+ * （agent-get-all / agent-get-paginated / agent-get-by-id / agent-create / agent-update /
+ * agent-delete / main-agent-get / main-agent-update）已随 harness 插件搬进
+ * `src/plugins/harness/main/ipc/agent.ts`（通道名 `plugin:harness:agent-*` /
+ * `plugin:harness:main-agent-*`）——智能体配置挂在 harness 的 workspace 表下，属「AI 助手」。
+ * 本文件只留模型 Provider；启动期供应商缓存仍归 core（见 src/main/provider/cache.ts）。
+ */
 export function registerProviderIpc(): void {
   ipcMain.handle('provider-get-all', async () => {
     try {
@@ -212,108 +206,6 @@ export function registerProviderIpc(): void {
       logger.error('Error in provider-lookup-profile:', error)
       return null
     }
-  })
-
-  // --- Agent (智能体) IPC handlers ---
-
-  ipcMain.handle('agent-get-all', async (_event, workspaceId: number) => {
-    try {
-      return await getAllAgents(workspaceId)
-    } catch (error) {
-      logger.error('Error in agent-get-all:', error)
-      throw error
-    }
-  })
-
-  ipcMain.handle(
-    'agent-get-paginated',
-    async (_event, workspaceId: number, page: number, pageSize: number) => {
-      try {
-        return await getAgentsPaginated(workspaceId, page, pageSize)
-      } catch (error) {
-        logger.error('Error in agent-get-paginated:', error)
-        throw error
-      }
-    }
-  )
-
-  ipcMain.handle('agent-get-by-id', async (_event, workspaceId: number, id: number) => {
-    try {
-      return await getAgentById(workspaceId, id)
-    } catch (error) {
-      logger.error('Error in agent-get-by-id:', error)
-      throw error
-    }
-  })
-
-  ipcMain.handle('agent-create', async (_event, input: AgentConfigInput) => {
-    try {
-      // agent_config.workspace_id 有外键约束：未配置工作区时给出可读提示，
-      // 而不是抛原始的 FK 违例（应用不再自动创建默认工作区）
-      const workspaces = await getAllWorkspaces()
-      if (!input.workspace_id || !workspaces.some((w) => w.id === input.workspace_id)) {
-        throw new Error(mainMessages().error.workspaceNotConfigured)
-      }
-      const id = await createAgent(input)
-      clearAgentCache()
-      return id
-    } catch (error) {
-      logger.error('Error in agent-create:', error)
-      throw error
-    }
-  })
-
-  ipcMain.handle(
-    'agent-update',
-    async (_event, workspaceId: number, id: number, updates: Partial<AgentConfigInput>) => {
-      try {
-        const result = await updateAgent(workspaceId, id, updates)
-        clearAgentCache()
-        return result
-      } catch (error) {
-        logger.error('Error in agent-update:', error)
-        throw error
-      }
-    }
-  )
-
-  ipcMain.handle('agent-delete', async (_event, workspaceId: number, id: number) => {
-    try {
-      // 先获取 agent 信息（需要 name 来删除记忆目录）
-      const agent = await getAgentById(workspaceId, id)
-      await deleteAgent(workspaceId, id)
-      clearAgentCache()
-      // 自动删除子Agent记忆目录
-      if (agent) {
-        const settings = settingsStore.store
-        const memoryPath = (settings.harness as HarnessSettings)?.memoryPath
-        if (memoryPath) {
-          try {
-            const agentDir = join(memoryPath, `workspace-${workspaceId}`, 'sub-agents', agent.name)
-            if (fs.existsSync(agentDir)) {
-              fs.rmSync(agentDir, { recursive: true, force: true })
-              logger.info(`Auto-removed memory directories for sub-agent: ${agent.name}`)
-            }
-          } catch (memErr) {
-            logger.warn('Failed to auto-remove sub-agent memory directories:', memErr)
-          }
-        }
-      }
-      return true
-    } catch (error) {
-      logger.error('Error in agent-delete:', error)
-      throw error
-    }
-  })
-
-  // 主智能体配置（electron-store）
-  ipcMain.handle('main-agent-get', async () => {
-    return (settingsStore.get('mainAgent') as Record<string, unknown>) ?? { tools: [], skills: [] }
-  })
-
-  ipcMain.handle('main-agent-update', async (_event, config: Record<string, unknown>) => {
-    settingsStore.set('mainAgent', config)
-    return true
   })
 
   // 拉取供应商的模型列表（元数据来自 models-profile.json 档案，不做名称/接口能力推导；

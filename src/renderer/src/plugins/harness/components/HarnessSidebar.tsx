@@ -24,7 +24,10 @@ import ChaseDots from './ChaseDots'
 import { useMessage } from '@renderer/hooks/useMessage'
 import { useTranslation } from '@renderer/i18n'
 import type { TFunction } from 'i18next'
-import type { HarnessTopicRow, WorkspaceRow } from '../../../../../main/database/mapper/harness'
+import type {
+  HarnessTopicRow,
+  WorkspaceRow
+} from '../../../../../plugins/harness/main/db/mapper/harness'
 import { Window } from '../../../../resource/types/window'
 
 interface HarnessSidebarProps {

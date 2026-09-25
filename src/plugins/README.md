@@ -118,8 +118,16 @@ export default {
       `src/plugins/home/**`；preload 的六个命名空间（`todoItems` / `taskDependencies` / `docs` / `wikis` /
       `graph` / `nodePositions`）删除，渲染层改用 `renderer/api.ts` 的 `homeApi`（通用桥 `plugin:home:*`）；
       知识图谱视图仍由 HomeView `React.lazy` 按需加载（2.7MB chunk 不进外壳）
-- [ ] harness（含 runtime、service、tools、workspace 文件历史）
-- [ ] core 收尾：删除旧路径（`src/main/ipc/index.ts` 的 builtinIpcGroups、ipc-capture、preload 各插件命名空间）
+- [x] harness 主进程（含 runtime 32 / service 7 / tools 3 / workspace 文件历史 / 5 个 db schema+mapper /
+      智能体配置）：`src/main/harness/**`、`src/main/workspace/**`、`ipc/{harness,harness-topic,mnemon,workspace}.ts`
+      全量收进 `src/plugins/harness/main/**`；63 个 `plugin:harness:*` 通道（含从 core 组移出的 9 个
+      `workspace-*`：实测只有 harness 渲染层在用）、15 个事件通道逐个 `ctx.registerEvent` 声明；
+      `provider.ts` 只留模型 Provider（8 个 agent-* / main-agent-* 归位 harness）；
+      启动接线（快照目录 + 工作区文件监听）搬进 `install(ctx)` 的 `ctx.effect`（停用即不再配置）
+- [ ] harness 渲染层：`src/renderer/src/plugins/harness/**` → `src/plugins/harness/renderer/**`，
+      preload 五个命名空间（`harness` / `agents` / `mainAgent` / `mnemon` / `workspace`）删除并改走通用桥
+- [ ] core 收尾：删除旧路径（`src/main/ipc/index.ts` 的 builtinIpcGroups、ipc-capture、preload 各插件命名空间、
+      6 处过渡期 core → 插件 import）
 
 每个插件迁移完成后：`pnpm run typecheck`（node+web）→ `node test/verify-*.mjs` →
 `node test/verify-plugin-host.mjs`（真实 Electron + CDP）→ 英文 conventional commit。

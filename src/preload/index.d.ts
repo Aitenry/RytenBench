@@ -1,5 +1,5 @@
 import { ElectronAPI } from '@electron-toolkit/preload'
-import { HarnessTopicRow, HarnessDialogueRow } from '../main/database/mapper/harness'
+import { HarnessTopicRow, HarnessDialogueRow } from '../plugins/harness/main/db/mapper/harness'
 import type { LlmProviderInput, LlmProviderConfig } from '../main/database/mapper/provider'
 import type { SystemSettings } from '../main/types/settings'
 import type {
@@ -8,9 +8,12 @@ import type {
   ToolInfo,
   QueuedMessageView
 } from '../renderer/resource/types/window'
-import type { StartMemoryAgentResult } from '../main/harness/runtime/memory-agent'
-import type { FileChangeView, FileChangeContent } from '../main/workspace/file-history'
-import type { WorkspaceFsChange } from '../main/workspace/watcher'
+import type { StartMemoryAgentResult } from '../plugins/harness/main/runtime/memory-agent'
+import type {
+  FileChangeView,
+  FileChangeContent
+} from '../plugins/harness/main/workspace/file-history'
+import type { WorkspaceFsChange } from '../plugins/harness/main/workspace/watcher'
 import type { PluginListEntry } from '../shared/plugin/types'
 
 interface HarnessOptions {

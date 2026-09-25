@@ -1,6 +1,6 @@
 import type { TFunction } from 'i18next'
 import type { ToolCall, MessageBlock } from '@renderer/types/harness'
-import type { StreamChunk } from '../../../../../main/harness/types'
+import type { StreamChunk } from '../../../../../plugins/harness/main/types'
 
 /** 判断工具块与工具事件是否为同一次调用。
  *  优先按 callId 精确匹配；content-block-start 的 id 与 run.toolCalls 的 callId 来源不同
@@ -476,7 +476,7 @@ export function tailContentIndices(blocks: MessageBlock[], indices: readonly num
  * 答复边界（协议层真源）→ 渲染端的块下标集合。
  *
  * 主进程随内容 chunk 打 `answer` 标记、随 done 事件给 `answerBlocks` 数量
- * （见 main/harness/service/answer-boundary.ts）。渲染端**只读不猜**：
+ * （见 plugins/harness/main/service/answer-boundary.ts）。渲染端**只读不猜**：
  * 这里把「末尾第 N 块是答复」翻译成本端合并块数组的下标集合，并且带两道守卫——
  *   ① 数量必须落在数组范围内（协议演进/版本不一致时宁可不标，也不能错切）；
  *   ② 被标的块必须是 reasoning/text。

@@ -3,7 +3,7 @@ import { Modal, Radio, Checkbox, Input, theme } from 'antd'
 import { RiQuestionAnswerLine } from '@remixicon/react'
 import { useTranslation } from '@renderer/i18n'
 import { Window } from '../../../../resource/types/window'
-import type { PendingQuestionView } from '../../../../../main/harness/runtime/ask'
+import type { PendingQuestionView } from '../../../../../plugins/harness/main/runtime/ask'
 
 /**
  * 提问弹窗（ask_user_question）— 模型执行 ask_user_question 工具时挂起等待，

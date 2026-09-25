@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useCallback, useState, useMemo } from 'react'
 import { Collapse, theme } from 'antd'
 import MessageActions from './MessageActions'
-import type { HarnessDialogueUsageRow } from '../../../../../../main/database/mapper/harness'
+import type { HarnessDialogueUsageRow } from '../../../../../../plugins/harness/main/db/mapper/harness'
 import {
   RiRefreshLine,
   RiAiAgentLine,

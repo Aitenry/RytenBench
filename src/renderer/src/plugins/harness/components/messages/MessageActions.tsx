@@ -16,7 +16,7 @@ import { Window } from '../../../../../resource/types/window'
 import { useMessage } from '@renderer/hooks/useMessage'
 import { useTranslation } from '@renderer/i18n'
 import type { Message } from '@renderer/types/harness'
-import type { HarnessDialogueUsageRow } from '../../../../../../main/database/mapper/harness'
+import type { HarnessDialogueUsageRow } from '../../../../../../plugins/harness/main/db/mapper/harness'
 import UsagePanel from './UsagePanel'
 import { buildUsageDetails } from '../../utils/usage'
 

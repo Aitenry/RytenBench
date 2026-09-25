@@ -1,7 +1,7 @@
-// 本工具（manage_docs）归属 home 插件：文档 CRUD 走本插件的 mapper，文档变更广播仍发 core 的
-// 「harness-doc-changed」通道（渲染端编辑器订阅，见 preload）。经 harness 的**工具贡献点**
-// （HARNESS_TOOL_CONTRIBUTION，契约见 src/main/plugins/tool-contract.ts）注册给 AI：
-// 插件未启用时 harness 拉不到这条贡献，工具自然不出现在模型面前。
+// 本工具（manage_docs）归属 home 插件：文档 CRUD 走本插件的 mapper，文档变更广播发
+// harness 的「plugin:harness:harness-doc-changed」事件通道（渲染端编辑器订阅，见 preload）。
+// 经 harness 的**工具贡献点**（HARNESS_TOOL_CONTRIBUTION，契约见 src/main/plugins/tool-contract.ts）
+// 注册给 AI：插件未启用时 harness 拉不到这条贡献，工具自然不出现在模型面前。
 import { BrowserWindow } from 'electron'
 import { tool } from '@langchain/core/tools'
 import type { StructuredToolInterface } from '@langchain/core/tools'
@@ -18,7 +18,9 @@ import type { PluginToolContribution } from '../../../../main/plugins/tool-contr
 function broadcastDocChanged(docId: number, action: 'updated' | 'deleted'): void {
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) {
-      safeSend(win.webContents, 'harness-doc-changed', { docId, action })
+      // 通道名按「插件不得 import harness」的铁律写成字面量，与 harness 插件
+      // install(ctx) 里 ctx.registerEvent 声明的名字一致（那边有注释互相指向）
+      safeSend(win.webContents, 'plugin:harness:harness-doc-changed', { docId, action })
     }
   }
 }

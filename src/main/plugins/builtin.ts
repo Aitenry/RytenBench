@@ -1,4 +1,5 @@
 import type { MainPluginContext } from './context'
+import * as harnessMain from '../../plugins/harness/main'
 import * as homeMain from '../../plugins/home/main'
 import * as musicMain from '../../plugins/music/main'
 import * as plannerMain from '../../plugins/planner/main'
@@ -29,6 +30,7 @@ export interface MainPluginModule {
 }
 
 export const builtinMainModules: Record<string, MainPluginModule> = {
+  harness: harnessMain,
   home: homeMain,
   music: musicMain,
   planner: plannerMain

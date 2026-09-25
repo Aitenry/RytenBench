@@ -55,7 +55,9 @@ export function registerLifecycleHooks(): void {
           }
         } finally {
           try {
-            const { closeAllMnemon } = await import('./harness/mnemon-singleton')
+            // 过渡期：Mnemon 单例属 harness 插件（实现已搬到 src/plugins/harness/main/），
+            // core 的退出清理仍要关掉它；这处 core → 插件依赖随 core 收尾一并处理
+            const { closeAllMnemon } = await import('../plugins/harness/main/mnemon-singleton')
             await closeAllMnemon()
           } catch (err) {
             logger.warn('[Mnemon] 退出清理失败:', err)

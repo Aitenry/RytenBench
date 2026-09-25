@@ -17,11 +17,11 @@ import { IPC_PLUGIN_CHANNELS_SYNC, IPC_PLUGIN_CHANNELS_UPDATED } from '../../sha
  * - **新契约**：`src/plugins/<id>/main/index.ts` 导出 `install(ctx)`，通道经
  *   `ctx.registerIpc({ 'plugin:<ns>:...': handler })` 注册，停用时 ctx.dispose() 一次性回滚
  *   （内置与外部插件走的是同一个 `MainPluginContextImpl`）；
- * - **旧路径（待迁移）**：`src/main/ipc/index.ts` 的 builtinIpcGroups + captureIpc 猴补丁，
- *   仍按插件 id 分组注册/注销，但内容还散在 src/main/ipc、src/main/database 等目录里。
+ * - **旧路径（只剩 core 一组，待 core 收尾删除）**：`src/main/ipc/index.ts` 的
+ *   builtinIpcGroups + captureIpc 猴补丁；四个内置插件都已迁走，那里现在只有 core 组。
  *
- * core 组（misc/settings/dialog/provider/workspace/graph/plugins）始终注册：
- * graph 常驻是因为 BuildProgressProvider 无条件订阅其构建进度事件。
+ * 插件分组遗留说明：core 组（misc/settings/dialog/provider/plugins）始终注册；
+ * 原先常驻的 workspace（AI 改动复核）与 graph（home 图谱）都已随归属插件迁走。
  */
 
 /** 已装配的内置插件主模块（新契约） */

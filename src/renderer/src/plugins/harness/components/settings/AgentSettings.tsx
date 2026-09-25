@@ -24,7 +24,10 @@ import { SkeletonSettingRows } from '@renderer/components/system/Skeleton'
 import { useMessage } from '@renderer/hooks/useMessage'
 import { useTranslation } from '@renderer/i18n'
 import { Window } from '../../../../../resource/types/window'
-import type { AgentConfigRow, AgentConfigInput } from '../../../../../../main/database/mapper/agent'
+import type {
+  AgentConfigRow,
+  AgentConfigInput
+} from '../../../../../../plugins/harness/main/db/mapper/agent'
 import type { ProviderOption } from '@renderer/types/components'
 import type { ToolInfo } from '../../../../../resource/types/window'
 import { toolIconMap } from '../HarnessConstants'

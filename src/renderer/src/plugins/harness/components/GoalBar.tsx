@@ -3,7 +3,7 @@ import { theme } from 'antd'
 import { RiFlag2Line } from '@remixicon/react'
 import { useTranslation } from '@renderer/i18n'
 import { Window } from '../../../../resource/types/window'
-import type { GoalView } from '../../../../../main/harness/runtime/goal'
+import type { GoalView } from '../../../../../plugins/harness/main/runtime/goal'
 
 /**
  * 目标栏（GoalBar）— 输入框上方展示当前对话的长期目标

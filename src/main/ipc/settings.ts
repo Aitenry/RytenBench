@@ -4,7 +4,10 @@ import { settingsStore } from '../context'
 import { awaitInitialized } from '../database/instance'
 import { SystemSettings } from '../types/settings'
 import { syncTrayState } from '../tray'
-import { syncWorkspaceWatcher } from '../workspace'
+// 过渡期：工作区文件监听随 harness 插件搬到 src/plugins/harness/main/workspace/，但
+// 「切换/重建工作区后让监听换根目录」这一步是系统设置写入的收尾动作，仍留在 core；
+// 这处 core → 插件依赖随 core 收尾一并处理（见报告）
+import { syncWorkspaceWatcher } from '../../plugins/harness/main/workspace'
 
 /** 系统设置 + 锁屏 IPC */
 export function registerSettingsIpc(): void {

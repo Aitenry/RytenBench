@@ -7,7 +7,9 @@ import { safeSend } from '../safe-send'
 import { getMainWindow, markMainWindowReady, setMainWindow } from './window-manager'
 import { isCloseToTrayEnabled, isTrayAvailable, syncTrayState } from '../tray'
 import { isQuittingNow, markQuitting } from '../lifecycle'
-import { dumpRendererMemory } from '../harness/renderer-memory'
+// 过渡期：渲染进程内存快照属 harness 的 OOM 可观测性，实现已随插件搬到
+// src/plugins/harness/main/renderer-memory.ts；core → 插件的这处依赖随 core 收尾一并处理
+import { dumpRendererMemory } from '../../plugins/harness/main/renderer-memory'
 
 /** 各窗口的最大化状态（主窗口与 mermaid 预览窗口共用；随窗口销毁清理） */
 const windowMaxStates = new Map<

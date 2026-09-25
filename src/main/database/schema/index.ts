@@ -11,11 +11,12 @@
  */
 export * from './common'
 export * from './workspace'
-export * from './harness'
-export * from './file-change'
-export * from './agent'
 // 插件表：唯一真源在 `src/plugins/<id>/main/db/schema*.ts`，这里用**相对路径** re-export
 // （drizzle-kit 不解析 tsconfig paths，`@plugins/*` 到这里会解析失败）。
+// harness 插件表（file-change 依赖 harness_topic，agent 依赖 workspace，顺序与原先一致）
+export * from '../../../plugins/harness/main/db/schema/harness'
+export * from '../../../plugins/harness/main/db/schema/file-change'
+export * from '../../../plugins/harness/main/db/schema/agent'
 // music 插件表
 export * from '../../../plugins/music/main/db/schema'
 // planner 插件表

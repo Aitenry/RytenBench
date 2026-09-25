@@ -3,17 +3,20 @@ import {
   HarnessDialogueRow,
   HarnessDialogueUsageRow,
   WorkspaceRow
-} from '../../../main/database/mapper/harness'
+} from '../../../plugins/harness/main/db/mapper/harness'
 import { Lock } from '@renderer/types/settings'
 import { LlmProviderInput, LlmProviderConfig } from '../../../main/database/mapper/provider'
-import { AgentConfigRow, AgentConfigInput } from '../../../main/database/mapper/agent'
-import { TodoItem } from '../../../main/harness/runtime/todo'
-import { GoalView } from '../../../main/harness/runtime/goal'
-import { JobSnapshot } from '../../../main/harness/runtime/jobs'
-import { SubagentSessionRow } from '../../../main/harness/runtime/subagent-sessions'
-import type { StartMemoryAgentResult } from '../../../main/harness/runtime/memory-agent'
-import { PendingQuestionView } from '../../../main/harness/runtime/ask'
-import { FileChangeView, FileChangeContent } from '../../../main/workspace/file-history'
+import { AgentConfigRow, AgentConfigInput } from '../../../plugins/harness/main/db/mapper/agent'
+import { TodoItem } from '../../../plugins/harness/main/runtime/todo'
+import { GoalView } from '../../../plugins/harness/main/runtime/goal'
+import { JobSnapshot } from '../../../plugins/harness/main/runtime/jobs'
+import { SubagentSessionRow } from '../../../plugins/harness/main/runtime/subagent-sessions'
+import type { StartMemoryAgentResult } from '../../../plugins/harness/main/runtime/memory-agent'
+import { PendingQuestionView } from '../../../plugins/harness/main/runtime/ask'
+import {
+  FileChangeView,
+  FileChangeContent
+} from '../../../plugins/harness/main/workspace/file-history'
 import { SystemSettings } from '@renderer/types/settings'
 
 export interface PaginatedResult<T> {
@@ -69,7 +72,7 @@ export interface StructuredMessage {
   __topicId?: number
   /** 目标自动续跑轮的起始标记（流首 chunk） */
   goalRound?: { round: number; objective: string }
-  /** 本段正文/推理是否属于本轮最终答复（明细见 main/harness/service/answer-boundary.ts） */
+  /** 本段正文/推理是否属于本轮最终答复（明细见 plugins/harness/main/service/answer-boundary.ts） */
   answer?: boolean
   /** 本轮终局标记（仅 `harness-stream-done` 载荷使用） */
   turnFinal?: TurnFinal
@@ -77,7 +80,7 @@ export interface StructuredMessage {
 
 /**
  * 本轮终局标记（主进程给出的权威结论，渲染端只读不猜）。
- * 与 main/harness/service/answer-boundary.ts 的 TurnFinal 同构。
+ * 与 plugins/harness/main/service/answer-boundary.ts 的 TurnFinal 同构。
  */
 export interface TurnFinal {
   /** 本次流是否自然跑完（false = 用户停止 / 渲染帧失效中止） */

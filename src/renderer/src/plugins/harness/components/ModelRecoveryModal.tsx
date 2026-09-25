@@ -8,7 +8,7 @@ import {
 } from '@remixicon/react'
 import type { Window } from '../../../../resource/types/window'
 import { useTranslation } from '@renderer/i18n'
-import type { PendingQuestionView } from '../../../../../main/harness/runtime/ask'
+import type { PendingQuestionView } from '../../../../../plugins/harness/main/runtime/ask'
 
 /**
  * 模型请求失败专用弹窗（换模型继续）。

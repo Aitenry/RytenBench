@@ -1,4 +1,4 @@
-import type { HarnessDialogueUsageRow } from '../../../../../main/database/mapper/harness'
+import type { HarnessDialogueUsageRow } from '../../../../../plugins/harness/main/db/mapper/harness'
 
 /**
  * 对话用量的归一化（真实数据，不做任何估算）。

@@ -27,6 +27,9 @@ export default defineConfig({
   driver: 'pglite',
   schema: [
     './src/main/database/schema',
+    './src/plugins/harness/main/db/schema/harness.ts',
+    './src/plugins/harness/main/db/schema/file-change.ts',
+    './src/plugins/harness/main/db/schema/agent.ts',
     './src/plugins/music/main/db/schema.ts',
     './src/plugins/planner/main/db/schema.ts',
     './src/plugins/home/main/db/schema/todo.ts',

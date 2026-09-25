@@ -6,10 +6,9 @@ import { initBuiltinPluginIpcs, pushPluginChannels, syncBuiltinPluginIpcs } from
 import { registerPluginScheme, registerPluginProtocolHandler } from './plugins/protocol'
 import { setPluginStateSyncHook } from './ipc/plugins'
 import { registerLifecycleHooks } from './lifecycle'
-import { configureToolOutputStore } from './harness/runtime/tool-output-store'
-import { configureFileHistory } from './workspace/file-history'
-import { syncWorkspaceWatcher } from './workspace'
-import { awaitInitialized } from './database/instance'
+// 工具结果详情存储目录：属 harness 插件的运行期数据，但配置动作留在 core 启动流程
+// （过渡期唯一的 core → 插件 import，随 core 收尾一并处理；见报告）
+import { configureToolOutputStore } from '../plugins/harness/main/runtime/tool-output-store'
 import { createLoadingWindow } from './windows/loading-window'
 import { createMainWindow } from './windows/main-window'
 import { registerMermaidPreviewIpc } from './windows/mermaid-preview'
@@ -61,18 +60,9 @@ app
     // 放 userData 而不是工作区——工作区挂载为虚拟 '/'，写进去会污染用户项目
     configureToolOutputStore(join(app.getPath('userData'), 'tool-output'))
 
-    // 文件改动快照目录（模型每次改文件的「改动前/改动后」正文）：同样放 userData，
-    // 不污染用户工作区，也不会出现在模型自己的 ls/glob 结果里
-    configureFileHistory(join(app.getPath('userData'), 'file-history'))
-
-    // 工作区文件监听：数据库初始化完成（设置已加载）后跟随当前工作区启动
-    void awaitInitialized().then(() => {
-      try {
-        syncWorkspaceWatcher()
-      } catch (err) {
-        logger.warn('[Main] 工作区文件监听启动失败:', err)
-      }
-    })
+    // 注意：文件改动快照目录（userData/file-history）与工作区文件监听原先在这里启动，
+    // 现随「AI 助手」插件搬进 `src/plugins/harness/main/index.ts` 的 install(ctx)：
+    // 停用该插件就不再配置快照目录、也不再监听工作区。
 
     app.on('browser-window-created', (_, window) => {
       optimizer.watchWindowShortcuts(window)
