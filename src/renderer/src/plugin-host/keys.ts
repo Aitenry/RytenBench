@@ -10,6 +10,7 @@ export const HOST_KEYS = [
   'settingsSection',
   'appProvider',
   'globalComponent',
+  'bottomBar',
   'api',
   'i18n',
   'events',

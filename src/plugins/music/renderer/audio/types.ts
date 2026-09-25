@@ -1,4 +1,4 @@
-import type { Track, RepeatMode } from './music'
+import type { Track, RepeatMode } from '../../shared/types'
 
 /** 音频播放状态 */
 export interface AudioState {

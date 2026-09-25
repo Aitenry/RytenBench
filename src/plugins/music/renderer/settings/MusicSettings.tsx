@@ -2,9 +2,9 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { Input, Button, Space } from 'antd'
 import { FolderOutlined } from '@ant-design/icons'
 import { useMessage } from '@renderer/hooks/useMessage'
-import { Window } from '../../../../resource/types/window'
 import type { SystemSettings } from '@renderer/types/settings'
 import { useTranslation } from '@renderer/i18n'
+import { musicApi } from '../api'
 import {
   SettingsPageHeader,
   SettingsSection
@@ -21,7 +21,7 @@ const MusicSettings: React.FC = () => {
   const loadSettings = useCallback(async () => {
     const msgKey = 'music-settings-load'
     try {
-      const result = await (window as unknown as Window).api.systemSettings.getAll()
+      const result = await window.api.systemSettings.getAll()
       setSettings(result)
       setMusicDir(result.musicDirectory || '')
     } catch (error) {
@@ -39,7 +39,7 @@ const MusicSettings: React.FC = () => {
 
   const handleBrowseDirectory = async (): Promise<void> => {
     try {
-      const dir = await (window as unknown as Window).api.music.selectDirectory()
+      const dir = await musicApi.selectDirectory()
       if (dir) {
         setMusicDir(dir)
       }

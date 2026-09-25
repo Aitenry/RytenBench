@@ -5,6 +5,8 @@ import { scanExternalPlugins } from '../plugins/scanner'
 import { installExternalPlugin, uninstallExternalPlugin } from '../plugins/lifecycle'
 import { loadExternalMain, unloadExternalMain } from '../plugins/host'
 import { BUILTIN_PLUGIN_CATALOG } from '../../shared/plugin/builtin-catalog'
+import { BUILTIN_PLUGIN_MANIFESTS } from '../../plugins/manifests'
+import type { PluginManifest } from '../../shared/plugin/types'
 import {
   IPC_PLUGIN_STATE_CHANGED,
   IPC_PLUGINS_LIST,
@@ -23,10 +25,25 @@ import type { PluginListEntry } from '../../shared/plugin/types'
  * 主进程按已装载的外部插件模块注册处理器（见 plugins/host.ts）。
  */
 
+/**
+ * 内置插件清单（过渡期合并策略）：
+ * 已迁进 `src/plugins/<id>/manifest.ts` 的插件以新清单为准（单一真源），
+ * 尚未迁移的仍读 `src/shared/plugin/builtin-catalog.ts`；顺序沿用旧目录，
+ * 保证设置面板里的插件次序不变。迁完最后一个插件即可删掉旧目录。
+ */
+function builtinManifestList(): PluginManifest[] {
+  const migrated = new Map(BUILTIN_PLUGIN_MANIFESTS.map((m) => [m.id, m]))
+  const ordered = BUILTIN_PLUGIN_CATALOG.map((legacy) => migrated.get(legacy.id) ?? legacy)
+  const extra = BUILTIN_PLUGIN_MANIFESTS.filter(
+    (m) => !BUILTIN_PLUGIN_CATALOG.some((legacy) => legacy.id === m.id)
+  )
+  return [...ordered, ...extra]
+}
+
 /** 列出全部已发现插件与启用态（内置默认启用、外部默认停用） */
 function listEntries(): PluginListEntry[] {
   const entries: PluginListEntry[] = []
-  for (const manifest of BUILTIN_PLUGIN_CATALOG) {
+  for (const manifest of builtinManifestList()) {
     const enabled = getEnabledOverride(manifest.id) ?? true
     entries.push({
       id: manifest.id,

@@ -6,6 +6,8 @@
  *   因此**不要**给 `drizzle()` 传 `casing: 'camelCase'`，否则列名会被改写。
  * - 各领域模块之间的外键依赖靠 import 解决，注意声明顺序（被引用表必须先定义）。
  * - 改结构后执行 `pnpm drizzle-kit generate`，生成的 SQL 进 drizzle/ 目录，启动时由迁移器应用。
+ * - 已迁进 `src/plugins/<id>/main/db/schema.ts` 的插件表由这里用**相对路径** re-export：
+ *   drizzle-kit 不解析 tsconfig paths，只能用相对路径（`@plugins/*` 到这里会解析失败）。
  */
 export * from './common'
 export * from './workspace'
@@ -17,5 +19,6 @@ export * from './planner'
 export * from './wiki'
 export * from './document'
 export * from './graph'
-export * from './music'
+// music 插件表（src/plugins/music/main/db/schema.ts）：保持唯一真源在插件目录里
+export * from '../../../plugins/music/main/db/schema'
 export * from './provider'

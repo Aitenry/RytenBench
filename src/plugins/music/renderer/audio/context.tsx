@@ -7,9 +7,19 @@ import React, {
   useEffect,
   useMemo
 } from 'react'
-import type { Track, RepeatMode } from '../types/music'
-import { REPEAT_STRATEGIES } from '../types/music'
-import type { AudioState, AudioActions, AudioProgress } from '../types/audio'
+import type { Track, RepeatMode } from '../../shared/types'
+import { REPEAT_STRATEGIES } from '../../shared/types'
+import type { AudioState, AudioActions, AudioProgress } from './types'
+import { musicApi } from '../api'
+import { publishCurrentTrack } from './store'
+
+/**
+ * 音乐播放器状态（插件自己的 Provider）。
+ *
+ * 这个文件属于 music 插件：Provider 由 `renderer/plugin.tsx` 经
+ * `ctx.use('appProvider').register(...)` 装进应用，插件停用即整体卸载——
+ * core 的 `App.tsx` 与外壳组件都不再持有它。
+ */
 
 // ---- Split context: fast-changing progress vs everything else ----
 
@@ -99,7 +109,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   /** IPC 读取文件 → ArrayBuffer → Blob → blob:// URL */
   const fileToBlobUrl = useCallback(async (filePath: string): Promise<string | null> => {
     try {
-      const buf = await window.api.music.readFile(filePath)
+      const buf = await musicApi.readFile(filePath)
       const blob = new Blob([buf], { type: getMimeType(filePath) })
       return URL.createObjectURL(blob)
     } catch (err) {
@@ -385,7 +395,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       // 记录播放时间
       const trackIdNum = Number(track.id)
       if (!isNaN(trackIdNum)) {
-        window.api.music.updateLastPlayed(trackIdNum).catch(() => {})
+        musicApi.updateLastPlayed(trackIdNum).catch(() => {})
       }
 
       // 释放旧的 blob URL
@@ -631,14 +641,19 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     [progress, duration, isBuffering]
   )
 
-  // 监听来自 AI 对话的播放请求
+  // 监听来自 AI 对话的播放请求（通用桥的插件事件通道）
   useEffect(() => {
-    if (!window.api?.music?.onMusicPlay) return
-    return window.api.music.onMusicPlay(({ folderTracks, folderId, targetIndex }) => {
+    return musicApi.onMusicPlay(({ folderTracks, folderId, targetIndex }) => {
       setSelectedFolderId(folderId)
       setPlaylist(folderTracks, targetIndex)
     })
   }, [setPlaylist])
+
+  // 把「当前曲目」同步进模块级 store：底栏（外壳）据此决定音乐条目是否出现，
+  // 而外壳完全不需要 import 音乐模块（见 renderer/audio/store.ts 与 bottomBar 插槽）
+  useEffect(() => {
+    publishCurrentTrack(displayTrack)
+  }, [displayTrack])
 
   return (
     <AudioStateContext.Provider value={stateValue}>

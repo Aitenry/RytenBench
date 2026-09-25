@@ -1,7 +1,7 @@
 import React from 'react'
 import { Button, Slider, Space, theme } from 'antd'
 import { RiPlayLine, RiPauseLine, RiSkipLeftLine, RiSkipRightLine } from '@remixicon/react'
-import { useAudioState, useAudioProgress } from '@renderer/contexts/AudioContext'
+import { useAudioState, useAudioProgress } from '../audio/context'
 import { useTranslation } from '@renderer/i18n'
 import { formatTime } from '@renderer/utils/formatTime'
 

@@ -2,10 +2,11 @@ import React from 'react'
 import * as antd from 'antd'
 import * as RemixIcons from '@remixicon/react'
 import type { Plugin } from '@renderer/plugin-host/types'
-import home from '@plugins/home/plugin'
-import planner from '@plugins/planner/plugin'
-import music from '@plugins/music/plugin'
-import harness from '@plugins/harness/plugin'
+// 已迁移的插件从自包含目录 @plugins 引入；未迁移的仍在 @renderer/plugins 下
+import home from '@renderer/plugins/home/plugin'
+import planner from '@renderer/plugins/planner/plugin'
+import music from '@plugins/music/renderer/plugin'
+import harness from '@renderer/plugins/harness/plugin'
 
 /**
  * 内置插件注册表：显式 import（不用 import.meta.glob），

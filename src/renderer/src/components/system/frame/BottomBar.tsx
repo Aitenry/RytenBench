@@ -1,11 +1,19 @@
-import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react'
-import { RiMusicLine, RiRefreshLine, RiSunCloudyLine } from '@remixicon/react'
+import React, { useEffect, useState, useRef, useCallback, useReducer } from 'react'
+import { RiRefreshLine, RiSunCloudyLine } from '@remixicon/react'
 import { useTheme } from '@renderer/contexts/useTheme'
-import { useAudioState, useAudioProgress } from '@renderer/contexts/AudioContext'
 import { useTranslation } from '@renderer/i18n'
-import { formatTime } from '@renderer/utils/formatTime'
-import { useGlobalComponents } from '@renderer/plugin-host/PluginHostContext'
+import { useBottomBarItems } from '@renderer/plugin-host/PluginHostContext'
+import type { BottomBarItemRegistration } from '@renderer/plugin-host/types'
 import { Window } from '../../../../resource/types/window'
+
+/**
+ * 底部信息栏（外壳）。
+ *
+ * 它**不认识任何插件**：轮播项 = 内置的「天气」+ 各插件经宿主 `bottomBar` 插槽注册
+ * 且当前 `isVisible()` 为真的条目（按 order 排序，音乐 10 在天气之前）。
+ * 每一项的标题行渲染注册项的 `Tab`、弹层渲染 `Popup`——音乐的状态与界面都留在
+ * music 插件里，插件停用后这里什么都不剩，外壳照常渲染。
+ */
 
 interface WeatherData {
   location: string
@@ -22,6 +30,9 @@ interface BottomBarProps {
 
 const CAROUSEL_INTERVAL = 4000
 
+/** 轮播项：插件注册项，或内置的天气项 */
+type CarouselItem = { kind: 'plugin'; reg: BottomBarItemRegistration } | { kind: 'weather' }
+
 const BottomBar: React.FC<BottomBarProps> = ({
   colorBgContainer,
   colorPrimary,
@@ -29,14 +40,21 @@ const BottomBar: React.FC<BottomBarProps> = ({
   colorTextSecondary
 }) => {
   const { effectiveTheme } = useTheme()
-  const { currentTrack } = useAudioState()
-  const { progress } = useAudioProgress()
   const { t, i18n } = useTranslation()
   const isDark = effectiveTheme === 'dark'
 
-  // 底部栏插槽：迷你播放器由 music 插件经 globalComponent 注册（插件停用即消失）
-  const miniPlayers = useGlobalComponents('bottomBar')
-  const MiniPlayer = miniPlayers[0]?.Component
+  // 底栏插槽：条目来自插件注册表（音乐插件注册；插件停用即消失）
+  const pluginItems = useBottomBarItems()
+  // 可见性触发器：插件在 subscribe 回调里 bump 一次，宿主重渲染时重新读 isVisible()
+  const [, forceVisibilityRefresh] = useReducer((n: number) => n + 1, 0)
+  useEffect(() => {
+    const unsubscribes = pluginItems
+      .map((reg) => reg.subscribe?.(forceVisibilityRefresh))
+      .filter((unsub): unsub is () => void => typeof unsub === 'function')
+    return () => {
+      for (const unsub of unsubscribes) unsub()
+    }
+  }, [pluginItems])
 
   const [carouselIndex, setCarouselIndex] = useState(0)
   const [carouselPaused, setCarouselPaused] = useState(false)
@@ -78,11 +96,12 @@ const BottomBar: React.FC<BottomBarProps> = ({
     return unsub
   }, [i18n.resolvedLanguage])
 
-  const carouselItems = useMemo(() => {
-    const items: ('music' | 'weather')[] = ['weather']
-    if (currentTrack) items.unshift('music')
-    return items
-  }, [currentTrack])
+  // 插件条目在前（order 已由宿主排好）、天气恒在最后——保持原有的「音乐 → 天气」顺序。
+  // 刻意不 memo：可见性来自插件侧快照，每次渲染都要重新读 isVisible()。
+  const carouselItems: CarouselItem[] = pluginItems
+    .filter((reg) => reg.isVisible())
+    .map((reg) => ({ kind: 'plugin', reg }))
+  carouselItems.push({ kind: 'weather' })
 
   useEffect(() => {
     setCarouselIndex(0)
@@ -110,6 +129,11 @@ const BottomBar: React.FC<BottomBarProps> = ({
     setPopupOpen(false)
   }, [])
 
+  // 索引兜底：可见性变化（例如播放结束）会让条目数减少，避免渲染越界
+  const activeItem = carouselItems[Math.min(carouselIndex, carouselItems.length - 1)]
+  const ActiveTab = activeItem?.kind === 'plugin' ? activeItem.reg.Tab : null
+  const ActivePopup = activeItem?.kind === 'plugin' ? activeItem.reg.Popup : null
+
   return (
     <div className="frame-bottombar">
       <div className="frame-bottombar-inner" onMouseLeave={handleCarouselLeave}>
@@ -122,10 +146,8 @@ const BottomBar: React.FC<BottomBarProps> = ({
               boxShadow: `0 -2px 12px rgba(0,0,0,${isDark ? '0.3' : '0.08'})`
             }}
           >
-            {carouselItems[carouselIndex] === 'music' ? (
-              MiniPlayer ? (
-                <MiniPlayer />
-              ) : null
+            {ActivePopup ? (
+              <ActivePopup />
             ) : (
               <div className="text-sm">
                 {weatherLoading ? (
@@ -206,14 +228,8 @@ const BottomBar: React.FC<BottomBarProps> = ({
             style={{ color: colorText }}
             onMouseEnter={handleCarouselEnter}
           >
-            {carouselItems[carouselIndex] === 'music' ? (
-              <span className="flex items-center gap-1.5">
-                <RiMusicLine size={14} />
-                {currentTrack?.title || t('shell.bottomBar.music')}
-                {currentTrack && (
-                  <span style={{ color: colorTextSecondary }}>{formatTime(progress)}</span>
-                )}
-              </span>
+            {ActiveTab ? (
+              <ActiveTab />
             ) : (
               <span className="flex items-center gap-1.5">
                 <RiSunCloudyLine size={14} />

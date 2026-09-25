@@ -26,11 +26,21 @@ export default defineConfig({
     resolve: {
       alias: {
         '@renderer': resolve('src/renderer/src'),
-        '@plugins': resolve('src/renderer/src/plugins'),
+        // 自包含插件目录（渲染层侧：src/plugins/<id>/renderer、shared、locales）。
+        // 未迁移的插件仍在 '@renderer/plugins/<id>' 下，两者同时可用。
+        '@plugins': resolve('src/plugins'),
         '@shared': resolve('src/shared')
       }
     },
     plugins: [tailwindcss(), react()],
+    // dev 下渲染层会 import 仓库根下 src/plugins/**（Vite root 之外）：
+    // server.fs.allow 默认就是 workspace root（= 本仓库根，含 src/plugins），无需显式配置。
+    server: {
+      fs: {
+        // 显式写出：允许读取仓库根下的文件（含 src/plugins），避免上层 workspace 变更时回归
+        allow: [resolve('.')]
+      }
+    },
     build: {
       rollupOptions: {
         input: {

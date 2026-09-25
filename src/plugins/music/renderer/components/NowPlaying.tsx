@@ -2,7 +2,7 @@ import React from 'react'
 import { theme } from 'antd'
 import { RiMusic2Line, RiHistoryLine, RiHeartLine } from '@remixicon/react'
 import { useTranslation, Trans } from '@renderer/i18n'
-import type { NowPlayingProps } from '@renderer/types/components'
+import type { NowPlayingProps } from '../types'
 
 const RECENTLY_PLAYED_ID = '__recent__'
 const LIKED_TRACKS_ID = '__liked__'

@@ -10,9 +10,10 @@ import {
   RiHeartFill
 } from '@remixicon/react'
 import { useTranslation } from '@renderer/i18n'
-import { formatTime } from '../../../utils/formatTime'
-import type { Track } from '../../../types/music'
-import type { PlaylistTableProps } from '@renderer/types/components'
+import { formatTime } from '@renderer/utils/formatTime'
+import { musicApi } from '../api'
+import type { Track } from '../../shared/types'
+import type { PlaylistTableProps } from '../types'
 
 const PlaylistTable: React.FC<PlaylistTableProps> = ({
   tracks,
@@ -47,7 +48,7 @@ const PlaylistTable: React.FC<PlaylistTableProps> = ({
 
   const handleChangeCover = async (): Promise<void> => {
     if (!editingTrack) return
-    const newCover = await window.api.music.updateTrackCover(Number(editingTrack.id))
+    const newCover = await musicApi.updateTrackCover(Number(editingTrack.id))
     if (newCover) {
       setCoverPreview(newCover)
       message.success(t('music.playlist.coverUpdated'))
@@ -59,7 +60,7 @@ const PlaylistTable: React.FC<PlaylistTableProps> = ({
     try {
       const values = await editForm.validateFields()
       if (!editingTrack) return
-      await window.api.music.updateTrack(Number(editingTrack.id), {
+      await musicApi.updateTrack(Number(editingTrack.id), {
         title: values.title,
         artist: values.artist,
         album: values.album || ''

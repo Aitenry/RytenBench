@@ -22,18 +22,31 @@ import type { PluginListEntry } from '../shared/plugin/types'
 import { PLUGIN_CHANNEL_RE } from '../shared/plugin/protocol'
 
 /**
- * 已启用外部插件通道白名单缓存（主进程权威注册表 + plugin-channels-updated 推送刷新）。
+ * 已启用插件通道白名单缓存（主进程权威注册表 + plugin-channels-updated 推送刷新）。
  * 仅作 preload 侧快速门控：真正权威校验在主进程（通道归属插件且插件已启用）。
  */
 const enabledPluginChannels = new Set<string>()
-ipcRenderer.on('plugin-channels-updated', (_event, list: unknown) => {
+const applyPluginChannels = (list: unknown): void => {
   enabledPluginChannels.clear()
   if (Array.isArray(list)) {
     for (const channel of list) {
       if (typeof channel === 'string') enabledPluginChannels.add(channel)
     }
   }
+}
+
+ipcRenderer.on('plugin-channels-updated', (_event, list: unknown) => {
+  applyPluginChannels(list)
 })
+
+// 启动竞态修复：推送（含 did-finish-load 补推）晚于渲染层首帧，插件 Provider 在
+// useEffect 里订阅事件通道时会撞上「白名单还没到」。preload 先于页面脚本执行，
+// 这里同步取一次权威清单，保证首个 window.api.plugin.on(...) 就能拿到正确结果。
+try {
+  applyPluginChannels(ipcRenderer.sendSync('plugin-channels-sync'))
+} catch {
+  // 主进程入口尚未注册（异常启动路径）：退回纯推送模式
+}
 
 interface WeatherData {
   location: string
@@ -664,139 +677,6 @@ const api = {
       return () => {
         ipcRenderer.off('window-maximized', handler)
       }
-    }
-  },
-  music: {
-    selectDirectory: () => ipcRenderer.invoke('music-select-directory') as Promise<string | null>,
-    getFolders: () =>
-      ipcRenderer.invoke('music-get-folders') as Promise<
-        {
-          id: string
-          path: string
-          name: string
-          description: string
-          track_count: number
-          coverDataUrl: string | null
-          created_at: string
-          updated_at: string
-        }[]
-      >,
-    getTracks: (folderId: string) =>
-      ipcRenderer.invoke('music-get-tracks', folderId) as Promise<
-        {
-          id: string
-          filePath: string
-          title: string
-          artist: string
-          album: string
-          duration: number
-          liked: boolean
-          coverDataUrl: string | null
-        }[]
-      >,
-    deleteFolder: (folderId: string) => ipcRenderer.invoke('music-delete-folder', folderId),
-    createFolder: (name: string, description?: string) =>
-      ipcRenderer.invoke('music-create-folder', name, description) as Promise<{
-        id: string
-        path: string
-        name: string
-        description: string
-        track_count: number
-        coverDataUrl: string | null
-        created_at: string
-        updated_at: string
-      }>,
-    updateFolderDescription: (folderId: string, description: string | null) =>
-      ipcRenderer.invoke('music-update-folder-description', folderId, description) as Promise<void>,
-    updateFolderCover: (folderId: string) =>
-      ipcRenderer.invoke('music-update-folder-cover', folderId) as Promise<string | null>,
-    saveFolderCover: (folderId: string, coverDataUrl: string | null) =>
-      ipcRenderer.invoke('music-save-folder-cover', folderId, coverDataUrl) as Promise<void>,
-    selectImage: () => ipcRenderer.invoke('music-select-image') as Promise<string | null>,
-    updateFolder: (folderId: string, fields: { name?: string; description?: string | null }) =>
-      ipcRenderer.invoke('music-update-folder', folderId, fields) as Promise<void>,
-    addTracks: (folderId: string) =>
-      ipcRenderer.invoke('music-add-tracks', folderId) as Promise<{
-        added: {
-          filePath: string
-          title: string
-          artist: string
-          album: string
-          duration: number
-          coverDataUrl: string | null
-        }[]
-        skipped: string[]
-      } | null>,
-    updateTrack: (trackId: number, fields: { title?: string; artist?: string; album?: string }) =>
-      ipcRenderer.invoke('music-update-track', trackId, fields) as Promise<void>,
-    updateTrackCover: (trackId: number) =>
-      ipcRenderer.invoke('music-update-track-cover', trackId) as Promise<string | null>,
-    deleteTrack: (trackId: number) =>
-      ipcRenderer.invoke('music-delete-track', trackId) as Promise<void>,
-    readFile: (filePath: string) =>
-      ipcRenderer.invoke('music-read-file', filePath) as Promise<ArrayBuffer>,
-    toggleLike: (trackId: number) =>
-      ipcRenderer.invoke('music-toggle-like', trackId) as Promise<boolean>,
-    updateLastPlayed: (trackId: number) =>
-      ipcRenderer.invoke('music-update-last-played', trackId) as Promise<void>,
-    getLikedTracks: () =>
-      ipcRenderer.invoke('music-get-liked-tracks') as Promise<
-        {
-          id: string
-          filePath: string
-          title: string
-          artist: string
-          album: string
-          duration: number
-          liked: boolean
-          coverDataUrl: string | null
-        }[]
-      >,
-    getRecentlyPlayed: () =>
-      ipcRenderer.invoke('music-get-recently-played') as Promise<
-        {
-          id: string
-          filePath: string
-          title: string
-          artist: string
-          album: string
-          duration: number
-          liked: boolean
-          coverDataUrl: string | null
-        }[]
-      >,
-    onMusicPlay: (
-      callback: (data: {
-        track: {
-          id: string
-          filePath: string
-          title: string
-          artist: string
-          album: string
-          duration: number
-          liked: boolean
-          coverDataUrl: string | null
-        }
-        folderTracks: {
-          id: string
-          filePath: string
-          title: string
-          artist: string
-          album: string
-          duration: number
-          liked: boolean
-          coverDataUrl: string | null
-        }[]
-        folderId: string
-        targetIndex: number
-      }) => void
-    ) => {
-      const handler = (
-        _event: Electron.IpcRendererEvent,
-        data: Parameters<typeof callback>[0]
-      ): void => callback(data)
-      ipcRenderer.on('music-play-track', handler)
-      return () => ipcRenderer.removeListener('music-play-track', handler)
     }
   },
   workspace: {

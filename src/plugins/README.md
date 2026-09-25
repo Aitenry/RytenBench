@@ -33,8 +33,12 @@ import type { MainPluginContext } from '../../main/plugins/context'
 
 export function install(ctx: MainPluginContext): void | (() => void) {
   ctx.registerIpc({
-    'plugin:music:get-folders': async () => { /* ... */ }
+    'plugin:music:get-folders': async () => {
+      /* ... */
+    }
   })
+  // 主进程 → 渲染层的事件通道（只 send、无 handler）：必须声明才进 preload 白名单
+  ctx.registerEvent('plugin:music:play-track')
   ctx.effect(() => {
     const timer = setInterval(poll, 5000)
     return () => clearInterval(timer)
@@ -45,6 +49,12 @@ export function install(ctx: MainPluginContext): void | (() => void) {
 - **通道命名空间**：`plugin:<命名空间>:<channel>`，命名空间 = 插件 id 去掉开头的 `plugin.` 段
   （`music` → `plugin:music:*`；外部插件 `plugin.demo` → `plugin:demo:*`）。宿主权威校验，
   重复占用报错。渲染层经 preload 通用桥 `window.api.plugin.invoke/on` 调用。
+- **事件通道**：`ctx.registerEvent('plugin:<ns>:<channel>')` 声明只有发送方的通道
+  （`webContents.send` 用）。preload 的白名单只收录插件**声明过**的通道，
+  不声明则渲染层 `window.api.plugin.on(...)` 抛「插件通道未启用」。
+  preload 启动时会用一次同步 IPC（`plugin-channels-sync`）把权威清单取回来，
+  之后启停变化由 `pushPluginChannels()` 增量刷新——插件 Provider 在 useEffect 里的
+  首个订阅因此不会撞上「推送还没到」的竞态。
 - **可逆装配**：`ctx.effect` 的效果按 LIFO 回滚；`install` 返回的 dispose 最先执行；
   IPC 通道随 `ctx.dispose()` 全部摘除。停用插件 = 卸载它的全部内容。
 - 插件的主进程代码可以照常 `import` core 模块（`@main/database/orm`、settings、workspace 等）；
@@ -60,32 +70,47 @@ export default {
   manifest,
   install(ctx) {
     ctx.use('route').register({ path: '/music', skeleton: 'music', load: () => import('./Index') })
-    ctx.use('menu').register({ key: 'music', labelKey: 'shell.menu.music', icon: <RiDiscLine />, order: 30 })
-    ctx.use('settingsSection').register({ tabKey: 'music', /* ... */ })
-    ctx.use('globalComponent').register({ id: 'music-mini-player', slot: 'bottomBar', Component: MusicMiniPlayer })
+    ctx
+      .use('menu')
+      .register({ key: 'music', labelKey: 'shell.menu.music', icon: <RiDiscLine />, order: 30 })
+    ctx.use('settingsSection').register({ tabKey: 'music' /* ... */ })
+    ctx.use('appProvider').register({ Provider: AudioProvider, order: 20 })
+    ctx.use('bottomBar').register({
+      id: 'music',
+      order: 10,
+      isVisible: () => Boolean(getCurrentTrack()),
+      subscribe: subscribeCurrentTrack,
+      Tab: MusicBottomTab,
+      Popup: MusicMiniPlayer
+    })
     ctx.use('i18n').addResources('translation', locales) // 词条随插件注册，停用即消失
   }
 }
 ```
 
 - 挂载点（宿主上下文键）：`route` / `menu` / `settingsSection` / `appProvider` / `globalComponent` /
-  `api` / `i18n` / `events` / `storage`。**插件自己的 Provider 与状态也随插件注册**（例如音乐播放器的
-  `AudioProvider`），不得再放进 `App.tsx` 的 core Provider 层或让外壳组件直接 import。
+  `bottomBar` / `api` / `i18n` / `events` / `storage`。**插件自己的 Provider 与状态也随插件注册**
+  （例如音乐播放器的 `AudioProvider`），不得再放进 `App.tsx` 的 core Provider 层或让外壳组件直接 import。
 - 外壳组件只认注册表：`MainRoutes` / `CustomFrame` / `BottomBar` / `SettingsModal` / `AppContent`。
   如果某个外壳组件需要插件的数据（例：底栏的音乐条目），就给它加一个**插槽**，让插件来填。
+- **`bottomBar` 插槽**（参考实现）：注册项是 `{ id, order, isVisible(), subscribe?, Tab, Popup }`。
+  宿主在每次渲染时读 `isVisible()` 决定该项是否参与轮播，插件用 `subscribe(onChange)` 通知
+  宿主重渲染；`Tab` 是底栏那一行，`Popup` 是悬停弹层。插件状态放模块级可订阅快照里
+  （见 `src/plugins/music/renderer/audio/store.ts`），外壳因此完全不 import 插件模块。
 
 ## 装配入口（三份注册表，都在 core）
 
-| 位置 | 内容 |
-| --- | --- |
-| `src/plugins/manifests.ts` | 只 import 各插件的 `manifest.ts`（主/渲染共用，无 react/electron 依赖） |
-| `src/main/plugins/builtin.ts` | 内置插件主模块：`{ <id>: await import('./<id>/main') }` |
-| `src/renderer/src/plugin-host/builtin.ts` | 内置插件渲染模块：`[home, planner, music, harness]` 显式导入 |
+| 位置                                      | 内容                                                                    |
+| ----------------------------------------- | ----------------------------------------------------------------------- |
+| `src/plugins/manifests.ts`                | 只 import 各插件的 `manifest.ts`（主/渲染共用，无 react/electron 依赖） |
+| `src/main/plugins/builtin.ts`             | 内置插件主模块：`{ <id>: await import('./<id>/main') }`                 |
+| `src/renderer/src/plugin-host/builtin.ts` | 内置插件渲染模块：`[home, planner, music, harness]` 显式导入            |
 
 ## 迁移状态
 
 - [x] 宿主与注册表（渲染层 + 主进程 + 外部插件机制 + 设置面板）
-- [ ] music（参考实现：main/db/renderer/locales/preload 通道全量收进 src/plugins/music）
+- [x] music（参考实现：main/db/renderer/locales/preload 通道全量收进 src/plugins/music；
+      通道 `plugin:music:*`、底栏 `bottomBar` 插槽、词条随插件注册）
 - [ ] planner
 - [ ] home（含 graph / document / wiki / todo 与知识图谱组件）
 - [ ] harness（含 runtime、service、tools、workspace 文件历史）

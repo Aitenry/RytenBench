@@ -1,8 +1,9 @@
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { theme, App } from 'antd'
 import { useTranslation, Trans } from '@renderer/i18n'
-import { useAudioState } from '../../contexts/AudioContext'
-import type { MusicFolder, Track } from '../../types/music'
+import { useAudioState } from './audio/context'
+import { musicApi } from './api'
+import type { MusicFolder, Track } from '../shared/types'
 import MusicSidebar from './components/MusicSidebar'
 import NowPlaying from './components/NowPlaying'
 import PlaylistTable from './components/PlaylistTable'
@@ -85,7 +86,7 @@ const Index: React.FC = () => {
   )
 
   useEffect(() => {
-    window.api.music.getFolders().then(setFolders).catch(console.error)
+    musicApi.getFolders().then(setFolders).catch(console.error)
   }, [])
 
   const handleSelectFolder = useCallback(
@@ -96,11 +97,11 @@ const Index: React.FC = () => {
       try {
         let tracks: Track[] = []
         if (folder.id === RECENTLY_PLAYED_ID) {
-          tracks = await window.api.music.getRecentlyPlayed()
+          tracks = await musicApi.getRecentlyPlayed()
         } else if (folder.id === LIKED_TRACKS_ID) {
-          tracks = await window.api.music.getLikedTracks()
+          tracks = await musicApi.getLikedTracks()
         } else {
-          tracks = await window.api.music.getTracks(folder.id)
+          tracks = await musicApi.getTracks(folder.id)
         }
         // 修复：快速连续切换歌单时,旧请求晚到会把旧列表写进当前 state
         //（列表与侧栏高亮不一致,且同 id 重复点击被提前 return 无法靠再点纠正）
@@ -126,7 +127,7 @@ const Index: React.FC = () => {
         okButtonProps: { danger: true },
         onOk: async () => {
           try {
-            await window.api.music.deleteFolder(folderId)
+            await musicApi.deleteFolder(folderId)
             setFolders((prev) => prev.filter((f) => f.id !== folderId))
             if (selectedFolderId === folderId) {
               setSelectedFolderId(null)
@@ -148,7 +149,7 @@ const Index: React.FC = () => {
       const trackIdNum = Number(trackId)
       if (isNaN(trackIdNum)) return
       try {
-        const newLiked = await window.api.music.toggleLike(trackIdNum)
+        const newLiked = await musicApi.toggleLike(trackIdNum)
         // 更新当前播放列表中的 track（不改变播放状态）
         const updated = playlist.map((t: Track) =>
           t.id === trackId ? { ...t, liked: newLiked } : t
@@ -156,7 +157,7 @@ const Index: React.FC = () => {
         updatePlaylist(updated)
         // 如果正在查看「我喜欢」歌单且取消收藏了，刷新列表
         if (selectedFolderId === LIKED_TRACKS_ID && !newLiked) {
-          const tracks = await window.api.music.getLikedTracks()
+          const tracks = await musicApi.getLikedTracks()
           updatePlaylist(tracks, LIKED_TRACKS_ID)
         }
       } catch {
@@ -171,10 +172,10 @@ const Index: React.FC = () => {
       // 内置歌单不支持添加歌曲
       if (folderId === RECENTLY_PLAYED_ID || folderId === LIKED_TRACKS_ID) return
       try {
-        const result = await window.api.music.addTracks(folderId)
+        const result = await musicApi.addTracks(folderId)
         if (result) {
-          const tracks = await window.api.music.getTracks(folderId)
-          const updatedFolders = await window.api.music.getFolders()
+          const tracks = await musicApi.getTracks(folderId)
+          const updatedFolders = await musicApi.getFolders()
           setFolders(updatedFolders)
           // 仅更新列表不中断播放
           updatePlaylist(tracks, folderId)
@@ -211,11 +212,11 @@ const Index: React.FC = () => {
 
   const handleCreateFolder = useCallback(
     async (data: { name: string; description: string; coverDataUrl: string | null }) => {
-      const folder = await window.api.music.createFolder(data.name, data.description || undefined)
+      const folder = await musicApi.createFolder(data.name, data.description || undefined)
       if (data.coverDataUrl) {
-        await window.api.music.saveFolderCover(folder.id, data.coverDataUrl)
+        await musicApi.saveFolderCover(folder.id, data.coverDataUrl)
       }
-      const updated = await window.api.music.getFolders()
+      const updated = await musicApi.getFolders()
       setFolders(updated)
       message.success(t('music.playlist.created'))
     },
@@ -227,7 +228,7 @@ const Index: React.FC = () => {
   }, [])
 
   const handleEditSaved = useCallback(async () => {
-    const updated = await window.api.music.getFolders()
+    const updated = await musicApi.getFolders()
     setFolders(updated)
     message.success(t('music.playlist.updated'))
   }, [message, t])
@@ -267,7 +268,7 @@ const Index: React.FC = () => {
       if (selectedFolderId === LIKED_TRACKS_ID) {
         // 「我喜欢」移除 = 取消收藏并落库（修复：此前仅 splice 内存列表,
         // 切走再切回/重启即原样复现）
-        await window.api.music.toggleLike(Number(track.id))
+        await musicApi.toggleLike(Number(track.id))
         removeFromPlaylist(index)
         message.success(t('music.track.unliked'))
         return
@@ -278,10 +279,10 @@ const Index: React.FC = () => {
       }
 
       try {
-        await window.api.music.deleteTrack(Number(track.id))
+        await musicApi.deleteTrack(Number(track.id))
         removeFromPlaylist(index)
         // 刷新侧边栏歌单计数
-        const updatedFolders = await window.api.music.getFolders()
+        const updatedFolders = await musicApi.getFolders()
         setFolders(updatedFolders)
         message.success(t('common.action.deleteSuccess'))
       } catch {
@@ -296,11 +297,11 @@ const Index: React.FC = () => {
     if (!selectedFolderId) return
     let tracks: Track[] = []
     if (selectedFolderId === RECENTLY_PLAYED_ID) {
-      tracks = await window.api.music.getRecentlyPlayed()
+      tracks = await musicApi.getRecentlyPlayed()
     } else if (selectedFolderId === LIKED_TRACKS_ID) {
-      tracks = await window.api.music.getLikedTracks()
+      tracks = await musicApi.getLikedTracks()
     } else {
-      tracks = await window.api.music.getTracks(selectedFolderId)
+      tracks = await musicApi.getTracks(selectedFolderId)
     }
     updatePlaylist(tracks, selectedFolderId)
   }, [selectedFolderId, updatePlaylist])

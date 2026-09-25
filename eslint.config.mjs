@@ -46,6 +46,7 @@ export default defineConfig(
             'usePluginSettingsSections',
             'usePluginProviders',
             'useGlobalComponents',
+            'useBottomBarItems',
             'useIsPluginEnabled'
           ]
         }

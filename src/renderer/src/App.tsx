@@ -1,7 +1,6 @@
 import React, { useEffect } from 'react'
 import { HashRouter } from 'react-router-dom'
 import { MessageContext } from '@renderer/contexts/MessageContext'
-import { AudioProvider } from '@renderer/contexts/AudioContext'
 import { BuildProgressProvider } from '@renderer/providers/BuildProgressProvider'
 import { NotificationProvider } from '@renderer/contexts/NotificationContext'
 import { composeProviders } from '@renderer/utils/composeProviders'
@@ -16,8 +15,8 @@ import { builtinPlugins, vendorModules } from '@renderer/plugin-host/builtin'
 import { loadExternalPlugin } from '@renderer/plugin-host/external-loader'
 
 // shell 常驻 Provider（插件系统之外的应用骨架层）。
-// AudioProvider 保留在此：BottomBar 无条件 useAudioState，缺失即 throw；
-// 迷你播放器 UI（含挂载行为）已随 music 插件可卸载。
+// 插件自己的 Provider（如音乐播放器的 AudioProvider）随插件注册，见 PluginProvidersShell：
+// 停用插件 = 连它的状态一起卸载，外壳组件不再持有任何插件状态。
 const CoreProviders = composeProviders(
   [
     MessageContext.Provider,
@@ -27,7 +26,6 @@ const CoreProviders = composeProviders(
       }
     }
   ],
-  [AudioProvider],
   [NotificationProvider],
   [BuildProgressProvider]
 )

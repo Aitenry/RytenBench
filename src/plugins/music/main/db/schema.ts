@@ -10,7 +10,9 @@ import {
   foreignKey,
   unique
 } from 'drizzle-orm/pg-core'
-import { images } from './common'
+// core 的 images 表（封面图共用）：插件 schema 用**相对路径** import core，
+// 因为 drizzle-kit 不解析 tsconfig paths（见 src/plugins/README.md 的装配入口说明）
+import { images } from '../../../../main/database/schema/common'
 
 /** 音乐文件夹（歌单）表：主键为业务 id（非自增） */
 export const music_folders = pgTable(

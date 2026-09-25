@@ -17,10 +17,10 @@ import {
   RiMusic2Line
 } from '@remixicon/react'
 import { useTranslation } from '@renderer/i18n'
-import { useAudioProgress } from '../../../contexts/AudioContext'
-import { formatTime } from '../../../utils/formatTime'
-import type { RepeatMode } from '../../../types/music'
-import type { PlayerControlsProps } from '@renderer/types/components'
+import { useAudioProgress } from '../audio/context'
+import { formatTime } from '@renderer/utils/formatTime'
+import type { RepeatMode } from '../../shared/types'
+import type { PlayerControlsProps } from '../types'
 
 const MODE_ICON: Record<RepeatMode, React.ReactNode> = {
   all: <RiRepeatLine size={20} />,

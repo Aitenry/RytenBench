@@ -1,7 +1,6 @@
 import type React from 'react'
 import type { MenuProps } from 'antd'
 import type { MessageInstance } from 'antd/es/message/interface'
-import type { Track, MusicFolder, RepeatMode } from './music'
 import type { DocItem, WikiRow, TodoItem, DocOption } from './models'
 import type { GraphEntity, GraphRelation, GraphChartData, WikiEditData } from './knowledge'
 
@@ -197,69 +196,6 @@ export interface TodoListProps {
 export interface StatusOption {
   value: number
   label: string
-}
-
-/* ── Music ── */
-
-export interface CreatePlaylistModalProps {
-  open: boolean
-  onClose: () => void
-  onCreated: (data: {
-    name: string
-    description: string
-    coverDataUrl: string | null
-  }) => Promise<void>
-}
-
-export interface EditPlaylistModalProps {
-  open: boolean
-  folder: MusicFolder | null
-  onClose: () => void
-  onSaved: () => void
-}
-
-export interface MusicSidebarProps {
-  folders: MusicFolder[]
-  specialFolders: MusicFolder[]
-  selectedFolderId: string | null
-  onSelectFolder: (folder: MusicFolder) => void
-  onAddTracks: (folderId: string) => void
-  onEditFolder: (folder: MusicFolder) => void
-  onDeleteFolder: (folderId: string) => void
-  onCreateClick: () => void
-  colorBgContainer: string
-  borderRadiusLG: number
-}
-
-export interface NowPlayingProps {
-  folder: MusicFolder | null
-}
-
-export interface PlayerControlsProps {
-  currentTrack: Track | null
-  duration: number
-  volume: number
-  isPlaying: boolean
-  repeatMode: RepeatMode
-  liked: boolean
-  onSeek: (v: number) => void
-  onVolumeChange: (v: number) => void
-  onToggleRepeat: () => void
-  onPrev: () => void
-  onNext: () => void
-  onPlayPause: () => void
-  onToggleLike: () => void
-  onTogglePlaylist: () => void
-}
-
-export interface PlaylistTableProps {
-  tracks: Track[]
-  currentIndex: number
-  isPlaying: boolean
-  onPlay: (index: number) => void
-  onRemove: (index: number) => void | Promise<void>
-  onUpdate: () => void
-  onToggleLike?: (trackId: string) => void
 }
 
 /* ── Settings ── */

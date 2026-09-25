@@ -1,9 +1,10 @@
-import { dialog, ipcMain } from 'electron'
+import { dialog } from 'electron'
 import * as fs from 'fs'
 import crypto from 'crypto'
 import { resolve, sep } from 'path'
-import { mainMessages } from '../i18n'
-import { settingsStore } from '../context'
+import { mainMessages } from '../../../main/i18n'
+import { settingsStore } from '../../../main/context'
+import type { MainIpcHandlers } from '../../../main/plugins/context'
 import {
   getAllFolders,
   getFolderById,
@@ -22,20 +23,25 @@ import {
   getLikedTracks,
   getRecentlyPlayed,
   deleteTrackById
-} from '../database/mapper/music'
+} from './db/mapper'
 
-/** 音乐播放器 IPC（歌单/曲目管理、封面、元数据解析） */
-export function registerMusicIpc(): void {
-  ipcMain.handle('music-select-directory', async () => {
+/**
+ * 音乐播放器 IPC 处理器表（歌单/曲目管理、封面、元数据解析）。
+ *
+ * 通道名一律 `plugin:music:<channel>`（命名空间 = manifest.id）；由 `main/index.ts`
+ * 交给 `ctx.registerIpc`，插件停用时随 ctx.dispose() 一次性摘除。
+ */
+export const musicIpcHandlers: MainIpcHandlers = {
+  'plugin:music:select-directory': async () => {
     const result = await dialog.showOpenDialog({
       properties: ['openDirectory'],
       title: mainMessages().dialog.selectMusicRoot
     })
     if (result.canceled || result.filePaths.length === 0) return null
     return result.filePaths[0]
-  })
+  },
 
-  ipcMain.handle('music-get-folders', async () => {
+  'plugin:music:get-folders': async () => {
     const rows = await getAllFolders()
     return rows.map((row) => ({
       id: row.id,
@@ -47,10 +53,10 @@ export function registerMusicIpc(): void {
       created_at: row.created_at,
       updated_at: row.updated_at
     }))
-  })
+  },
 
-  ipcMain.handle('music-get-tracks', async (_event, folderId: string) => {
-    const rows = await getTracksByFolder(folderId)
+  'plugin:music:get-tracks': async (_folderId: string) => {
+    const rows = await getTracksByFolder(_folderId)
     return rows.map((row) => ({
       id: String(row.id),
       filePath: row.file_path,
@@ -61,9 +67,9 @@ export function registerMusicIpc(): void {
       liked: row.liked,
       coverDataUrl: row.cover_data_url
     }))
-  })
+  },
 
-  ipcMain.handle('music-delete-folder', async (_event, folderId: string) => {
+  'plugin:music:delete-folder': async (folderId: string) => {
     const folder = await getFolderById(folderId)
     if (folder) {
       // 删除物理文件
@@ -72,9 +78,9 @@ export function registerMusicIpc(): void {
       }
     }
     await deleteFolder(folderId)
-  })
+  },
 
-  ipcMain.handle('music-create-folder', async (_event, name: string, description?: string) => {
+  'plugin:music:create-folder': async (name: string, description?: string) => {
     const musicDir = settingsStore.get('musicDirectory') as string | undefined
     if (!musicDir) throw new Error(mainMessages().error.musicDirNotSet)
 
@@ -93,23 +99,23 @@ export function registerMusicIpc(): void {
       created_at: '',
       updated_at: ''
     }
-  })
+  },
 
-  ipcMain.handle(
-    'music-update-folder',
-    async (_event, folderId: string, fields: { name?: string; description?: string | null }) => {
-      await updateFolder(folderId, fields)
-    }
-  )
+  'plugin:music:update-folder': async (
+    folderId: string,
+    fields: { name?: string; description?: string | null }
+  ) => {
+    await updateFolder(folderId, fields)
+  },
 
-  ipcMain.handle(
-    'music-update-folder-description',
-    async (_event, folderId: string, description: string | null) => {
-      await updateFolderDescription(folderId, description)
-    }
-  )
+  'plugin:music:update-folder-description': async (
+    folderId: string,
+    description: string | null
+  ) => {
+    await updateFolderDescription(folderId, description)
+  },
 
-  ipcMain.handle('music-select-image', async () => {
+  'plugin:music:select-image': async () => {
     const m = mainMessages().dialog
     const result = await dialog.showOpenDialog({
       properties: ['openFile'],
@@ -123,16 +129,13 @@ export function registerMusicIpc(): void {
     const mime = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg'
     const base64 = fs.readFileSync(imgPath).toString('base64')
     return `data:${mime};base64,${base64}`
-  })
+  },
 
-  ipcMain.handle(
-    'music-save-folder-cover',
-    async (_event, folderId: string, coverDataUrl: string | null) => {
-      await saveFolderCover(folderId, coverDataUrl)
-    }
-  )
+  'plugin:music:save-folder-cover': async (folderId: string, coverDataUrl: string | null) => {
+    await saveFolderCover(folderId, coverDataUrl)
+  },
 
-  ipcMain.handle('music-update-folder-cover', async (_event, folderId: string) => {
+  'plugin:music:update-folder-cover': async (folderId: string) => {
     const m = mainMessages().dialog
     const result = await dialog.showOpenDialog({
       properties: ['openFile'],
@@ -148,9 +151,9 @@ export function registerMusicIpc(): void {
     const coverDataUrl = `data:${mime};base64,${base64}`
 
     return await updateFolderCover(folderId, coverDataUrl)
-  })
+  },
 
-  ipcMain.handle('music-add-tracks', async (_event, folderId: string) => {
+  'plugin:music:add-tracks': async (folderId: string) => {
     try {
       const folder = await getFolderById(folderId)
       if (!folder) throw new Error(mainMessages().error.playlistNotFound)
@@ -268,12 +271,12 @@ export function registerMusicIpc(): void {
 
       return { added: tracks, skipped: skippedNames }
     } catch (error) {
-      console.error('Error in music-add-tracks:', error)
+      console.error('Error in plugin:music:add-tracks:', error)
       throw error
     }
-  })
+  },
 
-  ipcMain.handle('music-delete-track', async (_event, trackId: number) => {
+  'plugin:music:delete-track': async (trackId: number) => {
     try {
       const result = await deleteTrackById(trackId)
       if (!result) throw new Error(mainMessages().error.trackNotFound)
@@ -297,27 +300,23 @@ export function registerMusicIpc(): void {
         )
       }
     } catch (error) {
-      console.error('Error in music-delete-track:', error)
+      console.error('Error in plugin:music:delete-track:', error)
       throw error
     }
-  })
+  },
 
-  ipcMain.handle(
-    'music-update-track',
-    async (
-      _event,
-      trackId: number,
-      fields: {
-        title?: string
-        artist?: string
-        album?: string
-      }
-    ) => {
-      await updateTrack(trackId, fields)
+  'plugin:music:update-track': async (
+    trackId: number,
+    fields: {
+      title?: string
+      artist?: string
+      album?: string
     }
-  )
+  ) => {
+    await updateTrack(trackId, fields)
+  },
 
-  ipcMain.handle('music-update-track-cover', async (_event, trackId: number) => {
+  'plugin:music:update-track-cover': async (trackId: number) => {
     const m = mainMessages().dialog
     const result = await dialog.showOpenDialog({
       properties: ['openFile'],
@@ -333,9 +332,9 @@ export function registerMusicIpc(): void {
     const coverDataUrl = `data:${mime};base64,${base64}`
 
     return await updateTrackCover(trackId, coverDataUrl)
-  })
+  },
 
-  ipcMain.handle('music-read-file', async (_event, filePath: string) => {
+  'plugin:music:read-file': async (filePath: string) => {
     // 路径校验：渲染端传入的路径必须位于音乐目录内（防任意文件读取）
     const musicDir = settingsStore.get('musicDirectory') as string | undefined
     if (!musicDir || typeof filePath !== 'string') {
@@ -348,17 +347,17 @@ export function registerMusicIpc(): void {
     }
     const buffer = await fs.promises.readFile(target)
     return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength)
-  })
+  },
 
-  ipcMain.handle('music-toggle-like', async (_event, trackId: number) => {
+  'plugin:music:toggle-like': async (trackId: number) => {
     return await toggleLikeTrack(trackId)
-  })
+  },
 
-  ipcMain.handle('music-update-last-played', async (_event, trackId: number) => {
+  'plugin:music:update-last-played': async (trackId: number) => {
     await updateLastPlayed(trackId)
-  })
+  },
 
-  ipcMain.handle('music-get-liked-tracks', async () => {
+  'plugin:music:get-liked-tracks': async () => {
     const rows = await getLikedTracks()
     return rows.map((row) => ({
       id: String(row.id),
@@ -370,9 +369,9 @@ export function registerMusicIpc(): void {
       liked: row.liked,
       coverDataUrl: row.cover_data_url
     }))
-  })
+  },
 
-  ipcMain.handle('music-get-recently-played', async () => {
+  'plugin:music:get-recently-played': async () => {
     const rows = await getRecentlyPlayed(100)
     return rows.map((row) => ({
       id: String(row.id),
@@ -384,5 +383,8 @@ export function registerMusicIpc(): void {
       liked: row.liked,
       coverDataUrl: row.cover_data_url
     }))
-  })
+  }
 }
+
+/** 主进程 → 渲染层的音乐事件通道（AI 点播；`main/harness/tools/music.ts` 发送） */
+export const MUSIC_PLAY_TRACK_CHANNEL = 'plugin:music:play-track'

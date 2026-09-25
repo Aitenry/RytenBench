@@ -9,6 +9,9 @@ import logger from 'electron-log'
  *   在插件停用/卸载时由宿主一次性回滚（效果 LIFO）；
  * - IPC 通道必须落在本插件命名空间 `plugin:<命名空间>:` 内，宿主权威校验，
  *   防止插件互相顶掉通道（与 preload 的通道白名单同一套规则）；
+ * - 主进程 → 渲染层的事件通道（只 send、无 handler）用 `registerEvent` 声明：
+ *   preload 的插件通道白名单只收录「本插件声明过的通道」，未声明的事件通道
+ *   `window.api.plugin.on(...)` 会被拒绝（内置插件的订阅同样受白名单门控）；
  * - 插件业务代码可以照常 import 核心模块（orm / settings / workspace 等），
  *   但**不得**在 core 的 ipc 分组表里登记通道——归属与生命周期都由本契约表达。
  */
@@ -46,6 +49,15 @@ export interface MainPluginContext {
   readonly namespace: string
   /** 注册 IPC 处理器；返回只注销本次注册通道的逆操作 */
   registerIpc(handlers: MainIpcHandlers): () => void
+  /**
+   * 声明本插件「主进程 → 渲染层」的事件通道（没有 ipcMain 处理器，只有发送方）。
+   *
+   * 这些通道与 `registerIpc` 注册的通道一起进入 `activePluginChannels()`，
+   * 由 `pushPluginChannels()` 推给 preload 的白名单缓存；不声明就等于渲染层
+   * 订阅不到（`window.api.plugin.on` 抛「插件通道未启用」）。
+   * 通道同样必须落在 `plugin:<命名空间>:` 内。
+   */
+  registerEvent(...channels: string[]): void
   /** 注册可逆效果（例如一个后台服务/定时器），停用时 LIFO 回滚 */
   effect(register: () => void | (() => void)): void
 }
@@ -55,6 +67,8 @@ export class MainPluginContextImpl implements MainPluginContext {
 
   private readonly effects: Array<() => void> = []
   private readonly ownedChannels = new Set<string>()
+  /** 仅有发送方的事件通道（无 ipcMain 处理器，只参与 preload 白名单） */
+  private readonly eventChannels = new Set<string>()
   private disposed = false
 
   constructor(readonly id: string) {
@@ -62,9 +76,19 @@ export class MainPluginContextImpl implements MainPluginContext {
     claimNamespace(id, this.namespace)
   }
 
-  /** 当前占用的通道（用于日志/诊断） */
+  /** 当前占用的通道（IPC 处理器 + 事件通道；用于日志/白名单推送） */
   get channels(): string[] {
-    return [...this.ownedChannels]
+    return [...this.ownedChannels, ...this.eventChannels]
+  }
+
+  registerEvent(...channels: string[]): void {
+    const prefix = `plugin:${this.namespace}:`
+    for (const channel of channels) {
+      if (typeof channel !== 'string' || !channel.startsWith(prefix)) {
+        throw new Error(`事件通道 '${String(channel)}' 必须以 ${prefix} 开头`)
+      }
+      this.eventChannels.add(channel)
+    }
   }
 
   registerIpc(handlers: MainIpcHandlers): () => void {
@@ -138,6 +162,7 @@ export class MainPluginContextImpl implements MainPluginContext {
       }
     }
     this.ownedChannels.clear()
+    this.eventChannels.clear()
     releaseNamespace(this.id, this.namespace)
   }
 }

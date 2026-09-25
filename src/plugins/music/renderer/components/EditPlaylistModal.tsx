@@ -1,10 +1,16 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { theme, Modal, Input, Form } from 'antd'
 import { RiMusic2Line, RiCameraLine } from '@remixicon/react'
 import { useTranslation } from '@renderer/i18n'
-import type { CreatePlaylistModalProps } from '@renderer/types/components'
+import { musicApi } from '../api'
+import type { EditPlaylistModalProps } from '../types'
 
-const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({ open, onClose, onCreated }) => {
+const EditPlaylistModal: React.FC<EditPlaylistModalProps> = ({
+  open,
+  folder,
+  onClose,
+  onSaved
+}) => {
   const { t } = useTranslation()
   const {
     token: { colorFillAlter, colorTextTertiary }
@@ -12,54 +18,61 @@ const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({ open, onClose
 
   const [form] = Form.useForm()
   const [coverDataUrl, setCoverDataUrl] = useState<string | null>(null)
-  const [creating, setCreating] = useState(false)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    if (folder) {
+      form.setFieldsValue({
+        name: folder.name,
+        description: folder.description
+      })
+      setCoverDataUrl(folder.coverDataUrl)
+    }
+  }, [folder, form])
+
+  const handleOk = async (): Promise<void> => {
+    if (!folder) return
+    const values = await form.validateFields()
+    setSaving(true)
+    try {
+      await musicApi.updateFolder(folder.id, {
+        name: values.name.trim(),
+        description: values.description?.trim() || null
+      })
+      onSaved()
+      onClose()
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleCancel = (): void => {
+    onClose()
+  }
 
   const handleChangeCover = async (): Promise<void> => {
+    if (!folder) return
     try {
-      const dataUrl = await window.api.music.selectImage()
-      if (dataUrl) {
-        setCoverDataUrl(dataUrl)
+      const newCover = await musicApi.updateFolderCover(folder.id)
+      if (newCover) {
+        setCoverDataUrl(newCover)
       }
     } catch {
       // ignore
     }
   }
 
-  const handleOk = async (): Promise<void> => {
-    const values = await form.validateFields()
-    if (!values.name.trim()) return
-    setCreating(true)
-    try {
-      await onCreated({
-        name: values.name.trim(),
-        description: values.description?.trim() || '',
-        coverDataUrl
-      })
-      form.resetFields()
-      setCoverDataUrl(null)
-      onClose()
-    } finally {
-      setCreating(false)
-    }
-  }
-
-  const handleCancel = (): void => {
-    form.resetFields()
-    setCoverDataUrl(null)
-    onClose()
-  }
-
   return (
     <Modal
-      title={t('music.playlist.createTitle')}
+      title={t('music.playlist.editTitle')}
       open={open}
-      onCancel={handleCancel}
       onOk={handleOk}
-      okText={t('common.action.create')}
+      onCancel={handleCancel}
+      okText={t('common.action.save')}
       cancelText={t('common.action.cancel')}
-      confirmLoading={creating}
+      confirmLoading={saving}
     >
-      {/* 封面 — 点击上传，hover 显示遮罩 */}
+      {/* 封面 — 点击更换，hover 显示遮罩 */}
       <div className="flex justify-center mb-5">
         <div
           className="relative w-28 h-28 rounded-lg overflow-hidden cursor-pointer group/cover flex-shrink-0"
@@ -76,9 +89,7 @@ const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({ open, onClose
           {/* hover 遮罩 */}
           <div className="absolute inset-0 bg-black/40 flex flex-col items-center justify-center gap-1 opacity-0 group-hover/cover:opacity-100 transition-opacity">
             <RiCameraLine size={22} className="text-white" />
-            <span className="text-xs text-white">
-              {t(coverDataUrl ? 'music.playlist.coverChange' : 'music.playlist.coverAdd')}
-            </span>
+            <span className="text-xs text-white">{t('music.playlist.coverChange')}</span>
           </div>
         </div>
       </div>
@@ -94,14 +105,14 @@ const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({ open, onClose
             }
           ]}
         >
-          <Input placeholder={t('music.playlist.namePlaceholder')} />
+          <Input />
         </Form.Item>
         <Form.Item name="description" label={t('music.playlist.descriptionLabel')}>
-          <Input.TextArea placeholder={t('music.playlist.descriptionPlaceholder')} rows={3} />
+          <Input.TextArea rows={3} />
         </Form.Item>
       </Form>
     </Modal>
   )
 }
 
-export default CreatePlaylistModal
+export default EditPlaylistModal

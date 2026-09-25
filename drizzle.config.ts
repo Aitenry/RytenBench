@@ -6,6 +6,9 @@ import { join } from 'path'
  * drizzle-kit 配置（仅开发期使用，不进打包产物）。
  *
  * - schema：TS schema 是结构的单一真源，改完执行 `pnpm drizzle-kit generate` 产出增量 SQL。
+ *   数组里既列 core 的 schema 目录，也列已迁移插件的 schema 文件——drizzle-kit 不解析
+ *   tsconfig paths，插件 schema 只能用相对路径被 core re-export（见 database/schema/index.ts），
+ *   这里显式列出是为了让 drizzle-kit 的 TS 入口发现逻辑不依赖目录遍历顺序。
  * - out：迁移 SQL 与快照目录，随 extraResources 进安装包（database/drizzle），启动时由迁移器应用。
  * - dbCredentials：只在 `push` / `pull` / `studio` 这类**需要连库**的命令用到。
  *
@@ -22,7 +25,7 @@ import { join } from 'path'
 export default defineConfig({
   dialect: 'postgresql',
   driver: 'pglite',
-  schema: './src/main/database/schema',
+  schema: ['./src/main/database/schema', './src/plugins/music/main/db/schema.ts'],
   out: './drizzle',
   dbCredentials: {
     // 草稿库：与本机应用数据目录完全隔离（默认落在系统临时目录下）

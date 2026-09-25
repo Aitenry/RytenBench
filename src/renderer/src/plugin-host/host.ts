@@ -5,6 +5,7 @@ import { HOST_KEYS } from './keys'
 import { PluginContext } from './context'
 import type {
   AppProviderRegistration,
+  BottomBarItemRegistration,
   GlobalComponentRegistration,
   HostServiceKey,
   HostServices,
@@ -75,6 +76,7 @@ export class PluginHost {
   private readonly settingsRegistry = new ScopedRegistry<SettingsSectionRegistration>()
   private readonly providerRegistry = new ScopedRegistry<AppProviderRegistration>()
   private readonly globalRegistry = new ScopedRegistry<GlobalComponentRegistration>()
+  private readonly bottomBarRegistry = new ScopedRegistry<BottomBarItemRegistration>()
   private readonly eventHandlers = new Map<string, Set<EventHandler>>()
 
   constructor(plugins: Plugin[], initialEnabled?: Record<string, boolean>) {
@@ -205,6 +207,15 @@ export class PluginHost {
             this.globalRegistry.register(
               pluginId,
               g as Omit<GlobalComponentRegistration, 'pluginId'>,
+              () => this.bump()
+            )
+        } as HostServices[K]
+      case 'bottomBar':
+        return {
+          register: (b) =>
+            this.bottomBarRegistry.register(
+              pluginId,
+              b as Omit<BottomBarItemRegistration, 'pluginId'>,
               () => this.bump()
             )
         } as HostServices[K]
@@ -359,6 +370,7 @@ export class PluginHost {
       this.settingsRegistry.removeAll(pid, () => this.bump())
       this.providerRegistry.removeAll(pid, () => this.bump())
       this.globalRegistry.removeAll(pid, () => this.bump())
+      this.bottomBarRegistry.removeAll(pid, () => this.bump())
       // 2) 逆序回滚 effects + install dispose
       await ctx?.dispose().catch(() => undefined)
       this.removeAllProvides(pid)
@@ -450,6 +462,13 @@ export class PluginHost {
   getGlobalComponents(slot: string): GlobalComponentRegistration[] {
     return this.cached(`globalComponents:${slot}`, () =>
       this.globalRegistry.getAll().filter((g) => g.slot === slot)
+    )
+  }
+
+  /** 底栏槽位条目（按 order 排序，宿主侧只做排序、不判可见性） */
+  getBottomBarItems(): BottomBarItemRegistration[] {
+    return this.cached('bottomBarItems', () =>
+      this.bottomBarRegistry.getAll().sort((a, b) => a.order - b.order || a.id.localeCompare(b.id))
     )
   }
 

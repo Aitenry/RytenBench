@@ -1,0 +1,16 @@
+import type { MainPluginContext } from '../../../main/plugins/context'
+import { MUSIC_PLAY_TRACK_CHANNEL, musicIpcHandlers } from './ipc'
+
+/**
+ * music 插件主进程入口（契约见 src/plugins/README.md）。
+ *
+ * - `ctx.registerIpc`：19 个 `plugin:music:*` 通道（歌单/曲目/封面/文件读取），
+ *   停用或卸载时随 `ctx.dispose()` 一并摘除——宿主侧无需知道音乐的存在；
+ * - `ctx.registerEvent`：主进程 → 渲染层的事件通道 `plugin:music:play-track`
+ *   （AI 工具点播，见 `src/main/harness/tools/music.ts`）。它没有 ipcMain 处理器，
+ *   必须显式声明才会进 preload 的插件通道白名单，渲染层 `window.api.plugin.on` 才放行。
+ */
+export function install(ctx: MainPluginContext): void {
+  ctx.registerIpc(musicIpcHandlers)
+  ctx.registerEvent(MUSIC_PLAY_TRACK_CHANNEL)
+}

@@ -56,6 +56,29 @@ export interface GlobalComponentRegistration {
   Component: ComponentType
 }
 
+/**
+ * 底栏（外壳槽位 `bottomBar`）条目注册项。
+ *
+ * 为什么不是普通的 globalComponent：底栏是**轮播**（音乐 ⇄ 天气），宿主需要知道
+ * 「这一项现在该不该参与轮播」，并且要在可见性变化时知道该重渲染——所以注册项
+ * 带 `isVisible()`（宿主每次渲染读取）与 `subscribe()`（插件侧订阅可见性变化）。
+ * 外壳只认这个注册表，不 import 任何插件模块。
+ */
+export interface BottomBarItemRegistration {
+  pluginId: string
+  id: string
+  /** 轮播次序：数值小的在前（音乐 10 在天气之前） */
+  order: number
+  /** 当前是否参与轮播（宿主每次渲染读取；插件用订阅触发重渲染） */
+  isVisible: () => boolean
+  /** 订阅可见性变化（可选） */
+  subscribe?: (onChange: () => void) => () => void
+  /** 底栏那一行（带图标的标题） */
+  Tab: ComponentType
+  /** 悬停弹层内容 */
+  Popup: ComponentType
+}
+
 /** 注册表服务：register 返回注销函数（可逆效果），宿主在插件卸载时整组清空 */
 export interface RegistryService<T extends { pluginId: string }> {
   register(item: Omit<T, 'pluginId'>): () => void
@@ -69,6 +92,8 @@ export interface HostServices {
   settingsSection: RegistryService<SettingsSectionRegistration>
   appProvider: RegistryService<AppProviderRegistration>
   globalComponent: RegistryService<GlobalComponentRegistration>
+  /** 底栏插槽：外壳按 order 轮播可见条目（音乐条目由 music 插件填） */
+  bottomBar: RegistryService<BottomBarItemRegistration>
   api: { invoke: (channel: string, ...args: unknown[]) => Promise<unknown> }
   i18n: { addResources: (ns: string, resources: Record<string, unknown>) => void }
   events: {

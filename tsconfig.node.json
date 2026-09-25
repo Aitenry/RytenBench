@@ -7,6 +7,13 @@
     "src/plugins/**/*",
     "src/shared/**/*"
   ],
+  "exclude": [
+    "node_modules",
+    "out",
+    "dist",
+    "src/plugins/**/renderer/**",
+    "src/plugins/**/locales/**"
+  ],
   "compilerOptions": {
     "composite": true,
     "types": ["electron-vite/node"],

@@ -1,4 +1,5 @@
 import type { MainPluginContext } from './context'
+import * as musicMain from '../../plugins/music/main'
 
 /**
  * 内置插件的主进程模块注册表。
@@ -16,9 +17,15 @@ import type { MainPluginContext } from './context'
  *
  * 迁移是逐个插件进行的：已迁移的登记在这里（走新的 install(ctx) 契约），
  * 未迁移的仍留在 `src/main/ipc/index.ts` 的 builtinIpcGroups 里（旧路径，逐步删除）。
+ *
+ * 这里用静态 import 而不是 `await import(...)`：主进程产物是 CJS（package.json 无
+ * `"type": "module"`），顶层 await 会让构建失败；内置模块本就在同一份产物里，
+ * 静态引入不损失什么。
  */
 export interface MainPluginModule {
   install(ctx: MainPluginContext): void | (() => void)
 }
 
-export const builtinMainModules: Record<string, MainPluginModule> = {}
+export const builtinMainModules: Record<string, MainPluginModule> = {
+  music: musicMain
+}

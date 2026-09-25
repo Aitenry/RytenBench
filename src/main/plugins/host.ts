@@ -1,4 +1,4 @@
-import { BrowserWindow } from 'electron'
+import { BrowserWindow, ipcMain } from 'electron'
 import * as fs from 'fs'
 import * as path from 'path'
 import logger from 'electron-log'
@@ -8,7 +8,7 @@ import { findExternalPlugin, scanExternalPlugins } from './scanner'
 import { builtinIpcGroups, CORE_IPC_GROUP } from '../ipc'
 import { builtinMainModules } from './builtin'
 import { MainPluginContextImpl } from './context'
-import { IPC_PLUGIN_CHANNELS_UPDATED } from '../../shared/plugin/protocol'
+import { IPC_PLUGIN_CHANNELS_SYNC, IPC_PLUGIN_CHANNELS_UPDATED } from '../../shared/plugin/protocol'
 
 /**
  * 主进程插件宿主。
@@ -109,6 +109,7 @@ export function syncBuiltinPluginIpcs(next: Record<string, boolean>, ids: string
 
 /** 应用启动：注册 core 组 + 按持久化启用态注册插件 + 装载已启用的外部插件主模块 */
 export function initBuiltinPluginIpcs(): void {
+  registerPluginChannelsSync()
   legacyDisposers.set(CORE_IPC_GROUP, captureIpc(builtinIpcGroups[CORE_IPC_GROUP]))
   const ids = new Set([...Object.keys(builtinIpcGroups), ...Object.keys(builtinMainModules)])
   for (const id of ids) {
@@ -150,6 +151,20 @@ export function pushPluginChannels(): void {
   }
 }
 
+/**
+ * preload 启动时的**同步**取清单入口（`ipcRenderer.sendSync`）。
+ *
+ * 必须在任何窗口创建之前注册（`initBuiltinPluginIpcs` 的第一件事）：preload 先于页面脚本
+ * 执行，用它一次性取回通道白名单，渲染层首个 `window.api.plugin.on(...)` 才不会撞上
+ * 「推送还没到」的竞态（插件 Provider 在 useEffect 里订阅事件通道就是这个时机）。
+ * 之后的启停变化仍由 `pushPluginChannels()` 增量刷新。
+ */
+function registerPluginChannelsSync(): void {
+  ipcMain.on(IPC_PLUGIN_CHANNELS_SYNC, (event) => {
+    event.returnValue = activePluginChannels()
+  })
+}
+
 // ---------- 外部插件主进程模块 ----------
 
 /** 装载外部插件主进程模块（require CJS，导出的 install 或 { install }） */
@@ -162,7 +177,7 @@ export function loadExternalMain(id: string): void {
   if (!fs.existsSync(abs)) return // 允许纯渲染层插件（无主进程代码）
 
   // 动态 require 外部文件（out/main 为 CJS 产物）
-  // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const mod = require(abs) as unknown
   const install: unknown =
     typeof mod === 'function' ? mod : (mod as { install?: unknown } | null)?.install

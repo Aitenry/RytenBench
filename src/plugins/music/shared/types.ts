@@ -42,3 +42,22 @@ export interface MusicFolder {
   created_at: string
   updated_at: string
 }
+
+/* ── 跨进程 DTO（形状照抄原 preload 的 api.music 声明，语义不变） ── */
+
+/** 新增曲目：落库后才有 id / liked，主进程返回的就是这个形状 */
+export type AddedTrack = Omit<Track, 'id' | 'liked'>
+
+/** `plugin:music:add-tracks` 的返回值（用户取消选择时为 null） */
+export interface AddTracksResult {
+  added: AddedTrack[]
+  skipped: string[]
+}
+
+/** `plugin:music:play-track` 事件载荷（AI 工具点播 → 播放器） */
+export interface MusicPlayRequest {
+  track: Track
+  folderTracks: Track[]
+  folderId: string
+  targetIndex: number
+}

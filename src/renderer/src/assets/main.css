@@ -1,6 +1,13 @@
 @import 'tailwindcss';
 @import 'animate.css';
 
+/**
+ * 自包含插件目录（src/plugins/**）在 Vite root（src/renderer）之外，
+ * Tailwind v4 的自动扫描扫不到它们——不显式声明，插件里用到的工具类就不会进产物 CSS。
+ * 路径相对本 CSS 文件（../../../ = 仓库 src/）。
+ */
+@source '../../../plugins/**/*.{ts,tsx}';
+
 /* ======== 文档级约束：窗口就是一个固定视口，永远不许出现滚动条 ======== */
 
 /**

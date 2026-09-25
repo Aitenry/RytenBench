@@ -9,6 +9,7 @@ import React, {
 import { PluginHost } from './host'
 import type {
   AppProviderRegistration,
+  BottomBarItemRegistration,
   GlobalComponentRegistration,
   Plugin,
   RegisteredMenuItem,
@@ -132,6 +133,16 @@ export function useGlobalComponents(slot: string): GlobalComponentRegistration[]
   const host = usePluginHost()
   useHostVersion()
   return host.getGlobalComponents(slot)
+}
+
+/**
+ * 底栏插槽条目（按 order 排序）。
+ * 可见性不进注册表：宿主每次渲染读各条目的 `isVisible()`，插件用 `subscribe` 触发重渲染。
+ */
+export function useBottomBarItems(): BottomBarItemRegistration[] {
+  const host = usePluginHost()
+  useHostVersion()
+  return host.getBottomBarItems()
 }
 
 export function useIsPluginEnabled(): (id: string) => boolean {

@@ -5,6 +5,14 @@ import * as z from 'zod/v4'
 import { safeSend } from '../../safe-send'
 import { mainFormat, mainPlural } from '../../i18n'
 import { getPlannerToolTexts } from '../../i18n/tool-results-planner'
+// music 已迁到自包含插件目录：数据查询走插件的 mapper，事件通道名取插件的常量
+// （跨插件直接读实现是过渡形态，harness 迁移时改成 provide/inject 取音乐的主进程服务）
+import { MUSIC_PLAY_TRACK_CHANNEL } from '../../../plugins/music/main/ipc'
+import {
+  getAllFolders,
+  getTrackById,
+  getTracksByFolder
+} from '../../../plugins/music/main/db/mapper'
 
 // ============================================================================
 // Music Handlers — 渐进式：playlists → tracks
@@ -12,7 +20,6 @@ import { getPlannerToolTexts } from '../../i18n/tool-results-planner'
 
 async function listPlaylistsHandler(): Promise<string> {
   const tr = getPlannerToolTexts()
-  const { getAllFolders } = await import('../../database/mapper/music')
   const folders = await getAllFolders()
   if (!folders.length) return tr.music.playlistsEmpty
   const lines = [tr.music.playlistsHeader]
@@ -36,7 +43,6 @@ async function listTracksHandler(params: {
   limit?: number
 }): Promise<string> {
   const tr = getPlannerToolTexts()
-  const { getAllFolders, getTracksByFolder } = await import('../../database/mapper/music')
   const limit = params.limit ?? 20
   const folders = await getAllFolders()
   if (!folders.length) return tr.music.playlistsEmpty
@@ -81,7 +87,6 @@ async function listTracksHandler(params: {
 
 async function playTrackHandler(params: { trackId: number }): Promise<string> {
   const tr = getPlannerToolTexts()
-  const { getTrackById, getTracksByFolder } = await import('../../database/mapper/music')
   const track = await getTrackById(params.trackId)
   if (!track) return mainFormat(tr.music.trackNotFound, { id: params.trackId })
 
@@ -101,7 +106,7 @@ async function playTrackHandler(params: { trackId: number }): Promise<string> {
 
   const win = BrowserWindow.getAllWindows()[0]
   if (win && !win.isDestroyed()) {
-    safeSend(win.webContents, 'music-play-track', {
+    safeSend(win.webContents, MUSIC_PLAY_TRACK_CHANNEL, {
       track: {
         id: String(track.id),
         filePath: track.file_path,

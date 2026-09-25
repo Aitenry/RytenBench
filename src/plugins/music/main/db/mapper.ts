@@ -2,8 +2,9 @@ import crypto from 'crypto'
 import { and, asc, count, eq, isNotNull, notInArray, sql } from 'drizzle-orm'
 import type { PgUpdateSetSource } from 'drizzle-orm/pg-core'
 import logger from 'electron-log'
-import { withOrm, type Orm } from '../orm'
-import { images, music_folders, music_tracks } from '../schema'
+import { withOrm, type Orm } from '../../../../main/database/orm'
+import { images } from '../../../../main/database/schema/common'
+import { music_folders, music_tracks } from './schema'
 
 /** 歌单行（字段由 schema 推导） */
 export type MusicFolderRow = typeof music_folders.$inferSelect

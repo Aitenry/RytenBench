@@ -6,8 +6,15 @@
     "src/renderer/src/**/*.tsx",
     "src/renderer/src/types/**/*",
     "src/main/types/**/*",
+    "src/plugins/**/*",
     "src/shared/**/*",
     "src/preload/*.d.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "out",
+    "dist",
+    "src/plugins/**/main/**"
   ],
   "compilerOptions": {
     "composite": true,
@@ -18,7 +25,7 @@
         "src/renderer/src/*"
       ],
       "@plugins/*": [
-        "src/renderer/src/plugins/*"
+        "src/plugins/*"
       ],
       "@shared/*": [
         "src/shared/*"

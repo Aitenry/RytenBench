@@ -10,8 +10,8 @@ import {
   RiHeartLine
 } from '@remixicon/react'
 import { useTranslation } from '@renderer/i18n'
-import type { MusicFolder } from '../../../types/music'
-import type { MusicSidebarProps } from '@renderer/types/components'
+import type { MusicFolder } from '../../shared/types'
+import type { MusicSidebarProps } from '../types'
 
 const MusicSidebar: React.FC<MusicSidebarProps> = ({
   folders,

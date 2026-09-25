@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useMemo } from 'react'
+import React, { useEffect, useState, useCallback, useMemo, useSyncExternalStore } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { theme } from 'antd'
 import { useTheme } from '@renderer/contexts/useTheme'
@@ -8,7 +8,12 @@ import MainRoutes from '@renderer/route/MainRoutes'
 import { preloadView, scheduleViewPreload } from '@renderer/route/viewPreload'
 import { usePluginMenus, usePluginRoutes } from '@renderer/plugin-host/PluginHostContext'
 import SettingsModal from './settings/SettingsModal'
-import type { SettingsScope } from './settings/SettingsModal'
+import {
+  closeSettingsModal,
+  getSettingsModalState,
+  openSettingsModal,
+  subscribeSettingsModalState
+} from './settings/settings-modal-state'
 import TitleBar from './frame/TitleBar'
 import Sidebar from './frame/Sidebar'
 import RightBar from './frame/RightBar'
@@ -37,10 +42,9 @@ const CustomFrame: React.FC<CustomFrameProps> = ({ currentKey, setCurrentKey }) 
   const { t } = useTranslation()
 
   const [isMaximized, setIsMaximized] = useState(false)
-  const [settingsOpen, setSettingsOpen] = useState(false)
-  const [settingsTab, setSettingsTab] = useState<string | undefined>(undefined)
-  /** 弹窗展示范围：assistant = 只显示助手设置四页（侧边栏入口），full = 全部设置页 */
-  const [settingsScope, setSettingsScope] = useState<SettingsScope>('full')
+  // 设置弹窗状态外置到模块级 store：插件 Provider 装卸会重挂外壳子树，
+  // 状态留在组件里会被「停用插件」顺手关掉弹窗（详见 settings-modal-state.ts）
+  const settingsModal = useSyncExternalStore(subscribeSettingsModalState, getSettingsModalState)
 
   const api = (window as unknown as Window).api
 
@@ -83,10 +87,8 @@ const CustomFrame: React.FC<CustomFrameProps> = ({ currentKey, setCurrentKey }) 
   useEffect(() => {
     const handler = (e: Event): void => {
       const detail = (e as CustomEvent).detail as { tab?: string; scope?: string } | undefined
-      setSettingsTab(detail?.tab)
       // scope: 'assistant' → 聚焦模式（只显示智能体 / 模型 / 技能 / 记忆）
-      setSettingsScope(detail?.scope === 'assistant' ? 'assistant' : 'full')
-      setSettingsOpen(true)
+      openSettingsModal(detail?.tab, detail?.scope === 'assistant' ? 'assistant' : 'full')
     }
     window.addEventListener('open-system-settings', handler)
     return () => window.removeEventListener('open-system-settings', handler)
@@ -114,9 +116,7 @@ const CustomFrame: React.FC<CustomFrameProps> = ({ currentKey, setCurrentKey }) 
   const handleMaximize = useCallback(() => api.window.maximize(), [])
   const handleClose = useCallback(() => api.window.close(), [])
   const handleSettingsClick = useCallback(() => {
-    setSettingsTab(undefined)
-    setSettingsScope('full')
-    setSettingsOpen(true)
+    openSettingsModal(undefined, 'full')
   }, [])
 
   return (
@@ -167,10 +167,10 @@ const CustomFrame: React.FC<CustomFrameProps> = ({ currentKey, setCurrentKey }) 
         />
 
         <SettingsModal
-          open={settingsOpen}
-          onClose={() => setSettingsOpen(false)}
-          initialTab={settingsTab}
-          scope={settingsScope}
+          open={settingsModal.open}
+          onClose={closeSettingsModal}
+          initialTab={settingsModal.tab}
+          scope={settingsModal.scope}
         />
       </div>
     </div>

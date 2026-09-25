@@ -2,14 +2,28 @@
  * 插件系统的 IPC 通道常量 + plugin:// URL 工具 + 通道命名规范（三端共用）。
  *
  * 通道命名规范：
- * - 外部插件 invoke 通道：`plugin:<命名空间>:<channel>`，命名空间 = 插件 id 去掉开头的 `plugin.`
- *   段（plugin.demo → plugin:demo:*），主进程权威校验、preload 白名单缓存；
- * - 内置插件沿用现有扁平通道名（视为 core 通道，如 'music-get-folders'）；
+ * - 插件 invoke 通道：`plugin:<命名空间>:<channel>`，命名空间 = 插件 id 去掉开头的 `plugin.`
+ *   段（plugin.demo → plugin:demo:*，内置 music → plugin:music:*），主进程权威校验、
+ *   preload 白名单缓存；
+ * - 主进程 → 渲染层的事件通道同规则命名（如 `plugin:music:play-track`），
+ *   由插件在主进程 `ctx.registerEvent(...)` 声明后才进白名单；
+ * - 尚未插件化的 core/旧插件通道仍是扁平名（如 'todo-items-get-paginate'）；
  * - 管理通道为 kebab-case（plugins-*），与现有主进程风格一致。
  */
 
 /** 主进程 → 渲染层：已启用插件通道清单推送（preload 更新本地白名单缓存） */
 export const IPC_PLUGIN_CHANNELS_UPDATED = 'plugin-channels-updated'
+
+/**
+ * 渲染层 → 主进程：**同步**取一次当前通道清单（`ipcRenderer.sendSync`）。
+ *
+ * 为什么需要它：`IPC_PLUGIN_CHANNELS_UPDATED` 是推送（did-finish-load 补推），
+ * 而渲染层的首个订阅（插件 Provider 的 useEffect）发生在页面脚本执行期——
+ * 早于 did-finish-load，于是「首帧就订阅事件通道」必然撞上白名单还没到的竞态
+ * （表现为 `window.api.plugin.on` 抛「插件通道未启用」）。preload 在启动时用一次
+ * 同步 IPC 取回权威清单，之后仍由推送增量刷新。
+ */
+export const IPC_PLUGIN_CHANNELS_SYNC = 'plugin-channels-sync'
 
 /** 主进程 → 渲染层：插件启停/安装/卸载后的状态广播 */
 export const IPC_PLUGIN_STATE_CHANGED = 'plugin-state-changed'
