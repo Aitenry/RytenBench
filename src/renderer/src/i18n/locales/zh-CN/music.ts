@@ -1,4 +1,4 @@
-/* 「音乐」模块词条（作用于 views/music 下的播放器界面；设置页见 musicSettings）。 */
+/* 「音乐」模块词条（作用于 plugins/music 下的播放器界面；设置页见 musicSettings）。 */
 export const zhCNMusic = {
   playlist: {
     sectionTitle: '歌单',

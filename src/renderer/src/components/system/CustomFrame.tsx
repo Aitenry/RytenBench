@@ -1,12 +1,12 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { theme } from 'antd'
-import { RiCalendar2Line, RiChatAiLine, RiDashboardLine, RiDiscLine } from '@remixicon/react'
 import { useTheme } from '@renderer/contexts/useTheme'
 import { useTranslation } from '@renderer/i18n'
 import { Window } from '../../../resource/types/window'
 import MainRoutes from '@renderer/route/MainRoutes'
-import { isLazyViewKey, preloadView, scheduleViewPreload } from '@renderer/route/viewPreload'
+import { preloadView, scheduleViewPreload } from '@renderer/route/viewPreload'
+import { usePluginMenus, usePluginRoutes } from '@renderer/plugin-host/PluginHostContext'
 import SettingsModal from './settings/SettingsModal'
 import type { SettingsScope } from './settings/SettingsModal'
 import TitleBar from './frame/TitleBar'
@@ -44,21 +44,40 @@ const CustomFrame: React.FC<CustomFrameProps> = ({ currentKey, setCurrentKey }) 
 
   const api = (window as unknown as Window).api
 
+  // 侧栏菜单与路由均来自插件注册表（停用插件的菜单项/路由即时消失）
+  const pluginMenus = usePluginMenus()
+  const pluginRoutes = usePluginRoutes()
+
   useEffect(() => {
     api.window.isMaximized().then(setIsMaximized)
     return api.window.onMaximized(setIsMaximized)
   }, [])
 
-  // 启动后的空闲时段提前加载懒加载页面 chunk（harness → planner → music），
+  // 启动后的空闲时段提前加载「已启用插件的懒路由」chunk（按菜单序倒排 = 重插件靠前），
   // 首次切换菜单时模块已就绪，实现直接切换不卡顿
+  const lazyRoutes = useMemo(
+    () =>
+      [...pluginMenus]
+        .reverse()
+        .flatMap((m) => pluginRoutes.filter((r) => r.path === `/${m.key}` && r.load))
+        .map((r) => ({
+          key: r.path.replace(/^\//, ''),
+          load: r.load! as () => Promise<{ default: unknown }>
+        })),
+    [pluginMenus, pluginRoutes]
+  )
   useEffect(() => {
-    scheduleViewPreload()
-  }, [])
+    if (lazyRoutes.length > 0) scheduleViewPreload(lazyRoutes)
+  }, [lazyRoutes])
 
   // 菜单悬停/聚焦时预加载对应 chunk：空闲预加载未完成时的兜底
-  const onMenuHover = useCallback((key: string): void => {
-    if (isLazyViewKey(key)) preloadView(key)
-  }, [])
+  const onMenuHover = useCallback(
+    (key: string): void => {
+      const route = pluginRoutes.find((r) => r.path === `/${key}` && r.load)
+      if (route?.load) preloadView(key, route.load as () => Promise<{ default: unknown }>)
+    },
+    [pluginRoutes]
+  )
 
   // 监听自定义事件以从其他页面打开系统设置
   useEffect(() => {
@@ -74,13 +93,13 @@ const CustomFrame: React.FC<CustomFrameProps> = ({ currentKey, setCurrentKey }) 
   }, [])
 
   const menuItems: MenuItem[] = useMemo(
-    () => [
-      { key: 'home', label: t('shell.menu.home'), icon: <RiDashboardLine size={16} /> },
-      { key: 'planner', label: t('shell.menu.planner'), icon: <RiCalendar2Line size={16} /> },
-      { key: 'music', label: t('shell.menu.music'), icon: <RiDiscLine size={16} /> },
-      { key: 'harness', label: t('shell.menu.harness'), icon: <RiChatAiLine size={16} /> }
-    ],
-    [t]
+    () =>
+      pluginMenus.map((m) => ({
+        key: m.key,
+        label: t(m.labelKey as never),
+        icon: m.icon
+      })),
+    [pluginMenus, t]
   )
 
   const onMenuClick = useCallback(
@@ -150,18 +169,7 @@ const CustomFrame: React.FC<CustomFrameProps> = ({ currentKey, setCurrentKey }) 
         <SettingsModal
           open={settingsOpen}
           onClose={() => setSettingsOpen(false)}
-          initialTab={
-            settingsTab as
-              | 'general'
-              | 'music'
-              | 'graph'
-              | 'model'
-              | 'system'
-              | 'agents'
-              | 'skills'
-              | 'memory'
-              | undefined
-          }
+          initialTab={settingsTab}
           scope={settingsScope}
         />
       </div>

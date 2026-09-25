@@ -362,7 +362,10 @@ const FileDiffView: React.FC<FileDiffViewProps> = ({
     (view: EditorView) => {
       const next = computeMergeStats(view.state, original, change)
       setStats((prev) =>
-        prev && prev.chunks === next.chunks && prev.added === next.added && prev.removed === next.removed
+        prev &&
+        prev.chunks === next.chunks &&
+        prev.added === next.added &&
+        prev.removed === next.removed
           ? prev
           : next
       )

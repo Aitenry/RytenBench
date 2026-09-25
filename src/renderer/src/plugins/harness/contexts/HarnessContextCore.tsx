@@ -1,5 +1,5 @@
 import { createContext, useContext } from 'react'
-import type { UseHarnessHandlersReturn } from '@renderer/views/harness/hooks/useHarnessHandlers'
+import type { UseHarnessHandlersReturn } from '../hooks/useHarnessHandlers'
 
 export type HarnessContextType = UseHarnessHandlersReturn
 

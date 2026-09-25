@@ -11,7 +11,22 @@ export const zhCNSettings = {
     system: '系统',
     agents: '智能体',
     skills: '技能',
-    memory: '记忆'
+    memory: '记忆',
+    plugins: '插件'
+  },
+  plugins: {
+    pageTitle: '插件管理',
+    pageDescription: '启停内置功能或管理外部插件',
+    listTitle: '已安装插件',
+    listDescription: '停用后对应功能会立即从应用移除，重新启用即时恢复',
+    builtinBadge: '内置',
+    externalBadge: '外部',
+    switchFail: '插件状态切换失败',
+    install: '安装插件',
+    uninstall: '卸载',
+    installFail: '插件安装失败',
+    uninstallConfirmTitle: '卸载插件',
+    uninstallConfirmContent: '确认卸载该插件？其目录将被删除。'
   },
   general: {
     pageTitle: '通用设置',

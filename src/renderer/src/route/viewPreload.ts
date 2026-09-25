@@ -1,43 +1,29 @@
-import type { ComponentType } from 'react'
-
 /**
- * 视图 chunk 预加载
+ * 视图 chunk 预加载（注册表驱动版）
  *
- * 背景：Harness / Planner / Music 是 React.lazy 拆包页面，首次切换时才现场加载对应
- * chunk。Harness 的 chunk 含整套代码编辑器（CodeMirror 内核 + 差异视图，语言语法
- * 另按需分包），下载后还要在主线程求值，求值期间渲染进程无法绘制新画面，
- * 界面会「卡在上一页」一会儿。
+ * 背景：懒加载页面（Harness / Planner / Music 及外部插件页）首次切换时才现场加载
+ * 对应 chunk。重型 chunk（如 Harness 的整套代码编辑器）下载 + 求值期间界面会
+ * 「卡在上一页」一会儿。
  *
- * 方案：
+ * 方案（与旧实现一致，改为注册表驱动）：
  * 1. 启动后的空闲时段分批提前 import 各 chunk（重 → 轻），首次切换时模块
  *    已求值完毕，直接渲染目标页面；
  * 2. 侧边栏悬停/聚焦时也提前加载对应 chunk，作为空闲预加载未完成时的兜底；
- * 3. 万一仍未就绪，Suspense 会展示对应页面的骨架屏（见 RouteSkeleton），
- *    而不是停留在旧页面。
+ * 3. 万一仍未就绪，Suspense 会展示对应页面的骨架屏（见 RouteSkeleton）。
+ *
+ * 插件化语义：任务列表来自宿主注册表中「已启用插件」的路由 loader，
+ * 停用的插件不参与预加载。
  */
 
-export type LazyViewKey = 'harness' | 'planner' | 'music'
+export type LazyModule = () => Promise<{ default: unknown }>
 
-type LazyModule = () => Promise<{ default: ComponentType }>
+const inflight = new Map<string, Promise<void>>()
 
-/** 与 MainRoutes 中 lazy() 工厂指向同一份动态 import，加载后由模块缓存共享 */
-const factories: Record<LazyViewKey, LazyModule> = {
-  harness: () => import('../views/harness/Index'),
-  planner: () => import('../views/planner/Index'),
-  music: () => import('../views/music/Index')
-}
-
-const inflight = new Map<LazyViewKey, Promise<void>>()
-
-export function isLazyViewKey(key: string): key is LazyViewKey {
-  return key === 'harness' || key === 'planner' || key === 'music'
-}
-
-/** 立即加载指定视图的 chunk；幂等，重复调用共享同一次加载 */
-export function preloadView(key: LazyViewKey): Promise<void> {
+/** 立即加载指定插件的 chunk；幂等，重复调用共享同一次加载 */
+export function preloadView(key: string, load: LazyModule): Promise<void> {
   const running = inflight.get(key)
   if (running) return running
-  const task = factories[key]()
+  const task = load()
     .then(() => undefined)
     .catch((err) => {
       // 预加载失败不阻塞使用：Suspense 仍会按需加载并显示骨架屏
@@ -47,18 +33,21 @@ export function preloadView(key: LazyViewKey): Promise<void> {
   return task
 }
 
-let scheduled = false
+const scheduledKeys = new Set<string>()
 
 /**
- * 启动后空闲预加载（只调度一次）：先让首屏稳定一小段时间（minDelay 兜底），
- * 再按 重 → 轻 分批加载，避免与启动初期的主进程交互抢主线程。
+ * 启动后空闲预加载：按传入顺序分批（先重后轻由调用方排序），
+ * 每个 key 只调度一次（插件在运行中重新启用后仍能补调度新 key）。
  */
-export function scheduleViewPreload(): void {
-  if (scheduled) return
-  scheduled = true
-  runWhenIdle(() => preloadView('harness'), 3000, 3000)
-  runWhenIdle(() => preloadView('planner'), 5000, 2500)
-  runWhenIdle(() => preloadView('music'), 6500, 2500)
+export function scheduleViewPreload(tasks: { key: string; load: LazyModule }[]): void {
+  let slot = 0
+  for (const task of tasks) {
+    if (scheduledKeys.has(task.key)) continue
+    scheduledKeys.add(task.key)
+    const delay = 3000 + slot * 2000
+    slot += 1
+    runWhenIdle(() => preloadView(task.key, task.load), delay, 2500)
+  }
 }
 
 function runWhenIdle(task: () => void, minDelay: number, idleTimeout: number): void {

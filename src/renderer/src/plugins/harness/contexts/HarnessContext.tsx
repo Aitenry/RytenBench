@@ -1,5 +1,5 @@
 import React from 'react'
-import { useHarnessHandlers } from '@renderer/views/harness/hooks/useHarnessHandlers'
+import { useHarnessHandlers } from '../hooks/useHarnessHandlers'
 import { HarnessCtx } from './HarnessContextCore'
 
 export const HarnessProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {

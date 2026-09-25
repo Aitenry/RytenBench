@@ -13,22 +13,44 @@ import { registerWorkspaceIpc } from './workspace'
 import { registerGraphIpc } from './graph'
 import { registerProviderIpc } from './provider'
 import { registerDialogIpc } from './dialog'
+import { registerPluginsIpc } from './plugins'
 
-/** 注册全部 IPC 处理器（应用就绪时调用一次） */
-export function registerAllIpc(): void {
-  registerMiscIpc()
-  registerTodoIpc()
-  registerPlannerIpc()
-  registerSettingsIpc()
-  registerNodePositionIpc()
-  registerMusicIpc()
-  registerDocumentIpc()
-  registerWikiIpc()
-  registerHarnessIpc()
-  registerHarnessTopicIpc()
-  registerMnemonIpc()
-  registerWorkspaceIpc()
-  registerGraphIpc()
-  registerProviderIpc()
-  registerDialogIpc()
+/**
+ * 内置 IPC 组（主进程插件宿主消费）。
+ * - core 组始终注册（shell 骨架与全局能力）；
+ * - 插件组随对应插件启用/停用注册/注销（经 plugins/host.ts 的 captureIpc 捕获通道后回滚）。
+ * 归属表见方案 5.1：home(todo/document/wiki/node-position)、planner、music、
+ * harness(harness/harness-topic/mnemon)。
+ */
+
+/** core 组键名（始终注册，不受插件启停影响） */
+export const CORE_IPC_GROUP = 'core'
+
+export const builtinIpcGroups: Record<string, () => void> = {
+  [CORE_IPC_GROUP]: () => {
+    registerMiscIpc()
+    registerSettingsIpc()
+    registerDialogIpc()
+    registerProviderIpc()
+    registerWorkspaceIpc()
+    registerGraphIpc()
+    registerPluginsIpc()
+  },
+  home: () => {
+    registerTodoIpc()
+    registerDocumentIpc()
+    registerWikiIpc()
+    registerNodePositionIpc()
+  },
+  planner: () => {
+    registerPlannerIpc()
+  },
+  music: () => {
+    registerMusicIpc()
+  },
+  harness: () => {
+    registerHarnessIpc()
+    registerHarnessTopicIpc()
+    registerMnemonIpc()
+  }
 }

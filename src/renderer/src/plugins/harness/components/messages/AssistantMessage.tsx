@@ -33,7 +33,7 @@ import {
   tailContentIndices,
   type TaskSegment,
   type ToolRunEntry
-} from '@renderer/views/harness/utils/harnessHelpers'
+} from '../../utils/harnessHelpers'
 
 /** 定制化卡片工具集：进行中/完成态共用同款卡片外形（光泽只在进行中扫过，完成后静止） */
 const CARD_TOOLS = new Set([

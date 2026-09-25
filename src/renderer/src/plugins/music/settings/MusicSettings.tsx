@@ -5,7 +5,10 @@ import { useMessage } from '@renderer/hooks/useMessage'
 import { Window } from '../../../../resource/types/window'
 import type { SystemSettings } from '@renderer/types/settings'
 import { useTranslation } from '@renderer/i18n'
-import { SettingsPageHeader, SettingsSection } from './SettingsUI'
+import {
+  SettingsPageHeader,
+  SettingsSection
+} from '@renderer/components/system/settings/SettingsUI'
 
 const MusicSettings: React.FC = () => {
   const { viewMessage } = useMessage()

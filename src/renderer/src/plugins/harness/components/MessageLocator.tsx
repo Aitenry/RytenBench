@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { theme } from 'antd'
 import type { TFunction } from 'i18next'
 import { useTranslation } from '@renderer/i18n'
-import { tailContentIndices } from '@renderer/views/harness/utils/harnessHelpers'
+import { tailContentIndices } from '../utils/harnessHelpers'
 import type { Message } from '@renderer/types/harness'
 
 interface MessageLocatorProps {

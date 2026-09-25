@@ -2,7 +2,13 @@ import { app, BrowserWindow, ipcMain, crashReporter } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer } from '@electron-toolkit/utils'
 import logger from 'electron-log'
-import { registerAllIpc } from './ipc'
+import {
+  initBuiltinPluginIpcs,
+  pushExternalPluginChannels,
+  syncBuiltinPluginIpcs
+} from './plugins/host'
+import { registerPluginScheme, registerPluginProtocolHandler } from './plugins/protocol'
+import { setPluginStateSyncHook } from './ipc/plugins'
 import { registerLifecycleHooks } from './lifecycle'
 import { configureToolOutputStore } from './harness/runtime/tool-output-store'
 import { configureFileHistory } from './workspace/file-history'
@@ -44,10 +50,16 @@ try {
 // 退出前保存流式数据 / 全窗口关闭退出
 registerLifecycleHooks()
 
+// plugin:// 自定义协议（外部插件文件服务）：scheme 特权声明必须在 app ready 之前
+registerPluginScheme()
+
 app
   .whenReady()
   .then(async () => {
     electronApp.setAppUserModelId('com.ryten.bench')
+
+    // plugin:// 协议处理器（外部插件静态文件；需在 ready 后注册）
+    registerPluginProtocolHandler()
 
     // 工具结果详情存储目录（内置工具的结果不再随流下发/落库，点开卡片时按需读取）：
     // 放 userData 而不是工作区——工作区挂载为虚拟 '/'，写进去会污染用户项目
@@ -68,10 +80,16 @@ app
 
     app.on('browser-window-created', (_, window) => {
       optimizer.watchWindowShortcuts(window)
+      // 外部插件通道白名单：启动期推送早于窗口创建（必然丢包），窗口加载完成后补推一次
+      window.webContents.on('did-finish-load', () => pushExternalPluginChannels())
     })
 
-    // 注册全部 IPC 处理器（各领域独立模块，见 ./ipc）
-    registerAllIpc()
+    // 注册 IPC：core 组常驻，插件组（home/planner/music/harness）随启用态注册/注销
+    initBuiltinPluginIpcs()
+    // 启停插件时，主进程同名注册/注销对应 IPC 组
+    setPluginStateSyncHook((id, enabled) => {
+      syncBuiltinPluginIpcs({ [id]: enabled }, [id])
+    })
     // 应用版本（加载页展示）
     ipcMain.handle('app-version', () => app.getVersion())
     // Mermaid 预览窗口（HTML 模板存于资源文件 ./resource/mermaid-preview.html）

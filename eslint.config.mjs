@@ -32,7 +32,22 @@ export default defineConfig(
         'error',
         {
           allowConstantExport: true,
-          allowExportNames: ['useAudioState', 'useAudioProgress', 'useAudio']
+          // Provider/Context 文件同时导出 hooks 是本项目的既有形态（AudioContext 同款）：
+          // 这些 hook 就是该上下文对外的主 API，拆文件只会把 context 对象也变成第三个出口。
+          allowExportNames: [
+            'useAudioState',
+            'useAudioProgress',
+            'useAudio',
+            'usePluginHost',
+            'usePlugins',
+            'usePluginRoutes',
+            'usePluginMenus',
+            'usePluginMenuKeys',
+            'usePluginSettingsSections',
+            'usePluginProviders',
+            'useGlobalComponents',
+            'useIsPluginEnabled'
+          ]
         }
       ],
       'react/prop-types': 'off'
@@ -40,11 +55,12 @@ export default defineConfig(
   },
   {
     // node 直跑的纯 JS 脚本：scripts/ 下是构建补丁（patch-langgraph-sdk.js），test/ 下是
-    // 离线校验脚本（verify-*.mjs / sim-render-cost.mjs 等，该目录不入库）。它们刻意不写
-    // TS 类型标注，也有意留空实现（jsdom 桩的 observe/disconnect 之类）。套用 TS 规则只会
-    // 让 `pnpm lint` 常年失败、失去信号价值（此前 verify-text-window.mjs 等就已如此）。
+    // 离线校验脚本（verify-*.mjs / sim-render-cost.mjs 等，该目录不入库），examples/ 下是
+    // 外部插件示例（由插件作者自行构建，不参与应用的 TS 构建）。它们刻意不写 TS 类型标注，
+    // 也有意留空实现（jsdom 桩的 observe/disconnect 之类）。套用 TS 规则只会让 `pnpm lint`
+    // 常年失败、失去信号价值（此前 verify-text-window.mjs 等就已如此）。
     // 只放宽 JS 扩展名：test/ 里的 *.ts 校验源码仍按 TS 规则检查。
-    files: ['scripts/**/*.{js,mjs,cjs}', 'test/**/*.{js,mjs,cjs}'],
+    files: ['scripts/**/*.{js,mjs,cjs}', 'test/**/*.{js,mjs,cjs}', 'examples/**/*.{js,mjs,cjs}'],
     rules: {
       '@typescript-eslint/explicit-function-return-type': 'off',
       '@typescript-eslint/no-empty-function': 'off',

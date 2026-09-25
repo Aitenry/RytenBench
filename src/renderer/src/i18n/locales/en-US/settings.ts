@@ -12,7 +12,23 @@ export const enUSSettings: typeof zhCNSettings = {
     system: 'System',
     agents: 'Agents',
     skills: 'Skills',
-    memory: 'Memory'
+    memory: 'Memory',
+    plugins: 'Plugins'
+  },
+  plugins: {
+    pageTitle: 'Plugin Manager',
+    pageDescription: 'Enable/disable built-in features or manage external plugins',
+    listTitle: 'Installed Plugins',
+    listDescription:
+      'Disabled features are removed from the app immediately and restored on re-enable',
+    builtinBadge: 'Built-in',
+    externalBadge: 'External',
+    switchFail: 'Failed to toggle plugin state',
+    install: 'Install Plugin',
+    uninstall: 'Uninstall',
+    installFail: 'Failed to install plugin',
+    uninstallConfirmTitle: 'Uninstall Plugin',
+    uninstallConfirmContent: 'Uninstall this plugin? Its directory will be removed.'
   },
   general: {
     pageTitle: 'General',

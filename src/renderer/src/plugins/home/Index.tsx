@@ -1,6 +1,6 @@
 import React from 'react'
 import { theme } from 'antd'
-import HomeView from '@renderer/views/home/components/HomeView'
+import HomeView from './components/HomeView'
 
 /**
  * 首页：思源笔记风格三栏布局

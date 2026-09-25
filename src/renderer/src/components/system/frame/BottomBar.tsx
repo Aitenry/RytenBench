@@ -4,7 +4,7 @@ import { useTheme } from '@renderer/contexts/useTheme'
 import { useAudioState, useAudioProgress } from '@renderer/contexts/AudioContext'
 import { useTranslation } from '@renderer/i18n'
 import { formatTime } from '@renderer/utils/formatTime'
-import MusicMiniPlayer from '../MusicMiniPlayer'
+import { useGlobalComponents } from '@renderer/plugin-host/PluginHostContext'
 import { Window } from '../../../../resource/types/window'
 
 interface WeatherData {
@@ -33,6 +33,10 @@ const BottomBar: React.FC<BottomBarProps> = ({
   const { progress } = useAudioProgress()
   const { t, i18n } = useTranslation()
   const isDark = effectiveTheme === 'dark'
+
+  // 底部栏插槽：迷你播放器由 music 插件经 globalComponent 注册（插件停用即消失）
+  const miniPlayers = useGlobalComponents('bottomBar')
+  const MiniPlayer = miniPlayers[0]?.Component
 
   const [carouselIndex, setCarouselIndex] = useState(0)
   const [carouselPaused, setCarouselPaused] = useState(false)
@@ -119,7 +123,9 @@ const BottomBar: React.FC<BottomBarProps> = ({
             }}
           >
             {carouselItems[carouselIndex] === 'music' ? (
-              <MusicMiniPlayer />
+              MiniPlayer ? (
+                <MiniPlayer />
+              ) : null
             ) : (
               <div className="text-sm">
                 {weatherLoading ? (

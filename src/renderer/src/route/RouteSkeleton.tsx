@@ -8,7 +8,7 @@ import {
   useSkeletonPalette
 } from '@renderer/components/system/skeleton-palette'
 
-export type RouteSkeletonVariant = 'harness' | 'planner' | 'music'
+export type RouteSkeletonVariant = string
 
 const MONO_FONT = "'JetBrains Mono', 'Cascadia Code', Consolas, 'Courier New', monospace"
 
@@ -175,7 +175,7 @@ const RouteSkeleton: React.FC<{ variant: RouteSkeletonVariant; showTag?: boolean
         </div>
       </div>
     )
-  } else {
+  } else if (variant === 'music') {
     content = (
       <div className="flex h-full w-full gap-2.5 p-2.5" style={{ background: colorBgLayout }}>
         {/* 歌单侧栏 */}
@@ -233,6 +233,19 @@ const RouteSkeleton: React.FC<{ variant: RouteSkeletonVariant; showTag?: boolean
             {block(22, 22, 6)}
           </div>
         </div>
+      </div>
+    )
+  } else {
+    // 通用骨架兜底：未知 variant（如外部插件路由）给一个居中的简单骨架
+    content = (
+      <div
+        className="flex h-full w-full flex-col items-center justify-center gap-4 p-8"
+        style={{ background: colorBgContainer }}
+      >
+        {block(260, 16)}
+        {block(360, 12)}
+        {block('70%', 64, 12)}
+        {block(200, 32, 8)}
       </div>
     )
   }

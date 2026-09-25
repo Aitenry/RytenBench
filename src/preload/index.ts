@@ -18,6 +18,22 @@ import type { WorkspaceFsChange } from '../main/workspace/watcher'
 
 type AskAnswerItem = AskAnswer['answers'][number]
 import type { SystemSettings } from '../main/types/settings'
+import type { PluginListEntry } from '../shared/plugin/types'
+import { PLUGIN_CHANNEL_RE } from '../shared/plugin/protocol'
+
+/**
+ * 已启用外部插件通道白名单缓存（主进程权威注册表 + plugin-channels-updated 推送刷新）。
+ * 仅作 preload 侧快速门控：真正权威校验在主进程（通道归属插件且插件已启用）。
+ */
+const enabledPluginChannels = new Set<string>()
+ipcRenderer.on('plugin-channels-updated', (_event, list: unknown) => {
+  enabledPluginChannels.clear()
+  if (Array.isArray(list)) {
+    for (const channel of list) {
+      if (typeof channel === 'string') enabledPluginChannels.add(channel)
+    }
+  }
+})
 
 interface WeatherData {
   location: string
@@ -860,6 +876,47 @@ const api = {
       ipcRenderer.on('weather-update', handler)
       return () => {
         ipcRenderer.off('weather-update', handler)
+      }
+    }
+  },
+  plugin: {
+    list: () => ipcRenderer.invoke('plugins-list') as Promise<PluginListEntry[]>,
+    setEnabled: (id: string, enabled: boolean) =>
+      ipcRenderer.invoke('plugins-set-enabled', id, enabled) as Promise<PluginListEntry[]>,
+    install: () =>
+      ipcRenderer.invoke('plugins-install') as Promise<{
+        ok: boolean
+        id?: string
+        error?: string
+      }>,
+    uninstall: (id: string) =>
+      ipcRenderer.invoke('plugins-uninstall', id) as Promise<PluginListEntry[]>,
+    onStateChanged: (callback: () => void) => {
+      const handler = (): void => callback()
+      ipcRenderer.on('plugin-state-changed', handler)
+      return () => {
+        ipcRenderer.off('plugin-state-changed', handler)
+      }
+    },
+    /** 外部插件通道调用：前缀格式强校验；未注册通道由主进程抛错 */
+    invoke: (channel: string, ...args: unknown[]) => {
+      if (typeof channel !== 'string' || !PLUGIN_CHANNEL_RE.test(channel)) {
+        throw new Error(`非法插件通道名: ${String(channel)}`)
+      }
+      return ipcRenderer.invoke(channel, ...args) as Promise<unknown>
+    },
+    /** 订阅外部插件事件通道：白名单缓存门控（主进程为准） */
+    on: (channel: string, callback: (data: unknown) => void) => {
+      if (typeof channel !== 'string' || !PLUGIN_CHANNEL_RE.test(channel)) {
+        throw new Error(`非法插件通道名: ${String(channel)}`)
+      }
+      if (!enabledPluginChannels.has(channel)) {
+        throw new Error(`插件通道未启用: ${channel}`)
+      }
+      const handler = (_event: Electron.IpcRendererEvent, data: unknown): void => callback(data)
+      ipcRenderer.on(channel, handler)
+      return () => {
+        ipcRenderer.off(channel, handler)
       }
     }
   }

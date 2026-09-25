@@ -1,73 +1,61 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { Modal, theme } from 'antd'
-import {
-  RiSettings3Line,
-  RiMusicLine,
-  RiMindMap,
-  RiComputerLine,
-  RiBrainAi3Line,
-  RiAiAgentLine,
-  RiFileAi2Line,
-  RiBrain4Line
-} from '@remixicon/react'
+import { RiSettings3Line, RiBrainAi3Line, RiComputerLine, RiPlugLine } from '@remixicon/react'
 import GeneralSettings from './GeneralSettings'
-import MusicSettings from './MusicSettings'
-import GraphSettings from './GraphSettings'
 import SystemInfo from './SystemInfo'
 import ModelSettings from './ModelSettings'
-import AgentSettings from '@renderer/views/harness/components/settings/AgentSettings'
-import SkillsSettings from '@renderer/views/harness/components/settings/SkillsSettings'
-import MemorySettings from '@renderer/views/harness/components/settings/MemorySettings'
+import PluginsPanel from './PluginsPanel'
 import { useTranslation } from '@renderer/i18n'
-
-export type SettingsTab =
-  'general' | 'model' | 'music' | 'graph' | 'system' | 'agents' | 'skills' | 'memory'
-
-interface TabItem {
-  key: SettingsTab
-  label: string
-  icon: React.ReactNode
-}
-
-/** 完整设置的分组结构：常规 + 助手（文案在组件内按当前语言求值） */
-const NAV_GROUP_DEFS = [
-  {
-    labelKey: 'settings.nav.groupGeneral',
-    items: ['general', 'model', 'music', 'graph', 'system']
-  },
-  {
-    labelKey: 'settings.nav.groupAssistant',
-    items: ['agents', 'skills', 'memory']
-  }
-] as const satisfies readonly { labelKey: string; items: readonly SettingsTab[] }[]
+import { usePluginSettingsSections } from '@renderer/plugin-host/PluginHostContext'
 
 /**
- * 助手设置（聚焦模式）页签：智能体 → 模型 → 技能 → 记忆。
+ * 设置弹窗 = shell 核心页（静态）+ 插件注册页（settingsSection 注册点动态合并）。
  *
- * 侧边栏「助手设置」入口用这一组：只显示助手相关内容，通用 / 音乐 / 图谱 / 系统等
- * 系统级页面不出现（模型页按用户要求排在技能之前）。
+ * - 核心页：general / model / system，始终存在；
+ * - 插件页：music（音乐设置，随 music 插件）、graph（图谱设置，随 home 插件）、
+ *   agents / skills / memory（随 harness 插件）……注册页随插件启停即时出现/消失；
+ * - 聚焦模式（assistant）：只显示 assistant 分组页 + model（智能体 → 模型 → 技能 → 记忆）。
  */
-const ASSISTANT_SETTINGS_TABS: SettingsTab[] = ['agents', 'model', 'skills', 'memory']
 
-/** 设置弹窗的展示范围：full = 全部设置页；assistant = 只显示助手相关的四页 */
-export type SettingsScope = 'full' | 'assistant'
+export type SettingsTab = string
 
-/** 从候选里挑一个可用页签：白名单内优先用传入值，否则退回白名单第一项 */
-function pickTab(
-  tab: SettingsTab | undefined,
-  only: SettingsTab[] | null | undefined
-): SettingsTab {
-  if (only && only.length > 0) {
-    return tab && only.includes(tab) ? tab : only[0]
-  }
-  return tab ?? 'general'
+interface TabItem {
+  key: string
+  label: string
+  icon: React.ReactNode
+  order: number
 }
+
+interface GroupDef {
+  labelKey: string
+  items: { key: string; order: number }[]
+}
+
+const STATIC_TABS = {
+  general: { labelKey: 'settings.nav.general', order: 10 },
+  model: { labelKey: 'settings.nav.model', order: 20 },
+  system: { labelKey: 'settings.nav.system', order: 50 },
+  plugins: { labelKey: 'settings.nav.plugins', order: 60 }
+} as const
+
+const STATIC_ICONS: Record<string, React.ReactNode> = {
+  general: <RiSettings3Line size={16} />,
+  model: <RiBrainAi3Line size={16} />,
+  system: <RiComputerLine size={16} />,
+  plugins: <RiPlugLine size={16} />
+}
+
+const GROUP_GENERAL = 'settings.nav.groupGeneral'
+const GROUP_ASSISTANT = 'settings.nav.groupAssistant'
+
+/** 设置弹窗的展示范围：full = 全部设置页；assistant = 聚焦模式 */
+export type SettingsScope = 'full' | 'assistant'
 
 interface SettingsModalProps {
   open: boolean
   onClose: () => void
   initialTab?: SettingsTab
-  /** 展示范围：assistant = 聚焦模式（只显示助手设置四页）；默认 full = 全部设置页 */
+  /** 展示范围：assistant = 聚焦模式（只显示助手页 + 模型页）；默认 full = 全部设置页 */
   scope?: SettingsScope
 }
 
@@ -92,51 +80,104 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
 
   const { t } = useTranslation()
 
-  /** 全部设置页元数据（图标常驻，文案随语言变化） */
-  const tabMeta = useMemo<Record<SettingsTab, TabItem>>(
-    () => ({
-      general: {
-        key: 'general',
-        label: t('settings.nav.general'),
-        icon: <RiSettings3Line size={16} />
-      },
-      model: { key: 'model', label: t('settings.nav.model'), icon: <RiBrainAi3Line size={16} /> },
-      music: { key: 'music', label: t('settings.nav.music'), icon: <RiMusicLine size={16} /> },
-      graph: { key: 'graph', label: t('settings.nav.graph'), icon: <RiMindMap size={16} /> },
-      system: {
-        key: 'system',
-        label: t('settings.nav.system'),
-        icon: <RiComputerLine size={16} />
-      },
-      agents: { key: 'agents', label: t('settings.nav.agents'), icon: <RiAiAgentLine size={16} /> },
-      skills: { key: 'skills', label: t('settings.nav.skills'), icon: <RiFileAi2Line size={16} /> },
-      memory: { key: 'memory', label: t('settings.nav.memory'), icon: <RiBrain4Line size={16} /> }
-    }),
-    [t]
-  )
+  // 插件注册的设置页（已按 order 排序）
+  const pluginSections = usePluginSettingsSections()
 
-  /** 聚焦模式下生效的页签白名单（其余页面整组隐藏） */
-  const onlyTabs = scope === 'assistant' ? ASSISTANT_SETTINGS_TABS : null
+  /** 全部页签元数据（图标常驻，文案随语言变化；插件页来自注册表） */
+  const tabMeta = useMemo<Record<string, TabItem>>(() => {
+    const meta: Record<string, TabItem> = {}
+    for (const [key, def] of Object.entries(STATIC_TABS)) {
+      meta[key] = {
+        key,
+        label: t(def.labelKey as never),
+        icon: STATIC_ICONS[key],
+        order: def.order
+      }
+    }
+    for (const s of pluginSections) {
+      meta[s.tabKey] = {
+        key: s.tabKey,
+        label: t(s.labelKey as never),
+        icon: s.icon,
+        order: s.order
+      }
+    }
+    return meta
+  }, [pluginSections, t])
 
-  const [activeTab, setActiveTab] = useState<SettingsTab>(() => pickTab(initialTab, onlyTabs))
+  /** 分组结构：general（核心页 + 插件通用页）、assistant（插件助手页） */
+  const navGroupDefs = useMemo<GroupDef[]>(() => {
+    const groups: GroupDef[] = []
+    const generalItems = [
+      ...Object.entries(STATIC_TABS).map(([key, d]) => ({ key, order: d.order })),
+      ...pluginSections
+        .filter((s) => s.group === 'general')
+        .map((s) => ({ key: s.tabKey, order: s.order }))
+    ].sort((a, b) => a.order - b.order)
+    if (generalItems.length > 0) groups.push({ labelKey: GROUP_GENERAL, items: generalItems })
+    const assistantItems = pluginSections
+      .filter((s) => s.group === 'assistant')
+      .map((s) => ({ key: s.tabKey, order: s.order }))
+      .sort((a, b) => a.order - b.order)
+    if (assistantItems.length > 0) groups.push({ labelKey: GROUP_ASSISTANT, items: assistantItems })
+    return groups
+  }, [pluginSections])
+
+  /** 聚焦模式页签：助手分组页 + model 页（模型排在首项之后，维持 智能体 → 模型 → … 惯例） */
+  const focusedTabs = useMemo<string[]>(() => {
+    const assistant = navGroupDefs.find((g) => g.labelKey === GROUP_ASSISTANT)?.items ?? []
+    const sorted = [...assistant].sort((a, b) => a.order - b.order).map((i) => i.key)
+    if (sorted.length === 0) return ['model']
+    return [sorted[0], 'model', ...sorted.slice(1)]
+  }, [navGroupDefs])
+
+  const onlyTabs = scope === 'assistant' ? focusedTabs : null
+
+  const firstTab = (): string => {
+    if (onlyTabs && onlyTabs.length > 0) return onlyTabs[0]
+    const firstGroup = navGroupDefs[0]?.items[0]
+    return firstGroup?.key ?? 'general'
+  }
+
+  const pickTab = (tab: SettingsTab | undefined): SettingsTab => {
+    if (onlyTabs && onlyTabs.length > 0) {
+      return tab && onlyTabs.includes(tab) ? tab : onlyTabs[0]
+    }
+    if (tab && tabMeta[tab]) return tab
+    return firstTab()
+  }
+
+  const [activeTab, setActiveTab] = useState<SettingsTab>(() => pickTab(initialTab))
 
   // 每次打开弹窗时同步外部传入的 initialTab（聚焦模式下收敛到白名单内的页签）
   useEffect(() => {
     if (open) {
-      setActiveTab(pickTab(initialTab, onlyTabs))
+      setActiveTab(pickTab(initialTab))
     }
-  }, [open, initialTab, onlyTabs])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, initialTab, onlyTabs, tabMeta])
+
+  // 插件停用导致当前页签消失时，回退到首个可用页签
+  useEffect(() => {
+    if (open && !tabMeta[activeTab]) {
+      setActiveTab(pickTab(undefined))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, tabMeta])
 
   /** 聚焦模式只渲染白名单内的分组，其余系统级页面整组隐藏 */
-  const navGroups = useMemo(() => {
-    if (!onlyTabs || onlyTabs.length === 0) {
-      return NAV_GROUP_DEFS.map((group) => ({
-        label: t(group.labelKey),
-        items: group.items.map((key) => tabMeta[key])
-      }))
-    }
-    return [{ label: t('settings.nav.groupAssistant'), items: onlyTabs.map((key) => tabMeta[key]) }]
-  }, [onlyTabs, tabMeta, t])
+  const navGroups = useMemo(
+    () =>
+      (onlyTabs ? navGroupDefs.filter((g) => g.labelKey === GROUP_ASSISTANT) : navGroupDefs).map(
+        (group) => ({
+          label: t(group.labelKey as never),
+          items: group.items
+            .filter((i) => !onlyTabs || onlyTabs.includes(i.key))
+            .map((i) => tabMeta[i.key])
+        })
+      ),
+    [onlyTabs, navGroupDefs, tabMeta, t]
+  )
 
   const renderContent = (): React.ReactNode => {
     switch (activeTab) {
@@ -144,20 +185,15 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
         return <GeneralSettings />
       case 'model':
         return <ModelSettings />
-      case 'music':
-        return <MusicSettings />
-      case 'graph':
-        return <GraphSettings />
       case 'system':
         return <SystemInfo />
-      case 'agents':
-        return <AgentSettings />
-      case 'skills':
-        return <SkillsSettings />
-      case 'memory':
-        return <MemorySettings />
-      default:
-        return null
+      case 'plugins':
+        return <PluginsPanel />
+      default: {
+        // 插件注册页（music/graph/agents/skills/memory 等）
+        const section = pluginSections.find((s) => s.tabKey === activeTab)
+        return section ? <section.Component /> : null
+      }
     }
   }
 

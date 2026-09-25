@@ -27,6 +27,7 @@ import type {
 import type { StartMemoryAgentResult } from '../main/harness/runtime/memory-agent'
 import type { FileChangeView, FileChangeContent } from '../main/workspace/file-history'
 import type { WorkspaceFsChange } from '../main/workspace/watcher'
+import type { PluginListEntry } from '../shared/plugin/types'
 
 interface HarnessOptions {
   tools?: string[]
@@ -422,6 +423,22 @@ interface Api {
   weather: {
     getCurrent: (force?: boolean) => Promise<WeatherData>
     onUpdate: (callback: (data: WeatherData) => void) => () => void
+  }
+  plugin: {
+    /** 已发现插件与启用态（内置目录 + 外部扫描合并） */
+    list: () => Promise<PluginListEntry[]>
+    /** 启用/停用插件（写入持久化并广播，渲染层即时装载/卸载） */
+    setEnabled: (id: string, enabled: boolean) => Promise<PluginListEntry[]>
+    /** 安装外部插件（弹目录选择；返回 ok/error） */
+    install: () => Promise<{ ok: boolean; id?: string; error?: string }>
+    /** 卸载外部插件（删除用户插件目录，返回最新列表） */
+    uninstall: (id: string) => Promise<PluginListEntry[]>
+    /** 插件启用态变化推送（含安装/卸载） */
+    onStateChanged: (callback: () => void) => () => void
+    /** 外部插件通道调用（plugin:<id>: 前缀；经主进程权威校验） */
+    invoke: (channel: string, ...args: unknown[]) => Promise<unknown>
+    /** 订阅外部插件事件通道（白名单缓存门控） */
+    on: (channel: string, callback: (data: unknown) => void) => () => void
   }
   workspace: {
     listDir: (dirPath: string) => Promise<{ name: string; isDirectory: boolean; path: string }[]>

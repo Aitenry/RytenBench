@@ -8,6 +8,7 @@ import { Window } from '../../../resource/types/window'
 import { MessageProvider } from '@renderer/providers/MessageProvider'
 import { useMessage } from '@renderer/hooks/useMessage'
 import { useTranslation } from '@renderer/i18n'
+import { usePluginMenuKeys } from '@renderer/plugin-host/PluginHostContext'
 
 const AppContent: React.FC = () => {
   const { viewMessage } = useMessage()
@@ -17,6 +18,9 @@ const AppContent: React.FC = () => {
   const [isLocked, setIsLocked] = useState(false)
   const [lockCode, setLockCode] = useState<string | null>(null)
   const [lockEnabled, setLockEnabled] = useState(true)
+
+  // 侧栏合法菜单键来自插件注册表（替代硬编码白名单 ['home','harness','planner','music']）
+  const pluginMenuKeys = usePluginMenuKeys()
 
   // Initialize lock screen settings
   useEffect(() => {
@@ -74,10 +78,10 @@ const AppContent: React.FC = () => {
   // #/planner 等非菜单路径进入的视图时,侧栏仍高亮 home/旧项）
   useEffect(() => {
     const key = location.pathname.replace(/^\/+/, '').split('/')[0]
-    if (key && ['home', 'harness', 'planner', 'music'].includes(key)) {
+    if (key && pluginMenuKeys.includes(key)) {
       setCurrent(key)
     }
-  }, [location.pathname])
+  }, [location.pathname, pluginMenuKeys])
 
   useEffect(() => {
     const handleKeyPress = (e: KeyboardEvent): void => {
