@@ -386,5 +386,5 @@ export const musicIpcHandlers: MainIpcHandlers = {
   }
 }
 
-/** 主进程 → 渲染层的音乐事件通道（AI 点播；`main/harness/tools/music.ts` 发送） */
+/** 主进程 → 渲染层的音乐事件通道（AI 点播；`main/tools.ts` 的 manage_music 工具发送） */
 export const MUSIC_PLAY_TRACK_CHANNEL = 'plugin:music:play-track'

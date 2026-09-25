@@ -3,7 +3,7 @@ export type { HistoryDialogue, LoadHistoryFn } from './service/history'
 export type { HarnessOptions, HarnessMessage } from './types'
 export {
   toolBuilders,
-  availableTools,
+  listAvailableTools,
   buildTools,
   buildSubAgentTools,
   loadSubAgentDefinitions

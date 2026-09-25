@@ -1,12 +1,14 @@
 import { tool } from '@langchain/core/tools'
 import type { StructuredToolInterface } from '@langchain/core/tools'
 import * as z from 'zod/v4'
-// planner 已迁到自包含插件目录：数据查询走插件的 mapper（类型走插件的 shared DTO）。
-// 跨插件直接读实现是过渡形态，harness 迁移时改成 provide/inject 取规划的主进程服务
-// （与 harness/tools/music.ts 的过渡写法一致）。
-import type { PlannerTreeNode } from '../../../plugins/planner/shared/types'
-import { mainFormat, mainPlural } from '../../i18n'
-import { getPlannerToolTexts } from '../../i18n/tool-results-planner'
+// 本工具（manage_planner）归属 planner 插件：数据查询走本插件的 mapper、类型走本插件的
+// shared DTO，不再跨插件直读别人的实现。经 harness 的**工具贡献点**
+// （HARNESS_TOOL_CONTRIBUTION，契约见 src/main/plugins/tool-contract.ts）注册给 AI：
+// 插件未启用时 harness 拉不到这条贡献，工具自然不出现在模型面前。
+import type { PlannerTreeNode } from '../shared/types'
+import { mainFormat, mainPlural } from '../../../main/i18n'
+import { getPlannerToolTexts } from '../../../main/i18n/tool-results-planner'
+import type { PluginToolContribution } from '../../../main/plugins/tool-contract'
 
 // ============================================================================
 // Shared helpers
@@ -39,7 +41,7 @@ function computeAggregateProgress(node: PlannerTreeNode): number {
 
 async function listPlannerTasksHandler(params: { type?: string }): Promise<string> {
   const tr = getPlannerToolTexts()
-  const { getTaskTree } = await import('../../../plugins/planner/main/db/mapper')
+  const { getTaskTree } = await import('./db/mapper')
   const tree = await getTaskTree()
   if (!tree.length) return tr.common.noTasks
 
@@ -89,7 +91,7 @@ async function listPlannerTasksHandler(params: { type?: string }): Promise<strin
 
 async function getPlannerTreeHandler(): Promise<string> {
   const tr = getPlannerToolTexts()
-  const { getTaskTree } = await import('../../../plugins/planner/main/db/mapper')
+  const { getTaskTree } = await import('./db/mapper')
   const tree = await getTaskTree()
   if (!tree.length) return tr.common.noTasks
   const lines = [tr.planner.treeHeader]
@@ -135,7 +137,7 @@ async function createTaskHandler(params: {
   end_date?: string
 }): Promise<string> {
   const tr = getPlannerToolTexts()
-  const { addTask, getTaskTree } = await import('../../../plugins/planner/main/db/mapper')
+  const { addTask, getTaskTree } = await import('./db/mapper')
 
   // ── 必填校验 ──
   if (!params.title?.trim()) return tr.planner.validation.titleRequired
@@ -164,7 +166,7 @@ async function createTaskHandler(params: {
 
   // ── 父级时间范围约束（与前端 TaskModal 一致）──
   if (params.parent_id) {
-    const { getTaskById } = await import('../../../plugins/planner/main/db/mapper')
+    const { getTaskById } = await import('./db/mapper')
     const parent = await getTaskById(params.parent_id)
     if (parent && parent.start_date && parent.end_date) {
       const pStart = new Date(parent.start_date).getTime()
@@ -236,7 +238,7 @@ async function updateTaskHandler(params: {
   end_date?: string
 }): Promise<string> {
   const tr = getPlannerToolTexts()
-  const { updateTask, getTaskById } = await import('../../../plugins/planner/main/db/mapper')
+  const { updateTask, getTaskById } = await import('./db/mapper')
 
   // ── 部分更新语义（修复：此前 schema 全 optional 却强制全字段必填,模型只传 id+改项
   // 即被判「进度不能为空」,需多轮往返）──
@@ -315,7 +317,7 @@ async function updateTaskHandler(params: {
 
 async function deleteTaskHandler(params: { id: number }): Promise<string> {
   const tr = getPlannerToolTexts()
-  const { deleteTask, getTaskTree } = await import('../../../plugins/planner/main/db/mapper')
+  const { deleteTask, getTaskTree } = await import('./db/mapper')
 
   const tree = await getTaskTree()
 
@@ -360,7 +362,7 @@ async function manageDepsHandler(params: {
 }): Promise<string> {
   const tr = getPlannerToolTexts()
   const { addDependency, deleteDependency, getAllDependencies, getTaskTree } =
-    await import('../../../plugins/planner/main/db/mapper')
+    await import('./db/mapper')
 
   switch (params.subcommand) {
     case 'list': {
@@ -519,3 +521,22 @@ export function buildManagePlannerTool(): StructuredToolInterface {
     }
   )
 }
+
+// ============================================================================
+// Harness 工具贡献
+// ============================================================================
+
+/** 本插件贡献给 harness 的 AI 工具（由 main/index.ts 经 ctx.contribute 注册） */
+export const plannerToolContributions: PluginToolContribution[] = [
+  {
+    name: 'manage_planner',
+    info: {
+      name: 'manage_planner',
+      label: 'Planner',
+      description: 'Inspect the Gantt chart and task tree',
+      icon: 'RiBarChartHorizontalLine',
+      color: '#2f54eb'
+    },
+    build: buildManagePlannerTool
+  }
+]

@@ -1,8 +1,13 @@
+// 本工具（manage_todos）归属 home 插件：待办数据全部走本插件的 mapper，不再跨插件直读。
+// 经 harness 的**工具贡献点**（HARNESS_TOOL_CONTRIBUTION，契约见
+// src/main/plugins/tool-contract.ts）注册给 AI：插件未启用时 harness 拉不到这条贡献，
+// 工具自然不出现在模型面前。
 import { tool } from '@langchain/core/tools'
 import type { StructuredToolInterface } from '@langchain/core/tools'
 import * as z from 'zod/v4'
-import { mainFormat, mainPlural } from '../../i18n'
-import { getPlannerToolTexts } from '../../i18n/tool-results-planner'
+import { mainFormat, mainPlural } from '../../../../main/i18n'
+import { getPlannerToolTexts } from '../../../../main/i18n/tool-results-planner'
+import type { PluginToolContribution } from '../../../../main/plugins/tool-contract'
 
 // ============================================================================
 // Todo Handlers
@@ -16,7 +21,7 @@ async function listTodosHandler(params: {
 }): Promise<string> {
   const tr = getPlannerToolTexts()
   const { getAllTodoItems, getTodoItemsPaginated, getTodoItemsByStatus, getTodoItemsByPriority } =
-    await import('../../../plugins/home/main/db/mapper/todo')
+    await import('../db/mapper/todo')
   const { page = 1, pageSize = 20, status, priority } = params
   const safePage = Math.max(1, Math.floor(page))
   const safePageSize = Math.max(1, Math.floor(pageSize))
@@ -84,7 +89,7 @@ async function addTodoHandler(params: {
   category?: string
 }): Promise<string> {
   const tr = getPlannerToolTexts()
-  const { addTodoItem, getTodoItemById } = await import('../../../plugins/home/main/db/mapper/todo')
+  const { addTodoItem, getTodoItemById } = await import('../db/mapper/todo')
   const newId = await addTodoItem({
     title: params.title,
     content: params.content || '',
@@ -115,8 +120,7 @@ async function updateTodoHandler(params: {
   category?: string
 }): Promise<string> {
   const tr = getPlannerToolTexts()
-  const { updateTodoItem, getTodoItemById } =
-    await import('../../../plugins/home/main/db/mapper/todo')
+  const { updateTodoItem, getTodoItemById } = await import('../db/mapper/todo')
   const rows = await getTodoItemById(params.id)
   if (!rows.length) return mainFormat(tr.todos.notFound, { id: params.id })
   const existing = rows[0]
@@ -134,8 +138,7 @@ async function updateTodoHandler(params: {
 
 async function deleteTodoHandler(params: { id: number }): Promise<string> {
   const tr = getPlannerToolTexts()
-  const { deleteTodoItem, getTodoItemById } =
-    await import('../../../plugins/home/main/db/mapper/todo')
+  const { deleteTodoItem, getTodoItemById } = await import('../db/mapper/todo')
   const rows = await getTodoItemById(params.id)
   if (!rows.length) return mainFormat(tr.todos.notFound, { id: params.id })
   await deleteTodoItem(params.id)
@@ -200,3 +203,22 @@ export function buildManageTodosTool(): StructuredToolInterface {
     }
   )
 }
+
+// ============================================================================
+// Harness 工具贡献
+// ============================================================================
+
+/** 本插件贡献给 harness 的 AI 工具（由 main/index.ts 经 ctx.contribute 注册） */
+export const todoToolContributions: PluginToolContribution[] = [
+  {
+    name: 'manage_todos',
+    info: {
+      name: 'manage_todos',
+      label: 'To-dos',
+      description: 'View, create, update and delete to-dos',
+      icon: 'RiListCheck3',
+      color: '#fa8c16'
+    },
+    build: buildManageTodosTool
+  }
+]

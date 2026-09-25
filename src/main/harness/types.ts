@@ -232,11 +232,10 @@ export interface SubAgentEvent {
   subagentId?: string
 }
 
-/** Available tool definition for the frontend dropdown */
-export interface ToolInfo {
-  name: string
-  label: string
-  description: string
-  icon: string
-  color: string
-}
+/**
+ * Available tool definition for the frontend dropdown.
+ *
+ * 定义已搬到宿主契约 `src/main/plugins/tool-contract.ts`（插件贡献工具时也要用它，
+ * 放 harness 里会让插件反向 import harness），这里只做 re-export 保持既有 import 路径可用。
+ */
+export type { ToolInfo } from '../plugins/tool-contract'

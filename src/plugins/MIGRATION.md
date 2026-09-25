@@ -11,12 +11,12 @@
 IPC 通道共 126 个，全部是扁平名（`music-get-folders`、`harness-stream-chunk`…），没有任何命名空间。
 preload 976 行单文件里装着全部插件的 API 命名空间。渲染层 17 个词条文件与壳文案混放。
 
-| 插件 | 主进程旧位置（文件 / 行） | 通道前缀（个数） | preload 键 | core 里残留的渲染层内容 |
-| --- | --- | --- | --- | --- |
-| music | `ipc/music.ts`、`database/{schema,mapper}/music.ts`（3 / 882） | `music`（15） | `music` | `contexts/AudioContext.tsx`、`types/music.ts`、`i18n/locales/*/music{,Settings}.ts`、`BottomBar` 的音乐条目 |
-| planner | `ipc/planner.ts`、`database/{schema,mapper}/planner.ts`（3 / 445） | `planner`（10） | `planner` | `types/planner.ts` |
-| home | `ipc/{todo,document,wiki,node-position,graph}.ts`、`database/{schema,mapper}/*`、`graph/**`（28 / 5692） | `todo, task, doc, wiki, graph, node`（50） | `todoItems, taskDependencies, docs, wikis, graph, nodePositions` | `components/{graph,wiki,todo}/**`、首页词条 |
-| harness | `ipc/{harness,harness-topic,mnemon}.ts`、`harness/**`(55)、`workspace/**`(4)、`database/{schema,mapper}/*`（70 / 17370） | `harness, mnemon, agent, main`（41） | `harness, mnemon, agents, mainAgent` | `types/harness.ts`、harness 词条 |
+| 插件    | 主进程旧位置（文件 / 行）                                                                                                | 通道前缀（个数）                           | preload 键                                                       | core 里残留的渲染层内容                                                                                     |
+| ------- | ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------ | ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| music   | `ipc/music.ts`、`database/{schema,mapper}/music.ts`（3 / 882）                                                           | `music`（15）                              | `music`                                                          | `contexts/AudioContext.tsx`、`types/music.ts`、`i18n/locales/*/music{,Settings}.ts`、`BottomBar` 的音乐条目 |
+| planner | `ipc/planner.ts`、`database/{schema,mapper}/planner.ts`（3 / 445）                                                       | `planner`（10）                            | `planner`                                                        | `types/planner.ts`                                                                                          |
+| home    | `ipc/{todo,document,wiki,node-position,graph}.ts`、`database/{schema,mapper}/*`、`graph/**`（28 / 5692）                 | `todo, task, doc, wiki, graph, node`（50） | `todoItems, taskDependencies, docs, wikis, graph, nodePositions` | `components/{graph,wiki,todo}/**`、首页词条                                                                 |
+| harness | `ipc/{harness,harness-topic,mnemon}.ts`、`harness/**`(55)、`workspace/**`(4)、`database/{schema,mapper}/*`（70 / 17370） | `harness, mnemon, agent, main`（41）       | `harness, mnemon, agents, mainAgent`                             | `types/harness.ts`、harness 词条                                                                            |
 
 ## 每个插件的固定动作
 
@@ -50,8 +50,9 @@ preload 976 行单文件里装着全部插件的 API 命名空间。渲染层 17
   是否仍出现在产物 CSS 里，缺了就补 `@source '../../../plugins/**/*.{ts,tsx}'`。
 - **Vite dev**：`server.fs.allow` 需允许仓库根下的 `src/plugins`（dev 下 import root 之外的文件）。
 - **跨插件依赖**（不许偷偷 import 别的插件的实现）：
-  - `src/main/harness/tools/music.ts` 直接读音乐的 mapper → 归属音乐的数据应由音乐提供主进程服务，
-    harness 经 `provide/inject` 取用（迁移 harness 时处理；过渡期先改相对路径）。
+  - `src/main/harness/tools/*.ts` 里 planner/home/music 的工具已**搬进各插件**（
+    `src/plugins/<id>/main/tools.ts`），harness 只留「工具注册表 + `harness.tool` 贡献点」
+    （见 test/plugin-coupling-notes.md §5）；跨插件直读只剩 harness 自己的表（`mapper/agent`）。
   - `src/main/ipc/provider.ts` 里混着 `agent-*`/`main-*` 通道（属于 harness 的智能体配置）→
     迁移 harness 时一起搬走，provider.ts 只留模型 Provider。
   - 渲染层 `components/markdown/**`、`hooks/useMessage`、`utils/formatTime` 等被多个插件共用 →
@@ -67,14 +68,31 @@ preload 976 行单文件里装着全部插件的 API 命名空间。渲染层 17
 
 ## 迁移进度（每轮更新，权威版本在 `src/plugins/README.md` 的勾选表）
 
-| 步骤 | 提交 | 内容 |
-| --- | --- | --- |
-| 宿主 + 注册表 | `9cf1c55` | 渲染层 plugin-host、注册表、外部插件机制、设置面板 |
-| 主进程契约 | `104b51d` | `MainPluginContext`（registerIpc/registerEvent/effect）、命名空间独占、单一路径装载 |
-| music | `c673c4e` | 19 通道 → `plugin:music:*`；AudioProvider 随插件；新增通用 `bottomBar` 插槽；preload 删 `api.music` |
-| planner | `449faa0` | 10 通道 → `plugin:planner:*`；DTO 进 shared；`plannerApi` 取代 `api.planner` |
-| home 主进程 | `bfc65b8` | 50 通道 → `plugin:home:*`；表/mapper/图谱服务进 main/**；graph 移出 core 组 + 降级防线 |
-| home 渲染层 | 进行中 | 视图/组件/类型/词条搬运，preload 六命名空间收口 |
-| harness | 待做 | 70 文件 / 41 通道；先补 `ctx.provide/useOptional` 再做工具解耦 |
-| core 收尾 | 待做 | 删 `builtinIpcGroups`/`ipc-capture`/`builtin-catalog`/preload 残留命名空间；外壳局部状态外置 |
+| 步骤          | 提交      | 内容                                                                                                                                        |
+| ------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| 宿主 + 注册表 | `9cf1c55` | 渲染层 plugin-host、注册表、外部插件机制、设置面板                                                                                          |
+| 主进程契约    | `104b51d` | `MainPluginContext`（registerIpc/registerEvent/effect）、命名空间独占、单一路径装载                                                         |
+| music         | `c673c4e` | 19 通道 → `plugin:music:*`；AudioProvider 随插件；新增通用 `bottomBar` 插槽；preload 删 `api.music`                                         |
+| planner       | `449faa0` | 10 通道 → `plugin:planner:*`；DTO 进 shared；`plannerApi` 取代 `api.planner`                                                                |
+| home 主进程   | `bfc65b8` | 50 通道 → `plugin:home:*`；表/mapper/图谱服务进 main/**；graph 移出 core 组 + 降级防线                                                      |
+| home 渲染层   | `c7fd004` | 视图/组件/props/词条进插件；preload 六命名空间收口（855→665 行）；GraphView 仍独立懒加载 chunk                                              |
+| AI 工具归属   | 进行中    | 用户要求：工具实现进归属插件（planner/home/music），harness 只做注册表；新增多值贡献点 `ctx.contribute/contributions` + `harness.tool` 契约 |
+| harness       | 待做      | 70 文件 / 41 通道；renderer/preload 收口；`provider.ts` 的 `agent-*` 归位；home←harness 的 `doc-changed` 改事件总线                         |
+| core 收尾     | 待做      | 删 `builtinIpcGroups`/`ipc-capture`/`builtin-catalog`/preload 残留命名空间；外壳局部状态外置；`BuildProgressProvider` 三个通道名插槽化      |
 
+## AI 工具注册契约（用户 2026-09-26 要求；实施细节见 `test/plugin-coupling-notes.md` §5）
+
+工具**实现**属于数据归属方插件，harness 只拥有注册表。宿主提供多值贡献点：
+
+```ts
+// 供给方（planner / home / music 的 main/index.ts install 内）
+ctx.contribute(HARNESS_TOOL_CONTRIBUTION, { name, info, build })
+
+// 消费方（harness）
+listContributions<PluginToolContribution>(HARNESS_TOOL_CONTRIBUTION)
+```
+
+- 拉取语义 ⇒ **顺序无关**：harness 每次组装工具集时才读贡献，谁先装载都能拿到。
+- 插件停用 ⇒ 贡献随 `ctx.dispose()` 移除 ⇒ 下一次组装模型就看不到该工具（有 CDP 断言覆盖）。
+- 契约类型（`PluginToolContribution`、`ToolInfo`、`HARNESS_TOOL_CONTRIBUTION`）放 `src/main/plugins/tool-contract.ts`，
+  插件**不得** import harness 的任何东西。

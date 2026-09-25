@@ -1,10 +1,15 @@
+// 本工具（manage_docs）归属 home 插件：文档 CRUD 走本插件的 mapper，文档变更广播仍发 core 的
+// 「harness-doc-changed」通道（渲染端编辑器订阅，见 preload）。经 harness 的**工具贡献点**
+// （HARNESS_TOOL_CONTRIBUTION，契约见 src/main/plugins/tool-contract.ts）注册给 AI：
+// 插件未启用时 harness 拉不到这条贡献，工具自然不出现在模型面前。
 import { BrowserWindow } from 'electron'
 import { tool } from '@langchain/core/tools'
 import type { StructuredToolInterface } from '@langchain/core/tools'
 import * as z from 'zod/v4'
-import { safeSend } from '../../safe-send'
-import { mainFormat, mainPlural } from '../../i18n'
-import { getDocsToolTexts } from '../../i18n/tool-results-docs'
+import { safeSend } from '../../../../main/safe-send'
+import { mainFormat, mainPlural } from '../../../../main/i18n'
+import { getDocsToolTexts } from '../../../../main/i18n/tool-results-docs'
+import type { PluginToolContribution } from '../../../../main/plugins/tool-contract'
 
 /**
  * 广播文档被工具修改/删除（修复：编辑器对工具写入完全无感知,继续编辑会把工具刚写入的
@@ -29,7 +34,7 @@ async function searchDocsHandler(params: {
   page?: number
   pageSize?: number
 }): Promise<string> {
-  const { getAllDocs } = await import('../../../plugins/home/main/db/mapper/document')
+  const { getAllDocs } = await import('../db/mapper/document')
   const result = await getAllDocs(params.page ?? 1, params.pageSize ?? 10, undefined, params.query)
   const tr = getDocsToolTexts()
   if (!result.items.length) return mainFormat(tr.docs.searchEmpty, { query: params.query })
@@ -52,7 +57,7 @@ async function searchDocsHandler(params: {
 }
 
 async function getDocHandler(params: { docId: number; headingId?: string }): Promise<string> {
-  const { getDocById } = await import('../../../plugins/home/main/db/mapper/document')
+  const { getDocById } = await import('../db/mapper/document')
   const doc = await getDocById(params.docId)
   const tr = getDocsToolTexts()
   if (!doc) return mainFormat(tr.docs.notFound, { docId: params.docId })
@@ -120,7 +125,7 @@ async function getDocHandler(params: { docId: number; headingId?: string }): Pro
 }
 
 async function getDocTocHandler(params: { docId: number }): Promise<string> {
-  const { getDocById } = await import('../../../plugins/home/main/db/mapper/document')
+  const { getDocById } = await import('../db/mapper/document')
   const doc = await getDocById(params.docId)
   const tr = getDocsToolTexts()
   if (!doc) return mainFormat(tr.docs.notFound, { docId: params.docId })
@@ -179,7 +184,7 @@ async function createDocHandler(params: {
   tags?: string
   content?: string
 }): Promise<string> {
-  const { addDoc } = await import('../../../plugins/home/main/db/mapper/document')
+  const { addDoc } = await import('../db/mapper/document')
   const id = await addDoc({
     title: params.title,
     summary: params.summary ?? null,
@@ -197,7 +202,7 @@ async function updateDocHandler(params: {
   tags?: string
   content?: string
 }): Promise<string> {
-  const { updateDoc, getDocById } = await import('../../../plugins/home/main/db/mapper/document')
+  const { updateDoc, getDocById } = await import('../db/mapper/document')
   const doc = await getDocById(params.docId)
   const tr = getDocsToolTexts()
   if (!doc) return mainFormat(tr.docs.notFound, { docId: params.docId })
@@ -216,7 +221,7 @@ async function updateDocHandler(params: {
 }
 
 async function deleteDocHandler(params: { docId: number }): Promise<string> {
-  const { deleteDoc, getDocById } = await import('../../../plugins/home/main/db/mapper/document')
+  const { deleteDoc, getDocById } = await import('../db/mapper/document')
   const doc = await getDocById(params.docId)
   const tr = getDocsToolTexts()
   if (!doc) return mainFormat(tr.docs.notFound, { docId: params.docId })
@@ -287,3 +292,22 @@ export function buildManageDocsTool(): StructuredToolInterface {
     }
   )
 }
+
+// ============================================================================
+// Harness 工具贡献
+// ============================================================================
+
+/** 本插件贡献给 harness 的 AI 工具（由 main/index.ts 经 ctx.contribute 注册） */
+export const docToolContributions: PluginToolContribution[] = [
+  {
+    name: 'manage_docs',
+    info: {
+      name: 'manage_docs',
+      label: 'Documents',
+      description: 'Search, view, create, edit and delete documents',
+      icon: 'RiFileSearchLine',
+      color: '#722ed1'
+    },
+    build: buildManageDocsTool
+  }
+]

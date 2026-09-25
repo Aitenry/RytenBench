@@ -1,8 +1,13 @@
+// 本工具（manage_wikis）归属 home 插件：知识库/目录/归档文档全部走本插件的 wiki 与
+// document mapper，不再跨插件直读。经 harness 的**工具贡献点**（HARNESS_TOOL_CONTRIBUTION，
+// 契约见 src/main/plugins/tool-contract.ts）注册给 AI：插件未启用时 harness 拉不到这条贡献，
+// 工具自然不出现在模型面前。
 import { tool } from '@langchain/core/tools'
 import type { StructuredToolInterface } from '@langchain/core/tools'
 import * as z from 'zod/v4'
-import { mainFormat, mainPlural } from '../../i18n'
-import { getDocsToolTexts } from '../../i18n/tool-results-docs'
+import { mainFormat, mainPlural } from '../../../../main/i18n'
+import { getDocsToolTexts } from '../../../../main/i18n/tool-results-docs'
+import type { PluginToolContribution } from '../../../../main/plugins/tool-contract'
 
 // ============================================================================
 // Wiki Handlers — 渐进式披露：列表 → 目录 → 文档
@@ -12,7 +17,7 @@ import { getDocsToolTexts } from '../../i18n/tool-results-docs'
 // ── 查询 ──
 
 async function listWikisHandler(): Promise<string> {
-  const { getAllWikis } = await import('../../../plugins/home/main/db/mapper/wiki')
+  const { getAllWikis } = await import('../db/mapper/wiki')
   const result = await getAllWikis()
   const tr = getDocsToolTexts()
   if (!result.items.length) return tr.wikis.listEmpty
@@ -33,7 +38,7 @@ async function listWikisHandler(): Promise<string> {
 }
 
 async function getWikiHandler(params: { wikiId: number }): Promise<string> {
-  const { getWikiById } = await import('../../../plugins/home/main/db/mapper/wiki')
+  const { getWikiById } = await import('../db/mapper/wiki')
   const wiki = await getWikiById(params.wikiId)
   const tr = getDocsToolTexts()
   if (!wiki) return mainFormat(tr.wikis.notFound, { wikiId: params.wikiId })
@@ -55,7 +60,7 @@ async function getWikiHandler(params: { wikiId: number }): Promise<string> {
 
 async function getWikiDirectoriesHandler(params: { wikiId: number }): Promise<string> {
   const { getWikiById, getDirectoriesByWikiId, getDocsByDirectoryId } =
-    await import('../../../plugins/home/main/db/mapper/wiki')
+    await import('../db/mapper/wiki')
   const wiki = await getWikiById(params.wikiId)
   const tr = getDocsToolTexts()
   if (!wiki) return mainFormat(tr.wikis.notFound, { wikiId: params.wikiId })
@@ -132,8 +137,8 @@ async function getWikiDirectoriesHandler(params: { wikiId: number }): Promise<st
 }
 
 async function getDirectoryDocsHandler(params: { directoryId: number }): Promise<string> {
-  const { getDocsByDirectoryId } = await import('../../../plugins/home/main/db/mapper/wiki')
-  const { getDocById } = await import('../../../plugins/home/main/db/mapper/document')
+  const { getDocsByDirectoryId } = await import('../db/mapper/wiki')
+  const { getDocById } = await import('../db/mapper/document')
   const docRefs = await getDocsByDirectoryId(params.directoryId)
   const tr = getDocsToolTexts()
   if (!docRefs.length) return tr.wikis.directoryDocsEmpty
@@ -163,7 +168,7 @@ async function createWikiHandler(params: {
   summary?: string
   tags?: string
 }): Promise<string> {
-  const { addWiki } = await import('../../../plugins/home/main/db/mapper/wiki')
+  const { addWiki } = await import('../db/mapper/wiki')
   const id = await addWiki({
     title: params.title,
     summary: params.summary ?? null,
@@ -179,7 +184,7 @@ async function updateWikiHandler(params: {
   summary?: string
   tags?: string
 }): Promise<string> {
-  const { updateWiki, getWikiById } = await import('../../../plugins/home/main/db/mapper/wiki')
+  const { updateWiki, getWikiById } = await import('../db/mapper/wiki')
   const wiki = await getWikiById(params.wikiId)
   const tr = getDocsToolTexts()
   if (!wiki) return mainFormat(tr.wikis.notFound, { wikiId: params.wikiId })
@@ -196,7 +201,7 @@ async function updateWikiHandler(params: {
 }
 
 async function deleteWikiHandler(params: { wikiId: number }): Promise<string> {
-  const { deleteWiki, getWikiById } = await import('../../../plugins/home/main/db/mapper/wiki')
+  const { deleteWiki, getWikiById } = await import('../db/mapper/wiki')
   const wiki = await getWikiById(params.wikiId)
   const tr = getDocsToolTexts()
   if (!wiki) return mainFormat(tr.wikis.notFound, { wikiId: params.wikiId })
@@ -211,8 +216,7 @@ async function createDirectoryHandler(params: {
   parentId?: number
   name: string
 }): Promise<string> {
-  const { getWikiById, addDirectory, getDirectoriesByWikiId } =
-    await import('../../../plugins/home/main/db/mapper/wiki')
+  const { getWikiById, addDirectory, getDirectoriesByWikiId } = await import('../db/mapper/wiki')
   const wiki = await getWikiById(params.wikiId)
   const tr = getDocsToolTexts()
   if (!wiki) return mainFormat(tr.wikis.notFound, { wikiId: params.wikiId })
@@ -247,7 +251,7 @@ async function updateDirectoryHandler(params: {
   directoryId: number
   name: string
 }): Promise<string> {
-  const { updateDirectory } = await import('../../../plugins/home/main/db/mapper/wiki')
+  const { updateDirectory } = await import('../db/mapper/wiki')
   await updateDirectory(params.directoryId, { name: params.name })
   return mainFormat(getDocsToolTexts().wikis.directoryUpdated, {
     directoryId: params.directoryId,
@@ -256,7 +260,7 @@ async function updateDirectoryHandler(params: {
 }
 
 async function deleteDirectoryHandler(params: { directoryId: number }): Promise<string> {
-  const { deleteDirectory } = await import('../../../plugins/home/main/db/mapper/wiki')
+  const { deleteDirectory } = await import('../db/mapper/wiki')
   await deleteDirectory(params.directoryId)
   return mainFormat(getDocsToolTexts().wikis.directoryDeleted, { directoryId: params.directoryId })
 }
@@ -267,7 +271,7 @@ async function archiveDocsHandler(params: {
   directoryId: number
   docIds: number[]
 }): Promise<string> {
-  const { addDocToDirectory } = await import('../../../plugins/home/main/db/mapper/wiki')
+  const { addDocToDirectory } = await import('../db/mapper/wiki')
   const tr = getDocsToolTexts()
   const results: string[] = []
   for (const docId of params.docIds) {
@@ -282,7 +286,7 @@ async function archiveDocsHandler(params: {
 }
 
 async function removeDocHandler(params: { directoryId: number; docId: number }): Promise<string> {
-  const { removeDocFromDirectory } = await import('../../../plugins/home/main/db/mapper/wiki')
+  const { removeDocFromDirectory } = await import('../db/mapper/wiki')
   const ok = await removeDocFromDirectory(params.directoryId, params.docId)
   const tr = getDocsToolTexts()
   return ok
@@ -406,3 +410,22 @@ export function buildManageWikisTool(): StructuredToolInterface {
     }
   )
 }
+
+// ============================================================================
+// Harness 工具贡献
+// ============================================================================
+
+/** 本插件贡献给 harness 的 AI 工具（由 main/index.ts 经 ctx.contribute 注册） */
+export const wikiToolContributions: PluginToolContribution[] = [
+  {
+    name: 'manage_wikis',
+    info: {
+      name: 'manage_wikis',
+      label: 'Knowledge base',
+      description: 'Browse and manage knowledge bases, folders and archived documents',
+      icon: 'RiBook2Line',
+      color: '#13c2c2'
+    },
+    build: buildManageWikisTool
+  }
+]

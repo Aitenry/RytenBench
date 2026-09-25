@@ -1,18 +1,17 @@
+// 本工具（manage_music，AI 点播）归属 music 插件：歌单/曲目走本插件的 mapper，
+// 事件通道名取本插件的常量，不再跨插件直读别人的实现。经 harness 的**工具贡献点**
+// （HARNESS_TOOL_CONTRIBUTION，契约见 src/main/plugins/tool-contract.ts）注册给 AI：
+// 插件未启用时 harness 拉不到这条贡献，工具自然不出现在模型面前。
 import { BrowserWindow } from 'electron'
 import { tool } from '@langchain/core/tools'
 import type { StructuredToolInterface } from '@langchain/core/tools'
 import * as z from 'zod/v4'
-import { safeSend } from '../../safe-send'
-import { mainFormat, mainPlural } from '../../i18n'
-import { getPlannerToolTexts } from '../../i18n/tool-results-planner'
-// music 已迁到自包含插件目录：数据查询走插件的 mapper，事件通道名取插件的常量
-// （跨插件直接读实现是过渡形态，harness 迁移时改成 provide/inject 取音乐的主进程服务）
-import { MUSIC_PLAY_TRACK_CHANNEL } from '../../../plugins/music/main/ipc'
-import {
-  getAllFolders,
-  getTrackById,
-  getTracksByFolder
-} from '../../../plugins/music/main/db/mapper'
+import { safeSend } from '../../../main/safe-send'
+import { mainFormat, mainPlural } from '../../../main/i18n'
+import { getPlannerToolTexts } from '../../../main/i18n/tool-results-planner'
+import { MUSIC_PLAY_TRACK_CHANNEL } from './ipc'
+import type { PluginToolContribution } from '../../../main/plugins/tool-contract'
+import { getAllFolders, getTrackById, getTracksByFolder } from './db/mapper'
 
 // ============================================================================
 // Music Handlers — 渐进式：playlists → tracks
@@ -176,3 +175,22 @@ export function buildManageMusicTool(): StructuredToolInterface {
     }
   )
 }
+
+// ============================================================================
+// Harness 工具贡献
+// ============================================================================
+
+/** 本插件贡献给 harness 的 AI 工具（由 main/index.ts 经 ctx.contribute 注册） */
+export const musicToolContributions: PluginToolContribution[] = [
+  {
+    name: 'manage_music',
+    info: {
+      name: 'manage_music',
+      label: 'Music',
+      description: 'Browse playlists and tracks',
+      icon: 'RiPlayListLine',
+      color: '#a0d911'
+    },
+    build: buildManageMusicTool
+  }
+]

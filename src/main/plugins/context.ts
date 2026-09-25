@@ -1,5 +1,6 @@
 import { ipcMain } from 'electron'
 import logger from 'electron-log'
+import { addContribution, listContributions, removeContributions } from './contributions'
 
 /**
  * 主进程插件上下文（与渲染层 `plugin-host/context.ts` 对称的轻量实现）。
@@ -13,7 +14,9 @@ import logger from 'electron-log'
  *   preload 的插件通道白名单只收录「本插件声明过的通道」，未声明的事件通道
  *   `window.api.plugin.on(...)` 会被拒绝（内置插件的订阅同样受白名单门控）；
  * - 插件业务代码可以照常 import 核心模块（orm / settings / workspace 等），
- *   但**不得**在 core 的 ipc 分组表里登记通道——归属与生命周期都由本契约表达。
+ *   但**不得**在 core 的 ipc 分组表里登记通道——归属与生命周期都由本契约表达；
+ * - `contribute(key, value)` 挂载的多值贡献（例如 AI 工具）也是可逆装配的一部分：
+ *   停用/卸载时随 `dispose()` 摘除，消费方（harness 工具注册表）下一次拉取即生效。
  */
 
 /** 通道命名空间：插件 id 去掉开头的 `plugin.` 段（plugin.demo → demo） */
@@ -60,6 +63,20 @@ export interface MainPluginContext {
   registerEvent(...channels: string[]): void
   /** 注册可逆效果（例如一个后台服务/定时器），停用时 LIFO 回滚 */
   effect(register: () => void | (() => void)): void
+  /**
+   * 挂载一个**多值贡献**（同一个键可由多个插件分别贡献；同一插件也可贡献多项）。
+   *
+   * 语义（与 `contributions` 成对）：
+   * - **拉取**：贡献不派发、不通知，消费方在自己需要时调 `contributions(key)` 取当前全量；
+   * - **顺序无关**：谁的 install 先跑都能被取到，同 key 内按装载顺序排列；
+   * - **随插件停用移除**：宿主按 pluginId 记账，停用/卸载时 `dispose()` 一并摘除，
+   *   下一次拉取就看不到（例如 harness 组装的 AI 工具集里不再出现该插件的工具）。
+   *
+   * key 为空的贡献没有意义，直接抛错（装配期失败会连累插件装载，早暴露早修）。
+   */
+  contribute<T>(key: string, value: T): void
+  /** 读取某贡献点的全部贡献（宿主/注册表所有者用，例如 harness 读 'harness.tool'） */
+  contributions<T>(key: string): T[]
 }
 
 export class MainPluginContextImpl implements MainPluginContext {
@@ -142,6 +159,21 @@ export class MainPluginContextImpl implements MainPluginContext {
     if (typeof undo === 'function') this.effects.push(undo)
   }
 
+  contribute<T>(key: string, value: T): void {
+    if (typeof key !== 'string' || key.trim() === '') {
+      throw new Error(`贡献点 key 不能为空（插件 '${this.id}'）`)
+    }
+    // 已停用的上下文再贡献会挂进注册表却永不被回收，直接挡住
+    if (this.disposed) {
+      throw new Error(`插件 '${this.id}' 已停用，不能再贡献 '${key}'`)
+    }
+    addContribution(this.id, key, value)
+  }
+
+  contributions<T>(key: string): T[] {
+    return listContributions<T>(key)
+  }
+
   /** 回滚本插件全部效果与通道（幂等） */
   dispose(): void {
     if (this.disposed) return
@@ -163,6 +195,8 @@ export class MainPluginContextImpl implements MainPluginContext {
     }
     this.ownedChannels.clear()
     this.eventChannels.clear()
+    // 贡献点随插件停用一并摘除（拉取语义：下一次消费就看不到本插件的贡献）
+    removeContributions(this.id)
     releaseNamespace(this.id, this.namespace)
   }
 }

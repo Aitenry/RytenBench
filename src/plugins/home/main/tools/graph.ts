@@ -1,18 +1,22 @@
+// 本工具（search_graph）归属 home 插件：实体检索走本插件的 wiki 与 graph mapper，不再跨插件直读。
+// 经 harness 的**工具贡献点**（HARNESS_TOOL_CONTRIBUTION，契约见
+// src/main/plugins/tool-contract.ts）注册给 AI：插件未启用时 harness 拉不到这条贡献，
+// 工具自然不出现在模型面前。
 import { tool } from '@langchain/core/tools'
 import type { StructuredToolInterface } from '@langchain/core/tools'
 import * as z from 'zod/v4'
-import { mainFormat } from '../../i18n'
-import { getDocsToolTexts } from '../../i18n/tool-results-docs'
+import { mainFormat } from '../../../../main/i18n'
+import { getDocsToolTexts } from '../../../../main/i18n/tool-results-docs'
+import type { PluginToolContribution } from '../../../../main/plugins/tool-contract'
 
 // ============================================================================
 // Graph Handler
 // ============================================================================
 
 async function searchGraphHandler(params: { wikiId?: number; query: string }): Promise<string> {
-  // 过渡期直读（跨插件耦合）：document/wiki/graph 的 mapper 已随 home 插件搬进
-  // src/plugins/home/main/**；harness 应经 provide/inject 取用，留给 harness 那轮统一处理。
-  const { getAllWikis } = await import('../../../plugins/home/main/db/mapper/wiki')
-  const { searchEntities } = await import('../../../plugins/home/main/db/mapper/graph')
+  // 同插件内取数据：wiki/graph 的 mapper 与工具同属 home
+  const { getAllWikis } = await import('../db/mapper/wiki')
+  const { searchEntities } = await import('../db/mapper/graph')
   const tr = getDocsToolTexts()
   const wikis = params.wikiId ? [{ id: params.wikiId }] : (await getAllWikis()).items
   const lines: string[] = [mainFormat(tr.graph.searchHeader, { query: params.query })]
@@ -60,3 +64,22 @@ export function buildSearchGraphTool(): StructuredToolInterface {
     })
   })
 }
+
+// ============================================================================
+// Harness 工具贡献
+// ============================================================================
+
+/** 本插件贡献给 harness 的 AI 工具（由 main/index.ts 经 ctx.contribute 注册） */
+export const graphToolContributions: PluginToolContribution[] = [
+  {
+    name: 'search_graph',
+    info: {
+      name: 'search_graph',
+      label: 'Graph search',
+      description: 'Search entities in the knowledge graph',
+      icon: 'RiMindMap',
+      color: '#eb2f96'
+    },
+    build: buildSearchGraphTool
+  }
+]
