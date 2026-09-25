@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react'
 import { Modal, Input, Select, Slider, InputNumber, DatePicker, Form, Alert } from 'antd'
 import dayjs, { type Dayjs } from 'dayjs'
 import { useTranslation } from '@renderer/i18n'
-import type { PlannerTreeNode } from '@renderer/types/planner'
+import type { PlannerTreeNode } from '../../shared/types'
 
 const { RangePicker } = DatePicker
 

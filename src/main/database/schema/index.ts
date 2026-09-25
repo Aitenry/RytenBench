@@ -15,10 +15,12 @@ export * from './harness'
 export * from './file-change'
 export * from './agent'
 export * from './todo'
-export * from './planner'
 export * from './wiki'
 export * from './document'
 export * from './graph'
-// music 插件表（src/plugins/music/main/db/schema.ts）：保持唯一真源在插件目录里
+// 插件表：唯一真源在 src/plugins/<id>/main/db/schema.ts，这里用**相对路径** re-export
+// music 插件表
 export * from '../../../plugins/music/main/db/schema'
+// planner 插件表
+export * from '../../../plugins/planner/main/db/schema'
 export * from './provider'

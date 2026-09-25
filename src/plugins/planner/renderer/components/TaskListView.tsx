@@ -8,7 +8,8 @@ import {
   RiEditLine,
   RiLink
 } from '@remixicon/react'
-import { type PlannerTreeNode, PRIORITY_MAP } from '@renderer/types/planner'
+import { PRIORITY_MAP } from '../types'
+import type { PlannerTreeNode } from '../../shared/types'
 import { useTranslation } from '@renderer/i18n'
 
 /** 任务类型取值 → 词条键（模块级常量表不持有 t，由组件内 t() 求值） */

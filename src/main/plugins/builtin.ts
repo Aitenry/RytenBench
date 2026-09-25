@@ -1,5 +1,6 @@
 import type { MainPluginContext } from './context'
 import * as musicMain from '../../plugins/music/main'
+import * as plannerMain from '../../plugins/planner/main'
 
 /**
  * 内置插件的主进程模块注册表。
@@ -27,5 +28,6 @@ export interface MainPluginModule {
 }
 
 export const builtinMainModules: Record<string, MainPluginModule> = {
-  music: musicMain
+  music: musicMain,
+  planner: plannerMain
 }

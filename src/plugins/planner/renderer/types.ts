@@ -1,15 +1,6 @@
-import type {
-  PlannerTaskRow as PlannerTaskRowFromDb,
-  PlannerDependencyRow as PlannerDependencyRowFromDb,
-  PlannerTreeNode as PlannerTreeNodeFromDb
-} from '../../../main/database/mapper/planner'
-
-/** 计划任务行（复用主进程 mapper 推导出的行类型，避免两处手工维护） */
-export type PlannerTaskRow = PlannerTaskRowFromDb
-
-export type PlannerTreeNode = PlannerTreeNodeFromDb
-
-export type PlannerDependencyRow = PlannerDependencyRowFromDb
+/* planner 插件自己的渲染层常量与组件 props（原先混在 core 的 @renderer/types/planner.ts 里）。
+   插件专属内容不再放 core：core 反向 import 插件类型会破坏「插件可停用」的边界。
+   跨进程 DTO（行类型 / 树节点）在 ../shared/types.ts。 */
 
 export const PRIORITY_MAP: Record<number, { label: string; hex: string; rgba: string }> = {
   0: { label: 'P0', hex: '#D32F2F', rgba: 'rgba(211,47,47,0.3)' },

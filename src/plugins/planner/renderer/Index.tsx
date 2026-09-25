@@ -6,7 +6,8 @@ import TaskTree from './components/TaskTree'
 import TaskListView from './components/TaskListView'
 import GanttChart from './components/GanttChart'
 import AddTaskModal from './components/TaskModal'
-import type { PlannerTreeNode } from '@renderer/types/planner'
+import type { PlannerTreeNode } from '../shared/types'
+import { plannerApi } from './api'
 
 const Index: React.FC = () => {
   const {
@@ -26,7 +27,7 @@ const Index: React.FC = () => {
   const ganttRef = useRef<HTMLDivElement | null>(null)
 
   const loadTree = useCallback(async () => {
-    const data = await window.api.planner.tasks.getTree()
+    const data = await plannerApi.tasks.getTree()
     setTree(data)
     return data
   }, [])
@@ -34,7 +35,7 @@ const Index: React.FC = () => {
   useEffect(() => {
     ;(async () => {
       try {
-        const data = await window.api.planner.tasks.getTree()
+        const data = await plannerApi.tasks.getTree()
         setTree(data)
       } catch (err) {
         console.error(err)
@@ -80,9 +81,9 @@ const Index: React.FC = () => {
       editId: number | null
     ) => {
       if (editId !== null) {
-        await window.api.planner.tasks.update(editId, values)
+        await plannerApi.tasks.update(editId, values)
       } else {
-        await window.api.planner.tasks.add({
+        await plannerApi.tasks.add({
           ...values,
           parent_id: addParentId,
           sort_order: 0
@@ -97,7 +98,7 @@ const Index: React.FC = () => {
 
   const handleDeleteTask = useCallback(
     async (id: number) => {
-      await window.api.planner.tasks.delete(id)
+      await plannerApi.tasks.delete(id)
       if (selectedId === id) setSelectedId(null)
       await loadTree()
     },

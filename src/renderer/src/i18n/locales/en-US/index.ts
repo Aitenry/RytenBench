@@ -10,13 +10,12 @@ import { enUSMemorySettings } from './memorySettings'
 import { enUSShell } from './shell'
 import { enUSHome } from './home'
 import { enUSHarness } from './harness'
-import { enUSPlanner } from './planner'
 import { enUSGraph } from './graph'
 import { enUSMarkdown } from './markdown'
 
 /**
  * `typeof zhCN` 约束：与中文源语言逐键对齐，缺译/多键在编译期即报错。
- * 插件词条（music / musicSettings）由插件自己注册并对齐（见 src/plugins/music/locales/）。
+ * 插件词条（music / musicSettings / planner）由插件自己注册并对齐（见 src/plugins/<id>/locales/）。
  */
 export const enUS: typeof zhCN = {
   common: enUSCommon,
@@ -30,7 +29,6 @@ export const enUS: typeof zhCN = {
   shell: enUSShell,
   home: enUSHome,
   harness: enUSHarness,
-  planner: enUSPlanner,
   graph: enUSGraph,
   markdown: enUSMarkdown
 }

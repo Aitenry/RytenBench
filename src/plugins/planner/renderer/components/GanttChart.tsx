@@ -2,8 +2,8 @@ import React, { useRef, useEffect, useMemo, useCallback } from 'react'
 import { theme } from 'antd'
 import dayjs from 'dayjs'
 import { LANGUAGES, useTranslation } from '@renderer/i18n'
-import { PRIORITY_MAP, DAY_COL_WIDTH, ROW_HEIGHT } from '@renderer/types/planner'
-import type { PlannerTreeNode } from '@renderer/types/planner'
+import { PRIORITY_MAP, DAY_COL_WIDTH, ROW_HEIGHT } from '../types'
+import type { PlannerTreeNode } from '../../shared/types'
 
 interface Props {
   tree: PlannerTreeNode[]

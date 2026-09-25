@@ -25,7 +25,11 @@ import { join } from 'path'
 export default defineConfig({
   dialect: 'postgresql',
   driver: 'pglite',
-  schema: ['./src/main/database/schema', './src/plugins/music/main/db/schema.ts'],
+  schema: [
+    './src/main/database/schema',
+    './src/plugins/music/main/db/schema.ts',
+    './src/plugins/planner/main/db/schema.ts'
+  ],
   out: './drizzle',
   dbCredentials: {
     // 草稿库：与本机应用数据目录完全隔离（默认落在系统临时目录下）

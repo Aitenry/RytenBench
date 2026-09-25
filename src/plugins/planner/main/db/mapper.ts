@@ -1,21 +1,13 @@
 import { and, asc, eq, sql } from 'drizzle-orm'
 import type { PgUpdateSetSource } from 'drizzle-orm/pg-core'
 import logger from 'electron-log'
-import { withOrm } from '../orm'
-import { planner_dependencies, planner_tasks } from '../schema'
+// core 的 ORM 入口：插件主进程照常 import core 模块（见 src/plugins/README.md 的主进程契约）
+import { withOrm } from '../../../../main/database/orm'
+// 行类型与树节点是跨进程 DTO，唯一真源在 shared/types.ts（由 schema 推导），这里只引用
+import type { PlannerDependencyRow, PlannerTaskRow, PlannerTreeNode } from '../../shared/types'
+import { planner_dependencies, planner_tasks } from './schema'
 
-/** 计划任务行（字段由 schema 推导） */
-export type PlannerTaskRow = typeof planner_tasks.$inferSelect
-
-/** 计划任务依赖行 */
-export type PlannerDependencyRow = typeof planner_dependencies.$inferSelect
-
-/** 树节点，含子节点和依赖信息 */
-export interface PlannerTreeNode extends PlannerTaskRow {
-  children: PlannerTreeNode[]
-  dependencies: number[]
-  depth: number
-}
+export type { PlannerDependencyRow, PlannerTaskRow, PlannerTreeNode }
 
 /** 可由更新语句写入的列（与原实现的 allowedFields 一致） */
 const UPDATABLE_FIELDS = [

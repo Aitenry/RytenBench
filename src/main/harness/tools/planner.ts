@@ -1,7 +1,10 @@
 import { tool } from '@langchain/core/tools'
 import type { StructuredToolInterface } from '@langchain/core/tools'
 import * as z from 'zod/v4'
-import type { PlannerTreeNode } from '../../database/mapper/planner'
+// planner 已迁到自包含插件目录：数据查询走插件的 mapper（类型走插件的 shared DTO）。
+// 跨插件直接读实现是过渡形态，harness 迁移时改成 provide/inject 取规划的主进程服务
+// （与 harness/tools/music.ts 的过渡写法一致）。
+import type { PlannerTreeNode } from '../../../plugins/planner/shared/types'
 import { mainFormat, mainPlural } from '../../i18n'
 import { getPlannerToolTexts } from '../../i18n/tool-results-planner'
 
@@ -36,7 +39,7 @@ function computeAggregateProgress(node: PlannerTreeNode): number {
 
 async function listPlannerTasksHandler(params: { type?: string }): Promise<string> {
   const tr = getPlannerToolTexts()
-  const { getTaskTree } = await import('../../database/mapper/planner')
+  const { getTaskTree } = await import('../../../plugins/planner/main/db/mapper')
   const tree = await getTaskTree()
   if (!tree.length) return tr.common.noTasks
 
@@ -86,7 +89,7 @@ async function listPlannerTasksHandler(params: { type?: string }): Promise<strin
 
 async function getPlannerTreeHandler(): Promise<string> {
   const tr = getPlannerToolTexts()
-  const { getTaskTree } = await import('../../database/mapper/planner')
+  const { getTaskTree } = await import('../../../plugins/planner/main/db/mapper')
   const tree = await getTaskTree()
   if (!tree.length) return tr.common.noTasks
   const lines = [tr.planner.treeHeader]
@@ -132,7 +135,7 @@ async function createTaskHandler(params: {
   end_date?: string
 }): Promise<string> {
   const tr = getPlannerToolTexts()
-  const { addTask, getTaskTree } = await import('../../database/mapper/planner')
+  const { addTask, getTaskTree } = await import('../../../plugins/planner/main/db/mapper')
 
   // ── 必填校验 ──
   if (!params.title?.trim()) return tr.planner.validation.titleRequired
@@ -161,7 +164,7 @@ async function createTaskHandler(params: {
 
   // ── 父级时间范围约束（与前端 TaskModal 一致）──
   if (params.parent_id) {
-    const { getTaskById } = await import('../../database/mapper/planner')
+    const { getTaskById } = await import('../../../plugins/planner/main/db/mapper')
     const parent = await getTaskById(params.parent_id)
     if (parent && parent.start_date && parent.end_date) {
       const pStart = new Date(parent.start_date).getTime()
@@ -233,7 +236,7 @@ async function updateTaskHandler(params: {
   end_date?: string
 }): Promise<string> {
   const tr = getPlannerToolTexts()
-  const { updateTask, getTaskById } = await import('../../database/mapper/planner')
+  const { updateTask, getTaskById } = await import('../../../plugins/planner/main/db/mapper')
 
   // ── 部分更新语义（修复：此前 schema 全 optional 却强制全字段必填,模型只传 id+改项
   // 即被判「进度不能为空」,需多轮往返）──
@@ -312,7 +315,7 @@ async function updateTaskHandler(params: {
 
 async function deleteTaskHandler(params: { id: number }): Promise<string> {
   const tr = getPlannerToolTexts()
-  const { deleteTask, getTaskTree } = await import('../../database/mapper/planner')
+  const { deleteTask, getTaskTree } = await import('../../../plugins/planner/main/db/mapper')
 
   const tree = await getTaskTree()
 
@@ -357,7 +360,7 @@ async function manageDepsHandler(params: {
 }): Promise<string> {
   const tr = getPlannerToolTexts()
   const { addDependency, deleteDependency, getAllDependencies, getTaskTree } =
-    await import('../../database/mapper/planner')
+    await import('../../../plugins/planner/main/db/mapper')
 
   switch (params.subcommand) {
     case 'list': {

@@ -111,7 +111,9 @@ export default {
 - [x] 宿主与注册表（渲染层 + 主进程 + 外部插件机制 + 设置面板）
 - [x] music（参考实现：main/db/renderer/locales/preload 通道全量收进 src/plugins/music；
       通道 `plugin:music:*`、底栏 `bottomBar` 插槽、词条随插件注册）
-- [ ] planner
+- [x] planner（main/db/renderer/locales/preload 通道全量收进 src/plugins/planner；
+      10 个 `plugin:planner:*` 通道、无事件通道、词条随插件注册、
+      `window.api.planner` 命名空间删除并由 `renderer/api.ts` 的 `plannerApi` 取代）
 - [ ] home（含 graph / document / wiki / todo 与知识图谱组件）
 - [ ] harness（含 runtime、service、tools、workspace 文件历史）
 - [ ] core 收尾：删除旧路径（`src/main/ipc/index.ts` 的 builtinIpcGroups、ipc-capture、preload 各插件命名空间）

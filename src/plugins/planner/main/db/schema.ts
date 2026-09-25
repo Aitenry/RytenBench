@@ -1,3 +1,9 @@
+/**
+ * planner 插件的表定义（唯一真源，表结构未变，只是从 core 的 database/schema/ 搬进插件目录）。
+ *
+ * core 的 `src/main/database/schema/index.ts` 用**相对路径** re-export 汇总它，
+ * 并显式列进 `drizzle.config.ts` 的 schema 数组——drizzle-kit 不解析 tsconfig paths。
+ */
 import {
   pgTable,
   serial,

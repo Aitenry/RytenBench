@@ -7,7 +7,8 @@ import {
   RiDeleteBinLine,
   RiEditLine
 } from '@remixicon/react'
-import { type PlannerTreeNode, PRIORITY_MAP } from '@renderer/types/planner'
+import { PRIORITY_MAP } from '../types'
+import type { PlannerTreeNode } from '../../shared/types'
 import { useTranslation } from '@renderer/i18n'
 
 interface Props {

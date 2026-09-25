@@ -4,11 +4,6 @@ import type {
   TaskDependencyRow,
   TaskWithDependencies
 } from '../main/database/mapper/todo_dependencies'
-import type {
-  PlannerTaskRow,
-  PlannerTreeNode,
-  PlannerDependencyRow
-} from '../main/database/mapper/planner'
 import {
   DocRow,
   DocListItem,
@@ -74,27 +69,6 @@ interface Api {
     delete: (taskId: number, dependsOnTaskId: number) => Promise<boolean>
     getAll: () => Promise<TaskDependencyRow[]>
     getTasksWithDeps: () => Promise<TaskWithDependencies[]>
-  }
-  planner: {
-    tasks: {
-      getAll: () => Promise<PlannerTaskRow[]>
-      getById: (id: number) => Promise<PlannerTaskRow | null>
-      getTree: () => Promise<PlannerTreeNode[]>
-      add: (task: Omit<PlannerTaskRow, 'id' | 'created_at' | 'updated_at'>) => Promise<number>
-      update: (
-        id: number,
-        updates: Partial<Omit<PlannerTaskRow, 'id' | 'created_at'>>
-      ) => Promise<boolean>
-      delete: (id: number) => Promise<boolean>
-      reorder: (
-        orderList: { id: number; sort_order: number; parent_id: number | null }[]
-      ) => Promise<boolean>
-    }
-    deps: {
-      add: (taskId: number, dependsOnTaskId: number) => Promise<number>
-      delete: (taskId: number, dependsOnTaskId: number) => Promise<boolean>
-      getAll: () => Promise<PlannerDependencyRow[]>
-    }
   }
   docs: {
     getById: (id: number) => Promise<DocWithContent | null>
