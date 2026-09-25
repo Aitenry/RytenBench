@@ -42,8 +42,9 @@ function assertInsideWorkspace(inputPath: string): string {
  * 工作区文件浏览 + 文件改动审查 IPC（AI 工作区目录的文件操作，harness 插件的第 4 个域）。
  *
  * 通道名一律 `plugin:harness:<原扁平名>`（原 `src/main/ipc/workspace.ts` 的 9 个扁平通道
- * 逐个改名）。归属依据：`window.api.workspace.*` 只被 harness 的渲染层组件使用
- * （WorkspacePanel / FileExplorer / FileDiffView 的改动复核与文件浏览器），是 AI 改动复核能力；
+ * 逐个改名）。归属依据：这些工作区文件通道只被 harness 的渲染层组件使用
+ * （WorkspacePanel / FileExplorer / FileDiffView 的改动复核与文件浏览器，经插件自己的
+ * `renderer/api.ts` 的 `harnessApi.workspace.*` 调用），是 AI 改动复核能力；
  * 因此它从 core 组移出，停用「AI 助手」后这些通道一并消失。
  */
 export function workspaceIpcHandlers(): MainIpcHandlers {

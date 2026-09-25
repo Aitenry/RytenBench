@@ -65,6 +65,12 @@ preload 976 行单文件里装着全部插件的 API 命名空间。渲染层 17
   渲染层调用点要 await 才能捕获 rejection。
 - **审计口径**：`node test/audit-plugin-layout.mjs` 的「旧路径残留」指标会过滤 `src/plugins/` 命中——
   它衡量的是「还没搬走的旧位置」，插件自己新写的 `main/db/mapper/...` 不该计入。
+- **插件渲染层在模块顶层读通用桥**：`renderer/api.ts` 里 `const invoke = window.api.plugin.invoke`
+  是模块顶层求值（与 home/planner/music 一致）——jsdom / SSR 工装一旦 import 到任何插件组件就必须
+  **先**给 `window.api.plugin` 打桩（`test/lib/plugin-bridge.mjs`），否则整批工装会以
+  `Cannot read properties of undefined (reading 'plugin')` 挂掉。
+- **插件词条不再进中央表**：工装直接加载 `@renderer/i18n` 时不会走插件 install，
+  得显式注册（`test/lib/harness-locales.mjs` / 各 bundle 入口），否则界面渲染成裸键、按文案断言全失准。
 
 ## 迁移进度（每轮更新，权威版本在 `src/plugins/README.md` 的勾选表）
 
@@ -78,7 +84,7 @@ preload 976 行单文件里装着全部插件的 API 命名空间。渲染层 17
 | home 渲染层    | `c7fd004` | 视图/组件/props/词条进插件；preload 六命名空间收口（855→665 行）；GraphView 仍独立懒加载 chunk                                                                                                                                                                                               |
 | AI 工具归属    | `ed77eaf` | 工具实现进归属插件（planner/home/music），harness 只做注册表；新增 `ctx.contribute/contributions` + `harness.tool` 契约                                                                                                                                                                      |
 | harness 主进程 | 本轮      | 65 文件搬进 `src/plugins/harness/main/**`（runtime/service/tools/workspace/db）；45 通道 → `plugin:harness:*`（9 个 `workspace-*` 移出 core 组）；15 事件通道 `ctx.registerEvent`；启动接线（快照目录+工作区监听）进 `install` 的 `ctx.effect`；`agent-*`/`main-agent-*` 从 provider.ts 归位 |
-| harness 渲染层 | 待做      | `src/renderer/src/plugins/harness/**` 收进插件；preload 五命名空间（harness/agents/mainAgent/mnemon/workspace）改走通用桥                                                                                                                                                                    |
+| harness 渲染层 | 本轮      | 58 文件收进 `src/plugins/harness/renderer/**`；`types/harness.ts` 拆进 shared（DTO）/renderer（纯前端）；4 个词条文件进 `locales/**` 随插件注册；preload 五命名空间（harness/agents/mainAgent/mnemon/workspace）删除并改走 `harnessApi`；doc-changed 反向耦合解耦到宿主事件总线              |
 | core 收尾      | 待做      | 删 `builtinIpcGroups`/`ipc-capture`/`builtin-catalog`/preload 残留命名空间；外壳局部状态外置；`BuildProgressProvider` 三个通道名插槽化；6 处过渡期 core → 插件 import                                                                                                                        |
 
 ## AI 工具注册契约（用户 2026-09-26 要求；实施细节见 `test/plugin-coupling-notes.md` §5）

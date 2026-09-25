@@ -17,9 +17,10 @@ export const homeManifest: PluginManifest = {
   /**
    * 实际用到的宿主上下文键：
    * route 挂载视图（首屏即用，不走懒加载）、menu 侧栏、settingsSection（图谱设置页归属首页）、
-   * appProvider（图谱构建进度浮层，弹窗组件随插件装卸）、i18n 词条。
+   * appProvider（图谱构建进度浮层，弹窗组件随插件装卸）、i18n 词条、
+   * events（订阅宿主事件总线的 `doc:changed`：文档被 AI 工具改写时同步编辑器）。
    */
-  inject: ['route', 'menu', 'settingsSection', 'appProvider', 'i18n'],
+  inject: ['route', 'menu', 'settingsSection', 'appProvider', 'i18n', 'events'],
   routes: [{ path: '/home' }],
   menu: { key: 'home', labelKey: 'shell.menu.home', icon: 'RiDashboardLine', order: 10 }
 }

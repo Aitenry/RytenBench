@@ -16,6 +16,7 @@ import { getTagsArray } from '@renderer/utils/document'
 import { useMessage } from '@renderer/hooks/useMessage'
 import { useTranslation } from '@renderer/i18n'
 import { homeApi } from '../api'
+import { subscribeDocChanged } from '../doc-changed'
 import dayjs from 'dayjs'
 
 interface DocEditorPaneProps {
@@ -167,9 +168,11 @@ const DocEditorPane: React.FC<DocEditorPaneProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docId])
 
-  /* ── 外部修改同步（修复：此前对工具写入完全无感知,继续编辑会把工具刚写入的内容整体覆盖）── */
+  /* ── 外部修改同步（修复：此前对工具写入完全无感知,继续编辑会把工具刚写入的内容整体覆盖）──
+     事件源是 harness 插件（它把主进程的「文档被 AI 改写」桥接成宿主事件总线的 doc:changed），
+     本组件只订阅本插件的模块级中转（../doc-changed）——不认识任何插件的通道名或 API。 */
   useEffect(() => {
-    const unsubscribe = window.api.harness.onDocChanged((data) => {
+    const unsubscribe = subscribeDocChanged((data) => {
       if (data.docId !== docIdRef.current) return
       if (data.action === 'deleted') {
         setNotFound(true)

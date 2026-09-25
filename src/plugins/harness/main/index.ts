@@ -17,9 +17,10 @@ import { WORKSPACE_WATCHER_EVENT_CHANNELS } from './workspace/watcher'
  * 文档被 AI 工具改写/删除的事件通道。
  *
  * 发送方是 home 插件的 `manage_docs` 工具（`src/plugins/home/main/tools/docs.ts`，它按
- * 「插件不得 import harness」的铁律用字面量发这个通道名），订阅方是 home 的文档编辑器
- * （经 preload 的 `window.api.harness.onDocChanged`，本轮只改 preload 里的通道字面量，
- * 渲染层调用点不动）。在 harness 这里声明是为了让它进 preload 的插件通道白名单。
+ * 「插件不得 import harness」的铁律用字面量发这个通道名）；订阅方是 harness 的渲染层入口
+ * （`renderer/plugin.tsx`），它再把它桥接成**宿主事件总线**的语义事件 `doc:changed`，
+ * 由 home 的文档编辑器消费——home 因此不认识这个通道名。在 harness 这里声明通道名，
+ * 是为了让它进 preload 的插件通道白名单。
  */
 const HARNESS_DOC_CHANGED_CHANNEL = 'plugin:harness:harness-doc-changed'
 

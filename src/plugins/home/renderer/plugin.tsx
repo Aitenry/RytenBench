@@ -4,6 +4,7 @@ import manifest from '../manifest'
 import { homeLocales } from '../locales'
 import GraphSettings from './settings/GraphSettings'
 import BuildProgressOverlay from './providers/BuildProgressOverlay'
+import { publishDocChanged, type DocChangedPayload } from './doc-changed'
 import HomeIndex from './Index'
 
 /**
@@ -12,7 +13,8 @@ import HomeIndex from './Index'
  * 注册点：route（**首屏即用**：直接挂组件，不走懒加载 chunk——首页是默认落点）、
  * menu（侧栏，order 10）、settingsSection（图谱设置页，归属首页）、
  * appProvider（图谱构建进度浮层，弹窗组件随插件装卸，外壳不再 import 首页组件）、
- * i18n（词条随插件注册：`home` / `graph` / `graphSettings` 三个顶层键停用即消失）。
+ * i18n（词条随插件注册：`home` / `graph` / `graphSettings` 三个顶层键停用即消失）、
+ * events（订阅宿主事件总线的 `doc:changed`，转投给本插件的编辑器）。
  *
  * 知识图谱视图（2.7MB chunk，含 echarts/cytoscape）仍由 HomeView 用
  * `React.lazy(() => import('./graph/GraphView'))` 按需加载，不随首屏打包。
@@ -43,6 +45,12 @@ const plugin: Plugin = {
     ctx.use('appProvider').register({ Provider: BuildProgressOverlay, order: 10 })
     // 词条随插件注册：停用即不再注册这些键（原先由中央 locales 无条件打包进首屏）
     ctx.use('i18n').addResources('translation', homeLocales)
+    // 文档被 AI 工具改写：订阅宿主事件总线的语义事件（事件源是 harness 插件，
+    // 它把主进程的通道桥接成 `doc:changed`）。订阅是可逆效果，停用即解绑；
+    // 组件侧经 ../doc-changed 的模块级订阅表消费，不认识任何插件的通道名。
+    ctx.effect(() =>
+      ctx.use('events').on('doc:changed', (data) => publishDocChanged(data as DocChangedPayload))
+    )
   }
 }
 

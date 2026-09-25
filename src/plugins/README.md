@@ -124,8 +124,13 @@ export default {
       `workspace-*`：实测只有 harness 渲染层在用）、15 个事件通道逐个 `ctx.registerEvent` 声明；
       `provider.ts` 只留模型 Provider（8 个 agent-* / main-agent-* 归位 harness）；
       启动接线（快照目录 + 工作区文件监听）搬进 `install(ctx)` 的 `ctx.effect`（停用即不再配置）
-- [ ] harness 渲染层：`src/renderer/src/plugins/harness/**` → `src/plugins/harness/renderer/**`，
-      preload 五个命名空间（`harness` / `agents` / `mainAgent` / `mnemon` / `workspace`）删除并改走通用桥
+- [x] harness 渲染层：`src/renderer/src/plugins/harness/**`（58 个文件）→ `src/plugins/harness/renderer/**`；
+      `types/harness.ts` 拆进 `shared/types.ts`（跨进程 DTO）+ `renderer/types.ts`（纯前端模型）；
+      词条 `harness`/`agentSettings`/`memorySettings`/`skillsSettings` 收进 `locales/**` 并随插件注册；
+      preload 五个命名空间（`harness` / `agents` / `mainAgent` / `mnemon` / `workspace`）删除，
+      渲染层改用 `renderer/api.ts` 的 `harnessApi`（通用桥 `plugin:harness:*`）；
+      「文档被 AI 改写」不再由 home 直接订阅 harness 通道，改由 harness 桥接成宿主事件总线的
+      `doc:changed`（见 test/plugin-coupling-notes.md §6）；harness 视图仍是独立懒加载 chunk
 - [ ] core 收尾：删除旧路径（`src/main/ipc/index.ts` 的 builtinIpcGroups、ipc-capture、preload 各插件命名空间、
       6 处过渡期 core → 插件 import）
 
