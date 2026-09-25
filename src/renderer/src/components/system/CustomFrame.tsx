@@ -21,11 +21,11 @@ import BottomBar from './frame/BottomBar'
 import type { MenuItem } from './frame/Sidebar'
 
 interface CustomFrameProps {
+  /** 当前侧栏高亮键（由路由派生，见 AppContent；不再用可被重挂重置的 local state） */
   currentKey: string
-  setCurrentKey: (key: string) => void
 }
 
-const CustomFrame: React.FC<CustomFrameProps> = ({ currentKey, setCurrentKey }) => {
+const CustomFrame: React.FC<CustomFrameProps> = ({ currentKey }) => {
   const navigate = useNavigate()
   const {
     token: {
@@ -104,12 +104,13 @@ const CustomFrame: React.FC<CustomFrameProps> = ({ currentKey, setCurrentKey }) 
     [pluginMenus, t]
   )
 
+  // 菜单点击只改路由：侧栏高亮由 AppContent 从 location 派生（停用注册了
+  // appProvider 的插件会重挂外壳子树，local state 会被重置——高亮不能再依赖它）
   const onMenuClick = useCallback(
     (key: string): void => {
       navigate(`/${key}`)
-      setCurrentKey(key)
     },
-    [navigate, setCurrentKey]
+    [navigate]
   )
 
   const handleMinimize = useCallback(() => api.window.minimize(), [])

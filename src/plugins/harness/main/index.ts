@@ -3,7 +3,18 @@ import { join } from 'path'
 import logger from 'electron-log'
 import type { MainPluginContext } from '../../../main/plugins/context'
 import { awaitInitialized } from '../../../main/database/instance'
+import {
+  APP_BEFORE_QUIT,
+  APP_EVENT_WORKSPACE_CHANGED,
+  APP_PRELOAD,
+  APP_RENDERER_MEMORY_DUMP
+} from '../../../main/plugins/app-hooks'
+import { onAppEvent } from '../../../main/plugins/app-events'
 import { configureFileHistory } from './workspace/file-history'
+import { configureToolOutputStore } from './runtime/tool-output-store'
+import { preloadHarnessData } from './preload-cache'
+import { dumpRendererMemory } from './renderer-memory'
+import { closeAllMnemon } from './mnemon-singleton'
 import { syncWorkspaceWatcher, stopWorkspaceWatcher } from './workspace'
 import { HARNESS_EVENT_CHANNELS, installHarnessIpc } from './ipc/harness'
 import { harnessTopicIpcHandlers } from './ipc/harness-topic'
@@ -61,11 +72,30 @@ export function install(ctx: MainPluginContext): void {
     HARNESS_DOC_CHANGED_CHANNEL
   )
 
+  // ── 宿主生命周期钩子（贡献点：随 ctx.dispose() 摘除，停用即不再执行）────
+  // core 只负责「时机」，具体动作由本插件提供——core 因此不认识 harness 的任何模块。
+  ctx.contribute(APP_PRELOAD, {
+    label: 'harness.preload',
+    run: () => preloadHarnessData()
+  })
+  ctx.contribute(APP_RENDERER_MEMORY_DUMP, {
+    label: 'harness.renderer-memory',
+    run: (reason, exitCode) => dumpRendererMemory(reason ?? 'unknown', exitCode ?? 0)
+  })
+  ctx.contribute(APP_BEFORE_QUIT, {
+    label: 'harness.mnemon',
+    run: () => closeAllMnemon()
+  })
+
   // ── 启动接线（原 src/main/index.ts）─────────────────────────────────────
   ctx.effect(() => {
     // 文件改动快照目录：放 userData 而不是工作区——工作区挂载为虚拟 '/'，
     // 写进去会污染用户项目，也会出现在模型自己的 ls/glob 结果里
     configureFileHistory(join(app.getPath('userData'), 'file-history'))
+
+    // 工具结果详情存储目录（内置工具的结果不再随流下发/落库，点开卡片时按需读取）：
+    // 同样放 userData。停用时经 configureToolOutputStore('') 降级——见下方回滚。
+    configureToolOutputStore(join(app.getPath('userData'), 'tool-output'))
 
     // 工作区文件监听：数据库初始化完成（设置已加载）后跟随当前工作区启动。
     // 初始化未完成时插件就被停用的话（stopped）不能再起监听。
@@ -79,11 +109,23 @@ export function install(ctx: MainPluginContext): void {
       }
     })
 
+    // 系统设置里切换/重建工作区（core 发 `app.workspace-changed`）→ 监听换根目录。
+    // 事件订阅是可逆效果：停用即解绑，不再响应工作区变化。
+    const offWorkspaceChanged = onAppEvent(APP_EVENT_WORKSPACE_CHANGED, () => {
+      try {
+        syncWorkspaceWatcher()
+      } catch (err) {
+        logger.warn('[Harness] 工作区切换后重启监听失败:', err)
+      }
+    })
+
     return () => {
       stopped = true
+      offWorkspaceChanged()
       stopWorkspaceWatcher()
-      // 停用即「不再配置快照目录」：快照写入处按空目录降级为「无快照」（不抛错）
+      // 停用即「不再配置快照/详情目录」：写入处按空目录降级为「无快照 / 无详情」（不抛错）
       configureFileHistory('')
+      configureToolOutputStore('')
     }
   })
 }

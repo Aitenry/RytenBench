@@ -2,13 +2,26 @@ import React from 'react'
 import { Progress, Tag, Typography } from 'antd'
 import { useNotification } from '@renderer/hooks/useNotification'
 import { useTranslation } from '@renderer/i18n'
-import type { BuildProgressNotification } from '@renderer/types/notification'
 
+/**
+ * 通知列表（外壳）。
+ *
+ * 通知的**载体**属外壳，**形状**属产生它的插件：core 只按字段名读取通用字段
+ * （title/description）+ 已知的进度字段（phaseLabel/overallProgress/completed，
+ * 缺失即不渲染对应片段）。插件停用后不会再产生新通知，历史通知仍能正常渲染。
+ */
 interface NotificationListProps {
   onClose: () => void
   colorFillAlter: string
   colorText: string
   colorTextSecondary: string
+}
+
+/** 进度类通知的展示字段（插件扩展字段，缺省时该片段不渲染） */
+interface ProgressNotificationFields {
+  phaseLabel?: string
+  overallProgress?: number
+  completed?: boolean
 }
 
 const NotificationList: React.FC<NotificationListProps> = ({
@@ -38,8 +51,9 @@ const NotificationList: React.FC<NotificationListProps> = ({
   return (
     <div style={{ maxHeight: 360, overflow: 'auto', width: 320 }}>
       {notifications.map((item) => {
-        const isBuild = item.type === 'build_progress'
-        const buildItem = isBuild ? (item as BuildProgressNotification) : null
+        const progress: ProgressNotificationFields | null =
+          item.type === 'build_progress' ? (item as unknown as ProgressNotificationFields) : null
+        const isBuilding = Boolean(progress) && progress?.completed !== true
         return (
           <div
             key={item.id}
@@ -64,24 +78,22 @@ const NotificationList: React.FC<NotificationListProps> = ({
               <Typography.Text style={{ fontSize: 13, color: colorText, flex: 1 }} ellipsis>
                 {item.title}
               </Typography.Text>
-              {buildItem && buildItem.completed && (
+              {progress?.completed && (
                 <Tag color="success" style={{ fontSize: 11, lineHeight: '18px', margin: 0 }}>
                   {t('shell.notificationList.completed')}
                 </Tag>
               )}
-              {buildItem && !buildItem.completed && (
+              {isBuilding && progress?.phaseLabel && (
                 <Tag color="processing" style={{ fontSize: 11, lineHeight: '18px', margin: 0 }}>
-                  {buildItem.phaseLabel}
+                  {progress.phaseLabel}
                 </Tag>
               )}
             </div>
             <div style={{ fontSize: 12, color: colorTextSecondary, marginTop: 2 }}>
-              <div style={{ marginBottom: buildItem && !buildItem.completed ? 6 : 0 }}>
-                {item.description}
-              </div>
-              {buildItem && !buildItem.completed && (
+              <div style={{ marginBottom: isBuilding ? 6 : 0 }}>{item.description}</div>
+              {isBuilding && (
                 <Progress
-                  percent={buildItem.overallProgress}
+                  percent={progress?.overallProgress ?? 0}
                   size="small"
                   strokeColor="#1677ff"
                   showInfo={false}

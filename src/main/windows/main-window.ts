@@ -7,9 +7,8 @@ import { safeSend } from '../safe-send'
 import { getMainWindow, markMainWindowReady, setMainWindow } from './window-manager'
 import { isCloseToTrayEnabled, isTrayAvailable, syncTrayState } from '../tray'
 import { isQuittingNow, markQuitting } from '../lifecycle'
-// 过渡期：渲染进程内存快照属 harness 的 OOM 可观测性，实现已随插件搬到
-// src/plugins/harness/main/renderer-memory.ts；core → 插件的这处依赖随 core 收尾一并处理
-import { dumpRendererMemory } from '../../plugins/harness/main/renderer-memory'
+import { listContributions } from '../plugins/contributions'
+import { APP_RENDERER_MEMORY_DUMP, type AppHook } from '../plugins/app-hooks'
 
 /** 各窗口的最大化状态（主窗口与 mermaid 预览窗口共用；随窗口销毁清理） */
 const windowMaxStates = new Map<
@@ -18,6 +17,20 @@ const windowMaxStates = new Map<
 >()
 
 let windowControlIpcRegistered = false
+
+/** 执行插件贡献的渲染进程内存快照（贡献点 `app.renderer-memory-dump`） */
+function runRendererMemoryDumpHooks(reason: string, exitCode: number): void {
+  for (const hook of listContributions<AppHook>(APP_RENDERER_MEMORY_DUMP)) {
+    try {
+      // 快照是诊断旁路：不阻塞崩溃恢复流程，异步失败也只记日志
+      void Promise.resolve(hook.run(reason, exitCode)).catch((err) => {
+        logger.warn(`[Memory] 内存快照钩子执行失败（${hook.label}）:`, err)
+      })
+    } catch (err) {
+      logger.warn(`[Memory] 内存快照钩子执行失败（${hook.label}）:`, err)
+    }
+  }
+}
 
 /** 渲染端警告去重窗口（KaTeX 等库会为同一条消息连发数百次） */
 const CONSOLE_WARN_DEDUPE_WINDOW_MS = 10_000
@@ -141,7 +154,7 @@ export function createMainWindow(): void {
     else logger.info(msg)
     // 崩溃/OOM 时补一份内存快照（渲染进程已消失，只能靠流式期间的采样缓存）：
     // 没有这个数字时，日志里只剩 reason=oom，无法判断水位是哪一段流量推上去的。
-    if (abnormal) dumpRendererMemory(details.reason, details.exitCode)
+    if (abnormal) runRendererMemoryDumpHooks(details.reason, details.exitCode)
     if (
       details.reason === 'crashed' ||
       details.reason === 'oom' ||

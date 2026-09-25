@@ -16,6 +16,6 @@ setActiveWorkspaceIdProvider(() => {
 export const streamAbortControllers = new Map<number, AbortController>()
 // 进行中的对话流（退出前需等待其保存数据；含目标自动续跑轮）
 export const activeHarnessStreams = new Set<Promise<unknown>>()
-// 生成中的插话队列（harnessQueue）随 harness 插件搬到
-// src/plugins/harness/main/queue-store.ts：它的消费者全在插件内（ipc/harness、ipc/harness-topic），
-// core 不再需要它，因此这里不再做 core → 插件的再导出。
+// 生成中的插话队列（harnessQueue）属 harness 插件：实现与消费者都在
+// src/plugins/harness/main/queue-store.ts（ipc/harness、ipc/harness-topic），
+// core 不参与，因此这里不做任何再导出。

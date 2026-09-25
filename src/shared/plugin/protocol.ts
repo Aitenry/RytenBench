@@ -3,11 +3,13 @@
  *
  * 通道命名规范：
  * - 插件 invoke 通道：`plugin:<命名空间>:<channel>`，命名空间 = 插件 id 去掉开头的 `plugin.`
- *   段（plugin.demo → plugin:demo:*，内置 music → plugin:music:*），主进程权威校验、
+ *   段（plugin.demo → plugin:demo:*，内置 planner → plugin:planner:*），主进程权威校验、
  *   preload 白名单缓存；
- * - 主进程 → 渲染层的事件通道同规则命名（如 `plugin:music:play-track`），
+ * - 主进程 → 渲染层的事件通道同规则命名（如 `plugin:planner:tasks-updated`），
  *   由插件在主进程 `ctx.registerEvent(...)` 声明后才进白名单；
- * - 尚未插件化的 core/旧插件通道仍是扁平名（如 'todo-items-get-paginate'）；
+ * - **core 自己的通道不进这个命名空间**（扁平名）——原先那批扁平插件通道
+ *   （'todo-items-get-paginate' 等）已随四个内置插件迁走，core 现在只剩
+ *   window-* / setting / provider-* / plugins-* / weather-* 等外壳能力；
  * - 管理通道为 kebab-case（plugins-*），与现有主进程风格一致。
  */
 

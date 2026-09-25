@@ -2,6 +2,8 @@ import { app } from 'electron'
 import logger from 'electron-log'
 import { activeHarnessStreams, streamAbortControllers } from './context'
 import { getDatabaseRef } from './database/instance'
+import { listContributions } from './plugins/contributions'
+import { APP_BEFORE_QUIT, type AppHook } from './plugins/app-hooks'
 
 let isQuitting = false
 /** 资源清理是否已完成（完成后放行最终退出） */
@@ -17,7 +19,18 @@ export function markQuitting(): void {
   isQuitting = true
 }
 
-/** 注册应用生命周期钩子：退出前保存流式数据 / 关闭数据库与 Mnemon / 全窗口关闭退出 */
+/** 执行插件贡献的退出前清理（贡献点 `app.before-quit`；支持异步） */
+async function runBeforeQuitHooks(): Promise<void> {
+  for (const hook of listContributions<AppHook>(APP_BEFORE_QUIT)) {
+    try {
+      await hook.run()
+    } catch (err) {
+      logger.warn(`[Lifecycle] 退出前钩子失败（${hook.label}）:`, err)
+    }
+  }
+}
+
+/** 注册应用生命周期钩子：退出前保存流式数据 / 关闭数据库与插件资源 / 全窗口关闭退出 */
 export function registerLifecycleHooks(): void {
   app.on('before-quit', (event) => {
     // 清理完成后放行最终退出
@@ -55,12 +68,12 @@ export function registerLifecycleHooks(): void {
           }
         } finally {
           try {
-            // 过渡期：Mnemon 单例属 harness 插件（实现已搬到 src/plugins/harness/main/），
-            // core 的退出清理仍要关掉它；这处 core → 插件依赖随 core 收尾一并处理
-            const { closeAllMnemon } = await import('../plugins/harness/main/mnemon-singleton')
-            await closeAllMnemon()
+            // 退出前释放插件资源（贡献点 `app.before-quit`，例如 harness 关闭 Mnemon 单例）：
+            // 逐个 await + catch——单个插件清理失败不能拦住进程退出。
+            // 贡献随插件停用摘除，因此停用的插件不会被调用（core 不认识任何插件模块）。
+            await runBeforeQuitHooks()
           } catch (err) {
-            logger.warn('[Mnemon] 退出清理失败:', err)
+            logger.warn('[Lifecycle] 退出前钩子执行失败:', err)
           }
           cleanupDone = true
           app.quit()

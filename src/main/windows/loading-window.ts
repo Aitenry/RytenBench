@@ -15,9 +15,8 @@ import { getMainLanguage, mainMessages } from '../i18n'
 import { GraphSettings, HarnessSettings, TraySettings } from '../types/settings'
 import { getIp } from '../address'
 import { startWeatherAutoRefresh } from '../weather'
-// 过渡期：加载页预取的数据属 harness 插件（子代理定义 + 话题首页），实现已随插件搬到
-// src/plugins/harness/main/preload-cache.ts；core → 插件的这处依赖随 core 收尾一并处理
-import { preloadHarnessData } from '../../plugins/harness/main/preload-cache'
+import { listContributions } from '../plugins/contributions'
+import { APP_PRELOAD, type AppHook } from '../plugins/app-hooks'
 import { getLoadingWindow, markInitComplete, setLoadingWindow } from './window-manager'
 
 /** 加载窗口初始化进度（步骤名 + 细粒度百分比，逐步推进） */
@@ -187,6 +186,22 @@ async function offerDatabaseReset(
   return 'recovered'
 }
 
+/**
+ * 执行各插件贡献的「加载页预取」钩子（贡献点 `app.preload`）。
+ *
+ * 逐个 try/catch：某个插件预取失败只记日志——预取是加速用的旁路，
+ * 不该把一个还能用的启动流程拦在加载页上。钩子随插件停用摘除，停用的插件不执行。
+ */
+async function runPreloadHooks(): Promise<void> {
+  for (const hook of listContributions<AppHook>(APP_PRELOAD)) {
+    try {
+      await hook.run()
+    } catch (err) {
+      logger.warn(`[Init] 预取钩子执行失败（${hook.label}）:`, err)
+    }
+  }
+}
+
 async function performInitializationTasks(): Promise<void> {
   // 扁平化初始化步骤：配置 / 密钥库 / 连接数据库 / 执行数据库迁移 / 工作区迁移。
   // 进度条按步骤均匀推进，逐步增长，避免整任务一步跳到 25%。
@@ -334,8 +349,10 @@ export async function createLoadingWindow(): Promise<void> {
   const initPromise = performInitializationTasks()
     .then(async () => {
       logger.info('All initialization tasks completed.')
-      // 预加载 HarnessProvider 所需数据，不阻塞交接
-      preloadHarnessData()
+      // 预取插件数据（加载页阶段完成，不阻塞交接）：core 只负责时机，
+      // 具体预取什么由插件的 `app.preload` 贡献决定——停用插件即不再预取，
+      // core 不认识任何插件模块（见 src/main/plugins/app-hooks.ts）
+      await runPreloadHooks()
       // 通知加载页显示完成状态（纯 UI 提示；不依赖其回发驱动交接——
       // 加载页定时器可能被后台节流延迟数秒，交接由主进程直接控制）
       const win = getLoadingWindow()

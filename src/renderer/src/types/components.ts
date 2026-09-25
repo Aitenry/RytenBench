@@ -1,18 +1,20 @@
 import type React from 'react'
-import type { MenuProps } from 'antd'
 import type { MessageInstance } from 'antd/es/message/interface'
 
 /**
  * core 共享的组件 props / 上下文类型。
  *
- * 归属划分（home 插件迁移时清理）：**插件自己的 props 不放这里**——core 反向 import
- * 插件类型会让「插件可停用」的边界失真。home 的 props（`GraphViewProps` /
- * `GraphCanvasProps` / `GraphToolbarProps` / `EntityDetailProps` / `BuildProgressProps` /
- * `WikiEditModalProps` / `WikiCardProps` / `DocPreviewModalProps` / `TodoListProps`）
- * 已搬进 `src/plugins/home/renderer/types.ts`。
+ * 归属划分：**插件自己的 props 不放这里**——core 反向 import 插件类型会让
+ * 「插件可停用」的边界失真。home 的 props（`GraphViewProps` / `GraphCanvasProps` /
+ * `GraphToolbarProps` / `EntityDetailProps` / `BuildProgressProps` / `WikiEditModalProps` /
+ * `WikiCardProps` / `DocPreviewModalProps` / `TodoListProps`）都在
+ * `src/plugins/home/renderer/types.ts`；图谱构建进度的 Provider props 也随插件收走。
  *
- * 留在这里的是外壳与共享 UI：markdown 渲染、锁屏/侧栏/路由、消息与构建进度 Provider、
- * 底栏天气卡、模型 Provider 选项（图谱设置页与 harness 智能体设置页共用）。
+ * core 收尾清理：删掉已无消费方的类型（`StatusOption` / `SidebarProps` / `MainRoutesProps` /
+ * `WeatherData`+`WorkTimeData`+`CardItemProps`——底栏天气卡与侧栏/路由各自就地定义 props）。
+ *
+ * 留在这里的是外壳与共享 UI 真正共用的部分：markdown 渲染、锁屏、消息上下文，
+ * 以及模型 Provider 选项（图谱设置页与 harness 智能体设置页共用）。
  */
 
 /* ── Markdown ── */
@@ -51,17 +53,11 @@ export interface LockScreenProps {
 
 /* ── Sidebar ── */
 
-export interface SidebarProps {
-  currentKey: string
-  setCurrentKey: (key: string) => void
-  onUserMenuClick?: MenuProps['onClick']
-}
+/* 侧栏的 props 就地定义在 `components/system/frame/Sidebar.tsx`（自用，不外借）。 */
 
 /* ── Route ── */
 
-export interface MainRoutesProps {
-  defaultRoute?: string
-}
+/* 路由 props 就地定义在 `route/MainRoutes.tsx`（自用，不外借）。 */
 
 /* ── Provider / Context ── */
 
@@ -77,39 +73,6 @@ export interface MessageContextType {
 
 export interface MessageProviderProps {
   children: React.ReactNode
-}
-
-export interface BuildProgressProviderProps {
-  children: React.ReactNode
-}
-
-/* ── Home / Dashboard（外壳底栏的天气卡，与 home 插件无关） ── */
-
-export interface WeatherData {
-  city: string
-  date: string
-  temperature: string
-  condition: string
-  highLow: string
-  feelsLike: string
-  icon?: string
-}
-
-export interface WorkTimeData {
-  today: string
-  avgLastWeek: string
-  thisWeek: string
-  todayWorked: string
-}
-
-export interface CardItemProps {
-  weatherData: WeatherData
-  workTimeData: WorkTimeData
-}
-
-export interface StatusOption {
-  value: number
-  label: string
 }
 
 /* ── Settings（模型 Provider 选项：图谱设置页与 harness 智能体设置页共用） ── */

@@ -4,10 +4,18 @@ import { settingsStore } from '../context'
 import { awaitInitialized } from '../database/instance'
 import { SystemSettings } from '../types/settings'
 import { syncTrayState } from '../tray'
-// 过渡期：工作区文件监听随 harness 插件搬到 src/plugins/harness/main/workspace/，但
-// 「切换/重建工作区后让监听换根目录」这一步是系统设置写入的收尾动作，仍留在 core；
-// 这处 core → 插件依赖随 core 收尾一并处理（见报告）
-import { syncWorkspaceWatcher } from '../../plugins/harness/main/workspace'
+import { emitAppEvent } from '../plugins/app-events'
+import { APP_EVENT_WORKSPACE_CHANGED, type AppWorkspaceChangedPayload } from '../plugins/app-hooks'
+
+/** 当前活动工作区（设置已落盘后读取；未配置时为 null/空串） */
+function workspaceChangedPayload(): AppWorkspaceChangedPayload {
+  const harness = settingsStore.get('harness') as
+    { activeWorkspaceId?: number; workspacePath?: string } | undefined
+  return {
+    workspaceId: harness?.activeWorkspaceId ?? null,
+    workspacePath: harness?.workspacePath ?? ''
+  }
+}
 
 /** 系统设置 + 锁屏 IPC */
 export function registerSettingsIpc(): void {
@@ -100,9 +108,11 @@ export function registerSettingsIpc(): void {
       if ('tray' in updates || 'language' in updates) {
         syncTrayState()
       }
-      // 工作区切换（新建 / 选择 / 重建）后，文件监听跟着换根目录
+      // 工作区切换（新建 / 选择 / 重建）后通知订阅方（事件总线）：工作区文件监听的
+      // 换根动作属 harness 插件，core 只负责在设置落盘后发事件——停用插件则无人订阅，
+      // 事件自然没有效果（core 不认识 harness，见 src/main/plugins/app-hooks.ts）
       if ('harness' in updates) {
-        syncWorkspaceWatcher()
+        emitAppEvent(APP_EVENT_WORKSPACE_CHANGED, workspaceChangedPayload())
       }
       logger.info('System settings updated:', Object.keys(updates).join(', '))
       return true

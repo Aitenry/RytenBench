@@ -1,7 +1,6 @@
 import React, { useEffect } from 'react'
 import { HashRouter } from 'react-router-dom'
 import { MessageContext } from '@renderer/contexts/MessageContext'
-import { BuildProgressProvider } from '@renderer/providers/BuildProgressProvider'
 import { NotificationProvider } from '@renderer/contexts/NotificationContext'
 import { composeProviders } from '@renderer/utils/composeProviders'
 import AppContent from '@renderer/components/system/AppContent'
@@ -15,8 +14,8 @@ import { builtinPlugins, vendorModules } from '@renderer/plugin-host/builtin'
 import { loadExternalPlugin } from '@renderer/plugin-host/external-loader'
 
 // shell 常驻 Provider（插件系统之外的应用骨架层）。
-// 插件自己的 Provider（如音乐播放器的 AudioProvider）随插件注册，见 PluginProvidersShell：
-// 停用插件 = 连它的状态一起卸载，外壳组件不再持有任何插件状态。
+// 插件自己的 Provider（如音乐播放器的 AudioProvider、首页的图谱构建进度）随插件注册，
+// 见 PluginProvidersShell：停用插件 = 连它的状态一起卸载，外壳组件不再持有任何插件状态。
 const CoreProviders = composeProviders(
   [
     MessageContext.Provider,
@@ -26,8 +25,7 @@ const CoreProviders = composeProviders(
       }
     }
   ],
-  [NotificationProvider],
-  [BuildProgressProvider]
+  [NotificationProvider]
 )
 
 // 插件 Provider 层：模块级稳定组件，直接内联嵌套渲染插件注册的 Provider。

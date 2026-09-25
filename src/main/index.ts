@@ -1,14 +1,10 @@
 import { app, BrowserWindow, ipcMain, crashReporter } from 'electron'
-import { join } from 'path'
 import { electronApp, optimizer } from '@electron-toolkit/utils'
 import logger from 'electron-log'
-import { initBuiltinPluginIpcs, pushPluginChannels, syncBuiltinPluginIpcs } from './plugins/host'
+import { initPluginHost, pushPluginChannels, syncBuiltinPluginIpcs } from './plugins/host'
 import { registerPluginScheme, registerPluginProtocolHandler } from './plugins/protocol'
 import { setPluginStateSyncHook } from './ipc/plugins'
 import { registerLifecycleHooks } from './lifecycle'
-// 工具结果详情存储目录：属 harness 插件的运行期数据，但配置动作留在 core 启动流程
-// （过渡期唯一的 core → 插件 import，随 core 收尾一并处理；见报告）
-import { configureToolOutputStore } from '../plugins/harness/main/runtime/tool-output-store'
 import { createLoadingWindow } from './windows/loading-window'
 import { createMainWindow } from './windows/main-window'
 import { registerMermaidPreviewIpc } from './windows/mermaid-preview'
@@ -56,13 +52,10 @@ app
     // plugin:// 协议处理器（外部插件静态文件；需在 ready 后注册）
     registerPluginProtocolHandler()
 
-    // 工具结果详情存储目录（内置工具的结果不再随流下发/落库，点开卡片时按需读取）：
-    // 放 userData 而不是工作区——工作区挂载为虚拟 '/'，写进去会污染用户项目
-    configureToolOutputStore(join(app.getPath('userData'), 'tool-output'))
-
-    // 注意：文件改动快照目录（userData/file-history）与工作区文件监听原先在这里启动，
-    // 现随「AI 助手」插件搬进 `src/plugins/harness/main/index.ts` 的 install(ctx)：
-    // 停用该插件就不再配置快照目录、也不再监听工作区。
+    // 注意：文件改动快照目录（userData/file-history）、工具结果详情目录（userData/tool-output）
+    // 与工作区文件监听原先都在这里启动，现随「AI 助手」插件搬进
+    // `src/plugins/harness/main/index.ts` 的 install(ctx)：停用该插件就不再配置这些目录、
+    // 也不再监听工作区（core 启动流程不再 import 任何插件模块）。
 
     app.on('browser-window-created', (_, window) => {
       optimizer.watchWindowShortcuts(window)
@@ -70,8 +63,8 @@ app
       window.webContents.on('did-finish-load', () => pushPluginChannels())
     })
 
-    // 注册 IPC：core 组常驻，插件组（home/planner/music/harness）随启用态注册/注销
-    initBuiltinPluginIpcs()
+    // 注册 IPC：core（window/setting/dialog/provider/plugins）常驻 + 按启用态装载插件宿主
+    initPluginHost()
     // 启停插件时，主进程同名注册/注销对应 IPC 组
     setPluginStateSyncHook((id, enabled) => {
       syncBuiltinPluginIpcs({ [id]: enabled }, [id])

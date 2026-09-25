@@ -77,6 +77,17 @@ interface Api {
     invoke: (channel: string, ...args: unknown[]) => Promise<unknown>
     /** 订阅外部插件事件通道（白名单缓存门控） */
     on: (channel: string, callback: (data: unknown) => void) => () => void
+    /**
+     * 只读诊断：主进程里各插件贡献的宿主生命周期钩子（标签）+ 工作区事件订阅数。
+     * 用于验证「停用插件后 app.preload / app.before-quit / app.renderer-memory-dump
+     * 与工作区订阅都不再存在」（见 src/main/ipc/misc.ts）。
+     */
+    lifecycleHooks: () => Promise<{
+      preload: string[]
+      beforeQuit: string[]
+      memoryDump: string[]
+      workspaceListeners: number
+    }>
   }
   mermaid: {
     /** 全屏窗口预览 SVG（可拖拽/缩放画布） */

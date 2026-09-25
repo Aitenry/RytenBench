@@ -33,7 +33,13 @@ export default function install(ctx) {
       React.createElement('h2', null, 'Demo Plugin'),
       React.createElement(
         'button',
-        { onClick: () => api.invoke('plugin:demo:ping').then(setResult).catch((e) => setResult(String(e))) },
+        {
+          onClick: () =>
+            api
+              .invoke('plugin:demo:ping')
+              .then(setResult)
+              .catch((e) => setResult(String(e)))
+        },
         'Ping'
       ),
       React.createElement('div', { style: { marginTop: 12 } }, result ?? '(not invoked)')

@@ -18,6 +18,7 @@ import ArchiveDocModal from './ArchiveDocModal'
 // 知识图谱按需加载（echarts 体积较大，避免拖慢首屏）
 const GraphView = lazy(() => import('./graph/GraphView'))
 import type { Selection } from '../types'
+import { OPEN_WIKI_GRAPH_EVENT } from '../providers/build-progress'
 
 const HomeView: React.FC = () => {
   const { token } = theme.useToken()
@@ -157,8 +158,8 @@ const HomeView: React.FC = () => {
         setSelection({ kind: 'wiki-graph', wikiId: detail.wikiId })
       }
     }
-    window.addEventListener('open-wiki-graph', handleOpenGraph)
-    return () => window.removeEventListener('open-wiki-graph', handleOpenGraph)
+    window.addEventListener(OPEN_WIKI_GRAPH_EVENT, handleOpenGraph)
+    return () => window.removeEventListener(OPEN_WIKI_GRAPH_EVENT, handleOpenGraph)
   }, [])
 
   /* ── 新建文档：直接创建并打开编辑器（无弹窗，Notion 式交互） ── */

@@ -3,7 +3,7 @@ import type { Plugin } from '@renderer/plugin-host/types'
 import manifest from '../manifest'
 import { homeLocales } from '../locales'
 import GraphSettings from './settings/GraphSettings'
-import BuildProgressOverlay from './providers/BuildProgressOverlay'
+import BuildProgressProvider from './providers/BuildProgressProvider'
 import { publishDocChanged, type DocChangedPayload } from './doc-changed'
 import HomeIndex from './Index'
 
@@ -41,8 +41,9 @@ const plugin: Plugin = {
       order: 40,
       Component: GraphSettings
     })
-    // 图谱构建进度浮层随插件注册：Provider 增删即「插件启用/停用」的重构
-    ctx.use('appProvider').register({ Provider: BuildProgressOverlay, order: 10 })
+    // 图谱构建进度的 Provider + 浮层随插件注册（core 不再持有进度状态，
+    // 也不再认识 `plugin:home:graph-build-*` 这三个通道名——一并收进本插件）
+    ctx.use('appProvider').register({ Provider: BuildProgressProvider, order: 10 })
     // 词条随插件注册：停用即不再注册这些键（原先由中央 locales 无条件打包进首屏）
     ctx.use('i18n').addResources('translation', homeLocales)
     // 文档被 AI 工具改写：订阅宿主事件总线的语义事件（事件源是 harness 插件，

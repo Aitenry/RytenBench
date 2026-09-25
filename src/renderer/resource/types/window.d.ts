@@ -83,6 +83,24 @@ export interface Window {
       getCurrent: (force?: boolean) => Promise<WeatherData>
       onUpdate: (callback: (data: WeatherData) => void) => () => void
     }
+    plugin: {
+      list: () => Promise<unknown[]>
+      setEnabled: (id: string, enabled: boolean) => Promise<unknown[]>
+      install: () => Promise<{ ok: boolean; id?: string; error?: string }>
+      uninstall: (id: string) => Promise<unknown[]>
+      onStateChanged: (callback: () => void) => () => void
+      /** 通用桥：调用插件通道（`plugin:<命名空间>:<channel>`） */
+      invoke: (channel: string, ...args: unknown[]) => Promise<unknown>
+      /** 通用桥：订阅插件事件通道（preload 白名单门控） */
+      on: (channel: string, callback: (data: unknown) => void) => () => void
+      /** 只读诊断：插件贡献的宿主生命周期钩子 + 工作区事件订阅数 */
+      lifecycleHooks: () => Promise<{
+        preload: string[]
+        beforeQuit: string[]
+        memoryDump: string[]
+        workspaceListeners: number
+      }>
+    }
     mermaid: {
       /** 全屏窗口预览 SVG（可拖拽/缩放画布） */
       preview: (svg: string) => Promise<void>

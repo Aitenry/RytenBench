@@ -28,8 +28,9 @@ import {
  *
  * 为什么 graph 从 core 的 IPC 分组移到本插件：图谱的数据、服务与事件全部属于首页
  * （`main/graph/**` + `main/db/mapper/graph.ts`），此前挂在 core 组常驻只是因为渲染层
- * `BuildProgressProvider` 无条件订阅构建进度事件。现在改为「停用即摘除 + 渲染层优雅降级」
- * （见 src/renderer/src/providers/BuildProgressProvider.tsx 的订阅 try/catch）。
+ * 无条件订阅构建进度事件。现在改为「停用即摘除」，且进度 Provider 本身也收进了本插件
+ * （`renderer/providers/BuildProgressProvider.tsx`）——core 既不常驻图谱通道，
+ * 也不再认识这三个通道名。
  */
 export function install(ctx: MainPluginContext): void {
   ctx.registerIpc(todoIpcHandlers)

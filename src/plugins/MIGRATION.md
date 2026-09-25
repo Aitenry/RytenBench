@@ -74,18 +74,41 @@ preload 976 行单文件里装着全部插件的 API 命名空间。渲染层 17
 
 ## 迁移进度（每轮更新，权威版本在 `src/plugins/README.md` 的勾选表）
 
-| 步骤           | 提交      | 内容                                                                                                                                                                                                                                                                                         |
-| -------------- | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 宿主 + 注册表  | `9cf1c55` | 渲染层 plugin-host、注册表、外部插件机制、设置面板                                                                                                                                                                                                                                           |
-| 主进程契约     | `104b51d` | `MainPluginContext`（registerIpc/registerEvent/effect）、命名空间独占、单一路径装载                                                                                                                                                                                                          |
-| music          | `c673c4e` | 19 通道 → `plugin:music:*`；AudioProvider 随插件；新增通用 `bottomBar` 插槽；preload 删 `api.music`                                                                                                                                                                                          |
-| planner        | `449faa0` | 10 通道 → `plugin:planner:*`；DTO 进 shared；`plannerApi` 取代 `api.planner`                                                                                                                                                                                                                 |
-| home 主进程    | `bfc65b8` | 50 通道 → `plugin:home:*`；表/mapper/图谱服务进 main/**；graph 移出 core 组 + 降级防线                                                                                                                                                                                                       |
-| home 渲染层    | `c7fd004` | 视图/组件/props/词条进插件；preload 六命名空间收口（855→665 行）；GraphView 仍独立懒加载 chunk                                                                                                                                                                                               |
-| AI 工具归属    | `ed77eaf` | 工具实现进归属插件（planner/home/music），harness 只做注册表；新增 `ctx.contribute/contributions` + `harness.tool` 契约                                                                                                                                                                      |
-| harness 主进程 | 本轮      | 65 文件搬进 `src/plugins/harness/main/**`（runtime/service/tools/workspace/db）；45 通道 → `plugin:harness:*`（9 个 `workspace-*` 移出 core 组）；15 事件通道 `ctx.registerEvent`；启动接线（快照目录+工作区监听）进 `install` 的 `ctx.effect`；`agent-*`/`main-agent-*` 从 provider.ts 归位 |
-| harness 渲染层 | 本轮      | 58 文件收进 `src/plugins/harness/renderer/**`；`types/harness.ts` 拆进 shared（DTO）/renderer（纯前端）；4 个词条文件进 `locales/**` 随插件注册；preload 五命名空间（harness/agents/mainAgent/mnemon/workspace）删除并改走 `harnessApi`；doc-changed 反向耦合解耦到宿主事件总线              |
-| core 收尾      | 待做      | 删 `builtinIpcGroups`/`ipc-capture`/`builtin-catalog`/preload 残留命名空间；外壳局部状态外置；`BuildProgressProvider` 三个通道名插槽化；6 处过渡期 core → 插件 import                                                                                                                        |
+| 步骤           | 提交      | 内容                                                                                                                                                                                                                                                                                                                                                                           |
+| -------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 宿主 + 注册表  | `9cf1c55` | 渲染层 plugin-host、注册表、外部插件机制、设置面板                                                                                                                                                                                                                                                                                                                             |
+| 主进程契约     | `104b51d` | `MainPluginContext`（registerIpc/registerEvent/effect）、命名空间独占、单一路径装载                                                                                                                                                                                                                                                                                            |
+| music          | `c673c4e` | 19 通道 → `plugin:music:*`；AudioProvider 随插件；新增通用 `bottomBar` 插槽；preload 删 `api.music`                                                                                                                                                                                                                                                                            |
+| planner        | `449faa0` | 10 通道 → `plugin:planner:*`；DTO 进 shared；`plannerApi` 取代 `api.planner`                                                                                                                                                                                                                                                                                                   |
+| home 主进程    | `bfc65b8` | 50 通道 → `plugin:home:*`；表/mapper/图谱服务进 main/**；graph 移出 core 组 + 降级防线                                                                                                                                                                                                                                                                                         |
+| home 渲染层    | `c7fd004` | 视图/组件/props/词条进插件；preload 六命名空间收口（855→665 行）；GraphView 仍独立懒加载 chunk                                                                                                                                                                                                                                                                                 |
+| AI 工具归属    | `ed77eaf` | 工具实现进归属插件（planner/home/music），harness 只做注册表；新增 `ctx.contribute/contributions` + `harness.tool` 契约                                                                                                                                                                                                                                                        |
+| harness 主进程 | 本轮      | 65 文件搬进 `src/plugins/harness/main/**`（runtime/service/tools/workspace/db）；45 通道 → `plugin:harness:*`（9 个 `workspace-*` 移出 core 组）；15 事件通道 `ctx.registerEvent`；启动接线（快照目录+工作区监听）进 `install` 的 `ctx.effect`；`agent-*`/`main-agent-*` 从 provider.ts 归位                                                                                   |
+| harness 渲染层 | 本轮      | 58 文件收进 `src/plugins/harness/renderer/**`；`types/harness.ts` 拆进 shared（DTO）/renderer（纯前端）；4 个词条文件进 `locales/**` 随插件注册；preload 五命名空间（harness/agents/mainAgent/mnemon/workspace）删除并改走 `harnessApi`；doc-changed 反向耦合解耦到宿主事件总线                                                                                                |
+| core 收尾      | 本轮      | 删 `builtinIpcGroups`/`CORE_IPC_GROUP`/`ipc-capture`/`builtin-catalog`（改 `registerCoreIpc()` + `initPluginHost()`）；6 处过渡 import 全部改成贡献点/事件订阅（新增 `plugins/app-hooks.ts` + `plugins/app-events.ts`）；`BuildProgressProvider` 整体收进 home 插件（core 不再认识 `plugin:home:graph-build-*`）；`AppContent.currentKey` 改为路由派生；清死类型并更新契约文档 |
+
+> 进度口径：`node test/audit-plugin-layout.mjs` 已是 **0 未完成项**（退出码 0），
+> 四个内置插件与 core 收尾全部完成。
+
+## core 收尾轮（最后一轮）的落地要点
+
+1. **宿主生命周期钩子 = 贡献点**（不为每处造机制）：
+   - `src/main/plugins/app-hooks.ts`：`APP_PRELOAD` / `APP_BEFORE_QUIT` / `APP_RENDERER_MEMORY_DUMP`
+     三个多值贡献点 + `APP_EVENT_WORKSPACE_CHANGED` 事件名；
+   - `src/main/plugins/app-events.ts`：主进程事件总线（`onAppEvent` / `emitAppEvent`，同步派发、异常吞掉）；
+   - 6 处过渡 import 的去向：加载页预取→`APP_PRELOAD`；渲染内存快照→`APP_RENDERER_MEMORY_DUMP`；
+     Mnemon 退出清理→`APP_BEFORE_QUIT`；工具结果目录→harness `install` 的 `ctx.effect`
+     （停用时 `configureToolOutputStore('')` 降级）；工作区切换→`APP_EVENT_WORKSPACE_CHANGED`；
+     唯一保留的 core→插件依赖是 `database/schema/index.ts` 的 schema re-export（drizzle 约定）。
+2. **停用即不再执行**：贡献随 `ctx.dispose()` 摘除、事件订阅随 `ctx.effect` 回滚，
+   由 `verify-plugin-host.mjs` 的 `app-lifecycle-hooks` 只读探针实测（停用 harness 后三个钩子为 0、
+   工作区订阅为 0，重新启用后回归）。
+3. **core 不再认识插件通道名**：`BuildProgressProvider` / `BuildProgressContext` /
+   `useBuildProgress` / `BuildProgressState` 一并搬进 `src/plugins/home/renderer/providers/**`，
+   由 home 的 `plugin.tsx` 经 `ctx.use('appProvider')` 注册，订阅自己的通道；
+   通知中心仍是 core 服务，`NotificationItem` 收敛为通用结构（插件扩展字段按名读取）。
+4. **外壳局部状态外置**：`AppContent.currentKey` 改为 `useLocation().pathname` 派生，
+   菜单点击不再写 state——启停注册了 `appProvider` 的插件（外壳子树重挂）后高亮不再错位。
 
 ## AI 工具注册契约（用户 2026-09-26 要求；实施细节见 `test/plugin-coupling-notes.md` §5）
 

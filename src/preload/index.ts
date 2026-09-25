@@ -1,4 +1,4 @@
-﻿import { contextBridge, ipcRenderer, webUtils } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import type { LlmProviderInput, LlmProviderConfig } from '../main/database/mapper/provider'
 import type { SystemSettings } from '../main/types/settings'
@@ -152,6 +152,17 @@ const api = {
   },
   plugin: {
     list: () => ipcRenderer.invoke('plugins-list') as Promise<PluginListEntry[]>,
+    /**
+     * 只读诊断：当前主进程里各插件贡献的宿主生命周期钩子（数量 + 标签）
+     * 与工作区事件订阅数。用于验证「停用插件后钩子不再执行」（见 main/ipc/misc.ts）。
+     */
+    lifecycleHooks: () =>
+      ipcRenderer.invoke('app-lifecycle-hooks') as Promise<{
+        preload: string[]
+        beforeQuit: string[]
+        memoryDump: string[]
+        workspaceListeners: number
+      }>,
     setEnabled: (id: string, enabled: boolean) =>
       ipcRenderer.invoke('plugins-set-enabled', id, enabled) as Promise<PluginListEntry[]>,
     install: () =>
