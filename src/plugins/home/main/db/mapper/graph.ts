@@ -1,7 +1,11 @@
 import { and, asc, desc, eq, ilike, inArray, or, sql, type SQL } from 'drizzle-orm'
 import type { PgUpdateSetSource } from 'drizzle-orm/pg-core'
-import { withOrm } from '../orm'
-import { graph_build_jobs, graph_entities, graph_relations } from '../schema'
+import { withOrm } from '../../../../../main/database/orm'
+import {
+  graph_build_jobs,
+  graph_entities,
+  graph_relations
+} from '../../../../../main/database/schema'
 
 // --- 类型定义（全部由 schema 推导） ---
 

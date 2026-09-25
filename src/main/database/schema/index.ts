@@ -14,13 +14,15 @@ export * from './workspace'
 export * from './harness'
 export * from './file-change'
 export * from './agent'
-export * from './todo'
-export * from './wiki'
-export * from './document'
-export * from './graph'
-// 插件表：唯一真源在 src/plugins/<id>/main/db/schema.ts，这里用**相对路径** re-export
+// 插件表：唯一真源在 `src/plugins/<id>/main/db/schema*.ts`，这里用**相对路径** re-export
+// （drizzle-kit 不解析 tsconfig paths，`@plugins/*` 到这里会解析失败）。
 // music 插件表
 export * from '../../../plugins/music/main/db/schema'
 // planner 插件表
 export * from '../../../plugins/planner/main/db/schema'
+// home 插件表（document 依赖 wiki，graph 依赖 wiki，顺序与原先一致）
+export * from '../../../plugins/home/main/db/schema/todo'
+export * from '../../../plugins/home/main/db/schema/wiki'
+export * from '../../../plugins/home/main/db/schema/document'
+export * from '../../../plugins/home/main/db/schema/graph'
 export * from './provider'

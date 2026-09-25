@@ -1,11 +1,12 @@
-import { dialog, ipcMain } from 'electron'
+import { dialog } from 'electron'
 import * as fs from 'fs'
 import mammoth from 'mammoth'
 import TurndownService from 'turndown'
 import { JSDOM } from 'jsdom'
 import { Readability } from '@mozilla/readability'
-import { mainMessages } from '../i18n'
-import { deleteNodePosition } from '../database/mapper/node-position'
+import { mainMessages } from '../../../../main/i18n'
+import type { MainIpcHandlers } from '../../../../main/plugins/context'
+import { deleteNodePosition } from '../db/mapper/node-position'
 import {
   getDocById,
   getAllDocs,
@@ -16,7 +17,7 @@ import {
   getDocIdsByTimeRange,
   deleteDocsByTimeRange,
   DocRow
-} from '../database/mapper/document'
+} from '../db/mapper/document'
 
 /** HTML → Markdown 转换（doc-import 用） */
 function htmlToMarkdown(html: string): string {
@@ -24,79 +25,75 @@ function htmlToMarkdown(html: string): string {
   return turndownService.turndown(html)
 }
 
-/** 文档库 IPC（导入/导出/CRUD/时间范围清理） */
-export function registerDocumentIpc(): void {
-  ipcMain.handle('doc-get-by-id', async (_event, id: number) => {
+/**
+ * 文档库 IPC 处理器表（home 插件的第 2 个域：导入/导出/CRUD/时间范围清理）。
+ *
+ * 通道名一律 `plugin:home:<channel>`；迁移说明：原 `src/main/ipc/document.ts` 的 9 个
+ * 扁平通道（`doc-*`）逐个改名，参数与返回类型不变，只去掉 ipcMain 的 `_event` 形参。
+ */
+export const documentIpcHandlers: MainIpcHandlers = {
+  'plugin:home:doc-get-by-id': async (id: number) => {
     try {
       return await getDocById(id)
     } catch (error) {
-      console.error('Error in doc-get-by-id:', error)
+      console.error('Error in plugin:home:doc-get-by-id:', error)
       throw error
     }
-  })
+  },
 
-  ipcMain.handle(
-    'doc-get-all',
-    async (_event, page?: number, pageSize?: number, excludeWikiId?: number, search?: string) => {
-      try {
-        return await getAllDocs(page, pageSize, excludeWikiId, search)
-      } catch (error) {
-        console.error('Error in doc-get-all:', error)
-        throw error
-      }
+  'plugin:home:doc-get-all': async (
+    page?: number,
+    pageSize?: number,
+    excludeWikiId?: number,
+    search?: string
+  ) => {
+    try {
+      return await getAllDocs(page, pageSize, excludeWikiId, search)
+    } catch (error) {
+      console.error('Error in plugin:home:doc-get-all:', error)
+      throw error
     }
-  )
+  },
 
-  ipcMain.handle(
-    'doc-page-get',
-    async (_event, query: string, page?: number, pageSize?: number) => {
-      try {
-        return await getDocPage(query, page, pageSize)
-      } catch (error) {
-        console.error('Error in doc-page-get:', error)
-        throw error
-      }
+  'plugin:home:doc-page-get': async (query: string, page?: number, pageSize?: number) => {
+    try {
+      return await getDocPage(query, page, pageSize)
+    } catch (error) {
+      console.error('Error in plugin:home:doc-page-get:', error)
+      throw error
     }
-  )
+  },
 
-  ipcMain.handle(
-    'doc-add',
-    async (
-      _event,
-      doc: Omit<DocRow, 'id' | 'created_at' | 'updated_at'> & {
-        image?: string | null
-        content?: string | null
-      }
-    ) => {
-      try {
-        return await addDoc(doc)
-      } catch (error) {
-        console.error('Error in doc-add:', error)
-        throw error
-      }
+  'plugin:home:doc-add': async (
+    doc: Omit<DocRow, 'id' | 'created_at' | 'updated_at'> & {
+      image?: string | null
+      content?: string | null
     }
-  )
-
-  ipcMain.handle(
-    'doc-update',
-    async (
-      _event,
-      id: number,
-      updates: Partial<Omit<DocRow, 'id' | 'created_at'>> & {
-        image?: string | null
-        content?: string | null
-      }
-    ) => {
-      try {
-        return await updateDoc(id, updates)
-      } catch (error) {
-        console.error('Error in doc-update:', error)
-        throw error
-      }
+  ) => {
+    try {
+      return await addDoc(doc)
+    } catch (error) {
+      console.error('Error in plugin:home:doc-add:', error)
+      throw error
     }
-  )
+  },
 
-  ipcMain.handle('doc-delete', async (_event, id: number) => {
+  'plugin:home:doc-update': async (
+    id: number,
+    updates: Partial<Omit<DocRow, 'id' | 'created_at'>> & {
+      image?: string | null
+      content?: string | null
+    }
+  ) => {
+    try {
+      return await updateDoc(id, updates)
+    } catch (error) {
+      console.error('Error in plugin:home:doc-update:', error)
+      throw error
+    }
+  },
+
+  'plugin:home:doc-delete': async (id: number) => {
     try {
       const result = await deleteDoc(id)
       deleteNodePosition(`doc-${id}`).catch((err) =>
@@ -104,12 +101,12 @@ export function registerDocumentIpc(): void {
       )
       return result
     } catch (error) {
-      console.error('Error in doc-delete:', error)
+      console.error('Error in plugin:home:doc-delete:', error)
       throw error
     }
-  })
+  },
 
-  ipcMain.handle('doc-delete-by-time-range', async (_event, startTime: string, endTime: string) => {
+  'plugin:home:doc-delete-by-time-range': async (startTime: string, endTime: string) => {
     try {
       // 先查询将要被删除的文档 ID，用于清理节点位置
       const deletedIds = await getDocIdsByTimeRange(startTime, endTime)
@@ -125,12 +122,12 @@ export function registerDocumentIpc(): void {
 
       return result
     } catch (error) {
-      console.error('Error in doc-delete-by-time-range:', error)
+      console.error('Error in plugin:home:doc-delete-by-time-range:', error)
       throw error
     }
-  })
+  },
 
-  ipcMain.handle('doc-import', async () => {
+  'plugin:home:doc-import': async () => {
     try {
       const m = mainMessages().dialog
       const result = await dialog.showOpenDialog({
@@ -187,12 +184,12 @@ export function registerDocumentIpc(): void {
 
       return { title, content }
     } catch (error) {
-      console.error('Error in doc-import:', error)
+      console.error('Error in plugin:home:doc-import:', error)
       throw error
     }
-  })
+  },
 
-  ipcMain.handle('doc-export', async (_event, id: number) => {
+  'plugin:home:doc-export': async (id: number) => {
     try {
       const doc = await getDocById(id)
       if (!doc) {
@@ -211,8 +208,10 @@ export function registerDocumentIpc(): void {
       fs.writeFileSync(result.filePath, doc.content || '', 'utf-8')
       return true
     } catch (error) {
-      console.error('Error in doc-export:', error)
+      console.error('Error in plugin:home:doc-export:', error)
       throw error
     }
-  })
+  }
 }
+
+export default documentIpcHandlers

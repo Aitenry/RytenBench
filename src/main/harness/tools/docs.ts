@@ -29,7 +29,7 @@ async function searchDocsHandler(params: {
   page?: number
   pageSize?: number
 }): Promise<string> {
-  const { getAllDocs } = await import('../../database/mapper/document')
+  const { getAllDocs } = await import('../../../plugins/home/main/db/mapper/document')
   const result = await getAllDocs(params.page ?? 1, params.pageSize ?? 10, undefined, params.query)
   const tr = getDocsToolTexts()
   if (!result.items.length) return mainFormat(tr.docs.searchEmpty, { query: params.query })
@@ -52,7 +52,7 @@ async function searchDocsHandler(params: {
 }
 
 async function getDocHandler(params: { docId: number; headingId?: string }): Promise<string> {
-  const { getDocById } = await import('../../database/mapper/document')
+  const { getDocById } = await import('../../../plugins/home/main/db/mapper/document')
   const doc = await getDocById(params.docId)
   const tr = getDocsToolTexts()
   if (!doc) return mainFormat(tr.docs.notFound, { docId: params.docId })
@@ -120,7 +120,7 @@ async function getDocHandler(params: { docId: number; headingId?: string }): Pro
 }
 
 async function getDocTocHandler(params: { docId: number }): Promise<string> {
-  const { getDocById } = await import('../../database/mapper/document')
+  const { getDocById } = await import('../../../plugins/home/main/db/mapper/document')
   const doc = await getDocById(params.docId)
   const tr = getDocsToolTexts()
   if (!doc) return mainFormat(tr.docs.notFound, { docId: params.docId })
@@ -179,7 +179,7 @@ async function createDocHandler(params: {
   tags?: string
   content?: string
 }): Promise<string> {
-  const { addDoc } = await import('../../database/mapper/document')
+  const { addDoc } = await import('../../../plugins/home/main/db/mapper/document')
   const id = await addDoc({
     title: params.title,
     summary: params.summary ?? null,
@@ -197,7 +197,7 @@ async function updateDocHandler(params: {
   tags?: string
   content?: string
 }): Promise<string> {
-  const { updateDoc, getDocById } = await import('../../database/mapper/document')
+  const { updateDoc, getDocById } = await import('../../../plugins/home/main/db/mapper/document')
   const doc = await getDocById(params.docId)
   const tr = getDocsToolTexts()
   if (!doc) return mainFormat(tr.docs.notFound, { docId: params.docId })
@@ -216,7 +216,7 @@ async function updateDocHandler(params: {
 }
 
 async function deleteDocHandler(params: { docId: number }): Promise<string> {
-  const { deleteDoc, getDocById } = await import('../../database/mapper/document')
+  const { deleteDoc, getDocById } = await import('../../../plugins/home/main/db/mapper/document')
   const doc = await getDocById(params.docId)
   const tr = getDocsToolTexts()
   if (!doc) return mainFormat(tr.docs.notFound, { docId: params.docId })

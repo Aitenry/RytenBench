@@ -1,16 +1,17 @@
 import { ElectronAPI } from '@electron-toolkit/preload'
-import { TodoItemRow } from '../main/database/mapper/todo'
+// home 插件已收进 src/plugins/home/main/**：行类型 import 改指新位置（纯路径搬运）
+import { TodoItemRow } from '../plugins/home/main/db/mapper/todo'
 import type {
   TaskDependencyRow,
   TaskWithDependencies
-} from '../main/database/mapper/todo_dependencies'
+} from '../plugins/home/main/db/mapper/todo-dependencies'
 import {
   DocRow,
   DocListItem,
   DocWithContent,
   PaginatedResult
-} from '../main/database/mapper/document'
-import { WikiRow, WikiDirectoryRow } from '../main/database/mapper/wiki'
+} from '../plugins/home/main/db/mapper/document'
+import { WikiRow, WikiDirectoryRow } from '../plugins/home/main/db/mapper/wiki'
 import { HarnessTopicRow, HarnessDialogueRow } from '../main/database/mapper/harness'
 import type { LlmProviderInput, LlmProviderConfig } from '../main/database/mapper/provider'
 import type { SystemSettings } from '../main/types/settings'

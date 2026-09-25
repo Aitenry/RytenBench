@@ -211,10 +211,45 @@ export const BuildProgressProvider: React.FC<BuildProgressProviderProps> = ({ ch
     })
   }
 
+  /**
+   * 订阅图谱构建事件（主进程 → 渲染层）。
+   *
+   * 迁移说明：图谱通道已随 home 插件收进 `plugin:home:graph-build-*`，并随插件启停注册/摘除。
+   * 本 Provider 是无条件挂载的外壳 Provider，**停用 home 插件时通道不存在**：
+   * - preload 的 `api.graph.onBuild*` 直接 `ipcRenderer.on`，通常不抛；
+   * - 走通用桥 `window.api.plugin.on` 时白名单会拒（抛「插件通道未启用」）。
+   * 旧代码让异常从 useEffect 逃逸 → Provider 卸载 → 整棵应用树崩掉（白屏）。
+   * 这里统一 try/catch，订阅失败只是「没有进度事件」，不再影响外壳渲染。
+   */
   useEffect(() => {
-    const cleanupProgress = (window as unknown as Window).api.graph.onBuildProgress(handleProgress)
-    const cleanupComplete = (window as unknown as Window).api.graph.onBuildComplete(handleComplete)
-    const cleanupError = (window as unknown as Window).api.graph.onBuildError(handleError)
+    const api = (window as unknown as Window).api
+    const subscribe = <T,>(
+      label: string,
+      run: (cb: (payload: T) => void) => () => void,
+      cb: (payload: T) => void
+    ): (() => void) => {
+      try {
+        return run(cb)
+      } catch (error) {
+        console.warn(
+          `[BuildProgress] 订阅 ${label} 失败（home 插件可能未启用），已降级为空闲：`,
+          error
+        )
+        return () => {}
+      }
+    }
+
+    const cleanupProgress = subscribe(
+      'graph-build-progress',
+      api.graph.onBuildProgress,
+      handleProgress
+    )
+    const cleanupComplete = subscribe(
+      'graph-build-complete',
+      api.graph.onBuildComplete,
+      handleComplete
+    )
+    const cleanupError = subscribe('graph-build-error', api.graph.onBuildError, handleError)
 
     return () => {
       cleanupProgress()

@@ -1,9 +1,9 @@
-import type { TodoItemRow } from '../../../main/database/mapper/todo'
+import type { TodoItemRow } from '../../../plugins/home/main/db/mapper/todo'
 import type {
   WikiRow as WikiRowFromDb,
   WikiDirectoryRow as WikiDirectoryRowFromDb
-} from '../../../main/database/mapper/wiki'
-import type { DocListItem as DocListItemFromDb } from '../../../main/database/mapper/document'
+} from '../../../plugins/home/main/db/mapper/wiki'
+import type { DocListItem as DocListItemFromDb } from '../../../plugins/home/main/db/mapper/document'
 
 /** 知识库行数据（复用主进程 mapper 推导出的行类型，避免两处手工维护） */
 export type WikiRow = WikiRowFromDb

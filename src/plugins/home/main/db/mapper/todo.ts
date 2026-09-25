@@ -1,8 +1,8 @@
 import { asc, count, desc, eq, ne, sql } from 'drizzle-orm'
 import type { PgUpdateSetSource } from 'drizzle-orm/pg-core'
 import logger from 'electron-log'
-import { withOrm } from '../orm'
-import { todo_items } from '../schema'
+import { withOrm } from '../../../../../main/database/orm'
+import { todo_items } from '../../../../../main/database/schema'
 
 /** 待办事项行（字段由 schema 推导） */
 export type TodoItemRow = typeof todo_items.$inferSelect

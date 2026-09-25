@@ -1,5 +1,5 @@
-import { getDocById } from '../../database/mapper/document'
-import { getDirectoriesByWikiId, getDocsByDirectoryId } from '../../database/mapper/wiki'
+import { getDocById } from '../../db/mapper/document'
+import { getDirectoriesByWikiId, getDocsByDirectoryId } from '../../db/mapper/wiki'
 import { assembleDocContent } from '../utils'
 
 export async function collectWikiDocs(

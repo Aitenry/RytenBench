@@ -10,6 +10,9 @@ import {
   unique
 } from 'drizzle-orm/pg-core'
 
+// 迁移说明：本文件原为 src/main/database/schema/todo.ts，迁到 home 插件后由 core 的
+// database/schema/index.ts 用相对路径 re-export（表结构未改，纯搬家）。
+
 /** 待办事项表（全局数据，不按工作区隔离） */
 export const todo_items = pgTable(
   'todo_items',

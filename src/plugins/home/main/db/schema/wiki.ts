@@ -1,5 +1,6 @@
 import { pgTable, serial, text, timestamp, integer, index, foreignKey } from 'drizzle-orm/pg-core'
-import { images } from './common'
+// 迁移说明：core 的 images 表（知识库封面共用）用相对路径 import（drizzle-kit 不解析 paths）
+import { images } from '../../../../../main/database/schema/common'
 
 /** 知识库表（全局数据，不按工作区隔离） */
 export const wiki = pgTable(

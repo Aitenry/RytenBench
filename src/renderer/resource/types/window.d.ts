@@ -1,13 +1,14 @@
-import { TodoItemRow } from '../../../main/database/mapper/todo'
-import { DocRow, DocListItem, DocWithContent } from '../../../main/database/mapper/document'
-import { WikiRow, WikiDirectoryRow } from '../../../main/database/mapper/wiki'
+// home 插件已收进 src/plugins/home/main/**：行类型 import 改指新位置（纯路径搬运，渲染层不动）
+import { TodoItemRow } from '../../../plugins/home/main/db/mapper/todo'
+import { DocRow, DocListItem, DocWithContent } from '../../../plugins/home/main/db/mapper/document'
+import { WikiRow, WikiDirectoryRow } from '../../../plugins/home/main/db/mapper/wiki'
 import {
   HarnessTopicRow,
   HarnessDialogueRow,
   HarnessDialogueUsageRow,
   WorkspaceRow
 } from '../../../main/database/mapper/harness'
-import { GraphEntity, GraphBuildJob, GraphData } from '../../../main/database/mapper/graph'
+import { GraphEntity, GraphBuildJob, GraphData } from '../../../plugins/home/main/db/mapper/graph'
 import { Lock } from '@renderer/types/settings'
 import { LlmProviderInput, LlmProviderConfig } from '../../../main/database/mapper/provider'
 import { AgentConfigRow, AgentConfigInput } from '../../../main/database/mapper/agent'
@@ -552,7 +553,8 @@ export interface Window {
         relationsAdded: number
       }>
       getProcessedDocIds: (wikiId: number) => Promise<number[]>
-      buildGraph: (wikiId: number, config?: Record<string, unknown>) => void
+      /** 迁移说明：主进程侧改为普通 invoke 通道（原 ipcMain.on），返回 promise */
+      buildGraph: (wikiId: number, config?: Record<string, unknown>) => Promise<void>
       onBuildProgress: (
         callback: (progress: {
           wikiId: number

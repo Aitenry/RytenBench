@@ -1,7 +1,7 @@
 import { eq, sql } from 'drizzle-orm'
 import logger from 'electron-log'
-import { withOrm, type Orm } from '../orm'
-import { node_positions } from '../schema'
+import { withOrm, type Orm } from '../../../../../main/database/orm'
+import { node_positions } from '../../../../../main/database/schema'
 
 /** 画布节点坐标行（字段由 schema 推导） */
 export type NodePosition = typeof node_positions.$inferSelect

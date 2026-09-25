@@ -1,5 +1,5 @@
 import { BaseChatModel } from '@langchain/core/language_models/chat_models'
-import { GraphData } from '../database/mapper/graph'
+import { GraphData } from '../db/mapper/graph'
 import type { BuildConfig, ProgressCallback } from './types'
 import { createCachedInvoke, type ServiceContext } from './service/llm-invoke'
 import { buildGraph as buildGraphFn } from './service/build-graph'

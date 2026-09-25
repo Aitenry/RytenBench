@@ -9,8 +9,10 @@ import { getDocsToolTexts } from '../../i18n/tool-results-docs'
 // ============================================================================
 
 async function searchGraphHandler(params: { wikiId?: number; query: string }): Promise<string> {
-  const { getAllWikis } = await import('../../database/mapper/wiki')
-  const { searchEntities } = await import('../../database/mapper/graph')
+  // 过渡期直读（跨插件耦合）：document/wiki/graph 的 mapper 已随 home 插件搬进
+  // src/plugins/home/main/**；harness 应经 provide/inject 取用，留给 harness 那轮统一处理。
+  const { getAllWikis } = await import('../../../plugins/home/main/db/mapper/wiki')
+  const { searchEntities } = await import('../../../plugins/home/main/db/mapper/graph')
   const tr = getDocsToolTexts()
   const wikis = params.wikiId ? [{ id: params.wikiId }] : (await getAllWikis()).items
   const lines: string[] = [mainFormat(tr.graph.searchHeader, { query: params.query })]

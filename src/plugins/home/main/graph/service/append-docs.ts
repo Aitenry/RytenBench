@@ -7,8 +7,8 @@ import {
   getBuildJobByWikiId,
   getRelationsByWikiId,
   updateBuildJob
-} from '../../database/mapper/graph'
-import { getDocById } from '../../database/mapper/document'
+} from '../../db/mapper/graph'
+import { getDocById } from '../../db/mapper/document'
 import {
   splitByMarkdownHeaders,
   filterEntitiesInText,
@@ -26,7 +26,7 @@ import type { ServiceContext } from './llm-invoke'
 import { extractEntitiesAndRelations, gleanEntities } from './extraction'
 import { mergeEntities } from './merging'
 import { extractIncrementalCrossChunkRelations } from './cross-chunk'
-import { mainFormat, mainMessages } from '../../i18n'
+import { mainFormat, mainMessages } from '../../../../../main/i18n'
 
 export async function appendDocs(
   ctx: ServiceContext,

@@ -1,7 +1,7 @@
 import { and, asc, eq, getTableColumns, or } from 'drizzle-orm'
 import logger from 'electron-log'
-import { withOrm } from '../orm'
-import { task_dependencies, todo_items } from '../schema'
+import { withOrm } from '../../../../../main/database/orm'
+import { task_dependencies, todo_items } from '../../../../../main/database/schema'
 import type { TodoItemRow } from './todo'
 
 /** 待办依赖关系行（字段由 schema 推导） */

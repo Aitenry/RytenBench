@@ -16,7 +16,7 @@ async function listTodosHandler(params: {
 }): Promise<string> {
   const tr = getPlannerToolTexts()
   const { getAllTodoItems, getTodoItemsPaginated, getTodoItemsByStatus, getTodoItemsByPriority } =
-    await import('../../database/mapper/todo')
+    await import('../../../plugins/home/main/db/mapper/todo')
   const { page = 1, pageSize = 20, status, priority } = params
   const safePage = Math.max(1, Math.floor(page))
   const safePageSize = Math.max(1, Math.floor(pageSize))
@@ -84,7 +84,7 @@ async function addTodoHandler(params: {
   category?: string
 }): Promise<string> {
   const tr = getPlannerToolTexts()
-  const { addTodoItem, getTodoItemById } = await import('../../database/mapper/todo')
+  const { addTodoItem, getTodoItemById } = await import('../../../plugins/home/main/db/mapper/todo')
   const newId = await addTodoItem({
     title: params.title,
     content: params.content || '',
@@ -115,7 +115,8 @@ async function updateTodoHandler(params: {
   category?: string
 }): Promise<string> {
   const tr = getPlannerToolTexts()
-  const { updateTodoItem, getTodoItemById } = await import('../../database/mapper/todo')
+  const { updateTodoItem, getTodoItemById } =
+    await import('../../../plugins/home/main/db/mapper/todo')
   const rows = await getTodoItemById(params.id)
   if (!rows.length) return mainFormat(tr.todos.notFound, { id: params.id })
   const existing = rows[0]
@@ -133,7 +134,8 @@ async function updateTodoHandler(params: {
 
 async function deleteTodoHandler(params: { id: number }): Promise<string> {
   const tr = getPlannerToolTexts()
-  const { deleteTodoItem, getTodoItemById } = await import('../../database/mapper/todo')
+  const { deleteTodoItem, getTodoItemById } =
+    await import('../../../plugins/home/main/db/mapper/todo')
   const rows = await getTodoItemById(params.id)
   if (!rows.length) return mainFormat(tr.todos.notFound, { id: params.id })
   await deleteTodoItem(params.id)

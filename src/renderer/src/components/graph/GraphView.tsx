@@ -17,7 +17,7 @@ import GraphCanvas from './GraphCanvas'
 import EntityDetail from './EntityDetail'
 import GraphToolbar from './GraphToolbar'
 import DocumentPreviewModal from '@renderer/components/document/DocumentPreviewModal'
-import type { DocWithContent } from '../../../../main/database/mapper/document'
+import type { DocWithContent } from '../../../../plugins/home/main/db/mapper/document'
 
 const GraphView: React.FC<GraphViewProps> = ({
   selectedWiki,
@@ -216,14 +216,16 @@ const GraphView: React.FC<GraphViewProps> = ({
       okText: t('graph.build.confirmOk'),
       cancelText: t('common.action.cancel'),
       okButtonProps: { danger: true },
-      onOk: () => {
+      onOk: async () => {
         const messageKey = 'graph-build-trigger'
         viewMessage(messageKey, 'loading', t('graph.build.starting'))
 
         startBuild(selectedWiki.id, selectedWiki.title)
 
+        // 迁移说明：主进程的 graph-build-start 由 ipcMain.on 改为 ctx.registerIpc（invoke），
+        // 失败走 promise rejection；同时 home 插件停用时该通道无处理器，这里必须捕获。
         try {
-          ;(window as unknown as Window).api.graph.buildGraph(selectedWiki.id, { force: true })
+          await (window as unknown as Window).api.graph.buildGraph(selectedWiki.id, { force: true })
           viewMessage(messageKey, 'success', t('graph.build.started'), 2)
         } catch (error) {
           viewMessage(messageKey, 'error', t('graph.build.startFailed', { reason: String(error) }))

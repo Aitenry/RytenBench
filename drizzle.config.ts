@@ -28,7 +28,11 @@ export default defineConfig({
   schema: [
     './src/main/database/schema',
     './src/plugins/music/main/db/schema.ts',
-    './src/plugins/planner/main/db/schema.ts'
+    './src/plugins/planner/main/db/schema.ts',
+    './src/plugins/home/main/db/schema/todo.ts',
+    './src/plugins/home/main/db/schema/wiki.ts',
+    './src/plugins/home/main/db/schema/document.ts',
+    './src/plugins/home/main/db/schema/graph.ts'
   ],
   out: './drizzle',
   dbCredentials: {

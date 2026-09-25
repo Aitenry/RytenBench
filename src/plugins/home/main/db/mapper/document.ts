@@ -14,8 +14,13 @@ import {
 } from 'drizzle-orm'
 import type { PgUpdateSetSource } from 'drizzle-orm/pg-core'
 import logger from 'electron-log'
-import { withOrm, type Orm } from '../orm'
-import { documents, documents_content, directory_documents, images } from '../schema'
+import { withOrm, type Orm } from '../../../../../main/database/orm'
+import {
+  documents,
+  documents_content,
+  directory_documents,
+  images
+} from '../../../../../main/database/schema'
 import { saveImage } from './image'
 
 type DocumentsTableRow = typeof documents.$inferSelect

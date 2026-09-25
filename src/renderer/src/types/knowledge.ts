@@ -4,7 +4,7 @@ import type {
   GraphRelation as GraphRelationFromDb,
   GraphData as GraphDataFromDb,
   GraphBuildJob as BuildJobFromDb
-} from '../../../main/database/mapper/graph'
+} from '../../../plugins/home/main/db/mapper/graph'
 
 // 图谱相关行类型一律复用主进程 mapper（由 drizzle schema 推导），避免渲染层手抄导致漂移
 export type GraphEntity = GraphEntityFromDb

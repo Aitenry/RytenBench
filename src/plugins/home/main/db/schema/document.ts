@@ -8,7 +8,9 @@ import {
   foreignKey,
   unique
 } from 'drizzle-orm/pg-core'
-import { images } from './common'
+// 迁移说明：core 的 images 表（文档配图共用）用**相对路径** import——drizzle-kit 不解析
+// tsconfig paths；home 自己的表由 core 的 database/schema/index.ts 反向 re-export 汇总。
+import { images } from '../../../../../main/database/schema/common'
 import { wiki_directories } from './wiki'
 
 /** 文档表（全局数据，不按工作区隔离） */

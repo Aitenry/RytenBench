@@ -12,7 +12,10 @@ import {
 } from 'drizzle-orm'
 import type { PgUpdateSetSource } from 'drizzle-orm/pg-core'
 import logger from 'electron-log'
-import { withOrm } from '../orm'
+import { withOrm } from '../../../../../main/database/orm'
+// 迁移说明：core 的表统一经 core 的 schema 汇总入口取用（含 music_folders/music_tracks——
+// 它们归 music 插件所有，wiki 只在自己包里读「已入库」的歌单行；跨插件 provide/inject
+// 留给 harness 那轮统一处理）。
 import {
   directory_documents,
   documents,
@@ -22,7 +25,7 @@ import {
   wiki,
   wiki_directories,
   documents_content
-} from '../schema'
+} from '../../../../../main/database/schema'
 import { saveImage } from './image'
 
 type WikiTableRow = typeof wiki.$inferSelect

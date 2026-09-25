@@ -10,7 +10,7 @@ import {
   GraphData,
   updateBuildJob,
   persistEntityMerges
-} from '../../database/mapper/graph'
+} from '../../db/mapper/graph'
 import { splitByMarkdownHeaders, filterEntitiesInText, applyHybridConfidence } from '../utils'
 import type {
   BuildConfig,
@@ -24,7 +24,7 @@ import { collectWikiDocs } from './collect-docs'
 import { extractEntitiesAndRelations, gleanEntities } from './extraction'
 import { mergeEntities } from './merging'
 import { extractIncrementalCrossChunkRelations } from './cross-chunk'
-import { mainFormat, mainMessages } from '../../i18n'
+import { mainFormat, mainMessages } from '../../../../../main/i18n'
 
 export async function buildGraph(
   ctx: ServiceContext,

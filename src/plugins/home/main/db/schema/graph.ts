@@ -9,6 +9,7 @@ import {
   foreignKey,
   unique
 } from 'drizzle-orm/pg-core'
+// 迁移说明：图谱表挂在知识库下（同一插件，同目录内相对 import）
 import { wiki } from './wiki'
 
 /** 图谱构建任务状态 */

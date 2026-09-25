@@ -1,7 +1,7 @@
 import * as crypto from 'crypto'
 import { eq } from 'drizzle-orm'
-import { withOrm } from '../orm'
-import { images } from '../schema'
+import { withOrm } from '../../../../../main/database/orm'
+import { images } from '../../../../../main/database/schema'
 
 async function saveImage(dataUrl: string | null): Promise<string | null> {
   if (!dataUrl) return null
