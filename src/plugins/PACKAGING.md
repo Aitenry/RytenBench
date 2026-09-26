@@ -1,9 +1,41 @@
 # 插件打包与物理卸载（方案 B，2026-09-26 用户选定）
 
 > 用户要求：「内置的插件，可以完全卸载的形式，不是直接用开关形式」。
-> 卸载口径（用户澄清）：**卸载时询问是否保留数据——选择「保留数据」就不卸载；选择「不保留」才卸载并清除该插件的数据。**
+> 卸载口径（用户澄清两轮后定稿）：**卸载 = 移除插件代码；「同时删除该插件的全部数据」是一个勾选项**
+> （不勾 = 数据留在库里，重装后仍可用）。
 >
-> 本文是分轮实施的方案书。第一步（打包管线 `scripts/build-plugins.mjs`）已完成并验证。
+> 本文是分轮实施的方案书。P1~P5 已完成（见文末表格）。
+
+## 独立插件仓库（P5 之后，2026-09-26 用户选定）
+
+planner 与音乐**不再随应用分发**：它们搬到了独立仓库
+[`Aitenry/ryten-plugins`](https://github.com/Aitenry/ryten-plugins)（公开），当作第三方插件安装。
+
+```
+插件仓库                                   应用侧
+plugins/<id>/manifest.ts …（源码）         设置 → 插件 →「从插件仓库安装」
+  │  CI：node scripts/build.mjs --tag v…      │  读 <repo>/plugins.json（索引，含 sha256）
+  ▼                                            │  下载 <repo>/releases/download/<tag>/<id>-<v>.zip
+dist/<id>/{plugin.json,main.cjs,             │  校验 sha256 → 解压 → 校验 plugin.json
+           renderer.mjs,chunk-*.mjs}          ▼  装进 userData/plugins/<id>/ → 启用并装载
+dist/<id>-<version>.zip  →  GitHub Release
+plugins.json（索引，提交回 main）
+```
+
+- **安装实现**：`src/main/plugins/github.ts`（索引 → 下载 → sha256 → 解压（拒绝目录穿越/子目录）→ 安装/升级）。
+  地址可用 `RB_PLUGINS_REPO` 覆盖（离线工装用插件仓库自带的 fixture 服务器指向本机 HTTP）。
+- **命名**：独立插件的目录名与 id 一致（`task-planner` / `music-player`），IPC 命名空间随之成为
+  `plugin:task-planner:*` / `plugin:music-player:*`；**数据库表名不变**（`planner_tasks` / `music_folders`），
+  所以老用户的数据在「内置 → 独立」这次搬家前后是同一批行。
+- **表结构归插件**：core 的 `database/schema` 与 `drizzle.config.ts` 不再包含这两组表，插件装载时
+  用自带 DDL（`main/db/ddl.ts`）幂等建表；mapper / purge 都先 `await schemaReady`。
+  老库（表已存在）→ `IF NOT EXISTS` 全部命中；新库 → 由插件建表。
+  ⚠️ drizzle 迁移 `0007` 的 `DROP TABLE` 是**手工删掉的**（见该文件注释）：照原样执行会删光用户数据。
+- **升级清理**：`plugins.json.seeded` 记录「本应用铺过哪些 id」，`installer.removeRetiredBundledPlugins()`
+  据此删掉 `planner` / `music` 的旧铺包（它们在新宿主上装载必然失败），**不碰数据、不碰用户自装的插件**。
+- **第三方插件不再借用宿主命名空间**：菜单文案 / 设置页签文案由插件自己的词条提供
+  （`planner.menu.title` / `music.menu.title` / `musicSettings.nav`），宿主不再为它们保留
+  `shell.menu.*` / `settings.nav.*` 条目。
 
 ## 目标形态
 
@@ -12,12 +44,13 @@
 resources/plugins/<id>/      ──▶   userData/plugins/<id>/
   plugin.json                        plugin.json
   main.cjs                           main.cjs
-  renderer.mjs                       renderer.mjs
+  renderer.mjs / chunk-*.mjs         renderer.mjs / chunk-*.mjs
 ```
 
-- **运行时不再有「内置插件」**：应用里没有对插件代码的静态 import，所有插件（含这四个）都从
-  `userData/plugins/<id>/` 按现有外部插件链路加载（`loadExternalMain` + `plugin://` 渲染模块）。
-- 「内置」只表示**随应用分发、可随时重装**；「第三方」是用户自己放进去的。二者在列表里区分，卸载行为一致
+- **运行时不再有「内置插件」**：应用里没有对插件代码的静态 import，所有插件都从
+  `userData/plugins/<id>/` 按同一条外部插件链路加载（`loadExternalMain` + `plugin://` 渲染模块）。
+- 「内置」只表示**随应用分发、可随时重装**（现在只有 `home` / `harness`）；「第三方」是用户装的
+  （含从插件仓库安装的 `task-planner` / `music-player`）。二者在列表里区分，卸载行为一致
   （删目录），区别是内置的可以从应用包重新安装。
 - 插件的数据**不在插件目录里**（表在 core 的 schema、行在同一个 PGlite 库），所以「卸载」与「清数据」是两件事，
   分开询问（见下）。
@@ -25,14 +58,23 @@ resources/plugins/<id>/      ──▶   userData/plugins/<id>/
 ## 宿主运行时契约（方案的核心约束）
 
 插件包必须**通过宿主拿 core 与宿主 UI 的能力**，否则会打出第二份 PGlite 连接 / React / i18n。
-做法：打包时把插件源码里指向 core（`../../main/**`）与宿主 UI（`@renderer/**`）的导入改写成 `@host/**` 外部依赖，
-**源码一行不用改**（仍按真实 core 类型做 typecheck），运行期由宿主注入同一份模块实例。
+做法：打包时把指向 core（`../../main/**`）与宿主 UI（`@renderer/**`）的导入改写成 `@host/**` 外部依赖，
+运行期由宿主注入同一份模块实例。
 
-打包后统计出的接口面（去重，2026-09-26 实测）：
+- **应用内的内置插件**（`home` / `harness`）：源码照常写相对路径，构建时自动改写，**源码一行不用改**
+  （仍按真实 core 类型做 typecheck）。
+- **独立仓库里的插件**（`task-planner` / `music-player`）：源码直接写 `@host/main/**`、`@host/renderer/**`
+  （仓库里没有 core 源码可指），宿主 API 的类型由仓库自己的 `host.d.ts` 声明。
 
-**主进程 20 个**：`@host/main/` 下的 `context`（settingsStore）、`database/{instance,orm,schema,schema/common,workspace-context}`、
-`database/mapper/provider`、`i18n`、`i18n/tool-results-{agent,docs,fs,planner}`、`plugins/{app-events,app-hooks,contributions,tool-contract}`、
-`provider/{cache,service}`、`safe-send`、`shared/weather-utils`。
+打包后统计出的接口面（去重，2026-09-26 实测；契约以 `src/main/plugins/runtime.ts` 与
+`src/renderer/src/plugin-host/host-ui.ts` 的表为准，`node test/audit-plugin-host-contract.mjs` 会核对）：
+
+**主进程 21 个**：`@host/main/` 下的 `context`（settingsStore）、`database/{instance,orm,schema,schema/common,schema/workspace,workspace-context}`、
+`database/mapper/provider`、`i18n`、`i18n/tool-results-{agent,docs,fs,todos}`、`plugins/{app-events,app-hooks,contributions,tool-contract}`、
+`provider/{cache,service}`、`safe-send`、`shared/weather-utils`，外加 `@host/shared/model-params`。
+
+⚠️ **独立插件不从这里取表**：`task-planner` / `music-player` 的表由插件自己建（自带 DDL），
+宿主的 schema 里没有它们——插件只借用宿主的 `images` 等共享表。
 
 **渲染层 15 个**：`@host/renderer/` 下的 `i18n`、`hooks/{useMessage,useNotification,useTheme}`、
 `components/markdown/{MarkdownView,MarkdownLoad,TipTapMarkdownEditor}`、`components/system/{Skeleton,settings/SettingsUI}`、
@@ -83,21 +125,25 @@ globalThis.__RB_HOST_RESOLVE__(spec) // '@host/main/database/orm' → 宿主那�
 
 ## 安装 / 卸载 / 清数据
 
-- **首次启动**：把 `resources/plugins/<id>/` copy 到 `userData/plugins/<id>/`；
-  `plugins.json` 里记的 `uninstalled: string[]` 里的插件**跳过**（用户卸载过就不自动装回来）。
-- **安装（重装）**：从 `resources/plugins/<id>/` 重新 copy，并清掉 `uninstalled` 记录。
+- **首次启动（内置插件）**：把 `resources/plugins/<id>/`（现在只有 `home` / `harness`）copy 到
+  `userData/plugins/<id>/`；`plugins.json` 的 `uninstalled` 列表里的插件**跳过**（用户卸载过就不自动装回来）。
+- **安装（重装内置插件）**：从 `resources/plugins/<id>/` 重新 copy，并清掉 `uninstalled` 记录。
+- **安装（独立插件）**：设置 → 插件 →「从插件仓库安装」→ 读索引、下载 zip、校验 sha256、解压装进
+  `userData/plugins/<id>/`，随后自动启用并装载（见上文「独立插件仓库」）。
+- **升级清理**：曾经内置、现在移出应用的 id（`planner` / `music`）由 `plugins.json.seeded` 识别，
+  启动时删掉它们的旧代码目录（数据保留）——`test/probe-retired-builtins-cleanup.mjs` 覆盖。
 - **卸载**：弹确认框，**代码与数据是两件事**（2026-09-26 用户口径）——
   - 卸载本身 = **移除插件代码**：删 `userData/plugins/<id>/`、写 `uninstalled`、清启用覆写 → 广播；
   - 勾选项「同时删除该插件的全部数据」= **额外**清数据：先调插件的 `plugin.purge` 贡献
     （此时插件仍装载，能删自己的表数据/托管文件），再走上面的移除流程；
   - **不勾** = 数据原样留在库里（表行在、应用托管的文件也在），重装后照旧可用
-    ——`test/probe-uninstall-keep-data.mjs` 实测：不勾卸载 → 代码没了但 `music_folders` 仍 1 行、
+    ——`test/probe-uninstall-keep-data.mjs` 实测：不勾卸载 → 代码没了但歌单行仍是 1、
     托管歌单目录仍在，重装后歌单原样回来；勾上卸载 → 行归 0、托管目录被删。
   - 勾选项正文里的「包含：……」来自插件 `plugin.purge` 贡献的 `label`，经 `PluginListEntry.purgeLabel`
     下发给面板（插件停用/未装载时拿不到 → 回退成「包含该插件的全部业务数据」）。
 - **数据清除由插件自己实现**（`ctx.contribute(PLUGIN_PURGE, { run })`），core 不硬编码表名：
-  - music：`music_folders` / `music_tracks` 行 + 应用托管的歌单目录（`musicDirectory/<uuid>`，**不删** `musicDirectory` 本身）
-  - planner：`planner_tasks` / `planner_dependencies`
+  - music（独立插件 `music-player`）：`music_folders` / `music_tracks` 行 + 应用托管的歌单目录（`musicDirectory/<uuid>`，**不删** `musicDirectory` 本身）
+  - planner（独立插件 `task-planner`）：`planner_tasks` / `planner_dependencies`
   - home：`graph_relations`/`graph_entities`/`graph_build_jobs`、`directory_documents`、`documents_content`、
     `wiki_directories`、`documents`、`wiki`、`task_dependencies`、`todo_items`、`node_positions`、
     `images`（只删本插件引用的那些行）、设置键 `graph`（**用户文档会被删，确认框必须写清楚**）
@@ -115,6 +161,7 @@ globalThis.__RB_HOST_RESOLVE__(spec) // '@host/main/database/orm' → 宿主那�
 | P3 ✅ | home 同款（含 GraphView 懒加载 chunk 仍在）+ **渲染层改成多文件产物**（入口 + `chunk-<hash>.mjs`，见上节）+ home 自己的 `plugin.purge`（文档/正文/目录/知识库/图谱/待办/画布坐标/图片 + 设置键 `graph`）                                                                                                                                                                                                                                         | home 从 `userData/plugins/home` 装载；入口 118.0KB（**不含 echarts**）+ 懒加载 `chunk-IZPBTTMD.mjs` 1134KB，首屏只取入口与入口静态共享的 chunk，打开图谱才取懒加载那个（CDP Network 域实测）；7 类数据经磁盘包 handler 落库；卸载（不保留数据）后目录/菜单/路由/通道/harness 工具清单与 8 张表行数全清（images 也归 0）、不碰 music 的行、默认落地页从 `#/home` 退到 `#/planner`，重启不会自动铺回来，重装后原样回来（数据仍为空）；`verify-plugin-home-package` 57 条全绿                                                                                                                                                                                                                                                                                                            |
 | P4 ✅ | harness 同款 + harness 自己的 `plugin.purge`（7 张表 + 三处托管目录：`userData/file-history`、`userData/tool-output`、`<memoryPath>/workspace-<id>` 与 `spill`）；**新增离线契约审计** `test/audit-plugin-host-contract.mjs`                                                                                                                                                                                                                     | 四个插件全部从 `userData/plugins/<id>/` 装载（`loadedFrom().*.source === 'package'`）；harness 入口 111KB + 32 个 chunk（1712KB），打开助手只取 5/32 个 chunk；工作区/话题/子代理经磁盘包 handler 落库；卸载（不保留数据）后目录/菜单/路由/63 个通道/三个宿主钩子（preload·beforeQuit·memoryDump）与 7 张表行数全清，`<memoryPath>/workspace-<id>`、`spill`、`file-history`、`tool-output` 被删而 **`memoryPath` 本身、core 的 `workspace` 表、设置键 `harness` 保留**；重启不会自动铺回来，重装后原样回来（话题为空）；`verify-plugin-host` 61 条 / `verify-plugin-install-uninstall` 47 条 / `verify-plugin-planner-package` 46 条 / `verify-plugin-home-package` 57 条 / `verify-plugin-harness-package` 50 条全绿                                                                 |
 | P5 ✅ | 删掉三处过渡物：应用内静态注册表（`main/plugins/builtin.ts`、`plugin-host/builtin.ts`）与白名单 `packaged.ts`；`stateSyncHook` / `syncBuiltinPluginIpcs` / `isPackageReady` 判断全部移除；`electron-builder.yml` 加 `resources/plugins` → `extraResources`；`build:win/mac/linux/unpack` 前置 `build:plugins`；**dev 下自动补打产物**（缺产物或产物落后于源码 → `--plugin <id> --dev`）；面板去掉「过渡期只有开关」的分支；README/MIGRATION 收尾 | `node test/verify-plugin-restructure.mjs` 断言「应用内零插件实现 import」+ 三处过渡物已删；`App.tsx` 的初始插件集合恒为空数组，四个插件的路由/菜单/设置页/provider 全靠清单元数据声明 + 磁盘包异步注册；`test/probe-dev-package-fallback.mjs` 实测「移走 `resources/plugins` → 启动即自动补打四个包并全部装上；只改一个插件的源码 mtime → 只重打那一个」；**打包产物实测**（`pnpm build:unpack` + `test/probe-packaged-app-plugins.mjs`：把仓库的 `resources/plugins` 临时移走，打包应用仍从自己的 `resources/plugins` 铺出四个包，证明走的是 `app.isPackaged` 分支且没有误走 dev 补打）；全套 CDP 工装（61/47/46/57/50 条断言 + 6 个探针，含 `probe-uninstall-keep-data.mjs`：不勾 = 只删插件代码、数据留在库里且重装后原样回来；勾上 = 连数据一起清）在**删掉静态注册表之后**仍全绿 |
+| P6 ✅ | **planner 与音乐移出应用、改成独立插件**：源码进 `Aitenry/ryten-plugins`（目录名与 id = `task-planner` / `music-player`，源码直接写 `@host/**`，自带 `host.d.ts` 与构建/发布 CI），应用侧新增「从插件仓库安装」（索引 + Release 资产 + sha256 校验 + 解压安装）                                                                                                                                                                                  | 应用不再分发这两个插件（首启只有 首页/AI 助手）；从 fixture 服务器走完整链路安装：索引 → 下载 zip → sha256 → 解压 → 装入 `userData/plugins` → 自动启用 → 菜单/界面可用；插件自带 DDL 在宿主库建出 `planner_tasks` / `music_folders`；两者在清单里是第三方（builtin/bundled=false）；卸载（含 purge）后它建的表行归 0；`verify-github-plugin-install` 19 条全绿；老 profile 升级时旧 `planner`/`music` 铺包被清理（`probe-retired-builtins-cleanup`）                                                                                                                                                                                                                                                                                                                                  |
 
 ## 契约漂移的离线审计（P4 落地）
 
