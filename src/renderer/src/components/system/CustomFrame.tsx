@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useMemo, useSyncExternalStore } from 'react'
+import React, { useEffect, useState, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { theme } from 'antd'
 import { useTheme } from '@renderer/hooks/useTheme'
@@ -7,13 +7,7 @@ import { Window } from '../../../resource/types/window'
 import MainRoutes from '@renderer/route/MainRoutes'
 import { preloadView, scheduleViewPreload } from '@renderer/route/viewPreload'
 import { usePluginMenus, usePluginRoutes } from '@renderer/plugin-host/PluginHostContext'
-import SettingsModal from './settings/SettingsModal'
-import {
-  closeSettingsModal,
-  getSettingsModalState,
-  openSettingsModal,
-  subscribeSettingsModalState
-} from './settings/settings-modal-state'
+import { openSettingsModal } from './settings/settings-modal-state'
 import TitleBar from './frame/TitleBar'
 import Sidebar from './frame/Sidebar'
 import RightBar from './frame/RightBar'
@@ -42,9 +36,6 @@ const CustomFrame: React.FC<CustomFrameProps> = ({ currentKey }) => {
   const { t } = useTranslation()
 
   const [isMaximized, setIsMaximized] = useState(false)
-  // 设置弹窗状态外置到模块级 store：插件 Provider 装卸会重挂外壳子树，
-  // 状态留在组件里会被「停用插件」顺手关掉弹窗（详见 settings-modal-state.ts）
-  const settingsModal = useSyncExternalStore(subscribeSettingsModalState, getSettingsModalState)
 
   const api = (window as unknown as Window).api
 
@@ -167,11 +158,8 @@ const CustomFrame: React.FC<CustomFrameProps> = ({ currentKey }) => {
           colorTextSecondary={colorTextSecondary}
         />
 
-        <SettingsModal
-          open={settingsModal.open}
-          onClose={closeSettingsModal}
-          scope={settingsModal.scope}
-        />
+        {/* 设置弹窗不在这里渲染：它挂在插件 Provider 链之外（见 settings/SettingsHost.tsx），
+            否则插件启停导致的外壳重挂会让弹窗动画重放（看起来像关了又开）。 */}
       </div>
     </div>
   )

@@ -5,6 +5,7 @@ import { NotificationProvider } from '@renderer/contexts/NotificationContext'
 import { composeProviders } from '@renderer/utils/composeProviders'
 import AppContent from '@renderer/components/system/AppContent'
 import AppErrorBoundary from '@renderer/components/system/AppErrorBoundary'
+import SettingsHost from '@renderer/components/system/settings/SettingsHost'
 import {
   PluginHostProvider,
   usePluginHost,
@@ -148,6 +149,8 @@ const App: React.FC = () => {
               <PluginProvidersShell>
                 <AppContent />
               </PluginProvidersShell>
+              {/* 设置弹窗挂在插件 Provider 链之外：插件启停不会重建它（详见 SettingsHost.tsx） */}
+              <SettingsHost />
             </CoreProviders>
           </PluginStateBridge>
         </PluginHostProvider>
