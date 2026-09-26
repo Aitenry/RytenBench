@@ -3,6 +3,7 @@ import { PluginError, PLUGIN_ERROR } from '@shared/plugin/errors'
 import type { PluginDescriptor, PluginManifest, PluginState } from '@shared/plugin/types'
 import { HOST_KEYS } from './keys'
 import { PluginContext } from './context'
+import { installPluginCss, removePluginCss } from './plugin-css'
 import type {
   AppProviderRegistration,
   BottomBarItemRegistration,
@@ -408,12 +409,16 @@ export class PluginHost {
     this.states.set(id, 'reloading')
     this.bump()
     try {
+      // 插件自带的样式表先进 DOM：否则插件首帧会在“没样式”的状态下渲染一次
+      // （见 plugin-css.ts：宿主 Tailwind 扫不到运行期装进来的外部插件源码）
+      await installPluginCss(id)
       const dispose = await plugin.install(ctx)
       ctx.attachInstallDispose(dispose)
       this.enabled.add(id)
       this.states.set(id, 'active')
       this.errors.delete(id)
     } catch (err) {
+      removePluginCss(id)
       await ctx.dispose().catch(() => undefined)
       this.ctxs.delete(id)
       const msg = err instanceof Error ? err.message : String(err)
@@ -429,6 +434,8 @@ export class PluginHost {
     if (!this.enabled.has(id)) {
       // 未启用也要把声明项清干净：声明是首帧占位（可能先于 enable 存在），停用态不该有菜单
       if (this.declarations.delete(id)) this.bump()
+      // 样式同理：停用后 document 里不该留着这个插件的 CSS
+      removePluginCss(id)
       return
     }
     for (const pid of this.withdrawalOrder(id)) {
@@ -450,6 +457,8 @@ export class PluginHost {
       this.ctxs.delete(pid)
       this.enabled.delete(pid)
       this.states.set(pid, 'inactive')
+      // 样式随插件一起摘除（下面 this.bump() 之后界面才重绘，不会闪没样式的帧）
+      removePluginCss(pid)
     }
     this.bump()
   }

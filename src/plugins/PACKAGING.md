@@ -141,6 +141,37 @@ globalThis.__RB_HOST_RESOLVE__(spec) // '@host/main/database/orm' → 宿主那�
 - chunk 只有真正 mount 时才取（P3 工装用 CDP Network 域实测：首屏只取入口 + 入口静态共享的
   那个 chunk，打开图谱才取 `chunk-IZPBTTMD.mjs`，即 echarts 那一个）。
 
+### 插件自带的样式表 `plugin.css`（2026-09-26 用户实测「外部插件界面变形」后补的）
+
+**症状与根因**：宿主自己的 Tailwind 是**构建期**扫源码生成的（`main.css` 里 `@source src/plugins/**`），
+只覆盖随应用分发的内置插件；运行期才装进 `userData/plugins/<id>/` 的外部插件源码不在扫描范围里。
+实测 task-planner / music-player 用到的 124 个类名里有 **48 个在宿主产物 CSS 里没有任何规则**
+（`w-[280px]` / `grid-cols-2` / `bottom-full` / `hover:scale-105` / `overflow-x-hidden`…），
+布局因此塌掉——用户看到的就是「样式和以前不一样、内容都变形了」。
+
+**约定**：
+- 插件包里可以带一份 `plugin.css`（插件仓库的 `scripts/build.mjs` 用 Tailwind 扫**插件自己的**源码
+  编译：只取 `theme` + `utilities` 两层，**不含 preflight**——注入到宿主文档里的 base 层会重置宿主样式；
+  编译时加 `source(none)`，否则 Tailwind 会自动扫整个仓库，两份插件的 CSS 会变成同一份全集）；
+- 宿主装载插件时 `fetch('plugin://<id>/plugin.css')` 并注入 `<head><style data-plugin-css="<id>">`，
+  停用/卸载时摘除（`src/renderer/src/plugin-host/plugin-css.ts`，在 `host.enable/disable` 里调用）；
+- 包里没有这个文件时**静默跳过**（只留一条 debug 日志），旧包与纯 JS 样式的插件照常可用；
+- 用内联 `<style>` 而不是 `<link rel="stylesheet" href="plugin://…">`：CSP 里只有
+  `style-src 'self' 'unsafe-inline'`，没有 `style-src plugin:`。
+
+**升级必须重新装载**（同轮踩到的第二个坑）：主进程换了磁盘上的包（仓库升级 / 本地升级 /
+面板菜单里的「重新安装」）后，渲染层原先只看「这个 id 是否已登记」→ 直接跳过重载，
+用户升完级看到的还是旧界面、也没有新样式。现在 `PluginListEntry` 多了一个 `stamp`
+（入口文件与 `plugin.css` 的 mtime 最大值，见 `ipc/plugins.ts` 的 `packageStamp`），
+渲染层（`App.tsx` 的 `PluginStateBridge`）在 stamp 或版本变化时先 `forgetPlugin` 再重新
+`fetch + install`，于是新 `renderer.mjs` 与新 `plugin.css` 一起生效。
+
+**回归**：`node test/probe-plugin-css-coverage.mjs`（离线：逐个类名找规则，宿主 CSS 缺 48 个
+→ 加上插件自带 CSS 后 0 个缺；并核对 zip 里带上 `plugin.css`、无 preflight、两份 CSS 不是同一份）；
+`node test/probe-external-plugin-ui.mjs`（装机：装「去掉 plugin.css 的包」→ 无注入、缺规则、
+截图；换成真包 → 注入 9804B/2986B、规则齐、重新截图；两张截图逐像素比对 **music 3.9%** 的采样点
+发生变化；停用摘样式 / 启用重新注入）。
+
 ## 安装 / 卸载 / 清数据
 
 - **首次启动（内置插件）**：把 `resources/plugins/<id>/`（现在只有 `notes` / `harness`）copy 到

@@ -93,6 +93,14 @@ export interface PluginListEntry {
    * （面板自己拉 `plugin.available()` 比对，不在这里下发，避免列表读取依赖网络）。
    */
   bundledVersion?: string
+  /**
+   * 磁盘上这份插件包的**内容戳**（入口文件与 `plugin.css` 的 mtime 最大值）。
+   *
+   * 为什么不用 `version`：重装/升级本地包时版本号常常不变（面板菜单里的「重新安装」
+   * 就是同一版本重铺），而渲染层必须知道「磁盘上的代码换了，得重新 fetch renderer.mjs
+   * 并重新注入 plugin.css」——否则用户升完级看到的还是旧界面（2026-09-26 实测踩到）。
+   */
+  stamp?: string
   /** 插件入口（渲染层 loader 与主进程装载依据） */
   entry?: { renderer?: string; main?: string }
   /**

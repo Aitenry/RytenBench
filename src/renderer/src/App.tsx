@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo } from 'react'
+import React, { useEffect, useMemo, useRef } from 'react'
 import { HashRouter } from 'react-router-dom'
 import { MessageContext } from '@renderer/contexts/MessageContext'
 import { NotificationProvider } from '@renderer/contexts/NotificationContext'
@@ -51,6 +51,14 @@ const PluginProvidersShell: React.FC<{ children: React.ReactNode }> = ({ childre
 // 把清单 diff 应用到宿主（装载/卸载），并订阅启停广播即时重放。
 const PluginStateBridge: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const host = usePluginHost()
+  /**
+   * 已装载插件各自的**包内容戳**（`PluginListEntry.stamp`）。
+   *
+   * 为什么需要它：主进程换了磁盘上的包（升级/重装/重新安装）后，渲染层必须重新
+   * `fetch('plugin://<id>/renderer.mjs')` 并重新注入 `plugin.css`；只看「id 已登记」
+   * 会跳过重载，用户看到的还是旧界面（2026-09-26 实测：升级后样式与界面都不更新）。
+   */
+  const loadedStamps = useRef(new Map<string, string>())
   useEffect(() => {
     let disposed = false
     const sync = async (): Promise<void> => {
@@ -78,7 +86,24 @@ const PluginStateBridge: React.FC<{ children: React.ReactNode }> = ({ children }
             await host
               .forgetPlugin(id)
               .catch((err) => console.error(`[plugins] 插件移除失败: ${id}`, err))
-          } else if (!entry.enabled) {
+            continue
+          }
+          // ③ 包换了（升级 / 重装 / 面板里的「重新安装」）：内容戳或版本与登记里的不一致
+          //    → 摘掉登记，下面的加载循环会用**磁盘上新的包**重新 fetch + install
+          //    （新 renderer.mjs、新 plugin.css；不这么做用户升完级看到的还是旧界面）。
+          const stamp = entry.stamp ?? ''
+          const loadedStamp = loadedStamps.current.get(id)
+          if (
+            (loadedStamp !== undefined && loadedStamp !== stamp) ||
+            (entry.version && descriptor.manifest.version !== entry.version)
+          ) {
+            loadedStamps.current.delete(id)
+            await host
+              .forgetPlugin(id)
+              .catch((err) => console.error(`[plugins] 插件重新装载失败: ${id}`, err))
+            continue
+          }
+          if (!entry.enabled) {
             await host
               .disable(id)
               .catch((err) => console.error(`[plugins] 插件停用失败: ${id}`, err))
@@ -103,6 +128,7 @@ const PluginStateBridge: React.FC<{ children: React.ReactNode }> = ({ children }
               entry: e.entry
             })
             if (!disposed) host.addExternal(plugin)
+            if (!disposed) loadedStamps.current.set(e.id, e.stamp ?? '')
           } catch (err) {
             console.error(`[plugins] 插件 '${e.id}' 渲染模块加载失败:`, err)
           }

@@ -50,6 +50,31 @@ import { installPluginFromLocalPath, pickLocalPluginSource } from '../plugins/lo
  * 启停/安装/卸载都会广播 `plugin-state-changed`，渲染层据此重新拉清单并 diff 装载。
  */
 
+/**
+ * 磁盘上这份插件包的**内容戳**：入口文件与 `plugin.css` 的 mtime 最大值。
+ *
+ * 用途：渲染层据此判断「包换了，要重新 fetch renderer.mjs + 重新注入 plugin.css」。
+ * 不能用版本号代替——「重新安装」与本地/仓库的原地升级常常版本号不变（实测：升完级
+ * 界面还是旧的，因为渲染层看到「同一个 id 已登记」就跳过了重新装载）。
+ */
+function packageStamp(dir: string, entry?: { main?: string; renderer?: string }): string {
+  const files = [
+    'plugin.json',
+    'plugin.css',
+    entry?.main ?? 'main.cjs',
+    entry?.renderer ?? 'renderer.mjs'
+  ]
+  let max = 0
+  for (const file of files) {
+    try {
+      max = Math.max(max, fs.statSync(path.join(dir, file)).mtimeMs)
+    } catch {
+      // 缺文件就忽略（老包没有 plugin.css 是正常的）
+    }
+  }
+  return String(Math.round(max))
+}
+
 /** 已安装插件与启用态（内置默认启用、第三方默认停用） */
 function listEntries(): PluginListEntry[] {
   const entries: PluginListEntry[] = []
@@ -73,6 +98,8 @@ function listEntries(): PluginListEntry[] {
       entry: ext.manifest.entry,
       // 应用包里的同名副本版本：面板据此把菜单项写成「更新」（版本不同）或「重新安装」（同版本）
       bundledVersion: bundled ? (bundledManifest(ext.id)?.version ?? undefined) : undefined,
+      // 包内容戳：渲染层据此决定「要不要重新装载这个插件」（见 packageStamp 的说明）
+      stamp: packageStamp(ext.dir, ext.manifest.entry),
       // 清单里的路由/菜单元数据：渲染层首帧据此声明式预注册（见 shared/plugin/types.ts）
       routes: ext.manifest.routes,
       menu: ext.manifest.menu,
