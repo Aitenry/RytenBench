@@ -16,6 +16,29 @@ const windowMaxStates = new Map<
   { isMaximized: boolean; normalBounds: Electron.Rectangle | null }
 >()
 
+/**
+ * 窗口控制 IPC 绑定窗口的**唯一性守卫**。
+ *
+ * 为什么需要（2026-09-26 用户实测 `MaxListenersExceededWarning: 11 closed listeners
+ * added to [BrowserWindow]`）：此前 `winFromEvent` **每处理一次窗口控制 IPC** 就往
+ * 该窗口挂一个 `once('closed', …)` 清理器（最小化/最大化/关闭/查询是否最大化各挂一次，
+ * 且渲染层窗口按钮会频繁调用）——同一个窗口上堆到 11 个就触发 Node 的监听器上限告警。
+ * 现在按「一个窗口只注册一次清理」记账：WeakSet 不阻止窗口回收，窗口关闭后由
+ * `closed` 事件自己把状态与守卫一起清掉。
+ */
+const windowCleanupWatched = new WeakSet<Electron.BrowserWindow>()
+
+/** 登记某窗口的关闭清理（幂等：同一个窗口无论被调用多少次都只挂一个监听） */
+function watchWindowCleanup(win: Electron.BrowserWindow): void {
+  if (windowCleanupWatched.has(win)) return
+  windowCleanupWatched.add(win)
+  const id = win.id
+  win.once('closed', () => {
+    windowCleanupWatched.delete(win)
+    windowMaxStates.delete(id)
+  })
+}
+
 let windowControlIpcRegistered = false
 
 /** 执行插件贡献的渲染进程内存快照（贡献点 `app.renderer-memory-dump`） */
@@ -51,9 +74,7 @@ function registerWindowControlIpcOnce(): void {
     event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent
   ): BrowserWindow | null => {
     const win = BrowserWindow.fromWebContents(event.sender)
-    if (win && !win.isDestroyed()) {
-      win.once('closed', () => windowMaxStates.delete(win.id))
-    }
+    if (win && !win.isDestroyed()) watchWindowCleanup(win)
     return win
   }
 
