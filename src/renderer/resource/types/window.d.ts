@@ -112,6 +112,26 @@ export interface Window {
       }>
       /** 从插件仓库安装（或升级）某个插件 */
       installFromGithub: (id: string) => Promise<{ ok: boolean; id?: string; error?: string }>
+      /** 从本地路径安装插件：`.zip` 压缩包或插件包目录（装完自动启用并装载） */
+      installLocal: (source: string) => Promise<{
+        ok: boolean
+        canceled?: boolean
+        id?: string
+        name?: string
+        version?: string
+        upgraded?: boolean
+        error?: string
+      }>
+      /** 弹系统选择框挑一个本地来源并安装（取消返回 `{ ok: true, canceled: true }`） */
+      pickLocal: (kind: 'zip' | 'dir') => Promise<{
+        ok: boolean
+        canceled?: boolean
+        id?: string
+        name?: string
+        version?: string
+        upgraded?: boolean
+        error?: string
+      }>
       /**
        * 卸载插件（总是移除插件代码）。`purgeData` 决定是否同时清数据：
        * false = 数据保留在库里（重装后仍可用），true = 调 `plugin.purge` 删表内记录与托管文件。

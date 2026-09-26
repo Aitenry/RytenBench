@@ -25,15 +25,18 @@ import {
   IPC_PLUGINS_INSTALL,
   IPC_PLUGINS_AVAILABLE,
   IPC_PLUGINS_INSTALL_GITHUB,
+  IPC_PLUGINS_INSTALL_LOCAL,
   IPC_PLUGINS_LIST,
   IPC_PLUGINS_LIST_SYNC,
   IPC_PLUGINS_LOADED_FROM,
+  IPC_PLUGINS_PICK_LOCAL,
   IPC_PLUGINS_SET_ENABLED,
   IPC_PLUGINS_UNINSTALL
 } from '../../shared/plugin/protocol'
 import type { PluginListEntry } from '../../shared/plugin/types'
 import { setHostUiExports } from '../plugins/host-ui-bridge'
 import { fetchPluginIndex, installPluginFromGithub, pluginsRepoUrl } from '../plugins/github'
+import { installPluginFromLocalPath, pickLocalPluginSource } from '../plugins/local-install'
 
 /**
  * 插件管理 IPC（core，始终注册）。
@@ -262,6 +265,52 @@ function installPlugin(id: string): PluginListEntry[] {
   return listEntries()
 }
 
+/**
+ * 装好之后的统一收尾：「用户主动装的」→ 启用 + 装载主模块。
+ *
+ * 装载失败不掩盖「已经装上了」这个事实：抛出的错误里写明目录已就位，避免用户以为
+ * 什么都没发生（与从插件仓库安装同一口径）。
+ */
+function enableInstalled(id: string): void {
+  setEnabledOverride(id, true)
+  try {
+    loadExternalMain(id)
+  } catch (err) {
+    logger.error(`[Plugins] 装好的 '${id}' 装载失败:`, err)
+    throw new Error(
+      `插件 '${id}' 已安装，但装载失败：${err instanceof Error ? err.message : String(err)}`
+    )
+  }
+}
+
+/** 本地安装（压缩包 / 文件夹）→ 启用装载 → 广播；失败返回 `{ ok: false, error }` */
+async function installLocalAndEnable(source: string): Promise<{
+  ok: boolean
+  canceled?: boolean
+  id?: string
+  name?: string
+  version?: string
+  upgraded?: boolean
+  error?: string
+}> {
+  try {
+    const info = await installPluginFromLocalPath(source)
+    enableInstalled(info.id)
+    broadcastPluginStateChanged()
+    return {
+      ok: true,
+      id: info.id,
+      name: info.name,
+      version: info.version,
+      upgraded: info.upgraded
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    logger.warn(`[Plugins] 本地安装失败（${source}）:`, msg)
+    return { ok: false, error: msg }
+  }
+}
+
 export function registerPluginsIpc(): void {
   ipcMain.handle(IPC_PLUGINS_LIST, () => listEntries())
 
@@ -356,22 +405,16 @@ export function registerPluginsIpc(): void {
     }
   })
 
-  /** 从插件仓库安装（或升级）某个插件 */
+  /**
+   * 从插件仓库安装（或升级）某个插件
+   */
   ipcMain.handle(IPC_PLUGINS_INSTALL_GITHUB, async (_event, id: unknown) => {
     if (typeof id !== 'string' || id === '') throw new Error('plugins-install-github 参数非法')
     try {
       const result = await installPluginFromGithub(id)
       // 用户是**主动点了「安装」**的：装完直接启用并装载主模块（与内置插件重装同一口径），
       // 渲染层收到广播后会从 plugin://<id>/renderer.mjs 加载界面。
-      setEnabledOverride(id, true)
-      try {
-        loadExternalMain(id)
-      } catch (err) {
-        logger.error(`[Plugins] 从插件仓库装好的 '${id}' 装载失败:`, err)
-        throw new Error(
-          `插件 '${id}' 已安装，但装载失败：${err instanceof Error ? err.message : String(err)}`
-        )
-      }
+      enableInstalled(id)
       broadcastPluginStateChanged()
       return result
     } catch (err) {
@@ -379,5 +422,29 @@ export function registerPluginsIpc(): void {
       logger.warn(`[Plugins] 从插件仓库安装 '${id}' 失败:`, msg)
       return { ok: false, id, error: msg }
     }
+  })
+
+  /**
+   * 从**本地路径**安装插件（`.zip` 或插件包目录）。
+   *
+   * 与「从插件仓库安装」共用同一套落地与校验（`package-install.ts`），因此这里的
+   * 语义完全一致：装完即启用 + 装载 + 广播；失败返回 `{ ok: false, error }` 而不是抛错，
+   * 面板据此提示（路径不存在、包里没有 plugin.json、id 撞内置插件等都走这条）。
+   */
+  ipcMain.handle(IPC_PLUGINS_INSTALL_LOCAL, async (_event, source: unknown) => {
+    if (typeof source !== 'string' || source === '') {
+      throw new Error('plugins-install-local 需要压缩包或插件目录的路径')
+    }
+    return await installLocalAndEnable(source)
+  })
+
+  /** 弹系统选择框挑一个本地来源并安装（面板两个按钮走它；取消返回 `{ ok: true, canceled: true }`） */
+  ipcMain.handle(IPC_PLUGINS_PICK_LOCAL, async (_event, kind: unknown) => {
+    if (kind !== 'zip' && kind !== 'dir') {
+      throw new Error("plugins-pick-local 的参数必须是 'zip' 或 'dir'")
+    }
+    const source = await pickLocalPluginSource(kind)
+    if (!source) return { ok: true as const, canceled: true as const }
+    return await installLocalAndEnable(source)
   })
 }

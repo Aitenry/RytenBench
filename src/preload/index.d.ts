@@ -4,6 +4,23 @@ import type { SystemSettings } from '../main/types/settings'
 import type { PluginListEntry } from '../shared/plugin/types'
 
 /**
+ * 本地安装插件（压缩包 / 文件夹）的结果。
+ *
+ * `canceled` 与 `error` 分开：用户在系统选择框里点取消不是失败，面板不该弹红字
+ * （`ok: true, canceled: true`）。
+ */
+interface LocalPluginInstallResult {
+  ok: boolean
+  canceled?: boolean
+  id?: string
+  name?: string
+  version?: string
+  /** true = 覆盖了同 id 的既有安装（面板提示「已升级」） */
+  upgraded?: boolean
+  error?: string
+}
+
+/**
  * preload 暴露给渲染层的 core 能力（`window.api`）。
  *
  * 各插件的命名空间（music / planner / notes 的六个键 / harness 的
@@ -90,6 +107,10 @@ interface Api {
     }>
     /** 从插件仓库安装（或升级）某个插件 */
     installFromGithub: (id: string) => Promise<{ ok: boolean; id?: string; error?: string }>
+    /** 从本地路径安装插件：`.zip` 压缩包或插件包目录（装完自动启用并装载） */
+    installLocal: (source: string) => Promise<LocalPluginInstallResult>
+    /** 弹系统选择框挑一个本地来源并安装（`'zip'` = 压缩包 / `'dir'` = 文件夹；取消返回 canceled） */
+    pickLocal: (kind: 'zip' | 'dir') => Promise<LocalPluginInstallResult>
     /**
      * 卸载插件并返回最新列表。
      * 卸载本身总是移除插件代码；`purgeData` 决定要不要同时清数据（false = 数据保留在库里）。

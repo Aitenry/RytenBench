@@ -120,20 +120,34 @@ const PluginsPanel: React.FC = () => {
     [message, t]
   )
 
-  /** 第三方插件：选目录安装（内置插件的「安装」走 reinstall） */
-  const installExternal = useCallback(async (): Promise<void> => {
-    try {
-      const result = await window.api.plugin.install()
-      if (!result.ok) {
-        message.error(result.error || t('settings.plugins.installFail'))
-      } else {
-        message.success(t('settings.plugins.install'))
+  /**
+   * 本地安装：`'zip'` = 选压缩包，`'dir'` = 选插件文件夹。
+   *
+   * 走主进程的系统选择框（渲染层拿不到真实路径），装完主进程会自动启用并装载，
+   * 面板收到广播后刷新列表。用户取消时 `canceled: true`——**不算失败**，不弹错误。
+   */
+  const installLocal = useCallback(
+    async (kind: 'zip' | 'dir'): Promise<void> => {
+      try {
+        const result = await window.api.plugin.pickLocal(kind)
+        if (result.canceled) return
+        if (!result.ok) {
+          message.error(result.error || t('settings.plugins.installFail'))
+          return
+        }
+        message.success(
+          result.upgraded
+            ? t('settings.plugins.localUpgraded', { name: result.name ?? result.id ?? '' })
+            : t('settings.plugins.localInstalled', { name: result.name ?? result.id ?? '' })
+        )
+        refresh()
+      } catch (err) {
+        message.error(t('settings.plugins.installFail'))
+        console.error('[plugins] 本地安装失败:', err)
       }
-    } catch (err) {
-      message.error(t('settings.plugins.installFail'))
-      console.error('[plugins] 安装失败:', err)
-    }
-  }, [message, t])
+    },
+    [message, t, refresh]
+  )
 
   /** 从应用包重装某个内置插件 */
   const reinstall = useCallback(
@@ -257,9 +271,17 @@ const PluginsPanel: React.FC = () => {
         title={t('settings.plugins.pageTitle')}
         description={t('settings.plugins.pageDescription')}
         extra={
-          <Button size="small" onClick={openRepo}>
-            {t('settings.plugins.installFromRepo')}
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button size="small" onClick={() => void installLocal('zip')}>
+              {t('settings.plugins.installLocalZip')}
+            </Button>
+            <Button size="small" onClick={() => void installLocal('dir')}>
+              {t('settings.plugins.installLocalDir')}
+            </Button>
+            <Button size="small" onClick={openRepo}>
+              {t('settings.plugins.installFromRepo')}
+            </Button>
+          </div>
         }
       />
       <SettingsSection
@@ -390,10 +412,7 @@ const PluginsPanel: React.FC = () => {
         width={520}
         destroyOnHidden
         footer={
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Button size="small" type="text" onClick={() => void installExternal()}>
-              {t('settings.plugins.install')}
-            </Button>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
             <span style={{ display: 'flex', gap: 8 }}>
               <Button size="small" onClick={() => void loadRepo()} disabled={repoPlugins === null}>
                 {t('settings.plugins.repoRefresh')}

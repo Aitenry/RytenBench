@@ -1,15 +1,12 @@
 import { net } from 'electron'
 import * as fs from 'fs'
-import * as path from 'path'
 import * as os from 'os'
+import * as path from 'path'
 import { createHash } from 'crypto'
 import logger from 'electron-log'
-import JSZip from 'jszip'
-import { externalPluginsRoot, findExternalPlugin, invalidateInstalledPluginIds } from './scanner'
-import { readExternalManifest } from './lifecycle'
-import { isBundledPluginId } from './host'
-import { isValidManifest } from '../../shared/plugin/types'
 import { pluginAssetUrl, pluginIndexUrl, resolveIndexBase } from '../../shared/plugin/index-url'
+import { isBundledPluginId } from './host'
+import { extractZipToTemp, installPackageDir } from './package-install'
 
 /**
  * **从 GitHub 安装插件**（独立插件仓库的发行链路）。
@@ -28,6 +25,8 @@ import { pluginAssetUrl, pluginIndexUrl, resolveIndexBase } from '../../shared/p
  * URL 规则（含「索引里没有 tag 时走 `releases/latest/download/...`」这条）在
  * `src/shared/plugin/index-url.ts`，由 `test/verify-plugin-asset-url.mjs` 逐分支断言——
  * 真 GitHub 地址没法在离线工装里实测，只能把规则本身锁住。
+ *
+ * 「解压 + 校验 + 落地」这段与**本地安装**共用 `package-install.ts`（同一套校验与升级清理）。
  */
 
 /** 索引里的一条插件 */
@@ -108,22 +107,6 @@ async function downloadAsset(entry: AvailablePlugin, tag?: string): Promise<stri
   return zipPath
 }
 
-/** 解压到临时目录；拒绝目录穿越与子目录（插件包是平铺的几个文件） */
-async function extractAsset(zipPath: string): Promise<string> {
-  const dir = `${zipPath}.x`
-  fs.mkdirSync(dir, { recursive: true })
-  const zip = await JSZip.loadAsync(fs.readFileSync(zipPath))
-  for (const [name, file] of Object.entries(zip.files)) {
-    if (file.dir) continue
-    if (name.includes('..') || path.isAbsolute(name) || /[\\/]/.test(name)) {
-      throw new Error(`插件包里有非法路径：${name}`)
-    }
-    fs.writeFileSync(path.join(dir, name), await file.async('nodebuffer'))
-  }
-  fs.rmSync(zipPath, { force: true })
-  return dir
-}
-
 /**
  * 安装（或升级）来自插件仓库的插件：索引 → 下载 → sha256 校验 → 解压 → 装进 `userData/plugins/<id>/`。
  *
@@ -145,30 +128,9 @@ export async function installPluginFromGithub(id: string): Promise<{ ok: true; i
 
   logger.info(`[Plugins] 从插件仓库安装 ${id} v${entry.version}（tag=${index.tag ?? 'latest'}）`)
   const zipPath = await downloadAsset(entry, index.tag)
-  const extracted = await extractAsset(zipPath)
-
+  const extracted = await extractZipToTemp(zipPath)
   try {
-    const manifest = readExternalManifest(extracted)
-    if (!isValidManifest(manifest)) throw new Error('插件包里的 plugin.json 字段不完整')
-    if (manifest.id !== id) {
-      throw new Error(`插件包清单 id 与索引不一致：索引 ${id}，包内 ${manifest.id}`)
-    }
-
-    const dest = path.join(externalPluginsRoot(), id)
-    const isUpgrade = Boolean(findExternalPlugin(id))
-    fs.mkdirSync(dest, { recursive: true })
-    const incoming = fs.readdirSync(extracted)
-    for (const file of incoming) {
-      fs.copyFileSync(path.join(extracted, file), path.join(dest, file))
-    }
-    // 升级：旧版本里多出来的文件（主要是旧哈希的 chunk）删掉，避免新旧混装
-    if (isUpgrade) {
-      for (const file of fs.readdirSync(dest)) {
-        if (!incoming.includes(file)) fs.rmSync(path.join(dest, file), { force: true })
-      }
-    }
-    invalidateInstalledPluginIds()
-    logger.info(`[Plugins] 已${isUpgrade ? '升级' : '安装'} '${id}' v${manifest.version} → ${dest}`)
+    installPackageDir(extracted, { expectId: id })
     return { ok: true, id }
   } finally {
     fs.rmSync(extracted, { recursive: true, force: true })

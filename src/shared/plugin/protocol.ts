@@ -52,6 +52,13 @@ export const IPC_PLUGINS_AVAILABLE = 'plugins-available'
 
 /** 从插件仓库安装某个插件（按索引下载资产 + sha256 校验 + 解压安装） */
 export const IPC_PLUGINS_INSTALL_GITHUB = 'plugins-install-github'
+
+/** 从**本地路径**安装插件（`.zip` 压缩包或插件包目录；工装与拖入路径走它） */
+export const IPC_PLUGINS_INSTALL_LOCAL = 'plugins-install-local'
+
+/** 弹系统选择框挑一个本地来源（`'zip'` = 压缩包 / `'dir'` = 文件夹）并安装 */
+export const IPC_PLUGINS_PICK_LOCAL = 'plugins-pick-local'
+
 export const IPC_PLUGINS_UNINSTALL = 'plugins-uninstall'
 
 /**

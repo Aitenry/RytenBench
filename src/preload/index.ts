@@ -225,11 +225,43 @@ const api = {
           installed: boolean
         }[]
       }>,
-    /** 从插件仓库安装（或升级）某个插件：下载资产 → sha256 校验 → 解压 → 装进 userData/plugins */
+    /**
+     * 从插件仓库安装（或升级）某个插件：下载资产 → sha256 校验 → 解压 → 装进 userData/plugins
+     */
     installFromGithub: (id: string) =>
       ipcRenderer.invoke('plugins-install-github', id) as Promise<{
         ok: boolean
         id?: string
+        error?: string
+      }>,
+    /**
+     * 从**本地路径**安装插件：`.zip` 压缩包或插件包目录（构建产物，例如 dist/<id>）。
+     *
+     * 与从仓库安装同一套校验与落地语义：装完自动启用并装载。失败不抛错，
+     * 返回 `{ ok: false, error }`（路径不存在、包里没有 plugin.json、id 撞内置插件……）。
+     */
+    installLocal: (source: string) =>
+      ipcRenderer.invoke('plugins-install-local', source) as Promise<{
+        ok: boolean
+        canceled?: boolean
+        id?: string
+        name?: string
+        version?: string
+        upgraded?: boolean
+        error?: string
+      }>,
+    /**
+     * 弹系统选择框挑一个本地来源并安装：`'zip'` = 压缩包，`'dir'` = 插件文件夹。
+     * 用户取消时返回 `{ ok: true, canceled: true }`（取消不是错误）。
+     */
+    pickLocal: (kind: 'zip' | 'dir') =>
+      ipcRenderer.invoke('plugins-pick-local', kind) as Promise<{
+        ok: boolean
+        canceled?: boolean
+        id?: string
+        name?: string
+        version?: string
+        upgraded?: boolean
         error?: string
       }>,
     /**

@@ -148,6 +148,20 @@ globalThis.__RB_HOST_RESOLVE__(spec) // '@host/main/database/orm' → 宿主那�
 - **安装（重装内置插件）**：从 `resources/plugins/<id>/` 重新 copy，并清掉 `uninstalled` 记录。
 - **安装（独立插件）**：设置 → 插件 →「从插件仓库安装」→ 读索引、下载 zip、校验 sha256、解压装进
   `userData/plugins/<id>/`，随后自动启用并装载（见上文「独立插件仓库」）。
+- **安装（本地：压缩包 / 文件夹，2026-09-26 新增）**：设置 → 插件 →「从压缩包安装」/「从文件夹安装」。
+  - 压缩包：`.zip` → 解压到临时目录 → 校验 → 装进 `userData/plugins/<id>/`；
+    允许子目录与「右键压缩整个文件夹」多出来的那层顶层目录（自动剥掉），
+    **拒绝**绝对路径与 `..` 目录穿越，噪音条目（`__MACOSX` / `.DS_Store` / `Thumbs.db`）忽略；
+  - 文件夹：必须是插件**构建产物**目录（含 `plugin.json`，例如插件仓库里的 `dist/<id>`）；
+    选它的上一级且里面只有一个包时自动下钻，有多个包则报错要求选其中一个；
+  - 两种来源与「从插件仓库安装」共用同一个落地内核 `src/main/plugins/package-install.ts`：
+    同一套校验（字段齐备 / 拒绝 `builtin:true` / 拒绝覆盖内置 id / 入口文件必须存在）、
+    同一套升级清理（旧版本多出来的文件删掉）、同样装完即启用并装载；
+  - 装的是**拷贝**，不是就地启用：卸载删的永远是 `userData/plugins/<id>/`，不会碰到你选的目录；
+  - 系统选择框没法被自动化点击，所以工装走「按显式路径安装」的 IPC（`plugins-install-local`），
+    面板按钮走 `plugins-pick-local`（取消返回 `{ ok: true, canceled: true }`，不算失败）。
+    覆盖见 `test/verify-plugin-local-install.mjs`（23 条：zip / 前缀形态 / 升级清理 / 文件夹 /
+    8 类错误路径 / 选择框参数校验 / 面板三个入口 / 卸载含 purge）。
 - **升级清理**：曾经内置、现在移出应用的 id（`planner` / `music`）由 `plugins.json.seeded` 识别，
   启动时删掉它们的旧代码目录（数据保留）——`test/probe-retired-builtins-cleanup.mjs` 覆盖。
 - **卸载**：弹确认框，**代码与数据是两件事**（2026-09-26 用户口径）——
