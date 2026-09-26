@@ -11,9 +11,12 @@ import {
   answerTailIndices
 } from '../utils/harnessHelpers'
 import {
+  getCapabilities,
   getProviderDisplayName,
   isEmbeddingProvider,
-  supportsCapability
+  sortReasoningEfforts,
+  supportsCapability,
+  supportsReasoningEffort
 } from '@renderer/utils/providerMeta'
 import type {
   HarnessTopicRow,
@@ -92,7 +95,17 @@ export interface UseHarnessHandlersReturn {
   modelSupportsVision: boolean
   groupedProviderOptions: {
     label: string
-    options: { value: number; label: string; providerType: string }[]
+    options: {
+      value: number
+      label: string
+      providerType: string
+      /** 当前模型的推理等级（null = 未设置） */
+      reasoningEffort: string | null
+      /** 该模型档案声明的可选档位（空数组 = 档案未收录） */
+      effortLevels: string[]
+      /** 当前协议是否真的会下发档位参数（未适配时界面提示「仅记录」） */
+      effortControllable: boolean
+    }[]
   }[]
   /** 话题分页 */
   topicsHasMore: boolean
@@ -1801,21 +1814,44 @@ export const useHarnessHandlers = (): UseHarnessHandlersReturn => {
   }, [syncLoadingTopics])
 
   const groupedProviderOptions = useMemo(() => {
-    const grouped = new Map<string, { value: number; displayName: string; model: string }[]>()
+    const grouped = new Map<
+      string,
+      {
+        value: number
+        displayName: string
+        model: string
+        effort: string | null
+        levels: string[]
+        controllable: boolean
+      }[]
+    >()
     for (const p of providers) {
       if (!grouped.has(p.provider)) {
         grouped.set(p.provider, [])
       }
-      grouped
-        .get(p.provider)!
-        .push({ value: p.id, displayName: getProviderDisplayName(p), model: p.model })
+      // 自定义端点按 extra_config.api_format 判定（Anthropic 兼容协议同样会下发档位）
+      const anthropicFormat =
+        String((p.extra_config as Record<string, unknown> | null)?.api_format ?? 'openai') ===
+        'anthropic'
+      grouped.get(p.provider)!.push({
+        value: p.id,
+        displayName: getProviderDisplayName(p),
+        model: p.model,
+        effort: p.reasoning_effort ?? null,
+        // 档位真源是模型档案：未收录的模型不给档位（界面上只能选「默认」）
+        levels: sortReasoningEfforts(getCapabilities(p.metadata).reasoning_effort_levels),
+        controllable: supportsReasoningEffort(p.provider, anthropicFormat)
+      })
     }
     return Array.from(grouped.entries()).map(([provider, opts]) => ({
       label: provider.charAt(0).toUpperCase() + provider.slice(1),
       options: opts.map((o) => ({
         value: o.value,
         label: o.displayName,
-        providerType: provider
+        providerType: provider,
+        reasoningEffort: o.effort,
+        effortLevels: o.levels,
+        effortControllable: o.controllable
       }))
     }))
   }, [providers])

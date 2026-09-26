@@ -38,6 +38,12 @@ export const llm_providers = pgTable(
     top_k: integer(),
     /** 思考模式：auto 跟随模型默认配置 / on 强制开启 / off 强制关闭 */
     thinking_mode: text().default('auto'),
+    /**
+     * 推理等级：none/minimal/low/medium/high/xhigh/max（协议原值小写）。
+     * 留空(null) = 未设置，不下发档位参数；可选档位来自模型档案
+     * capabilities.reasoning_effort_levels，由 ProviderService 按协议族翻译成各家字段。
+     */
+    reasoning_effort: text(),
     /** 单次对话工具调用总次数上限（工具调用轮数） */
     max_tool_rounds: integer().default(DEFAULT_MAX_TOOL_ROUNDS),
     extra_config: text(),

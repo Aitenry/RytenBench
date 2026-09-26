@@ -201,7 +201,7 @@ class ProviderService {
   }
 
   /**
-   * 逐模型请求参数的统一注入点（温度 / Top P / Top K / 思考模式）。
+   * 逐模型请求参数的统一注入点（温度 / Top P / Top K / 思考模式 / 推理等级）。
    * 所有供应商工厂方法在返回前调用，避免每个分支各写一遍；
    * 留空的采样参数一律不下发，交给供应商走「最佳默认配置」。
    */
@@ -219,6 +219,7 @@ class ProviderService {
       provider,
       anthropicFormat: String(extra.api_format ?? 'openai').toLowerCase() === 'anthropic',
       mode: config.thinking_mode,
+      effort: config.reasoning_effort,
       maxTokens: this.resolveMaxTokens(config)
     })
     if (!thinking) return

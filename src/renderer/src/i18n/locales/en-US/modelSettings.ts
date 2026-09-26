@@ -113,6 +113,8 @@ export const enUSModelSettings: typeof zhCNModelSettings = {
     imageInputUnsupported: 'Not supported',
     thinkingMode: 'Thinking mode',
     thinkingModeHint: 'This protocol does not send the parameter; the value is only stored',
+    reasoningEffortLevels: 'Available levels',
+    reasoningEffortLevelsPlaceholder: 'Pick or type a level, press Enter',
     samplingParams: 'Sampling parameters',
     enabled: 'Enabled',
     setDefault: 'Set as default',

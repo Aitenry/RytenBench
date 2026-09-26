@@ -56,6 +56,8 @@ export interface LlmProviderConfig {
   top_p: number | null
   top_k: number | null
   thinking_mode: ThinkingMode
+  /** 推理等级：null = 未设置（不下发档位参数）；取值来自模型档案的档位表 */
+  reasoning_effort: string | null
   /** 工具调用轮数：单次对话工具调用总次数上限 */
   max_tool_rounds: number
   extra_config: Record<string, unknown> | null
@@ -81,6 +83,8 @@ export interface LlmProviderInput {
   top_p?: number | null
   top_k?: number | null
   thinking_mode?: ThinkingMode
+  /** 推理等级：留空(undefined/null) = 未设置，不下发档位参数 */
+  reasoning_effort?: string | null
   max_tool_rounds?: number
   extra_config?: Record<string, unknown> | null
   metadata?: ModelMetadata | null

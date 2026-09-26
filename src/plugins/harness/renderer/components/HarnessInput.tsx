@@ -1,6 +1,17 @@
 import React, { useMemo, useState, useCallback, useEffect, useRef } from 'react'
-import { App, Button, Tooltip, Select } from 'antd'
-import { RiArrowUpLine, RiAttachment2, RiCloseLine, RiStopFill } from '@remixicon/react'
+import { App, Button, Input, Popover, Tooltip, theme } from 'antd'
+import {
+  RiArrowUpLine,
+  RiAttachment2,
+  RiCloseLine,
+  RiStopFill,
+  RiArrowRightSLine,
+  RiArrowLeftSLine,
+  RiArrowUpSLine,
+  RiArrowDownSLine,
+  RiSearchLine,
+  RiCheckLine
+} from '@remixicon/react'
 import {
   OpenAIFilled,
   DeepSeekFilled,
@@ -25,7 +36,7 @@ import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
 import FileRef from './FileRefNode'
 import { useTranslation } from '@renderer/i18n'
 
-import { getProviderColor } from '@renderer/utils/providerMeta'
+import { getProviderColor, reasoningEffortLabel } from '@renderer/utils/providerMeta'
 import ProviderMark from '@renderer/components/provider/provider-mark'
 import type { Attachment } from '../types'
 
@@ -77,7 +88,17 @@ interface HarnessInputProps {
   onSelectProvider: (value: number) => void
   groupedProviderOptions: {
     label: string
-    options: { value: number; label: string; providerType: string }[]
+    options: {
+      value: number
+      label: string
+      providerType: string
+      /** 当前模型的推理等级（null = 未设置） */
+      reasoningEffort: string | null
+      /** 该模型档案声明的可选档位（空数组 = 档案未收录） */
+      effortLevels: string[]
+      /** 当前协议是否真的会下发档位参数（未适配时面板里提示「仅记录」） */
+      effortControllable: boolean
+    }[]
   }[]
   modelSupportsTools: boolean
   modelSupportsVision: boolean
@@ -117,6 +138,139 @@ const HarnessInput: React.FC<HarnessInputProps> = ({
   const caretRef = useRef<HTMLSpanElement | null>(null)
   const { message } = App.useApp()
   const { t } = useTranslation()
+  const { token } = theme.useToken()
+
+  // ── 模型 / 推理等级面板（输入框左下角的模型选择）──────────────────────────
+  // 展开面板是一层「模型 / 推理等级」两行入口，点进去才是列表：
+  // 两行都带当前值，收起时点一下就能同时看到「当前用的是哪个模型、多深的思考」。
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [menuView, setMenuView] = useState<'root' | 'model' | 'effort'>('root')
+  const [modelQuery, setModelQuery] = useState('')
+  /** 模型列表的键盘高亮下标（搜索结果扁平化后的下标） */
+  const [activeIndex, setActiveIndex] = useState(0)
+  const [savingEffort, setSavingEffort] = useState(false)
+
+  /** 扁平化选项：查找当前模型、键盘导航、搜索结果共用一份 */
+  const flatOptions = useMemo(
+    () =>
+      groupedProviderOptions.flatMap((group) =>
+        group.options.map((option) => ({ ...option, groupLabel: group.label }))
+      ),
+    [groupedProviderOptions]
+  )
+
+  const selectedOption = useMemo(
+    () => flatOptions.find((option) => option.value === selectedProviderId) ?? null,
+    [flatOptions, selectedProviderId]
+  )
+
+  /** 当前模型档案声明的推理档位（空 = 未收录，面板里不给选） */
+  const effortLevels = selectedOption?.effortLevels ?? []
+  const currentEffort = selectedOption?.reasoningEffort ?? null
+
+  /** 模型搜索：按展示名与协议名过滤，保留分组结构 */
+  const filteredGroups = useMemo(() => {
+    const query = modelQuery.trim().toLowerCase()
+    if (!query) return groupedProviderOptions
+    return groupedProviderOptions
+      .map((group) => ({
+        label: group.label,
+        options: group.options.filter(
+          (option) =>
+            option.label.toLowerCase().includes(query) ||
+            option.providerType.toLowerCase().includes(query)
+        )
+      }))
+      .filter((group) => group.options.length > 0)
+  }, [groupedProviderOptions, modelQuery])
+
+  /** 搜索结果扁平化（键盘下标用它，与渲染顺序一致） */
+  const filteredOptions = useMemo(
+    () => filteredGroups.flatMap((group) => group.options),
+    [filteredGroups]
+  )
+
+  const closeMenu = useCallback((): void => {
+    setMenuOpen(false)
+    setMenuView('root')
+    setModelQuery('')
+  }, [])
+
+  const openModelList = useCallback((): void => {
+    setMenuView('model')
+    setModelQuery('')
+    // 打开时高亮当前模型（搜索词刚被清空，所以按全量列表定位）
+    setActiveIndex(Math.max(0, flatOptions.findIndex((o) => o.value === selectedProviderId)))
+  }, [flatOptions, selectedProviderId])
+
+  const handleMenuOpenChange = useCallback(
+    (open: boolean): void => {
+      setMenuOpen(open)
+      if (open) {
+        setMenuView('root')
+        setModelQuery('')
+      }
+    },
+    []
+  )
+
+  const selectModel = useCallback(
+    (value: number): void => {
+      onSelectProvider(value)
+      closeMenu()
+    },
+    [onSelectProvider, closeMenu]
+  )
+
+  /**
+   * 写入推理等级：落到该模型自己的配置列（provider.reasoning_effort），
+   * 由主进程按协议族翻译成各家字段。保存后 providers-changed 广播会让列表刷新。
+   * null = 未设置（不下发档位参数，走模型默认）。
+   */
+  const selectEffort = useCallback(
+    async (level: string | null): Promise<void> => {
+      if (selectedProviderId == null) return
+      setSavingEffort(true)
+      try {
+        await window.api.providers.update(selectedProviderId, { reasoning_effort: level })
+      } catch {
+        message.error(t('harness.input.effortSaveFailed'))
+      } finally {
+        setSavingEffort(false)
+        closeMenu()
+      }
+    },
+    [selectedProviderId, message, t, closeMenu]
+  )
+
+  /** 模型列表键盘操作：↑/↓ 移动、Enter 选中、Esc 退回上一级 */
+  const handleModelListKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLInputElement>): void => {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setMenuView('root')
+        return
+      }
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault()
+        if (filteredOptions.length === 0) return
+        const delta = e.key === 'ArrowDown' ? 1 : -1
+        setActiveIndex((prev) => {
+          const next = prev + delta
+          if (next < 0) return filteredOptions.length - 1
+          if (next >= filteredOptions.length) return 0
+          return next
+        })
+        return
+      }
+      if (e.key === 'Enter') {
+        e.preventDefault()
+        const picked = filteredOptions[activeIndex]
+        if (picked) selectModel(picked.value)
+      }
+    },
+    [filteredOptions, activeIndex, selectModel]
+  )
 
   const selectedProviderType = useMemo(() => {
     if (selectedProviderId == null) return ''
@@ -666,6 +820,161 @@ const HarnessInput: React.FC<HarnessInputProps> = ({
     [isDarkMode]
   )
 
+  // ── 模型 / 推理等级面板 ─────────────────────────────────────────────────
+  // 面板挂在 Popover 的浮层里（portal，不在输入框容器内），主题变量直接写在面板根节点上。
+  const menuVars = {
+    '--hmm-bg': token.colorBgElevated,
+    '--hmm-border': token.colorBorderSecondary,
+    '--hmm-text': token.colorText,
+    '--hmm-secondary': token.colorTextSecondary,
+    '--hmm-tertiary': token.colorTextTertiary,
+    '--hmm-hover': token.colorFillTertiary,
+    '--hmm-accent': token.colorPrimary
+  } as React.CSSProperties
+
+  const providerOptionIcon = (providerType: string, size: number): React.ReactNode => {
+    const Icon = providerIconMap[providerType]
+    const color = getProviderColor(providerType, isDarkMode) ?? '#888888'
+    return Icon ? (
+      <Icon style={{ fontSize: size, color }} />
+    ) : (
+      <ProviderMark providerType={providerType} size={size} color={color} />
+    )
+  }
+
+  /** 面板标题行（二级页：返回 + 标题） */
+  const menuHeader = (title: string, onBack: () => void): React.ReactNode => (
+    <div className="hmm-head">
+      <button
+        type="button"
+        className="hmm-back"
+        onClick={onBack}
+        aria-label={t('harness.input.back')}
+      >
+        <RiArrowLeftSLine size={16} />
+      </button>
+      <span className="hmm-title">{title}</span>
+    </div>
+  )
+
+  /** 推理等级一行（含「默认」= 未设置） */
+  const effortItem = (value: string | null, label: string): React.ReactNode => {
+    const active = (currentEffort ?? null) === value
+    return (
+      <button
+        key={value ?? '__default'}
+        type="button"
+        className={`hmm-item${active ? ' is-active' : ''}`}
+        disabled={savingEffort}
+        onClick={() => void selectEffort(value)}
+      >
+        <span className="hmm-item-label">{label}</span>
+        {active ? <RiCheckLine size={14} className="hmm-item-check" /> : null}
+      </button>
+    )
+  }
+
+  const modelMenu = (
+    <div className="harness-model-menu" style={menuVars} data-menu-view={menuView}>
+      {menuView === 'root' && (
+        <>
+          <button type="button" className="hmm-row" onClick={openModelList}>
+            <span className="hmm-row-label">{t('harness.input.modelLabel')}</span>
+            <span className="hmm-row-value">
+              {selectedOption?.label ?? t('harness.input.modelPlaceholder')}
+            </span>
+            <RiArrowRightSLine size={16} className="hmm-row-chev" />
+          </button>
+          {effortLevels.length > 0 ? (
+            <button type="button" className="hmm-row" onClick={() => setMenuView('effort')}>
+              <span className="hmm-row-label">{t('harness.input.effortLabel')}</span>
+              <span className="hmm-row-value">
+                {currentEffort ? reasoningEffortLabel(currentEffort) : t('harness.input.effortDefault')}
+              </span>
+              <RiArrowRightSLine size={16} className="hmm-row-chev" />
+            </button>
+          ) : (
+            // 档案未收录档位的模型：入口保留但不可点，悬停说明原因（免得看着像坏了）
+            <Tooltip title={t('harness.input.effortUnavailableHint')} placement="left">
+              <div className="hmm-row is-disabled" aria-disabled="true">
+                <span className="hmm-row-label">{t('harness.input.effortLabel')}</span>
+                <span className="hmm-row-value">
+                  {currentEffort ? reasoningEffortLabel(currentEffort) : '—'}
+                </span>
+              </div>
+            </Tooltip>
+          )}
+        </>
+      )}
+
+      {menuView === 'model' && (
+        <>
+          {menuHeader(t('harness.input.modelLabel'), () => setMenuView('root'))}
+          <div className="hmm-search">
+            <Input
+              size="small"
+              autoFocus
+              allowClear
+              value={modelQuery}
+              onChange={(e) => {
+                setModelQuery(e.target.value)
+                setActiveIndex(0)
+              }}
+              onKeyDown={handleModelListKeyDown}
+              prefix={<RiSearchLine size={13} className="hmm-search-icon" />}
+              placeholder={t('harness.input.modelSearchPlaceholder')}
+            />
+          </div>
+          <div className="hmm-list">
+            {filteredGroups.length === 0 ? (
+              <div className="hmm-empty">{t('harness.input.modelEmpty')}</div>
+            ) : (
+              filteredGroups.map((group) => (
+                <div key={group.label} className="hmm-group">
+                  <div className="hmm-group-label">{group.label}</div>
+                  {group.options.map((option) => {
+                    const active = option.value === selectedProviderId
+                    const focused = filteredOptions[activeIndex]?.value === option.value
+                    return (
+                      <button
+                        key={option.value}
+                        type="button"
+                        className={`hmm-item${active ? ' is-active' : ''}${focused ? ' is-focused' : ''}`}
+                        onClick={() => selectModel(option.value)}
+                        onMouseEnter={() => setActiveIndex(filteredOptions.indexOf(option))}
+                      >
+                        {providerOptionIcon(option.providerType, 16)}
+                        <span className="hmm-item-label">{option.label}</span>
+                        {active ? <RiCheckLine size={14} className="hmm-item-check" /> : null}
+                      </button>
+                    )
+                  })}
+                </div>
+              ))
+            )}
+          </div>
+        </>
+      )}
+
+      {menuView === 'effort' && (
+        <>
+          {menuHeader(t('harness.input.effortLabel'), () => setMenuView('root'))}
+          <div className="hmm-list">
+            {effortItem(null, t('harness.input.effortDefault'))}
+            {effortLevels.map((level) => effortItem(level, reasoningEffortLabel(level)))}
+          </div>
+          {selectedOption?.effortControllable ? null : (
+            <div className="hmm-note">{t('harness.input.effortNotSentHint')}</div>
+          )}
+        </>
+      )}
+    </div>
+  )
+
+  const effortTriggerText = currentEffort
+    ? reasoningEffortLabel(currentEffort)
+    : t('harness.input.effortDefault')
+
   return (
     <div
       className="rounded-2xl input-scrollbar"
@@ -673,7 +982,9 @@ const HarnessInput: React.FC<HarnessInputProps> = ({
         background: colorBgLayout,
         border: `1px solid ${isDragOver ? '#4d6bfe' : colorBorder}`,
         transition: 'border-color 0.2s',
-        ...chipCssVars
+        ...chipCssVars,
+        // 触发条在容器内、面板在 portal 里，两边共用同一套 --hmm-* 主题变量
+        ...menuVars
       }}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
@@ -769,6 +1080,148 @@ const HarnessInput: React.FC<HarnessInputProps> = ({
           .harness-input-caret {
             animation: harness-input-caret-blink 1.06s steps(1) infinite;
           }
+          /* ── 模型 / 推理等级：收起态一行触发条 ── */
+          .harness-model-trigger {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            min-width: 0;
+            max-width: 100%;
+            height: 26px;
+            padding: 0 8px;
+            border: 1px solid transparent;
+            border-radius: 8px;
+            background: transparent;
+            color: var(--hmm-text);
+            font-size: 13px;
+            line-height: 1;
+            cursor: pointer;
+            transition: background 0.15s, border-color 0.15s;
+          }
+          .harness-model-trigger:hover { background: var(--hmm-hover); }
+          .harness-model-trigger[aria-expanded='true'] {
+            background: var(--hmm-hover);
+            border-color: var(--hmm-border);
+          }
+          .harness-model-trigger-name {
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+          }
+          .harness-model-trigger-effort { color: var(--hmm-tertiary); }
+          .harness-model-trigger-chev { color: var(--hmm-tertiary); flex-shrink: 0; }
+
+          /* ── 模型 / 推理等级：展开面板 ── */
+          .harness-model-menu {
+            min-width: 260px;
+            padding: 6px;
+            border: 1px solid var(--hmm-border);
+            border-radius: 14px;
+            background: var(--hmm-bg);
+            box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
+            font-size: 13px;
+          }
+          .harness-model-menu .hmm-row {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            width: 100%;
+            height: 38px;
+            padding: 0 12px;
+            border: 0;
+            border-radius: 10px;
+            background: transparent;
+            font-size: 13px;
+            text-align: left;
+            cursor: pointer;
+          }
+          .harness-model-menu .hmm-row:hover { background: var(--hmm-hover); }
+          .harness-model-menu .hmm-row.is-disabled { cursor: default; }
+          .harness-model-menu .hmm-row.is-disabled:hover { background: transparent; }
+          .harness-model-menu .hmm-row-label { color: var(--hmm-text); }
+          .harness-model-menu .hmm-row-value {
+            margin-left: auto;
+            max-width: 156px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            /* 值比标签低一档：同一行里靠明度分主次（对齐参考设计稿） */
+            color: var(--hmm-tertiary);
+          }
+          .harness-model-menu .hmm-row-chev { flex-shrink: 0; color: var(--hmm-tertiary); }
+          .harness-model-menu .hmm-head {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            height: 30px;
+            padding: 0 6px 0 2px;
+          }
+          .harness-model-menu .hmm-back {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 24px;
+            height: 24px;
+            border: 0;
+            border-radius: 6px;
+            background: transparent;
+            color: var(--hmm-secondary);
+            cursor: pointer;
+          }
+          .harness-model-menu .hmm-back:hover { background: var(--hmm-hover); }
+          .harness-model-menu .hmm-title { font-size: 12px; color: var(--hmm-tertiary); }
+          .harness-model-menu .hmm-search { padding: 0 4px 6px; }
+          .harness-model-menu .hmm-search-icon { color: var(--hmm-tertiary); }
+          .harness-model-menu .hmm-list {
+            max-height: 264px;
+            overflow-y: auto;
+            overscroll-behavior: contain;
+          }
+          .harness-model-menu .hmm-list::-webkit-scrollbar { width: 4px; }
+          .harness-model-menu .hmm-list::-webkit-scrollbar-track { background: transparent; }
+          .harness-model-menu .hmm-list::-webkit-scrollbar-thumb {
+            background: rgba(128, 128, 128, 0.4);
+            border-radius: 2px;
+          }
+          .harness-model-menu .hmm-group-label {
+            padding: 6px 10px 2px;
+            font-size: 11px;
+            color: var(--hmm-tertiary);
+          }
+          .harness-model-menu .hmm-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            width: 100%;
+            height: 30px;
+            padding: 0 8px;
+            border: 0;
+            border-radius: 8px;
+            background: transparent;
+            color: var(--hmm-text);
+            font-size: 13px;
+            text-align: left;
+            cursor: pointer;
+          }
+          .harness-model-menu .hmm-item:hover,
+          .harness-model-menu .hmm-item.is-focused { background: var(--hmm-hover); }
+          .harness-model-menu .hmm-item.is-active { color: var(--hmm-accent); }
+          .harness-model-menu .hmm-item-label {
+            flex: 1;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+          }
+          .harness-model-menu .hmm-item-check { flex-shrink: 0; color: var(--hmm-accent); }
+          .harness-model-menu .hmm-empty,
+          .harness-model-menu .hmm-note {
+            padding: 8px 10px;
+            font-size: 12px;
+            line-height: 1.5;
+            color: var(--hmm-tertiary);
+          }
           @keyframes harness-input-caret-blink {
             0%, 45% { opacity: 1; }
             50%, 95% { opacity: 0; }
@@ -838,49 +1291,41 @@ const HarnessInput: React.FC<HarnessInputProps> = ({
               }}
             />
           </Tooltip>
-          <Select
-            size="small"
-            value={selectedProviderId}
-            onChange={(value) => onSelectProvider(value)}
-            style={{ minWidth: 140, maxWidth: '100%', padding: '5px', borderRadius: '10px' }}
-            placeholder={t('harness.input.modelPlaceholder')}
-            showSearch={{
-              filterOption: (input, option) =>
-                (option?.label as string)?.toLowerCase().includes(input.toLowerCase()) ?? false
+          {/* 模型选择：收起时一行（模型名 + 推理等级），点开是「模型 / 推理等级」两行入口。
+              推理等级直接写进该模型的配置列，下一轮请求即按协议族翻译成各家字段。 */}
+          <Popover
+            open={menuOpen}
+            onOpenChange={handleMenuOpenChange}
+            trigger="click"
+            placement="topLeft"
+            arrow={false}
+            content={modelMenu}
+            styles={{
+              content: { padding: 0, background: 'transparent', boxShadow: 'none' }
             }}
-            popupMatchSelectWidth={false}
-            popupStyle={{ minWidth: 260 }}
-            labelRender={(props) => (
-              <span className="flex min-w-0 items-center gap-1.5 overflow-hidden">
-                {SelectedIcon ? (
-                  <SelectedIcon style={{ fontSize: 14, color: selectedColor }} />
-                ) : selectedProviderType ? (
-                  <ProviderMark
-                    providerType={selectedProviderType}
-                    size={14}
-                    color={selectedColor}
-                  />
-                ) : null}
-                <span className="truncate">{props.label}</span>
+          >
+            <button
+              type="button"
+              className="harness-model-trigger"
+              aria-label={t('harness.input.modelMenuAria')}
+              aria-expanded={menuOpen}
+            >
+              {SelectedIcon ? (
+                <SelectedIcon style={{ fontSize: 14, color: selectedColor }} />
+              ) : selectedProviderType ? (
+                <ProviderMark providerType={selectedProviderType} size={14} color={selectedColor} />
+              ) : null}
+              <span className="harness-model-trigger-name">
+                {selectedOption?.label ?? t('harness.input.modelPlaceholder')}
               </span>
-            )}
-            optionRender={(option) => {
-              const providerType = (option.data as { providerType?: string })?.providerType ?? ''
-              const Icon = providerIconMap[providerType]
-              const color = getProviderColor(providerType, isDarkMode) ?? '#888888'
-              return (
-                <div className="flex items-center gap-2">
-                  {Icon ? (
-                    <Icon style={{ fontSize: 18, color }} />
-                  ) : (
-                    <ProviderMark providerType={providerType} size={18} color={color} />
-                  )}
-                  <span>{option.label as string}</span>
-                </div>
-              )
-            }}
-            options={groupedProviderOptions}
-          />
+              <span className="harness-model-trigger-effort">{effortTriggerText}</span>
+              {menuOpen ? (
+                <RiArrowUpSLine size={14} className="harness-model-trigger-chev" />
+              ) : (
+                <RiArrowDownSLine size={14} className="harness-model-trigger-chev" />
+              )}
+            </button>
+          </Popover>
         </div>
         <div className="flex items-center gap-2">
           {/* 主按钮只有一个，语义随状态切换（与参考项目 deepseek-harness 的 InputBar 同款）：

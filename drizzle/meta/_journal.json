@@ -57,6 +57,13 @@
       "when": 1790406319500,
       "tag": "0007_tiny_luke_cage",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1790430038149,
+      "tag": "0008_warm_norman_osborn",
+      "breakpoints": true
     }
   ]
 }

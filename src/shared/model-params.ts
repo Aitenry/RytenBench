@@ -131,3 +131,121 @@ export function resolveThinkingFamily(
 export function supportsThinkingControl(provider: string, anthropicFormat = false): boolean {
   return resolveThinkingFamily(provider, anthropicFormat) !== 'none'
 }
+
+/* ==================== 推理等级（reasoning effort） ==================== */
+
+/**
+ * 推理等级的标准档位顺序（各协议通用词汇）。
+ *
+ * 单模型「支持哪些档位」以模型档案 `capabilities.reasoning_effort_levels` 为唯一真源
+ * （models-profile.json），这里只负责排序与展示名——档案里给的顺序不保证规范，
+ * 各厂商档位集合也不一致（如 DeepSeek 只有 low/high/max，GLM-5.3 只有 low/high/max，
+ * GPT-5.x 有 none/low/medium/high/xhigh/max）。档案未收录的档位按字典序排在末尾。
+ */
+export const REASONING_EFFORT_ORDER = [
+  'none',
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+  'ultra'
+] as const
+
+/** 推理等级标识（协议原值，小写；档案与请求体里都是这个形态） */
+export type ReasoningEffort = string
+
+/**
+ * 设置页快捷胶囊用的档位：标准词汇去掉纯别名 `ultra`
+ * （`ultra` 只是 DeepSeek 文档里映射到 `max` 的别名，模型档案里不出现，不单列一个胶囊）。
+ */
+export const REASONING_EFFORT_PRESETS: readonly string[] = REASONING_EFFORT_ORDER.filter(
+  (level) => level !== 'ultra'
+)
+
+/**
+ * 设置页字段**右侧那一排**快捷胶囊（比 PRESETS 窄很多）。
+ *
+ * 实测：弹窗内容区约 500px，一排 7 个胶囊 + 输入框会撑破整行（胶囊挤掉输入框、前面的档位被裁掉），
+ * 所以右侧只放最常用的四档，其余档位（none / minimal / xhigh）在下拉里选或直接输入。
+ */
+export const REASONING_EFFORT_CHIPS: readonly string[] = ['low', 'medium', 'high', 'max']
+
+/** 档位展示名：拉丁原文首字母大写（等宽/拉丁用原文，不译成中文，避免和协议值两套叫法） */
+export function reasoningEffortLabel(effort: string): string {
+  const key = (effort ?? '').trim()
+  if (!key) return ''
+  if (key.toLowerCase() === 'xhigh') return 'XHigh'
+  return key.charAt(0).toUpperCase() + key.slice(1)
+}
+
+/** 按标准档位顺序排列档案给的档位集合（去重、去空、未知档位按字典序收尾） */
+export function sortReasoningEfforts(levels: readonly string[] | null | undefined): string[] {
+  const list = Array.from(
+    new Set((levels ?? []).map((l) => String(l).trim().toLowerCase()).filter(Boolean))
+  )
+  const rank = (level: string): number => {
+    const index = (REASONING_EFFORT_ORDER as readonly string[]).indexOf(level)
+    return index === -1 ? REASONING_EFFORT_ORDER.length : index
+  }
+  return list.sort((a, b) => rank(a) - rank(b) || a.localeCompare(b))
+}
+
+/**
+ * 推理等级适配族：各家「调推理力度」的参数形态同样不统一，按协议族映射。
+ * - 'reasoning-effort'：OpenAI 兼容请求体里的 `reasoning_effort`（DeepSeek / 智谱官方文档
+ *   明确该字段；同族 OpenAI 兼容端点沿用同一字段）
+ * - 'openrouter-effort'：OpenRouter 统一的 `reasoning.effort`
+ * - 'anthropic-effort'：Anthropic 的 `output_config.effort`（`none` 走关闭思考）
+ * - 'google-level'：Gemini 的 `thinkingConfig.thinkingLevel`（LOW/MEDIUM/HIGH）
+ * - 'ollama-think'：Ollama 的 `think`（布尔或 low/medium/high）
+ * - 'none'：未适配，只记录不下发
+ */
+export type ReasoningParamFamily =
+  | 'reasoning-effort'
+  | 'openrouter-effort'
+  | 'anthropic-effort'
+  | 'google-level'
+  | 'ollama-think'
+  | 'none'
+
+/**
+ * 协议 → 推理等级适配族。
+ * 未收录的协议（含自定义 OpenAI 兼容端点）一律 'none'：宁可不生效，也不往请求体里
+ * 塞对方可能不认识的字段导致 400（与思考模式同一原则）。
+ */
+export const REASONING_FAMILY_BY_PROVIDER: Readonly<Record<string, ReasoningParamFamily>> = {
+  openai: 'reasoning-effort',
+  xai: 'reasoning-effort',
+  deepseek: 'reasoning-effort',
+  zhipu: 'reasoning-effort',
+  volcengine: 'reasoning-effort',
+  aliyun: 'reasoning-effort',
+  qwen: 'reasoning-effort',
+  siliconflow: 'reasoning-effort',
+  moonshot: 'reasoning-effort',
+  tencent: 'reasoning-effort',
+  openrouter: 'openrouter-effort',
+  anthropic: 'anthropic-effort',
+  google: 'google-level',
+  'google-genai': 'google-level',
+  'google-vertexai': 'google-level',
+  vertexai: 'google-level',
+  ollama: 'ollama-think'
+}
+
+/** 解析协议对应的推理等级适配族（自定义端点按兼容协议判定；入参大小写不敏感） */
+export function resolveReasoningFamily(
+  provider: string,
+  anthropicFormat = false
+): ReasoningParamFamily {
+  const key = (provider ?? '').toLowerCase()
+  if (key === 'custom') return anthropicFormat ? 'anthropic-effort' : 'none'
+  return REASONING_FAMILY_BY_PROVIDER[key] ?? 'none'
+}
+
+/** 该协议是否会把推理等级真正下发（设置界面提示 + 主进程注入共用同一判断） */
+export function supportsReasoningEffort(provider: string, anthropicFormat = false): boolean {
+  return resolveReasoningFamily(provider, anthropicFormat) !== 'none'
+}

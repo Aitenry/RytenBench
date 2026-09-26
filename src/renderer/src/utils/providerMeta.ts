@@ -14,8 +14,15 @@ export {
   SAMPLING_PARAM_SPECS,
   TOP_K_PROVIDERS,
   supportsThinkingControl,
+  REASONING_EFFORT_ORDER,
+  REASONING_EFFORT_PRESETS,
+  REASONING_EFFORT_CHIPS,
+  supportsReasoningEffort,
+  reasoningEffortLabel,
+  sortReasoningEfforts,
   type ThinkingMode,
-  type SamplingParamName
+  type SamplingParamName,
+  type ReasoningEffort
 } from '../../../shared/model-params'
 
 /** Token 数量的紧凑展示：4000 → 4k，128000 → 128k，1000000 → 1M */

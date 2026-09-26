@@ -58,6 +58,10 @@ import {
   getCapabilities,
   getProviderDisplayName,
   isEmbeddingProvider,
+  REASONING_EFFORT_CHIPS,
+  REASONING_EFFORT_PRESETS,
+  reasoningEffortLabel,
+  sortReasoningEfforts,
   supportsThinkingControl
 } from '@renderer/utils/providerMeta'
 import { SettingsPageHeader, SettingsSection } from './SettingsUI'
@@ -332,6 +336,36 @@ const PresetChips: React.FC<{
 )
 
 /**
+ * 推理档位胶囊：点一下把这个档位加进 / 移出「可选档位」。
+ *
+ * 为什么是**多选开关**而不是像上下文窗口那样的单选回填：这里的字段本身是一个集合
+ * （哪些档位能在输入框里选），胶囊就是集合成员的开关；模型档案没收录档位的模型，
+ * 用户在这里自己点出该模型的档位表。
+ *
+ * 只放最常用的四档（`REASONING_EFFORT_CHIPS`）：弹窗内容区约 500px，一排 7 个胶囊会把
+ * 输入框挤没（实测胶囊因 `justify-content: flex-end` 反向溢出、盖住输入框边缘）。
+ */
+const EffortPresetChips: React.FC<{
+  value: string[]
+  presets: readonly string[]
+  onToggle: (level: string) => void
+}> = ({ value, presets, onToggle }) => (
+  <div className="ms-chips">
+    {presets.map((preset) => (
+      <button
+        key={preset}
+        type="button"
+        className="ms-chip"
+        data-active={value.includes(preset)}
+        onClick={() => onToggle(preset)}
+      >
+        {reasoningEffortLabel(preset)}
+      </button>
+    ))}
+  </div>
+)
+
+/**
  * 「支持图片输入」单选：直接读写 metadata_capabilities 数组。
  * 面板只暴露这一个能力开关，档案里其余能力（工具调用/思考/嵌入…）原样保留，不被覆盖。
  */
@@ -400,6 +434,20 @@ const ModelSettings: React.FC = () => {
     form
   )
   const watchedToolRounds: number | null | undefined = Form.useWatch('max_tool_rounds', form)
+  const watchedReasoningEffort: string | null | undefined = Form.useWatch('reasoning_effort', form)
+  /**
+   * 该模型的「可选档位」表（推理等级候选集）。
+   * 真源是模型档案的 `capabilities.reasoning_effort_levels`，但**用户可以自己改**：
+   * 档案没收录档位的模型（自建/小众模型）就在这里手填或点胶囊，输入框的档位菜单读的也是它。
+   */
+  const watchedEffortLevels: string[] | undefined = Form.useWatch(
+    'metadata_reasoning_effort_levels',
+    form
+  )
+  const effortLevels = useMemo<string[]>(
+    () => (Array.isArray(watchedEffortLevels) ? watchedEffortLevels.filter(Boolean) : []),
+    [watchedEffortLevels]
+  )
   const watchedTemperature: number | null | undefined = Form.useWatch('temperature', form)
   const watchedTopP: number | null | undefined = Form.useWatch('top_p', form)
   const watchedTopK: number | null | undefined = Form.useWatch('top_k', form)
@@ -421,6 +469,7 @@ const ModelSettings: React.FC = () => {
     if (watchedContext != null) parts.push(`in ${formatTokenCount(watchedContext)}`)
     if (watchedMaxOutput != null) parts.push(`out ${formatTokenCount(watchedMaxOutput)}`)
     if (watchedToolRounds != null) parts.push(`tools ${watchedToolRounds}`)
+    if (watchedReasoningEffort) parts.push(String(watchedReasoningEffort))
     if (watchedTemperature != null) parts.push(`t ${watchedTemperature}`)
     if (watchedTopP != null) parts.push(`p ${watchedTopP}`)
     if (watchedTopK != null) parts.push(`k ${watchedTopK}`)
@@ -429,6 +478,7 @@ const ModelSettings: React.FC = () => {
     watchedContext,
     watchedMaxOutput,
     watchedToolRounds,
+    watchedReasoningEffort,
     watchedTemperature,
     watchedTopP,
     watchedTopK
@@ -437,6 +487,14 @@ const ModelSettings: React.FC = () => {
   /** 快捷档位：写入数值并标记「已触碰」，避免切换模型 ID 时被档案自动填充重置 */
   const pickAdvancedNumber = (name: string, value: number): void => {
     form.setFields([{ name, value, touched: true }])
+  }
+
+  /** 档位胶囊：把档位加进 / 移出「可选档位」，同样标记「已触碰」（用户的手动集合优先于档案） */
+  const toggleEffortLevel = (level: string): void => {
+    const next = effortLevels.includes(level)
+      ? effortLevels.filter((item) => item !== level)
+      : [...effortLevels, level]
+    form.setFields([{ name: 'metadata_reasoning_effort_levels', value: sortReasoningEfforts(next), touched: true }])
   }
 
   /** 弹窗内的主题变量：表单原语共用一套色板（发丝线/等宽字/强调色） */
@@ -489,6 +547,7 @@ const ModelSettings: React.FC = () => {
       if (key === 'name') empty[key] = ''
       else if (key === 'metadata_type') empty[key] = undefined
       else if (key === 'metadata_capabilities') empty[key] = []
+      else if (key === 'metadata_reasoning_effort_levels') empty[key] = []
       else empty[key] = null
     }
     form.setFieldsValue(empty)
@@ -509,9 +568,13 @@ const ModelSettings: React.FC = () => {
         if (form.getFieldValue('model') !== modelId) return
         const cur = form.getFieldsValue()
         const patch: Record<string, unknown> = {}
-        const fillIfEmpty = (key: string, value: string | number): void => {
+        const fillIfEmpty = (key: string, value: string | number | string[]): void => {
           const now = cur[key]
-          const empty = now == null || now === '' || now === 0
+          const empty =
+            now == null ||
+            now === '' ||
+            now === 0 ||
+            (Array.isArray(now) && now.length === 0) // 数组型字段（可选档位）空数组也算空
           if (empty) patch[key] = value
         }
         if (typeof profile.display_name === 'string' && profile.display_name.trim()) {
@@ -523,8 +586,8 @@ const ModelSettings: React.FC = () => {
         const caps = Array.isArray(cur.metadata_capabilities)
           ? (cur.metadata_capabilities as string[])
           : []
+        const pc = (profile.capabilities ?? {}) as Record<string, boolean | string[] | undefined>
         if (caps.length === 0) {
-          const pc = (profile.capabilities ?? {}) as Record<string, boolean | undefined>
           const capKeys = CAPABILITY_OPTIONS.filter((o) => pc[o.key] === true).map((o) => o.key)
           if (capKeys.length > 0) patch.metadata_capabilities = capKeys
         }
@@ -533,6 +596,11 @@ const ModelSettings: React.FC = () => {
         }
         if (typeof profile.max_output_tokens === 'number' && profile.max_output_tokens > 0) {
           fillIfEmpty('metadata_max_output_tokens', profile.max_output_tokens)
+        }
+        // 推理档位表：档案命中就回填（用户已手改过则不动——fillIfEmpty 只补空数组）
+        const profileLevels = pc.reasoning_effort_levels
+        if (Array.isArray(profileLevels) && profileLevels.length > 0) {
+          fillIfEmpty('metadata_reasoning_effort_levels', sortReasoningEfforts(profileLevels))
         }
         autoFillRef.current = { modelId, keys: Object.keys(patch) }
         setProfileStatus('matched')
@@ -626,8 +694,10 @@ const ModelSettings: React.FC = () => {
       top_p: null,
       top_k: null,
       thinking_mode: 'auto',
+      reasoning_effort: null,
       max_tool_rounds: DEFAULT_MAX_TOOL_ROUNDS,
       metadata_capabilities: [],
+      metadata_reasoning_effort_levels: [],
       is_enabled: true,
       pinned: false
     })
@@ -656,6 +726,7 @@ const ModelSettings: React.FC = () => {
       top_p: record.top_p,
       top_k: record.top_k,
       thinking_mode: record.thinking_mode ?? 'auto',
+      reasoning_effort: record.reasoning_effort ?? null,
       max_tool_rounds: record.max_tool_rounds ?? DEFAULT_MAX_TOOL_ROUNDS,
       api_format:
         record.extra_config && typeof record.extra_config.api_format === 'string'
@@ -663,6 +734,8 @@ const ModelSettings: React.FC = () => {
           : 'openai',
       metadata_type: typeof meta.type === 'string' ? meta.type : undefined,
       metadata_capabilities: CAPABILITY_OPTIONS.filter((o) => caps[o.key]).map((o) => o.key),
+      // 已存元数据里的档位表：输入框的档位菜单与这里的选择器读的都是它
+      metadata_reasoning_effort_levels: sortReasoningEfforts(caps.reasoning_effort_levels),
       is_enabled: record.is_enabled,
       pinned: record.is_pinned
     })
@@ -687,14 +760,21 @@ const ModelSettings: React.FC = () => {
     existing: ModelMetadata | null
   ): ModelMetadata | null => {
     const base = existing ? { ...existing } : {}
-    const currentCaps: Record<string, boolean> = {
+    const currentCaps: Record<string, boolean | string[]> = {
       ...(existing?.capabilities && typeof existing.capabilities === 'object'
-        ? (existing.capabilities as Record<string, boolean>)
+        ? (existing.capabilities as Record<string, boolean | string[]>)
         : {})
     }
     // 面板只暴露「支持图片输入」一个开关，其余能力按档案原样保留
     const selectedCaps = ((values.metadata_capabilities as string[]) ?? []).filter(Boolean)
     currentCaps.supports_image_input = selectedCaps.includes('supports_image_input')
+
+    // 可选档位（数组型能力）：用户手填/档案回填后整份写回；空表示该模型没有档位可选
+    const levels = sortReasoningEfforts(
+      (values.metadata_reasoning_effort_levels as string[] | undefined) ?? []
+    )
+    if (levels.length > 0) currentCaps.reasoning_effort_levels = levels
+    else delete currentCaps.reasoning_effort_levels
 
     const vendor = typeof values.provider === 'string' ? values.provider.trim() : ''
     const type = typeof values.metadata_type === 'string' ? values.metadata_type.trim() : ''
@@ -764,6 +844,8 @@ const ModelSettings: React.FC = () => {
         top_p: (values.top_p as number | null | undefined) ?? null,
         top_k: (values.top_k as number | null | undefined) ?? null,
         thinking_mode: (values.thinking_mode as LlmProviderInput['thinking_mode']) ?? 'auto',
+        // 推理等级：留空 = 未设置（不下发档位参数，走模型默认）
+        reasoning_effort: (values.reasoning_effort as string | null | undefined) ?? null,
         max_tool_rounds:
           (values.max_tool_rounds as number | null | undefined) ?? DEFAULT_MAX_TOOL_ROUNDS,
         // 兼容协议仅对「自定义」类型生效，存入 extra_config.api_format；其余类型保留原 extra_config
@@ -1500,6 +1582,41 @@ const ModelSettings: React.FC = () => {
                       </Form.Item>
                     </ParamRow>
 
+                    {/* 可选档位：模型有哪些档位（档案命中自动回填，用户可自己增删）。
+                        排列与「上下文窗口 → 输入/输出」一致：控件在左、档位胶囊在右。
+                        当前用哪个档位不在这里选（输入框的模型菜单负责），但值要随表单原样带回，
+                        否则每次在设置里保存都会把用户在输入框选好的档位清掉。 */}
+                    <Form.Item name="reasoning_effort" hidden>
+                      <Input />
+                    </Form.Item>
+                    <ParamRow
+                      label={t('modelSettings.form.reasoningEffortLevels')}
+                      extra={
+                        <EffortPresetChips
+                          value={effortLevels}
+                          presets={REASONING_EFFORT_CHIPS}
+                          onToggle={toggleEffortLevel}
+                        />
+                      }
+                    >
+                      <Form.Item name="metadata_reasoning_effort_levels" noStyle>
+                        <Select
+                          mode="tags"
+                          allowClear
+                          // 档位多了不折行（折行会把整行撑高、还会跟右侧胶囊抢宽度）：
+                          // 放不下的档位收成「+N」，完整集合点开下拉就能看见与增删
+                          maxTagCount="responsive"
+                          maxTagPlaceholder={(omitted) => `+${omitted.length}`}
+                          placeholder={t('modelSettings.form.reasoningEffortLevelsPlaceholder')}
+                          options={REASONING_EFFORT_PRESETS.map((level) => ({
+                            value: level,
+                            label: reasoningEffortLabel(level)
+                          }))}
+                          style={{ width: '100%' }}
+                        />
+                      </Form.Item>
+                    </ParamRow>
+
                     <GroupLabel>{t('modelSettings.form.samplingParams')}</GroupLabel>
                     {SAMPLING_PARAM_SPECS.map((spec) => (
                       <ParamRow key={spec.name} label={spec.label}>
@@ -1514,45 +1631,46 @@ const ModelSettings: React.FC = () => {
                         </Form.Item>
                       </ParamRow>
                     ))}
+
+                    {/* 状态开关（启用 / 置顶 / 没默认模型时的设为默认）也归高级配置：
+                        它们是模型自身的状态，不是主流程必填项，跟着下面这批开关走。 */}
+                    <div className="ms-switches">
+                      <span className="ms-switch">
+                        {t('modelSettings.form.enabled')}
+                        <Form.Item name="is_enabled" valuePropName="checked" noStyle>
+                          <Switch size="small" />
+                        </Form.Item>
+                      </span>
+                      {!editingProvider && !providers.some((p) => p.is_default) && (
+                        <Tooltip
+                          title={
+                            isEmbeddingInForm
+                              ? t('modelSettings.messages.embeddingNotDefaultChat')
+                              : t('modelSettings.form.setDefaultTooltipNoDefault')
+                          }
+                        >
+                          <span className="ms-switch">
+                            {t('modelSettings.form.setDefault')}
+                            <Form.Item name="is_default" valuePropName="checked" noStyle>
+                              <Switch size="small" disabled={isEmbeddingInForm} />
+                            </Form.Item>
+                          </span>
+                        </Tooltip>
+                      )}
+                      <Tooltip title={t('modelSettings.form.pinnedTooltip')}>
+                        <span className="ms-switch">
+                          {t('modelSettings.form.pinned')}
+                          <Form.Item name="pinned" valuePropName="checked" noStyle>
+                            <Switch size="small" />
+                          </Form.Item>
+                        </span>
+                      </Tooltip>
+                    </div>
                   </div>
                 )
               }
             ]}
           />
-
-          {/* ── 状态开关：置于高级配置之下 ── */}
-          <div className="ms-switches">
-            <span className="ms-switch">
-              {t('modelSettings.form.enabled')}
-              <Form.Item name="is_enabled" valuePropName="checked" noStyle>
-                <Switch size="small" />
-              </Form.Item>
-            </span>
-            {!editingProvider && !providers.some((p) => p.is_default) && (
-              <Tooltip
-                title={
-                  isEmbeddingInForm
-                    ? t('modelSettings.messages.embeddingNotDefaultChat')
-                    : t('modelSettings.form.setDefaultTooltipNoDefault')
-                }
-              >
-                <span className="ms-switch">
-                  {t('modelSettings.form.setDefault')}
-                  <Form.Item name="is_default" valuePropName="checked" noStyle>
-                    <Switch size="small" disabled={isEmbeddingInForm} />
-                  </Form.Item>
-                </span>
-              </Tooltip>
-            )}
-            <Tooltip title={t('modelSettings.form.pinnedTooltip')}>
-              <span className="ms-switch">
-                {t('modelSettings.form.pinned')}
-                <Form.Item name="pinned" valuePropName="checked" noStyle>
-                  <Switch size="small" />
-                </Form.Item>
-              </span>
-            </Tooltip>
-          </div>
         </Form>
       </Modal>
 

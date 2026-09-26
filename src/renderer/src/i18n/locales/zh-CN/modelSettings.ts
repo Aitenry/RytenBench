@@ -109,6 +109,8 @@ export const zhCNModelSettings = {
     imageInputUnsupported: '不支持',
     thinkingMode: '思考模式',
     thinkingModeHint: '当前接口协议不下发该参数，仅记录',
+    reasoningEffortLevels: '可选档位',
+    reasoningEffortLevelsPlaceholder: '选择或输入档位，回车确认',
     samplingParams: '采样参数',
     enabled: '启用',
     setDefault: '设为默认',

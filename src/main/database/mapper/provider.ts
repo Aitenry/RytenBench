@@ -31,6 +31,8 @@ export interface LlmProviderConfig {
   top_p: number | null
   top_k: number | null
   thinking_mode: ThinkingMode
+  /** 推理等级：null = 未设置（不下发档位参数，走模型默认）；取值来自模型档案的档位表 */
+  reasoning_effort: string | null
   max_tool_rounds: number
   extra_config: Record<string, unknown> | null
   metadata: Record<string, unknown> | null
@@ -55,6 +57,8 @@ export interface LlmProviderInput {
   top_p?: number | null
   top_k?: number | null
   thinking_mode?: ThinkingMode
+  /** 推理等级：留空(undefined/null) = 未设置，不下发档位参数 */
+  reasoning_effort?: string | null
   max_tool_rounds?: number
   extra_config?: Record<string, unknown> | null
   metadata?: Record<string, unknown> | null
@@ -87,6 +91,7 @@ function rowToConfig(row: LlmProviderRow, includeKey = true): LlmProviderConfig 
     top_p: row.top_p,
     top_k: row.top_k,
     thinking_mode: (row.thinking_mode as ThinkingMode | null) ?? 'auto',
+    reasoning_effort: row.reasoning_effort ?? null,
     max_tool_rounds: row.max_tool_rounds ?? DEFAULT_MAX_TOOL_ROUNDS,
     extra_config: row.extra_config ? JSON.parse(row.extra_config) : null,
     metadata: row.metadata ? JSON.parse(row.metadata) : null,
@@ -179,6 +184,7 @@ function toProviderColumns(input: LlmProviderInput): PgInsertValue<typeof llm_pr
     top_p: input.top_p ?? null,
     top_k: input.top_k ?? null,
     thinking_mode: input.thinking_mode ?? 'auto',
+    reasoning_effort: input.reasoning_effort?.trim() || null,
     max_tool_rounds: input.max_tool_rounds ?? DEFAULT_MAX_TOOL_ROUNDS,
     extra_config: input.extra_config ? JSON.stringify(input.extra_config) : null,
     metadata: input.metadata ? JSON.stringify(input.metadata) : null,
@@ -291,6 +297,10 @@ async function updateProvider(id: number, updates: Partial<LlmProviderInput>): P
     if (updates.top_p !== undefined) patch.top_p = updates.top_p
     if (updates.top_k !== undefined) patch.top_k = updates.top_k
     if (updates.thinking_mode !== undefined) patch.thinking_mode = updates.thinking_mode
+    if (updates.reasoning_effort !== undefined) {
+      // 空串/null 都视为「未设置」：清掉档位，回到模型默认
+      patch.reasoning_effort = updates.reasoning_effort?.trim() || null
+    }
     if (updates.max_tool_rounds !== undefined) patch.max_tool_rounds = updates.max_tool_rounds
     if (updates.extra_config !== undefined) {
       patch.extra_config = updates.extra_config ? JSON.stringify(updates.extra_config) : null
