@@ -6,11 +6,7 @@ import { settingsStore } from '../../../../main/context'
 import { mainMessages } from '../../../../main/i18n'
 import type { MainIpcHandlers } from '../../../../main/plugins/context'
 import type { MainAgentConfig, McpServerInput } from '../../shared/mcp'
-import {
-  mcpServerViews,
-  refreshCatalog,
-  testMcpServer
-} from '../runtime/mcp'
+import { mcpServerViews, refreshCatalog, testMcpServer } from '../runtime/mcp'
 import {
   importMcpServers,
   removeMcpServer,
@@ -53,10 +49,12 @@ export function mcpIpcHandlers(): MainIpcHandlers {
     handlers[`plugin:harness:${channel}`] = handler
   }
 
-  // 当前服务器清单 + 运行期状态（连没连上、有哪些工具）
+  // 当前服务器清单 + 运行期状态（连没连上、有哪些工具）。
+  // **只读快照、不重连**（2026-09-26 用户要求：加载列表不要测试连接，否则服务器一多就卡）。
+  // 状态要更新就点「重新连接」；保存/切换启用态/删除仍然会主动重连并广播。
   handle('mcp-servers-list', async () => {
     try {
-      return await mcpServerViewsAsync()
+      return mcpServerViews()
     } catch (error) {
       logger.error('Error in mcp-servers-list:', error)
       throw error
@@ -190,16 +188,4 @@ export function mcpIpcHandlers(): MainIpcHandlers {
   })
 
   return handlers
-}
-
-/**
- * 读当前视图。
- *
- * 这里**总是重连一次**再回报：打开设置页的语义就是「我要看当前真实状态」，直接读快照
- * 可能给出旧结论（启动预热失败、外部改过 mcp.json、某台服务器刚被系统杀掉）。
- * 刷新在 refreshCatalog 内部串行化，重复调用不会并发起子进程；连不上的服务器最多等一个
- * 握手超时，回报里带原始错误——用户看得到原因，而不是面对一份假的「没有工具」。
- */
-async function mcpServerViewsAsync(): Promise<ReturnType<typeof mcpServerViews>> {
-  return refreshCatalog()
 }

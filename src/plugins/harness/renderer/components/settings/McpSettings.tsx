@@ -1,12 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { App, Button, Dropdown, Form, Input, InputNumber, Modal, Select, Switch, theme } from 'antd'
-import { PlusOutlined, UploadOutlined, MoreOutlined } from '@ant-design/icons'
+import { App, Button, Form, Input, InputNumber, Modal, Select, Switch, theme } from 'antd'
+import { PlusOutlined, UploadOutlined } from '@ant-design/icons'
 import {
   RiAddLine,
   RiDeleteBin6Line,
   RiEditLine,
-  RiFlashlightLine,
-  RiListCheck2,
   RiPlug2Line,
   RiRefreshLine
 } from '@remixicon/react'
@@ -25,14 +23,17 @@ import type { McpServerInput, McpServerView, McpToolInfo } from '../../../shared
  * 设置 → MCP（服务器管理）。
  *
  * 版面遵循设置页既有约定：**字段顺排**（页头 + 分区卡片 + 行式条目），不用装饰性分组标题、
- * 不用带框的信息块；分组的区分只靠纯文本标签，明细放在结构化面板里（详情与工具清单走弹窗，
- * 每行「⋯」菜单是唯一入口，不做一列平行按钮）。
+ * 不用带框的信息块；结构只在携带信息时才成立——所以「工具」不是一个布尔开关，而是一份
+ * 逐项开关的清单（哪台服务器带来哪些工具、哪些真的挂给了模型，都要能一眼看见并当场改）。
  *
  * 数据流：主进程是唯一真源（配置落 electron-store，状态来自真实连接）。这一页只做三件事：
- * 读（`mcp.list`）、写（save/remove/toggle/setToolsEnabled）、触发重连（reconnect/test）。
+ * 读（`mcp.list`）、写（save/remove/toggle/setToolsEnabled）、触发重连并试连（reconnect/test）。
  * 目录变化由 `mcp.onCatalogUpdated` 广播回来，因此别处（如导入）改了配置这里也会自动刷新。
  *
- * 「工具可用」的勾选不写在本页的临时 state 里，而是保存时并入 `mainAgent.mcpTools`
+ * 工具清单的两个来源：编辑已连上的服务器时用目录快照里的清单；新建（或刚改了连接参数）时
+ * 由「测试连接」现连一次拿回来。两者都落在同一个「工具」字段上，用户勾完保存即可。
+ *
+ * 「工具启用」的勾选不写在本页的临时 state 里，而是保存时并入 `mainAgent.mcpTools`
  * （见 shared/mcp.ts）：与智能体页的工具下拉共用同一份启用清单，避免两处各存一份。
  */
 
@@ -50,25 +51,52 @@ interface ServerFormValues {
   headers?: { key?: string; value?: string }[]
   timeoutMs?: number | null
   enabled?: boolean
-  toolsEnabled?: boolean
 }
 
-/** 每行「⋯」菜单里的一项 */
-interface RowAction {
-  key: string
-  label: string
-  icon: React.ReactNode
-  danger?: boolean
+/**
+ * 工具开关：**按服务器上报的原始名（rawName）记**，不是全名。
+ *
+ * 全名（`mcp__<服务器名净化>__<工具名>`）里含服务器名，用户改一次名字就会整体换掉；
+ * 按全名记选择会在改名后集体丢失。保存时再拿最新清单把 rawName 映射成全名（见 handleSave）。
+ */
+type ToolSelection = Record<string, boolean>
+
+/** 表单窗口的初始值来源：新建（空）或编辑某台服务器；清单与开关初始态由父组件按当前数据算好 */
+interface FormSeed {
+  /** 每次打开递增：作为弹窗的 `key`，保证换一份初始值时一定是全新实例（见 openCreate 的注释） */
+  seq: number
+  mode: 'create' | 'edit'
+  /** 编辑时的服务器视图（配置 + 运行期状态 + 已知工具清单） */
+  server?: McpServerView
+  /** 打开时已知的工具清单（编辑已连上的服务器时来自目录快照） */
+  catalog: McpToolInfo[]
+  selection: ToolSelection
 }
 
-/** 表单窗口的初始值来源：新建（空）或编辑某台服务器；`toolsEnabled` 由父组件按当前启用清单算好 */
-type FormSeed =
-  | { mode: 'create'; toolsEnabled: boolean }
-  | { mode: 'edit'; server: McpServerView; toolsEnabled: boolean }
+/** 一次试连的结果：成功时带最新工具清单（就地铺成「工具」字段），失败时带原始错误 */
+interface TestResult {
+  ok: boolean
+  text: string
+  tools: McpToolInfo[]
+}
+
+/** 状态点：颜色是唯一的状态语言，与列表其它页一致 */
+const StatusDot: React.FC<{ color: string }> = ({ color }) => (
+  <span
+    style={{
+      width: 6,
+      height: 6,
+      borderRadius: '50%',
+      background: color,
+      display: 'inline-block',
+      flexShrink: 0
+    }}
+  />
+)
 
 const McpSettings: React.FC = () => {
   const {
-    token: { colorTextSecondary, colorTextTertiary, colorSuccess, colorError, colorFillAlter }
+    token: { colorTextSecondary, colorTextTertiary, colorSuccess, colorError }
   } = theme.useToken()
   const { t } = useTranslation()
   const { viewMessage } = useMessage()
@@ -93,9 +121,8 @@ const McpSettings: React.FC = () => {
   const [formSeed, setFormSeed] = useState<FormSeed | null>(null)
   const [saving, setSaving] = useState(false)
   const [testing, setTesting] = useState(false)
-  /** 试连结果：就地显示在表单里（成功给工具数，失败给原始错误） */
-  const [testResult, setTestResult] = useState<{ ok: boolean; text: string } | null>(null)
-  const [toolsView, setToolsView] = useState<{ server: McpServerView } | null>(null)
+  /** 试连结果：就地显示在「工具」字段上方（成功给清单，失败给原始错误） */
+  const [testResult, setTestResult] = useState<TestResult | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -135,19 +162,41 @@ const McpSettings: React.FC = () => {
   const serverEnabledCount = (view: McpServerView): number =>
     view.tools.filter((tool) => enabledSet.has(tool.name)).length
 
+  /** 这台服务器的全部工具名（用于并入 / 移出 mainAgent.mcpTools） */
+  const toolNamesOf = (view: McpServerView): string[] => view.tools.map((tool) => tool.name)
+
   // ── 表单：打开 / 提交 ────────────────────────────────────────────────
+
+  /**
+   * 每次打开表单递增一次的序号，作为 `ServerFormModal` 的 `key`。
+   *
+   * 为什么需要它：`formSeed` 直接从「编辑 A」换成「新建」时（关闭与打开落在同一批次，
+   * 或将来多了别的入口），React 会**复用**同一个组件实例——`Form.useForm` 的实例、
+   * `initialValues`、`useState(seed.selection)` 全是首次挂载时的值，界面就会显示上一个
+   * 服务器的字段与勾选（实测：新建窗口里还留着刚编辑那台服务器的命令）。加 `key` 后
+   * 每次打开都强制新实例，与「每次打开用一个全新的表单实例」的约定一致。
+   */
+  const seedSeq = React.useRef(0)
 
   const openCreate = (): void => {
     setTestResult(null)
-    setFormSeed({ mode: 'create', toolsEnabled: true })
+    seedSeq.current += 1
+    setFormSeed({ seq: seedSeq.current, mode: 'create', catalog: [], selection: {} })
   }
 
   const openEdit = (view: McpServerView): void => {
     setTestResult(null)
-    // 「工具可用」的初始态从这里定：该服务器已有任一工具在启用清单里 → 视为已勾选；
-    // 连不上（还没有工具清单）时也按勾选显示，避免用户以为开关被关掉了
-    const enabledCount = view.tools.filter((tool) => enabledSet.has(tool.name)).length
-    setFormSeed({ mode: 'edit', server: view, toolsEnabled: enabledCount > 0 || view.tools.length === 0 })
+    // 逐项开关的初始态直接来自「已启用清单」：无启发式，看到的就是真的
+    const selection: ToolSelection = {}
+    for (const tool of view.tools) selection[tool.rawName] = enabledSet.has(tool.name)
+    seedSeq.current += 1
+    setFormSeed({
+      seq: seedSeq.current,
+      mode: 'edit',
+      server: view,
+      catalog: view.tools,
+      selection
+    })
   }
 
   const closeForm = (): void => {
@@ -190,23 +239,24 @@ const McpSettings: React.FC = () => {
     return { ...base, url: values.url?.trim(), headers: pairs(values.headers) }
   }
 
-  /** 这台服务器的全部工具名（用于并入 / 移出 mainAgent.mcpTools） */
-  const toolNamesOf = (view: McpServerView): string[] => view.tools.map((tool) => tool.name)
-
-  const handleSave = async (values: ServerFormValues): Promise<void> => {
-    const editing = formSeed?.mode === 'edit' ? formSeed.server : null
+  const handleSave = async (values: ServerFormValues, selection: ToolSelection): Promise<void> => {
+    const editing = formSeed?.mode === 'edit' ? (formSeed.server ?? null) : null
     setSaving(true)
     try {
       const saved = await harnessApi.mcp.save(toInput(values, editing))
-      // 【工具可用】的落点：把这台服务器的工具并入 / 移出 mainAgent.mcpTools。
+      // 【工具启用】的落点：把这台服务器的工具并入 / 移出 mainAgent.mcpTools。
       // 关键是**先摘掉这台服务器名下的全部工具名再按勾选补回**——用户可能在服务器上
       // 删过工具，只做并集会留下永远挂不上的幽灵名字。
       const before = servers.find((s) => s.config.id === saved.id)
       const stale = before ? toolNamesOf(before) : []
       const rest = enabledTools.filter((name) => !stale.includes(name))
-      // saved 刚写入、工具清单要等重连完成才有：重新拉一次列表拿到最新工具名
+      // saved 刚写入、工具清单要等重连完成才有：重新拉一次列表，拿最新工具名把
+      // 按 rawName 记的勾选映射成全名（改名会换命名空间，所以不能直接用旧全名）。
+      // 清单里没出现过的（新发现的 / 没试连过的）按默认启用处理，与「新服务器整台可用」一致。
       const fresh = (await harnessApi.mcp.list()).find((v) => v.config.id === saved.id)
-      const kept = values.toolsEnabled && fresh ? toolNamesOf(fresh) : []
+      const kept = (fresh?.tools ?? [])
+        .filter((tool) => selection[tool.rawName] !== false)
+        .map((tool) => tool.name)
       const next = Array.from(new Set([...rest, ...kept]))
       await harnessApi.mcp.setToolsEnabled(next)
       setEnabledTools(next)
@@ -231,9 +281,7 @@ const McpSettings: React.FC = () => {
     // 乐观更新：开关的手感不该等一次真实的连接握手
     setServers((prev) =>
       prev.map((s) =>
-        s.config.id === view.config.id
-          ? { ...s, config: { ...s.config, enabled: checked } }
-          : s
+        s.config.id === view.config.id ? { ...s, config: { ...s.config, enabled: checked } } : s
       )
     )
     try {
@@ -334,24 +382,28 @@ const McpSettings: React.FC = () => {
   }
 
   const handleTest = async (values: ServerFormValues): Promise<void> => {
-    const editing = formSeed?.mode === 'edit' ? formSeed.server : null
+    const editing = formSeed?.mode === 'edit' ? (formSeed.server ?? null) : null
     setTesting(true)
     setTestResult(null)
     try {
       const result = await harnessApi.mcp.test(toInput(values, editing))
       if (result.ok) {
-        const count = result.tools?.length ?? 0
+        const tools = result.tools ?? []
         setTestResult({
           ok: true,
-          text: count
-            ? t('mcpSettings.form.testOk', { count })
-            : t('mcpSettings.form.testEmpty')
+          tools,
+          // 工具数不再重复写进这句话：计数跟着同一行显示（见 ServerFormModal 的 statusLine）
+          text: tools.length ? t('mcpSettings.form.testOk') : t('mcpSettings.form.testEmpty')
         })
       } else {
-        setTestResult({ ok: false, text: result.error ?? t('mcpSettings.form.testFailed') })
+        setTestResult({
+          ok: false,
+          tools: [],
+          text: result.error ?? t('mcpSettings.form.testFailed')
+        })
       }
     } catch (error) {
-      setTestResult({ ok: false, text: String(error) })
+      setTestResult({ ok: false, tools: [], text: String(error) })
     } finally {
       setTesting(false)
     }
@@ -362,65 +414,21 @@ const McpSettings: React.FC = () => {
   /** 状态：小圆点 + 文案（颜色是唯一的状态语言，与列表其它页一致） */
   const statusNode = (view: McpServerView): React.ReactNode => {
     const color =
-      view.status === 'ok'
-        ? colorSuccess
-        : view.status === 'error'
-          ? colorError
-          : colorTextTertiary
+      view.status === 'ok' ? colorSuccess : view.status === 'error' ? colorError : colorTextTertiary
     return (
       <span className="flex items-center" style={{ gap: 6, fontSize: 12, color }}>
-        <span
-          style={{
-            width: 6,
-            height: 6,
-            borderRadius: '50%',
-            background: color,
-            display: 'inline-block'
-          }}
-        />
+        <StatusDot color={color} />
         {t(`mcpSettings.status.${view.status}`)}
       </span>
     )
   }
 
-  /** 一行副标题：连接目标 + 工具计数（命令/地址是要给用户看的信息，不藏进 tooltip） */
-  const subtitleNode = (view: McpServerView): React.ReactNode => {
+  /** 连接目标（命令 + 参数 / 地址）：单行截断，完整值在编辑表单里看 */
+  const targetOf = (view: McpServerView): string => {
     const config = view.config
-    const target =
-      config.transport === 'stdio'
-        ? [config.command, ...(config.args ?? [])].filter(Boolean).join(' ')
-        : (config.url ?? '')
-    return (
-      <span style={{ fontSize: 12, color: colorTextTertiary, wordBreak: 'break-all' }}>
-        {target}
-        {view.tools.length > 0 ? ` · ${t('mcpSettings.list.toolCount', { count: view.tools.length })}` : ''}
-        {view.status === 'error' && view.error ? ` · ${view.error}` : ''}
-      </span>
-    )
-  }
-
-  /** 「⋯」菜单项：一个功能一个入口，不做一列文字按钮 */
-  const actionsOf = (): RowAction[] => [
-    {
-      key: 'tools',
-      label: t('mcpSettings.list.viewTools'),
-      icon: <RiListCheck2 size={14} />
-    },
-    { key: 'edit', label: t('mcpSettings.list.edit'), icon: <RiEditLine size={14} /> },
-    { key: 'reconnect', label: t('mcpSettings.list.manual'), icon: <RiRefreshLine size={14} /> },
-    {
-      key: 'remove',
-      label: t('mcpSettings.list.remove'),
-      icon: <RiDeleteBin6Line size={14} />,
-      danger: true
-    }
-  ]
-
-  const onAction = (view: McpServerView, key: string): void => {
-    if (key === 'tools') setToolsView({ server: view })
-    else if (key === 'edit') openEdit(view)
-    else if (key === 'reconnect') void handleReconnect()
-    else if (key === 'remove') handleRemove(view)
+    return config.transport === 'stdio'
+      ? [config.command, ...(config.args ?? [])].filter(Boolean).join(' ')
+      : (config.url ?? '')
   }
 
   return (
@@ -470,6 +478,7 @@ const McpSettings: React.FC = () => {
         ) : (
           servers.map((view) => {
             const enabledCount = serverEnabledCount(view)
+            const target = targetOf(view)
             return (
               <SettingRow
                 key={view.config.id}
@@ -484,31 +493,71 @@ const McpSettings: React.FC = () => {
                       loading={togglingId === view.config.id}
                       onChange={(checked) => void handleToggle(view, checked)}
                     />
-                    <Dropdown
-                      trigger={['click']}
-                      menu={{
-                        items: actionsOf().map((action) => ({
-                          key: action.key,
-                          label: action.label,
-                          icon: action.icon,
-                          danger: action.danger
-                        })),
-                        onClick: ({ key }) => onAction(view, key)
-                      }}
-                    >
-                      <Button type="text" size="small" icon={<MoreOutlined />} />
-                    </Dropdown>
+                    {/*
+                      行内操作直接摆出来（用户 2026-09-26 要求：编辑/删除从「⋯」菜单里移出来，
+                      且只要图标、不带文字）。`aria-label` 只给读屏用，界面上不出现文字。
+                    */}
+                    <Button
+                      type="text"
+                      size="small"
+                      data-mcp-row-action="edit"
+                      aria-label={t('mcpSettings.list.edit')}
+                      icon={<RiEditLine size={14} />}
+                      onClick={() => openEdit(view)}
+                    />
+                    <Button
+                      type="text"
+                      size="small"
+                      danger
+                      data-mcp-row-action="remove"
+                      aria-label={t('mcpSettings.list.remove')}
+                      icon={<RiDeleteBin6Line size={14} />}
+                      onClick={() => handleRemove(view)}
+                    />
                   </div>
                 }
               >
-                <div style={{ marginTop: 2 }}>{subtitleNode(view)}</div>
-                <div style={{ marginTop: 2, fontSize: 12, color: colorTextTertiary }}>
-                  {view.tools.length === 0
-                    ? ''
-                    : enabledCount > 0
-                      ? t('mcpSettings.list.enabledForModel', { count: enabledCount })
-                      : t('mcpSettings.list.notEnabledForModel')}
-                </div>
+                {/* 连接目标：单行截断（整条命令可能很长，任它换行会把行高撑散） */}
+                {target && (
+                  <div
+                    style={{
+                      marginTop: 2,
+                      fontSize: 12,
+                      color: colorTextTertiary,
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis'
+                    }}
+                  >
+                    {target}
+                  </div>
+                )}
+                {view.tools.length > 0 && (
+                  <div
+                    data-mcp-row-tools
+                    style={{ marginTop: 2, fontSize: 12, color: colorTextTertiary }}
+                  >
+                    {t('mcpSettings.list.toolsEnabledCount', {
+                      enabled: enabledCount,
+                      total: view.tools.length
+                    })}
+                  </div>
+                )}
+                {view.status === 'error' && view.error && (
+                  <div
+                    style={{
+                      marginTop: 2,
+                      fontSize: 12,
+                      color: colorError,
+                      display: '-webkit-box',
+                      WebkitLineClamp: 2,
+                      WebkitBoxOrient: 'vertical',
+                      overflow: 'hidden'
+                    }}
+                  >
+                    {view.error}
+                  </div>
+                )}
               </SettingRow>
             )
           })
@@ -518,59 +567,16 @@ const McpSettings: React.FC = () => {
       {/* ── 新增 / 编辑（每次打开挂载一个全新的表单实例，见 formSeed 的注释）── */}
       {formSeed && (
         <ServerFormModal
+          key={formSeed.seq}
           seed={formSeed}
           saving={saving}
           testing={testing}
           testResult={testResult}
           onClose={closeForm}
-          onSubmit={(values) => void handleSave(values)}
+          onSubmit={(values, selection) => void handleSave(values, selection)}
           onTest={(values) => void handleTest(values)}
         />
       )}
-
-      {/* ── 工具清单（结构化明细：名称 + 描述两列对齐） ── */}
-      <Modal
-        open={Boolean(toolsView)}
-        title={toolsView?.server.config.name}
-        onCancel={() => setToolsView(null)}
-        footer={null}
-        width={560}
-      >
-        {toolsView && toolsView.server.tools.length > 0 ? (
-          <div style={{ maxHeight: 420, overflowY: 'auto' }}>
-            {toolsView.server.tools.map((tool: McpToolInfo, index) => (
-              <div
-                key={tool.name}
-                style={{
-                  display: 'flex',
-                  gap: 12,
-                  padding: '8px 0',
-                  borderTop: index === 0 ? 'none' : `1px solid ${colorFillAlter}`
-                }}
-              >
-                <span
-                  style={{
-                    fontFamily: 'monospace',
-                    fontSize: 12,
-                    color: colorTextSecondary,
-                    flex: '0 0 auto',
-                    minWidth: 140
-                  }}
-                >
-                  {tool.rawName}
-                </span>
-                <span style={{ fontSize: 12, color: colorTextTertiary, minWidth: 0 }}>
-                  {tool.description || '—'}
-                </span>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div style={{ fontSize: 13, color: colorTextSecondary }}>
-            {toolsView?.server.error ?? t('mcpSettings.form.testEmpty')}
-          </div>
-        )}
-      </Modal>
     </div>
   )
 }
@@ -636,6 +642,9 @@ const KeyValueList: React.FC<{
  *  - 关掉再打开不会残留上一次的字段（含 `Form.List` 的行）；
  *  - `transport` 切换时 stdio / http 两组字段由 `Form.useWatch` 决定渲染哪一组。
  *
+ * 版面：字段顺排、**不摆装饰性分组标题**，次要输入两两一行（连接方式 + 调用超时、
+ * 名称 + 启用）；说明文字只留在真正需要解释的字段上。
+ *
  * 固定高度：body 限高 + 只有表单区滚动（与设置页其余表单弹窗同款），
  * 条目再多也不会把底部按钮顶出视口。
  */
@@ -643,48 +652,63 @@ const ServerFormModal: React.FC<{
   seed: FormSeed
   saving: boolean
   testing: boolean
-  testResult: { ok: boolean; text: string } | null
+  testResult: TestResult | null
   onClose: () => void
-  onSubmit: (values: ServerFormValues) => void
+  onSubmit: (values: ServerFormValues, selection: ToolSelection) => void
   onTest: (values: ServerFormValues) => void
 }> = ({ seed, saving, testing, testResult, onClose, onSubmit, onTest }) => {
   const {
-    token: { colorTextTertiary, colorSuccess, colorError, colorFillAlter }
+    token: {
+      colorTextTertiary,
+      colorTextSecondary,
+      colorSuccess,
+      colorError,
+      colorBorderSecondary,
+      colorPrimary
+    }
   } = theme.useToken()
   const { t } = useTranslation()
   const [form] = Form.useForm<ServerFormValues>()
   const transport = Form.useWatch('transport', form)
-  const editing = seed.mode === 'edit' ? seed.server : null
+  const editing = seed.server ?? null
+
+  /** 用户当前的勾选（rawName → 是否启用） */
+  const [selection, setSelection] = useState<ToolSelection>(seed.selection)
+  /** 「工具」字段（试连结果与清单都挂在这里，见下面的滚动） */
+  const toolsRef = React.useRef<HTMLDivElement | null>(null)
+
+  /**
+   * 试连结束后把「工具」字段滚进视野。
+   *
+   * 这个字段在表单最下方，而表单（stdio + 环境变量）常常长过弹窗高度：用户点完底部
+   * 「测试连接」，结果落在视口外就等于「点了没反应」——这正是用户反馈
+   * 「测试后不能看见工具列表」的现场。滚动是幂等的（已在视野内就不动）。
+   */
+  React.useEffect(() => {
+    if (!testResult) return
+    // jsdom 没实现 scrollIntoView，工装里靠可选调用跳过
+    toolsRef.current?.scrollIntoView?.({ block: 'nearest' })
+  }, [testResult])
 
   /** 打开时的初始值：新建给一份可用默认值；编辑把既有配置摊平进字段（凭据是掩码） */
-  const initialValues: ServerFormValues =
-    seed.mode === 'edit'
-      ? {
-          name: seed.server.config.name,
-          description: seed.server.config.description,
-          transport: seed.server.config.transport,
-          command: seed.server.config.command,
-          argsText: (seed.server.config.args ?? []).join('\n'),
-          env: Object.entries(seed.server.config.env ?? {}).map(([key, value]) => ({
-            key,
-            value
-          })),
-          cwd: seed.server.config.cwd,
-          url: seed.server.config.url,
-          headers: Object.entries(seed.server.config.headers ?? {}).map(([key, value]) => ({
-            key,
-            value
-          })),
-          timeoutMs: seed.server.config.timeoutMs,
-          enabled: seed.server.config.enabled,
-          toolsEnabled: seed.toolsEnabled
-        }
-      : {
-          transport: 'stdio',
-          enabled: true,
-          toolsEnabled: seed.toolsEnabled,
-          env: []
-        }
+  const initialValues: ServerFormValues = editing
+    ? {
+        name: editing.config.name,
+        description: editing.config.description,
+        transport: editing.config.transport,
+        command: editing.config.command,
+        argsText: (editing.config.args ?? []).join('\n'),
+        env: Object.entries(editing.config.env ?? {}).map(([key, value]) => ({ key, value })),
+        cwd: editing.config.cwd,
+        url: editing.config.url,
+        headers: Object.entries(editing.config.headers ?? {}).map(([key, value]) => ({
+          key,
+          value
+        })),
+        timeoutMs: editing.config.timeoutMs,
+        enabled: editing.config.enabled
+      }
+    : { transport: 'stdio', enabled: true, env: [] }
 
   /** 校验通过才回调（保存与「测试连接」都先过这一关，避免拿半填配置去连） */
   const withValidValues = async (handler: (values: ServerFormValues) => void): Promise<void> => {
@@ -696,6 +720,41 @@ const ServerFormModal: React.FC<{
   }
 
   const isStdio = transport !== 'http' && transport !== 'sse'
+
+  /**
+   * 「工具」字段里的清单：试连成功就用刚拿回来的那份，否则用打开时的目录快照。
+   * 试连**失败**时保留旧清单（用户还能看见原来有哪些工具，不至于一片空白）。
+   */
+  const catalog = testResult?.ok ? testResult.tools : seed.catalog
+  const isEnabled = (rawName: string): boolean => selection[rawName] !== false
+  const enabledCount = catalog.filter((tool) => isEnabled(tool.rawName)).length
+  const allEnabled = catalog.length > 0 && enabledCount === catalog.length
+
+  /**
+   * 工具字段顶部那一行 = 连接状态 + 工具计数（原本是上下两行，用户要求合成一行）。
+   *  - 刚试连过：成功报「连接成功」，失败报原始错误；
+   *  - 打开编辑时还没试连：连接成功过的服务器报「已连接」，连不上时报原始错误。
+   * 计数与「全部启用/停用」跟在它后面，按钮靠 `margin-left: auto` 贴字段最右边。
+   */
+  const statusLine: { color: string; text: string } | null = testResult
+    ? { color: testResult.ok ? colorSuccess : colorError, text: testResult.text }
+    : editing?.status === 'error' && editing.error
+      ? { color: colorError, text: editing.error }
+      : editing?.status === 'ok'
+        ? { color: colorSuccess, text: t('mcpSettings.status.ok') }
+        : null
+
+  /**
+   * 没试连、也没有已知清单时**整块不渲染**（用户明确要求：没点「测试连接」就不要出现
+   * 「工具」字段与那句「点测试连接读取清单」的提示）。有清单或有试连结果时才铺开。
+   */
+  const showTools = catalog.length > 0 || testResult !== null
+
+  const toggleAll = (): void => {
+    const next: ToolSelection = {}
+    for (const tool of catalog) next[tool.rawName] = !allEnabled
+    setSelection(next)
+  }
 
   return (
     <Modal
@@ -710,11 +769,7 @@ const ServerFormModal: React.FC<{
       okText={t('common.action.save')}
       cancelText={t('common.action.cancel')}
       footer={[
-        <Button
-          key="test"
-          loading={testing}
-          onClick={() => void withValidValues(onTest)}
-        >
+        <Button key="test" loading={testing} onClick={() => void withValidValues(onTest)}>
           {testing ? t('mcpSettings.form.testing') : t('mcpSettings.form.test')}
         </Button>,
         <Button key="cancel" onClick={onClose}>
@@ -724,7 +779,7 @@ const ServerFormModal: React.FC<{
           key="save"
           type="primary"
           loading={saving}
-          onClick={() => void withValidValues(onSubmit)}
+          onClick={() => void withValidValues((values) => onSubmit(values, selection))}
         >
           {t('common.action.save')}
         </Button>
@@ -740,38 +795,48 @@ const ServerFormModal: React.FC<{
       classNames={{ body: 'custom-scrollbar' }}
     >
       <Form form={form} layout="vertical" size="small" initialValues={initialValues}>
-        {/* 基本信息（纯文本分组标签，不用装饰性标题） */}
-        <div style={{ fontSize: 12, color: colorTextTertiary, margin: '2px 0 8px' }}>
-          {t('mcpSettings.form.groups.basic')}
+        <div className="flex gap-3">
+          <Form.Item
+            label={t('mcpSettings.field.name')}
+            name="name"
+            rules={[{ required: true, message: t('mcpSettings.field.namePlaceholder') }]}
+            extra={t('mcpSettings.field.nameHint')}
+            style={{ flex: 1, marginBottom: 12 }}
+          >
+            <Input placeholder={t('mcpSettings.field.namePlaceholder')} />
+          </Form.Item>
+          <Form.Item
+            label={t('mcpSettings.field.enabled')}
+            name="enabled"
+            valuePropName="checked"
+            style={{ flex: '0 0 auto', marginBottom: 12 }}
+          >
+            <Switch />
+          </Form.Item>
         </div>
-        <Form.Item
-          label={t('mcpSettings.field.name')}
-          name="name"
-          rules={[{ required: true, message: t('mcpSettings.field.namePlaceholder') }]}
-          extra={t('mcpSettings.field.nameHint')}
-        >
-          <Input placeholder={t('mcpSettings.field.namePlaceholder')} />
-        </Form.Item>
         <Form.Item label={t('mcpSettings.field.description')} name="description">
           <Input placeholder={t('mcpSettings.field.descriptionPlaceholder')} />
         </Form.Item>
 
-        <div style={{ fontSize: 12, color: colorTextTertiary, margin: '10px 0 8px' }}>
-          {t('mcpSettings.form.groups.connection')}
+        <div className="flex gap-3">
+          <Form.Item label={t('mcpSettings.field.transport')} name="transport" style={{ flex: 1 }}>
+            <Select
+              options={[
+                { value: 'stdio', label: t('mcpSettings.transport.stdio') },
+                { value: 'http', label: t('mcpSettings.transport.http') },
+                { value: 'sse', label: t('mcpSettings.transport.sse') }
+              ]}
+            />
+          </Form.Item>
+          <Form.Item label={t('mcpSettings.field.timeout')} name="timeoutMs" style={{ flex: 1 }}>
+            <InputNumber
+              min={1000}
+              step={1000}
+              style={{ width: '100%' }}
+              placeholder={t('mcpSettings.field.timeoutPlaceholder')}
+            />
+          </Form.Item>
         </div>
-        <Form.Item
-          label={t('mcpSettings.field.transport')}
-          name="transport"
-          extra={t('mcpSettings.field.transportHint')}
-        >
-          <Select
-            options={[
-              { value: 'stdio', label: t('mcpSettings.transport.stdio') },
-              { value: 'http', label: t('mcpSettings.transport.http') },
-              { value: 'sse', label: t('mcpSettings.transport.sse') }
-            ]}
-          />
-        </Form.Item>
 
         {isStdio ? (
           <>
@@ -782,16 +847,15 @@ const ServerFormModal: React.FC<{
             >
               <Input placeholder={t('mcpSettings.field.commandPlaceholder')} />
             </Form.Item>
-            <Form.Item
-              label={t('mcpSettings.field.args')}
-              name="argsText"
-              extra={t('mcpSettings.field.argsHint')}
-            >
+            <Form.Item label={t('mcpSettings.field.args')} name="argsText">
               <Input.TextArea
                 rows={2}
                 placeholder={t('mcpSettings.field.argsPlaceholder')}
                 style={{ fontFamily: 'monospace' }}
               />
+            </Form.Item>
+            <Form.Item label={t('mcpSettings.field.cwd')} name="cwd">
+              <Input placeholder={t('mcpSettings.field.cwdPlaceholder')} />
             </Form.Item>
             <KeyValueList
               name="env"
@@ -800,9 +864,6 @@ const ServerFormModal: React.FC<{
               addLabel={t('mcpSettings.field.addEnv')}
               extra={editing ? t('mcpSettings.field.secretsKept') : undefined}
             />
-            <Form.Item label={t('mcpSettings.field.cwd')} name="cwd">
-              <Input placeholder={t('mcpSettings.field.cwdPlaceholder')} />
-            </Form.Item>
           </>
         ) : (
           <>
@@ -823,53 +884,126 @@ const ServerFormModal: React.FC<{
           </>
         )}
 
-        <div style={{ fontSize: 12, color: colorTextTertiary, margin: '10px 0 8px' }}>
-          {t('mcpSettings.form.groups.options')}
-        </div>
-        <div className="flex gap-3">
-          <Form.Item label={t('mcpSettings.field.timeout')} name="timeoutMs" style={{ flex: 1 }}>
-            <InputNumber
-              min={1000}
-              step={1000}
-              style={{ width: '100%' }}
-              placeholder={t('mcpSettings.field.timeoutPlaceholder')}
-            />
+        {/*
+          「工具」字段：状态 + 计数一行，下面是清单 + 逐项开关，右侧一个「全部启用/停用」。
+          **没试连过（也没有已知清单）时整块不渲染**——不摆空字段、也不摆「点测试连接读取清单」
+          这类提示（用户 2026-09-26 明确要求）；有清单时条目再多也只在这块内部滚动。
+        */}
+        {showTools && (
+          <Form.Item label={t('mcpSettings.field.tools')} style={{ marginBottom: 12 }}>
+            {/* 状态行 + 清单作为一个整体滚进视野（ref 挂在这层，见上面的 useEffect） */}
+            <div ref={toolsRef} data-mcp-tools-field>
+              <div className="flex items-center" style={{ gap: 8 }}>
+                {statusLine && (
+                  <span
+                    className="flex items-center"
+                    data-mcp-tools-status
+                    style={{ gap: 6, fontSize: 12, color: statusLine.color, minWidth: 0 }}
+                  >
+                    <StatusDot color={statusLine.color} />
+                    <span
+                      style={{
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap'
+                      }}
+                    >
+                      {statusLine.text}
+                    </span>
+                  </span>
+                )}
+                {catalog.length > 0 && (
+                  <>
+                    {statusLine && (
+                      <span style={{ fontSize: 12, color: colorTextTertiary }}>·</span>
+                    )}
+                    <span
+                      data-mcp-tools-count
+                      style={{ fontSize: 12, color: colorTextTertiary, flexShrink: 0 }}
+                    >
+                      {t('mcpSettings.form.toolsCount', {
+                        total: catalog.length,
+                        enabled: enabledCount
+                      })}
+                    </span>
+                    <button
+                      type="button"
+                      data-mcp-tools-all
+                      onClick={toggleAll}
+                      style={{
+                        // 贴字段最右边：这一行铺满控件宽度，按钮自带 auto 外边距把它推到尽头
+                        marginLeft: 'auto',
+                        flexShrink: 0,
+                        padding: 0,
+                        border: 'none',
+                        background: 'none',
+                        cursor: 'pointer',
+                        fontSize: 12,
+                        color: colorPrimary
+                      }}
+                    >
+                      {allEnabled
+                        ? t('mcpSettings.field.toolsNone')
+                        : t('mcpSettings.field.toolsAll')}
+                    </button>
+                  </>
+                )}
+              </div>
+              {catalog.length > 0 && (
+                <div className="custom-scrollbar" style={{ maxHeight: 208, overflowY: 'auto' }}>
+                  {catalog.map((tool, index) => {
+                    const on = isEnabled(tool.rawName)
+                    return (
+                      <div
+                        key={tool.rawName}
+                        data-mcp-tool={tool.rawName}
+                        className="flex items-center"
+                        style={{
+                          gap: 12,
+                          padding: '5px 0',
+                          borderTop: index === 0 ? 'none' : `1px solid ${colorBorderSecondary}`
+                        }}
+                      >
+                        <span
+                          style={{
+                            flex: '0 0 150px',
+                            fontFamily: 'monospace',
+                            fontSize: 12,
+                            color: on ? colorTextSecondary : colorTextTertiary,
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis'
+                          }}
+                        >
+                          {tool.rawName}
+                        </span>
+                        <span
+                          style={{
+                            flex: 1,
+                            minWidth: 0,
+                            fontSize: 12,
+                            color: colorTextTertiary,
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis'
+                          }}
+                        >
+                          {tool.description || '—'}
+                        </span>
+                        <Switch
+                          size="small"
+                          checked={on}
+                          onChange={(checked) =>
+                            setSelection((prev) => ({ ...prev, [tool.rawName]: checked }))
+                          }
+                        />
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
           </Form.Item>
-          <Form.Item
-            label={t('mcpSettings.field.enabled')}
-            name="enabled"
-            valuePropName="checked"
-            style={{ flex: 1 }}
-            extra={t('mcpSettings.field.enabledHint')}
-          >
-            <Switch />
-          </Form.Item>
-          <Form.Item
-            label={t('mcpSettings.field.toolsEnabled')}
-            name="toolsEnabled"
-            valuePropName="checked"
-            style={{ flex: 1 }}
-            extra={t('mcpSettings.field.toolsEnabledHint')}
-          >
-            <Switch />
-          </Form.Item>
-        </div>
-
-        {/* 试连结果就地显示：成功给工具数，失败给原始错误（用户据此改配置） */}
-        {testResult && (
-          <div
-            style={{
-              fontSize: 12,
-              color: testResult.ok ? colorSuccess : colorError,
-              wordBreak: 'break-all',
-              background: colorFillAlter,
-              borderRadius: 6,
-              padding: '6px 8px'
-            }}
-          >
-            <RiFlashlightLine size={12} style={{ marginRight: 6 }} />
-            {testResult.text}
-          </div>
         )}
       </Form>
     </Modal>

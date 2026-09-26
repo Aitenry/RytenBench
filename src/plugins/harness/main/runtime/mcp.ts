@@ -218,17 +218,16 @@ function maskMap(map?: Record<string, string>): Record<string, string> {
 async function connectServer(config: McpServerConfig): Promise<McpClient> {
   const { Client, StdioClientTransport, StreamableHTTPClientTransport, SSEClientTransport } =
     await loadSdk()
-  const client = new Client(
-    { name: 'rytenbench-harness', version: '0.1.0' },
-    { capabilities: {} }
-  )
+  const client = new Client({ name: 'rytenbench-harness', version: '0.1.0' }, { capabilities: {} })
   const transport =
     config.transport === 'stdio'
       ? new StdioClientTransport({
           command: config.command as string,
           args: config.args ?? [],
           // 只在用户显式配了 env 时覆盖：默认继承宿主环境（npx 找不到 PATH 就起不来）
-          ...(config.env ? { env: { ...process.env, ...config.env } as Record<string, string> } : {}),
+          ...(config.env
+            ? { env: { ...process.env, ...config.env } as Record<string, string> }
+            : {}),
           cwd: config.cwd,
           // stderr 进管道而不是 inherit：MCP 服务器爱往 stderr 打日志，直接继承会污染应用日志
           stderr: 'pipe'
@@ -428,6 +427,14 @@ function toView(entry: McpServerEntry): McpServerView {
   }
 }
 
+/** 凭据「配没配」的只读信息（列表在没有运行期记录时也要给得出） */
+function hasSecretsOf(config: McpServerConfig): McpServerView['hasSecrets'] {
+  return {
+    env: Object.keys(config.env ?? {}).length > 0,
+    headers: Object.keys(config.headers ?? {}).length > 0
+  }
+}
+
 /**
  * 每轮组装工具集时的**同步**入口：给当前快照；顺带在后台做两件事——
  * 配置变了就重连，或快照过期了刷新一次。同步返回保证工具装配路径不被网络拖住。
@@ -443,9 +450,29 @@ export function currentMcpTools(): { tools: StructuredToolInterface[]; infos: To
   return { tools: defs.map((d) => d.instance), infos: defs.map((d) => d.info) }
 }
 
-/** 设置页当前视图（不触发重连；连没连上以最近一次刷新为准） */
+/**
+ * 设置页当前视图：**只读最近一次真实结果，绝不发起连接**。
+ *
+ * 为什么不顺手重连一次（2026-09-26 用户要求「加载列表的时候，不需要测试连接，不然会很卡」）：
+ * 每次打开设置页（以及每次目录广播后刷新）都去起一轮子进程 / 做一遍 HTTP 握手，
+ * 服务器一多就整页卡住；而这些连接一旦有变化会由保存/切换/手动重连主动刷新。
+ *
+ * 视图因此**从配置出发**再叠加运行期记录：配置里有、但还没连过的服务器也要出现在列表里
+ * （否则冷启动后的第一次打开会是「一台服务器都没有」）。它的状态是 `unknown`（未连接），
+ * 用户点「重新连接」或试连时才真正去连。
+ */
 export function mcpServerViews(): McpServerView[] {
-  return snapshot.entries.map(toView)
+  const runtimeById = new Map(snapshot.entries.map((entry) => [entry.config.id, entry]))
+  return listMcpServers().map((config) => {
+    const entry = runtimeById.get(config.id)
+    if (entry) return toView(entry)
+    return {
+      config: maskServerSecrets(config),
+      status: config.enabled ? ('unknown' as McpServerStatus) : ('disabled' as McpServerStatus),
+      tools: [],
+      hasSecrets: hasSecretsOf(config)
+    }
+  })
 }
 
 /**

@@ -420,8 +420,10 @@ export const harnessZhCN = {
     },
     main: {
       defaultTools: '默认工具',
-      defaultToolsDescription: '选择主智能体可用的系统工具',
+      defaultToolsDescription:
+        '选择主智能体可用的系统工具；MCP 按服务器整组勾选（名字就是服务器名），里面具体哪几个工具在「MCP」设置页里开关',
       defaultToolsPlaceholder: '选择工具',
+      mcpToolsCount: '已启用 {{enabled}}/{{total}}',
       defaultSkills: '默认技能',
       defaultSkillsDescription: '选择主智能体可用的技能',
       defaultSkillsPlaceholder: '选择技能（不选则无技能）',
@@ -610,7 +612,7 @@ export const harnessZhCN = {
   mcpSettings: {
     pageTitle: 'MCP',
     pageDescription:
-      '接入外部 MCP 服务器（stdio 本地进程或 HTTP/SSE 远程地址），服务器暴露的工具会出现在智能体的工具清单里。',
+      '接入外部 MCP 服务器（stdio 本地进程或 HTTP/SSE 远程地址），服务器暴露的工具会出现在智能体的工具清单里。状态取最近一次连接结果，需要时点「重新连接」刷新。',
     list: {
       sectionTitle: '服务器',
       newServer: '新增',
@@ -621,12 +623,9 @@ export const harnessZhCN = {
       toolCount: '{{count}} 个工具',
       toolCount_one: '{{count}} 个工具',
       toolCount_other: '{{count}} 个工具',
-      enabledForModel: '已启用 {{count}} 个工具',
-      notEnabledForModel: '未启用工具',
-      viewTools: '查看工具',
+      toolsEnabledCount: '{{total}} 个工具 · 已启用 {{enabled}}',
       edit: '编辑',
       remove: '删除',
-      manual: '手动重连',
       removeConfirmTitle: '删除 MCP 服务器「{{name}}」？',
       removeConfirmBody: '只删除本机的这份配置；不影响该服务器本身。此操作不可撤销。',
       removed: '已删除「{{name}}」',
@@ -637,7 +636,8 @@ export const harnessZhCN = {
       ok: '已连接',
       error: '连接失败',
       disabled: '已停用',
-      unconfigured: '配置不完整'
+      unconfigured: '配置不完整',
+      unknown: '未连接'
     },
     /* 字段名（表单标签与详情面板共用；分组标签是纯文本，不带装饰） */
     field: {
@@ -669,8 +669,9 @@ export const harnessZhCN = {
       timeoutPlaceholder: '留空用默认 60000',
       enabled: '启用',
       enabledHint: '停用后不连接，其工具即刻从工具清单移除',
-      toolsEnabled: '工具可用',
-      toolsEnabledHint: '勾选后这台服务器的全部工具进入智能体工具清单',
+      tools: '工具',
+      toolsAll: '全部启用',
+      toolsNone: '全部停用',
       secretsKept: '已保存的值不回显，留空表示不改动'
     },
     transport: {
@@ -681,14 +682,10 @@ export const harnessZhCN = {
     form: {
       createTitle: '新增 MCP 服务器',
       editTitle: '编辑 MCP 服务器：{{name}}',
-      groups: {
-        basic: '基本信息',
-        connection: '连接',
-        options: '选项'
-      },
+      toolsCount: '{{total}} 个工具 · 已启用 {{enabled}}',
       test: '测试连接',
       testing: '正在连接…',
-      testOk: '连接成功，发现 {{count}} 个工具',
+      testOk: '连接成功',
       testEmpty: '连接成功，但这台服务器没有暴露工具',
       testFailed: '连接失败'
     },

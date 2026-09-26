@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react'
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import {
   theme,
   Button,
@@ -34,7 +34,14 @@ import {
 } from '@renderer/components/system/settings/SettingsUI'
 import { harnessApi } from '../../api'
 import type { HarnessToolInfo } from '../../types'
-import type { AgentConfigInput, AgentConfigRow } from '../../../shared/types'
+import type { AgentConfigInput, AgentConfigRow, McpServerView } from '../../../shared/types'
+import {
+  isMcpServerGroup,
+  isMcpToolName,
+  mcpNamespace,
+  mcpServerGroupValue,
+  parseMcpToolName
+} from '../../../shared/mcp'
 
 const { TextArea } = Input
 
@@ -63,7 +70,24 @@ const AgentSettings: React.FC = () => {
     tools: string[]
     skills: string[]
   }>({ tools: [], skills: [] })
-  const [mainSaving, setMainSaving] = useState(false)
+  /**
+   * 主智能体配置的**同步快照**。
+   *
+   * 这一区没有保存按钮（用户 2026-09-26 要求「保存按钮不需要了，操作后即可保存」）：改一次
+   * 工具/技能就落一次库。快照存在的理由是连续两次改动可能落在同一批次里——那时 `setMainAgent`
+   * 还没生效，回调里读 state 会拿到旧值，后一次写入就把前一次抹掉。
+   */
+  const mainAgentRef = useRef<{ tools: string[]; skills: string[] }>({ tools: [], skills: [] })
+  /**
+   * MCP 页当前启用给模型的工具名（`mainAgent.mcpTools`）。
+   *
+   * 智能体页**不逐项列 MCP 工具**（服务器一多就是几十项，而且与 MCP 页的逐项开关是同一个
+   * 决定，两个入口必然漂移）：按**服务器**各给一项，名字就是服务器名，
+   * 具体哪几个工具仍然只由 MCP 页决定。见 shared/mcp.ts 的 MCP_SERVER_GROUP_PREFIX。
+   */
+  const [enabledMcpTools, setEnabledMcpTools] = useState<string[]>([])
+  /** MCP 服务器清单（出分组项用：名字、命名空间、可用工具） */
+  const [mcpServers, setMcpServers] = useState<McpServerView[]>([])
 
   // 编辑/创建弹窗
   const [modalOpen, setModalOpen] = useState(false)
@@ -103,20 +127,39 @@ const AgentSettings: React.FC = () => {
 
   const loadOptions = useCallback(async () => {
     try {
-      const [providerList, tools, skillList, main, settings] = await Promise.all([
+      const [providerList, tools, skillList, main, settings, mcp] = await Promise.all([
         window.api.providers.getEnabled(),
         harnessApi.harness.getTools(),
         harnessApi.harness.listSkills(),
         harnessApi.mainAgent.get(),
-        window.api.systemSettings.getAll()
+        window.api.systemSettings.getAll(),
+        harnessApi.mcp.list()
       ])
       setProviders((providerList as ProviderOption[]).filter((p) => !isEmbeddingProvider(p)))
       setAvailableTools(tools)
       setSkills(skillList)
-      setMainAgent({
-        tools: ((main as Record<string, unknown>).tools as string[]) ?? [],
-        skills: ((main as Record<string, unknown>).skills as string[]) ?? []
-      })
+      setMcpServers(mcp)
+      const rawMain = main as Record<string, unknown>
+      const rawTools = (rawMain.tools as string[]) ?? []
+      const rawMcpTools = (rawMain.mcpTools as string[]) ?? []
+      const rawSkills = (rawMain.skills as string[]) ?? []
+      /**
+       * 兼容旧数据：MCP 工具以前会混在智能体页的工具下拉里、被写进 `tools`。现在这一页按
+       * 服务器出项、工具级管控在 MCP 页，所以把遗留的 `mcp__…` 名字搬进 `mcpTools`
+       * （**只增不减**，用户不会因为这次改版丢掉已勾选的工具）。搬过一次后这里不再触发。
+       */
+      const legacyMcp = rawTools.filter(isMcpToolName)
+      const nextTools =
+        legacyMcp.length > 0 ? rawTools.filter((name) => !isMcpToolName(name)) : rawTools
+      const nextMcpTools =
+        legacyMcp.length > 0 ? Array.from(new Set([...rawMcpTools, ...legacyMcp])) : rawMcpTools
+      if (legacyMcp.length > 0) {
+        await harnessApi.mcp.setToolsEnabled(nextMcpTools)
+        await harnessApi.mainAgent.update({ tools: nextTools, skills: rawSkills })
+      }
+      mainAgentRef.current = { tools: nextTools, skills: rawSkills }
+      setMainAgent(mainAgentRef.current)
+      setEnabledMcpTools(nextMcpTools)
       const wsId = (settings as unknown as Record<string, unknown>)?.harness
         ? ((((settings as unknown as Record<string, unknown>).harness as Record<string, unknown>)
             ?.activeWorkspaceId as number) ?? 0)
@@ -133,10 +176,21 @@ const AgentSettings: React.FC = () => {
     }
   }, [viewMessage, t])
 
-  /** 只重取工具清单（MCP 目录变化时用：不动分页、不动用户正在编辑的表单值） */
+  /**
+   * 只重取工具清单（MCP 目录变化时用：不动分页、不动用户正在编辑的表单值）。
+   * 顺带同步 MCP 服务器清单与启用清单——服务器分组项的勾选态与计数都由它们派生，
+   * 而这一页不编辑它们（编辑入口在 MCP 页），所以在别处改了要能立刻反映过来。
+   */
   const refreshTools = useCallback(async () => {
     try {
-      setAvailableTools(await harnessApi.harness.getTools())
+      const [tools, main, mcp] = await Promise.all([
+        harnessApi.harness.getTools(),
+        harnessApi.mainAgent.get(),
+        harnessApi.mcp.list()
+      ])
+      setAvailableTools(tools)
+      setEnabledMcpTools(main.mcpTools ?? [])
+      setMcpServers(mcp)
     } catch {
       // 工具清单取不到不影响其余功能：保持上一份即可，不弹错
     }
@@ -174,20 +228,135 @@ const AgentSettings: React.FC = () => {
 
   // ===== 主智能体 =====
 
-  const handleMainSave = async (): Promise<void> => {
-    setMainSaving(true)
-    try {
-      await harnessApi.mainAgent.update(mainAgent)
-      viewMessage('main-save', 'success', t('agentSettings.main.saved'), 2)
-    } catch (error) {
-      viewMessage(
-        'main-save',
-        'error',
-        t('common.message.saveFailedWithReason', { reason: String(error) })
-      )
-    } finally {
-      setMainSaving(false)
+  /**
+   * MCP 服务器分组项：**一台服务器一项，名字就用服务器自己的名字**（用户 2026-09-26 要求
+   * 「要用 mcp 的名称」），勾上=这台服务器的工具进入启用清单，取消=按命名空间摘掉。
+   * 具体哪几个工具仍然只在 MCP 页里逐项开关。
+   */
+  const mcpGroupOptions = useMemo(
+    () =>
+      mcpServers
+        .map((view) => {
+          const namespace = mcpNamespace(view.config.name)
+          const enabled = view.tools.filter((tool) => enabledMcpTools.includes(tool.name)).length
+          return {
+            value: mcpServerGroupValue(namespace),
+            name: view.config.name,
+            namespace,
+            total: view.tools.length,
+            enabled
+          }
+        })
+        // 连不上的服务器也可能留着之前勾过的名字：只要还有启用的工具就仍然列出来（否则没法关掉）
+        .filter(
+          (group) =>
+            group.total > 0 ||
+            enabledMcpTools.some((name) => parseMcpToolName(name)?.server === group.namespace)
+        ),
+    [mcpServers, enabledMcpTools]
+  )
+
+  /** 工具下拉里的选项：普通工具逐个列 + 每台 MCP 服务器一项 */
+  const toolOptions = useMemo(() => {
+    const regular = availableTools.filter((tool) => !isMcpToolName(tool.name))
+    return [
+      ...regular,
+      ...mcpGroupOptions.map((group) => ({
+        name: group.value,
+        label: group.name,
+        description: '',
+        icon: 'RiPlug2Line',
+        color: '#8c6b3f'
+      }))
+    ]
+  }, [availableTools, mcpGroupOptions])
+
+  /** 该服务器此刻算不算勾上：属于它命名空间的工具至少有一个被启用 */
+  const groupChecked = (namespace: string): boolean =>
+    enabledMcpTools.some((name) => parseMcpToolName(name)?.server === namespace)
+
+  /** 主智能体工具下拉的受控值：普通工具 + 勾上的 MCP 服务器 */
+  const mainToolsValue = useMemo(
+    () => [
+      ...mainAgent.tools.filter((name) => !isMcpServerGroup(name) && !isMcpToolName(name)),
+      ...mcpGroupOptions.filter((group) => groupChecked(group.namespace)).map((g) => g.value)
+    ],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [mainAgent.tools, mcpGroupOptions, enabledMcpTools]
+  )
+
+  /**
+   * 落库主智能体配置（**没有保存按钮，改完即存**）并同步本地快照。
+   *
+   * 只写 `tools` / `skills`：`mcpTools` 由 MCP 页单独维护（见 main/ipc/agent.ts 的说明），
+   * 整对象覆盖会把「MCP 页刚勾好」的清单抹掉。失败弹错时快照仍是用户刚改的值——界面不会
+   * 假装回滚，用户再动一次即可重试。
+   */
+  const saveMainAgent = useCallback(
+    async (patch: Partial<{ tools: string[]; skills: string[] }>): Promise<void> => {
+      // tools 里只该有真实工具名：万一还留着 MCP 分组项（旧配置/被复制过来的），落库前摘掉
+      const next = {
+        ...mainAgentRef.current,
+        ...patch
+      }
+      next.tools = next.tools.filter((name) => !isMcpServerGroup(name) && !isMcpToolName(name))
+      mainAgentRef.current = next
+      setMainAgent(next)
+      try {
+        await harnessApi.mainAgent.update({ tools: next.tools, skills: next.skills })
+        viewMessage('main-save', 'success', t('agentSettings.main.saved'), 1)
+      } catch (error) {
+        viewMessage(
+          'main-save',
+          'error',
+          t('common.message.saveFailedWithReason', { reason: String(error) })
+        )
+      }
+    },
+    [viewMessage, t]
+  )
+
+  /**
+   * 按服务器整组勾选/取消。
+   *
+   * 勾上 = 把**这台服务器**当前可用的工具并进启用清单（并集，不影响别的服务器）；
+   * 取消 = 按命名空间把这台服务器的名字摘掉（连着旧数据里残留的幽灵名字一起清）。
+   * 想细调具体工具，仍然去 MCP 页逐项开关——那边是工具级的唯一入口。
+   *
+   * 普通工具与 MCP 分组项是两份存储（`tools` / `mcpTools`），所以一次改动要分别落：
+   * 分组项走 `mcp-tools-set`，普通工具走 `main-agent-update`。
+   */
+  const handleMainToolsChange = async (value: string[]): Promise<void> => {
+    const selected = value.filter(isMcpServerGroup)
+    const tools = value.filter((name) => !isMcpServerGroup(name) && !isMcpToolName(name))
+    let next = [...enabledMcpTools]
+    let changed = false
+    for (const group of mcpGroupOptions) {
+      const wants = selected.includes(group.value)
+      const has = groupChecked(group.namespace)
+      if (wants === has) continue
+      changed = true
+      if (wants) {
+        const view = mcpServers.find((s) => mcpNamespace(s.config.name) === group.namespace)
+        next = Array.from(new Set([...next, ...(view?.tools ?? []).map((tool) => tool.name)]))
+      } else {
+        next = next.filter((name) => parseMcpToolName(name)?.server !== group.namespace)
+      }
     }
+    if (changed) {
+      try {
+        await harnessApi.mcp.setToolsEnabled(next)
+        setEnabledMcpTools(next)
+      } catch (error) {
+        // 失败时保持原状态（受控值由 enabledMcpTools 派生，界面不会停在「已勾选」的假象上）
+        viewMessage(
+          'main-mcp-tools',
+          'error',
+          t('common.message.saveFailedWithReason', { reason: String(error) })
+        )
+      }
+    }
+    await saveMainAgent({ tools })
   }
 
   // ===== 子智能体 =====
@@ -195,12 +364,34 @@ const AgentSettings: React.FC = () => {
   const openEditModal = (agent?: AgentConfigRow): void => {
     setEditingAgent(agent ?? null)
     if (agent) {
+      const storedTools: string[] = agent.tools ? JSON.parse(agent.tools) : []
+      /**
+       * 旧数据里存的是逐个 MCP 全名（`mcp__<命名空间>__<工具>`）：归一成**各自服务器**的分组项
+       * （具体哪几个工具由 MCP 页决定），随这次保存落库。老的笼统标记 `mcp` 也一并升级。
+       */
+      const migrated: string[] = []
+      for (const name of storedTools) {
+        if (isMcpToolName(name)) {
+          const parsed = parseMcpToolName(name)
+          if (parsed) migrated.push(mcpServerGroupValue(parsed.server))
+          continue
+        }
+        if (name === 'mcp') {
+          for (const view of mcpServers) {
+            if (view.tools.some((tool) => enabledMcpTools.includes(tool.name))) {
+              migrated.push(mcpServerGroupValue(mcpNamespace(view.config.name)))
+            }
+          }
+          continue
+        }
+        migrated.push(name)
+      }
       form.setFieldsValue({
         name: agent.name,
         rename: agent.rename || '',
         prompt: agent.prompt || '',
         description: agent.description || '',
-        tools: agent.tools ? JSON.parse(agent.tools) : [],
+        tools: Array.from(new Set(migrated)),
         skills: agent.skills ? JSON.parse(agent.skills) : [],
         model: agent.model || undefined,
         enable: agent.enable
@@ -335,8 +526,11 @@ const AgentSettings: React.FC = () => {
       return
     }
 
-    // 建立有效项集合
-    const validToolNames = new Set(availableTools.map((t) => t.name))
+    // 建立有效项集合（MCP 分组项 `mcp@<命名空间>` 也是合法的一项：它引用 MCP 页的勾选）
+    const validToolNames = new Set([
+      ...availableTools.map((t) => t.name),
+      ...mcpGroupOptions.map((group) => group.value)
+    ])
     const validSkillIds = new Set(skills.map((s) => s.id))
     const validModelKeys = new Set(providers.map((p) => `${p.provider}:${p.model}`))
 
@@ -352,11 +546,15 @@ const AgentSettings: React.FC = () => {
           continue
         }
 
-        // 验证并过滤 tools
+        // 验证并过滤 tools（导入文件里若是逐个 MCP 全名，归一到它所属服务器的分组项）
         let filteredTools: string[]
         if (Array.isArray(item.tools) && item.tools.length > 0) {
-          const removed = item.tools.filter((t) => !validToolNames.has(t))
-          filteredTools = item.tools.filter((t) => validToolNames.has(t))
+          const normalized = item.tools.map((name) => {
+            const parsed = isMcpToolName(name) ? parseMcpToolName(name) : null
+            return parsed ? mcpServerGroupValue(parsed.server) : name
+          })
+          const removed = normalized.filter((t) => !validToolNames.has(t))
+          filteredTools = Array.from(new Set(normalized.filter((t) => validToolNames.has(t))))
           if (removed.length > 0) {
             stripped.push(
               t('agentSettings.messages.importMissingTool', {
@@ -496,15 +694,10 @@ const AgentSettings: React.FC = () => {
         description={t('agentSettings.pageDescription')}
       />
 
-      {/* ====== 主智能体 ====== */}
+      {/* ====== 主智能体（改完即存：这一区没有保存按钮） ====== */}
       <SettingsSection
         title={t('agentSettings.sections.mainAgent')}
         icon={<RobotOutlined size={14} />}
-        extra={
-          <Button type="primary" size="small" loading={mainSaving} onClick={handleMainSave}>
-            {t('common.action.save')}
-          </Button>
-        }
       >
         <SettingRow
           title={t('agentSettings.main.defaultTools')}
@@ -514,24 +707,37 @@ const AgentSettings: React.FC = () => {
               mode="multiple"
               size="small"
               placeholder={t('agentSettings.main.defaultToolsPlaceholder')}
-              value={mainAgent.tools}
-              onChange={(value) => setMainAgent((prev) => ({ ...prev, tools: value }))}
+              value={mainToolsValue}
+              onChange={(value) => void handleMainToolsChange(value)}
               allowClear
               maxTagCount="responsive"
               style={{ minWidth: 280 }}
               optionRender={(option) => {
-                const tool = availableTools.find((t) => t.name === option.value)
+                const tool = toolOptions.find((t) => t.name === option.value)
                 if (!tool) return option.label as React.ReactNode
+                const group = mcpGroupOptions.find((g) => g.value === option.value)
                 return (
                   <div className="flex items-center gap-2">
                     <span style={{ color: tool.color }}>{toolIconMap[tool.icon]}</span>
                     <span>{tool.label}</span>
+                    {group && group.total > 0 && (
+                      <span style={{ fontSize: 11, color: colorTextTertiary }}>
+                        {t('agentSettings.main.mcpToolsCount', {
+                          enabled: group.enabled,
+                          total: group.total
+                        })}
+                      </span>
+                    )}
                   </div>
                 )
               }}
               tagRender={(props) => {
-                const tool = availableTools.find((t) => t.name === props.value)
+                const tool = toolOptions.find((t) => t.name === props.value)
                 const { label, closable, onClose } = props
+                // MCP 服务器那一项带上这台服务器的「已启用/可用」计数（名字就是服务器名）
+                const group = mcpGroupOptions.find((g) => g.value === props.value)
+                const text =
+                  group && group.total > 0 ? `${label} ${group.enabled}/${group.total}` : label
                 return (
                   <Tag
                     closable={closable}
@@ -549,11 +755,11 @@ const AgentSettings: React.FC = () => {
                     }}
                   >
                     <span style={{ marginRight: 4 }}>{tool ? toolIconMap[tool.icon] : null}</span>
-                    {label}
+                    {text}
                   </Tag>
                 )
               }}
-              options={availableTools.map((t) => ({
+              options={toolOptions.map((t) => ({
                 value: t.name,
                 label: t.label,
                 icon: t.icon,
@@ -571,7 +777,7 @@ const AgentSettings: React.FC = () => {
               size="small"
               placeholder={t('agentSettings.main.defaultSkillsPlaceholder')}
               value={mainAgent.skills}
-              onChange={(value) => setMainAgent((prev) => ({ ...prev, skills: value }))}
+              onChange={(value) => void saveMainAgent({ skills: value })}
               allowClear
               disabled={skills.length === 0}
               style={{ minWidth: 280 }}
@@ -806,7 +1012,7 @@ const AgentSettings: React.FC = () => {
               <Select
                 mode="multiple"
                 placeholder={t('agentSettings.form.toolsPlaceholder')}
-                options={availableTools.map((t) => ({
+                options={toolOptions.map((t) => ({
                   value: t.name,
                   label: `${t.label} (${t.description})`
                 }))}

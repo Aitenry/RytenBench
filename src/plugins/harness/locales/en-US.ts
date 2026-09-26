@@ -413,8 +413,10 @@ export const harnessEnUS: typeof harnessZhCN = {
     },
     main: {
       defaultTools: 'Default tools',
-      defaultToolsDescription: 'Choose the system tools available to the main agent',
+      defaultToolsDescription:
+        'System tools available to the main agent. Each MCP server is picked as one group (named after the server); which tools it contains is toggled on the MCP settings page',
       defaultToolsPlaceholder: 'Select tools',
+      mcpToolsCount: '{{enabled}}/{{total}} enabled',
       defaultSkills: 'Default skills',
       defaultSkillsDescription: 'Choose the skills available to the main agent',
       defaultSkillsPlaceholder: 'Select skills (none if left empty)',
@@ -610,7 +612,7 @@ export const harnessEnUS: typeof harnessZhCN = {
   mcpSettings: {
     pageTitle: 'MCP',
     pageDescription:
-      'Connect external MCP servers (a local stdio process or a remote HTTP/SSE endpoint). The tools a server exposes show up in the agent tool list.',
+      'Connect external MCP servers (a local stdio process or a remote HTTP/SSE endpoint). The tools a server exposes show up in the agent tool list. Statuses come from the last connection attempt — use "Reconnect" to refresh.',
     list: {
       sectionTitle: 'Servers',
       newServer: 'Add',
@@ -621,12 +623,9 @@ export const harnessEnUS: typeof harnessZhCN = {
       toolCount: '{{count}} tools',
       toolCount_one: '{{count}} tool',
       toolCount_other: '{{count}} tools',
-      enabledForModel: '{{count}} tools enabled',
-      notEnabledForModel: 'No tools enabled',
-      viewTools: 'View tools',
+      toolsEnabledCount: '{{total}} tools · {{enabled}} enabled',
       edit: 'Edit',
       remove: 'Delete',
-      manual: 'Reconnect',
       removeConfirmTitle: 'Delete MCP server "{{name}}"?',
       removeConfirmBody:
         'This only removes the local configuration entry; the server itself is untouched. This cannot be undone.',
@@ -638,7 +637,8 @@ export const harnessEnUS: typeof harnessZhCN = {
       ok: 'Connected',
       error: 'Connection failed',
       disabled: 'Disabled',
-      unconfigured: 'Incomplete config'
+      unconfigured: 'Incomplete config',
+      unknown: 'Not connected'
     },
     field: {
       name: 'Name',
@@ -669,8 +669,9 @@ export const harnessEnUS: typeof harnessZhCN = {
       timeoutPlaceholder: 'Empty uses the default 60000',
       enabled: 'Enabled',
       enabledHint: 'When disabled the server is not connected and its tools disappear',
-      toolsEnabled: 'Tools available',
-      toolsEnabledHint: 'When checked every tool of this server joins the agent tool list',
+      tools: 'Tools',
+      toolsAll: 'Enable all',
+      toolsNone: 'Disable all',
       secretsKept: 'Stored values are not echoed back; leave empty to keep them'
     },
     transport: {
@@ -681,14 +682,10 @@ export const harnessEnUS: typeof harnessZhCN = {
     form: {
       createTitle: 'Add MCP server',
       editTitle: 'Edit MCP server: {{name}}',
-      groups: {
-        basic: 'Basics',
-        connection: 'Connection',
-        options: 'Options'
-      },
+      toolsCount: '{{total}} tools · {{enabled}} enabled',
       test: 'Test connection',
       testing: 'Connecting…',
-      testOk: 'Connected, found {{count}} tools',
+      testOk: 'Connected',
       testEmpty: 'Connected, but this server exposes no tools',
       testFailed: 'Connection failed'
     },

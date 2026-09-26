@@ -50,8 +50,11 @@ export interface McpToolInfo {
   description: string
 }
 
-/** 服务器的实时连接状态（设置页逐行展示；连不上的原因要能看见） */
-export type McpServerStatus = 'ok' | 'error' | 'disabled' | 'unconfigured'
+/**
+ * 服务器的实时连接状态（设置页逐行展示；连不上的原因要能看见）。
+ * `unknown` = 还没连过（加载列表不再顺手重连，见 runtime/mcp.ts 的 mcpServerViews）。
+ */
+export type McpServerStatus = 'ok' | 'error' | 'disabled' | 'unconfigured' | 'unknown'
 
 /** 设置页一行的视图（配置 + 运行期状态 + 工具清单） */
 export interface McpServerView {
@@ -162,9 +165,7 @@ export function mcpToolName(serverNamespace: string, rawToolName: string): strin
  * 只认 `mcp__` 前缀 + 第一个 `__` 分隔：工具名本身可能含 `__`（如 `list__x`），
  * 按第一个分隔切才不会把服务器名切错。
  */
-export function parseMcpToolName(
-  fullName: string
-): { server: string; tool: string } | null {
+export function parseMcpToolName(fullName: string): { server: string; tool: string } | null {
   if (!fullName.startsWith(MCP_TOOL_PREFIX)) return null
   const rest = fullName.slice(MCP_TOOL_PREFIX.length)
   const sep = rest.indexOf('__')
@@ -172,13 +173,100 @@ export function parseMcpToolName(
   return { server: rest.slice(0, sep), tool: rest.slice(sep + 2) }
 }
 
+/** 是不是一条 MCP 工具的全名（`mcp__…`） */
+export function isMcpToolName(name?: string): boolean {
+  return typeof name === 'string' && name.startsWith(MCP_TOOL_PREFIX)
+}
+
+/**
+ * 智能体工具选择里的「MCP 服务器」分组项：`mcp@<命名空间>`。
+ *
+ * 为什么要有它（2026-09-26 用户要求「MCP 注册到智能体的设置页面，不能直接选择全部的工具」
+ * → 紧接着又要求「要用 mcp 的名称」）：MCP 服务器一多，工具就是几十项
+ * （`mcp__<服务器>__<工具>`），智能体页的工具下拉会被它们淹没；而在那儿挑某个具体工具，
+ * 与 MCP 页的逐项开关本来就是**同一个决定**——两个入口必然漂移。
+ * 现在的分工：智能体页**按服务器**给一项，名字就用服务器自己的名字（如 `github`）；
+ * **具体哪几个工具只由 MCP 设置页的逐项开关决定**。
+ *
+ * 分隔符为什么用 `@`：`mcpNamespace()` 只保留 `[A-Za-z0-9_-]`，`@` 不可能出现在命名空间里，
+ * 因此这一项与真实工具全名（`mcp__…`）绝不会互相误认。
+ */
+export const MCP_SERVER_GROUP_PREFIX = 'mcp@'
+
+/** 服务器命名空间 → 选择项的值 */
+export function mcpServerGroupValue(namespace: string): string {
+  return `${MCP_SERVER_GROUP_PREFIX}${namespace}`
+}
+
+/** 反解选择项：是某台 MCP 服务器的分组项就给命名空间，否则 null */
+export function parseMcpServerGroup(value?: string): string | null {
+  if (typeof value !== 'string' || !value.startsWith(MCP_SERVER_GROUP_PREFIX)) return null
+  const namespace = value.slice(MCP_SERVER_GROUP_PREFIX.length)
+  return namespace || null
+}
+
+/** 该选择项是不是某台 MCP 服务器的分组项 */
+export function isMcpServerGroup(value?: string): boolean {
+  return parseMcpServerGroup(value) !== null
+}
+
+/**
+ * 历史标记：最早那版只给一项笼统的「MCP」（所有服务器一起开关）。
+ * 现在按服务器分开，但旧配置里可能还留着它——读到时按「全部已启用的 MCP 工具」处理。
+ */
+export const MCP_TOOL_GROUP = 'mcp'
+
+/** 该名字是不是那个笼统的旧「MCP」分组项 */
+export function isMcpToolGroup(name?: string): boolean {
+  return name === MCP_TOOL_GROUP
+}
+
+/**
+ * 把选择列表里的 MCP 相关项展开成**具体工具名**（其余原样保留）。
+ *
+ * 三种形态都认：
+ *  - `mcp@<命名空间>`：那台服务器在 MCP 页被勾选的工具；
+ *  - `mcp`（旧标记）：全部被勾选的 MCP 工具；
+ *  - `mcp__<命名空间>__<工具>`（旧数据里逐个存的真实全名）：**也按所属服务器的勾选展开**——
+ *    MCP 页是工具级的唯一管控点，不能因为别处存了个名字就绕过它。
+ */
+export function expandMcpServerGroups(
+  names: string[] | undefined,
+  enabledMcpToolNames: string[]
+): string[] {
+  const out: string[] = []
+  for (const name of names ?? []) {
+    const groupNamespace = parseMcpServerGroup(name)
+    if (groupNamespace) {
+      out.push(
+        ...enabledMcpToolNames.filter((tool) => parseMcpToolName(tool)?.server === groupNamespace)
+      )
+      continue
+    }
+    if (isMcpToolGroup(name)) {
+      out.push(...enabledMcpToolNames)
+      continue
+    }
+    const parsed = parseMcpToolName(name)
+    if (parsed) {
+      out.push(
+        ...enabledMcpToolNames.filter((tool) => parseMcpToolName(tool)?.server === parsed.server)
+      )
+      continue
+    }
+    out.push(name)
+  }
+  return out
+}
+
 /**
  * 主智能体配置（electron-store 的 `mainAgent` 键）。
  *
- * `tools` 是**用户从工具下拉里勾的**（本地工具 + 插件工具 + MCP 工具混在一张清单里），
- * `mcpTools` 是**在 MCP 页按服务器勾的**（整台服务器的工具）。两者分开存的原因：
- * 进设置页反勾一台 MCP 服务器时，只该停用它带来的工具，不能把用户在主智能体页挑的
- * 其他工具一起抹掉——合并成一张表存就必然出这个问题（同一份数据两个入口改）。
+ * `tools` 是**用户从「智能体」页工具下拉里勾的**（本地工具 + 插件工具，**不含** MCP 工具；
+ * MCP 在那一页按服务器显示成 `mcp@<命名空间>`，见 MCP_SERVER_GROUP_PREFIX），
+ * `mcpTools` 是**在 MCP 页按工具勾的**（MCP 是全项目唯一的工具级管控点）。
+ * 两者分开存的原因：进 MCP 页反勾某个工具时，只该停用它自己，不能把用户在智能体页挑的
+ * 其他工具一起抹掉——合并成一张表存就必然出这个问题。
  */
 export interface MainAgentConfig {
   tools?: string[]
@@ -190,13 +278,22 @@ export interface MainAgentConfig {
  * 一轮对话实际启用的工具名 = 主智能体勾选的工具 + MCP 页勾选的 MCP 工具（去重）。
  *
  * 单一真源：主进程组装工具集（harness-start-stream / harness-send-message）与设置页展示
- * 都走这里，避免「页面显示已启用、实际没挂上」这类漂移。
+ * 都走这里，避免「页面显示已启用、实际没挂上」这类漂移。`tools` 里若混进了 MCP 分组项
+ * （历史数据/子智能体配置被复制过来），这里直接跳过——它不是真实工具名。
  */
 export function effectiveMainAgentTools(config?: MainAgentConfig | null): string[] {
   const out: string[] = []
   const push = (names?: string[]): void => {
     for (const name of names ?? []) {
-      if (typeof name === 'string' && name && !out.includes(name)) out.push(name)
+      if (
+        typeof name === 'string' &&
+        name &&
+        !isMcpToolGroup(name) &&
+        !isMcpServerGroup(name) &&
+        !out.includes(name)
+      ) {
+        out.push(name)
+      }
     }
   }
   push(config?.tools)

@@ -6,6 +6,8 @@ import {
   type ToolInfo
 } from '../../../../main/plugins/tool-contract'
 import { listContributions } from '../../../../main/plugins/contributions'
+import { settingsStore } from '../../../../main/context'
+import { expandMcpServerGroups, type MainAgentConfig } from '../../shared/mcp'
 import { mergeToolSources, type ToolSource } from './registry'
 import { buildGetWeatherTool } from './weather'
 import { buildGetTimeTool } from './time'
@@ -66,8 +68,7 @@ const localToolInfos: ToolInfo[] = [
  * 会让工具注册表带上仅主进程可用的依赖，离线回归（node 直接加载本模块）就跑不起来。
  * 未注入时（插件未装载/被停用）退化为「没有 MCP 工具」，与「一台服务器都没配」同一条路径。
  */
-let mcpToolProvider: (() => { tools: StructuredToolInterface[]; infos: ToolInfo[] }) | null =
-  null
+let mcpToolProvider: (() => { tools: StructuredToolInterface[]; infos: ToolInfo[] }) | null = null
 
 /** 注入/撤销 MCP 工具提供者（插件 install 的可逆装配里调用） */
 export function setMcpToolProvider(
@@ -146,7 +147,24 @@ export function buildTools(toolNames: string[]): StructuredToolInterface[] {
 /** 为智能体构建实际的工具实例 */
 export function buildSubAgentTools(subAgent: SubAgentConfig): StructuredToolInterface[] {
   const registry = resolveToolBuilders()
-  return (subAgent.tools || []).filter((name) => name in registry).map((name) => registry[name]())
+  /**
+   * 子智能体的选择里存的可能是 MCP 分组项（智能体页按服务器给一项，见 shared/mcp.ts）：
+   * 建实例前展开成 MCP 页当前启用的那批真实工具名。**只有 MCP 页能决定具体哪几个工具**，
+   * 子智能体只是引用那份清单，因此这里每次都现读，MCP 页改了立即生效。
+   */
+  const selected = expandMcpServerGroups(subAgent.tools, enabledMcpToolNames())
+  return selected.filter((name) => name in registry).map((name) => registry[name]())
+}
+
+/** MCP 页当前勾选给模型的工具名（`mainAgent.mcpTools`，读不到就当没有） */
+function enabledMcpToolNames(): string[] {
+  try {
+    const config = settingsStore.get('mainAgent') as MainAgentConfig | undefined
+    return Array.isArray(config?.mcpTools) ? config.mcpTools : []
+  } catch (err) {
+    console.warn('[Harness] 读取已启用的 MCP 工具失败:', err)
+    return []
+  }
 }
 
 // ============================================================================
