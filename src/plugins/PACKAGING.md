@@ -27,8 +27,21 @@ plugins.json（索引，提交回 main）
 - **URL 规则单独锁住**：索引/资产地址由纯函数 `src/shared/plugin/index-url.ts` 生成，
   `node --experimental-strip-types test/verify-plugin-asset-url.mjs` 逐分支断言（18 条）——
   重点是「索引里没有 tag 时走 `releases/latest/download/<asset>`」而不是 404 的
-  `releases/download/latest/<asset>`。真 GitHub 地址要等仓库发布后才存在，这是唯一
-  无法端到端实测的一段：fixture 只覆盖「索引与资产同源」那条分支（`verify-github-plugin-install` 19 条）。
+  `releases/download/latest/<asset>`。fixture 只覆盖「索引与资产同源」那条分支
+  （`verify-github-plugin-install` 19 条），其余分支由这份离线断言兜住。
+- **仓库已发布并实测（2026-09-26）**：`Aitenry/ryten-plugins` 已建（public，MIT，README 英文），
+  推 tag `v0.1.0` 后 CI 成功（run #1，约 30s）——Release 里两个 zip 的 `digest` 与 CI 提交回 `main`
+  的 `plugins.json`（`tag: v0.1.0`）里的 `size`/`sha256` **逐字节一致**。
+  真机链路由新增的在线工装 `test/verify-plugin-github-live.mjs` 实测（10 条断言全绿）：
+  应用默认索引地址（`raw.githubusercontent.com`）0.3~1.1s 读回 `tag=v0.1.0`；`installFromGithub('music-player')`
+  真实下载 Release 资产（22KB，资产主机在本地网络上时快时慢：1.4s / 20.4s）+ sha256 校验通过 → 装进
+  `userData/plugins/music-player` → 菜单/通道/自带 DDL 建出 `music_folders` 全部可用 → 卸载含 purge 清干净。
+  ⚠️ 同一台机器上 PowerShell 的 `Invoke-WebRequest` 打 `raw.githubusercontent.com` 会 6/6 超时而 Electron 的
+  `net.fetch` 正常——**判据以应用自身为准**，不要用 PowerShell 的连通性否定这条链路。
+- **构建不可字节复现**：zip 内嵌条目时间戳，同源码两次构建**大小相同、sha256 不同**，因此索引必须与
+  上传的资产出自同一次构建（CI 就是这么做的；本地 `npm run build` 改写 `plugins.json` 后**不要提交**，
+  除非发布的正是那批本地 zip）。插件仓库的 fixture 服务器已改为**按本机 dist 现算** `size`/`sha256`
+  并去掉 `tag`，所以本地跑离线工装与仓库里那份 CI 索引可以并存。
 - **命名**：独立插件的目录名与 id 一致（`task-planner` / `music-player`），IPC 命名空间随之成为
   `plugin:task-planner:*` / `plugin:music-player:*`；**数据库表名不变**（`planner_tasks` / `music_folders`），
   所以老用户的数据在「内置 → 独立」这次搬家前后是同一批行。
