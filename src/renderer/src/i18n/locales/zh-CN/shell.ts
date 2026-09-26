@@ -6,7 +6,7 @@ export const zhCNShell = {
   menu: {
     // 只保留**内置**插件的菜单文案；独立插件（task-planner / music-player）自带
     // planner.menu.title / music.menu.title（见各自 locales）。
-    home: '首页',
+    notes: '笔记',
     harness: '助手'
   },
   titleBar: {

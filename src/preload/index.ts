@@ -52,7 +52,7 @@ interface WeatherData {
 }
 
 // Custom APIs for renderer
-// 各插件的命名空间（music / planner / home 六个键 / harness 的 harness·agents·mainAgent·workspace）
+// 各插件的命名空间（music / planner / notes 六个键 / harness 的 harness·agents·mainAgent·workspace）
 // 已全部删除：改由插件自己的 src/plugins/<id>/renderer/api.ts 走通用桥
 // window.api.plugin.invoke/on（通道 plugin:<命名空间>:*）。这里只剩 core 的外壳能力 + 通用桥。
 const api = {

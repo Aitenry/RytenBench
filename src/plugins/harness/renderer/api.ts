@@ -139,9 +139,9 @@ export const harnessApi = {
       ),
 
     /**
-     * 文档被聊天工具修改/删除（home 插件的编辑器据此同步或提示，防覆盖工具写入）。
+     * 文档被聊天工具修改/删除（notes 插件的编辑器据此同步或提示，防覆盖工具写入）。
      * 渲染层不再有人直接订阅它——harness 的 renderer install 把它桥接成宿主事件总线的
-     * 语义事件 `doc:changed`（见 renderer/plugin.tsx），消费方是 home 的文档编辑器。
+     * 语义事件 `doc:changed`（见 renderer/plugin.tsx），消费方是 notes 的文档编辑器。
      */
     onDocChanged: (
       callback: (data: { docId: number; action: 'updated' | 'deleted' }) => void

@@ -49,7 +49,7 @@ resources/plugins/<id>/      ──▶   userData/plugins/<id>/
 
 - **运行时不再有「内置插件」**：应用里没有对插件代码的静态 import，所有插件都从
   `userData/plugins/<id>/` 按同一条外部插件链路加载（`loadExternalMain` + `plugin://` 渲染模块）。
-- 「内置」只表示**随应用分发、可随时重装**（现在只有 `home` / `harness`）；「第三方」是用户装的
+- 「内置」只表示**随应用分发、可随时重装**（现在只有 `notes` / `harness`）；「第三方」是用户装的
   （含从插件仓库安装的 `task-planner` / `music-player`）。二者在列表里区分，卸载行为一致
   （删目录），区别是内置的可以从应用包重新安装。
 - 插件的数据**不在插件目录里**（表在 core 的 schema、行在同一个 PGlite 库），所以「卸载」与「清数据」是两件事，
@@ -61,7 +61,7 @@ resources/plugins/<id>/      ──▶   userData/plugins/<id>/
 做法：打包时把指向 core（`../../main/**`）与宿主 UI（`@renderer/**`）的导入改写成 `@host/**` 外部依赖，
 运行期由宿主注入同一份模块实例。
 
-- **应用内的内置插件**（`home` / `harness`）：源码照常写相对路径，构建时自动改写，**源码一行不用改**
+- **应用内的内置插件**（`notes` / `harness`）：源码照常写相对路径，构建时自动改写，**源码一行不用改**
   （仍按真实 core 类型做 typecheck）。
 - **独立仓库里的插件**（`task-planner` / `music-player`）：源码直接写 `@host/main/**`、`@host/renderer/**`
   （仓库里没有 core 源码可指），宿主 API 的类型由仓库自己的 `host.d.ts` 声明。
@@ -125,7 +125,7 @@ globalThis.__RB_HOST_RESOLVE__(spec) // '@host/main/database/orm' → 宿主那�
 
 ## 安装 / 卸载 / 清数据
 
-- **首次启动（内置插件）**：把 `resources/plugins/<id>/`（现在只有 `home` / `harness`）copy 到
+- **首次启动（内置插件）**：把 `resources/plugins/<id>/`（现在只有 `notes` / `harness`）copy 到
   `userData/plugins/<id>/`；`plugins.json` 的 `uninstalled` 列表里的插件**跳过**（用户卸载过就不自动装回来）。
 - **安装（重装内置插件）**：从 `resources/plugins/<id>/` 重新 copy，并清掉 `uninstalled` 记录。
 - **安装（独立插件）**：设置 → 插件 →「从插件仓库安装」→ 读索引、下载 zip、校验 sha256、解压装进
@@ -144,7 +144,7 @@ globalThis.__RB_HOST_RESOLVE__(spec) // '@host/main/database/orm' → 宿主那�
 - **数据清除由插件自己实现**（`ctx.contribute(PLUGIN_PURGE, { run })`），core 不硬编码表名：
   - music（独立插件 `music-player`）：`music_folders` / `music_tracks` 行 + 应用托管的歌单目录（`musicDirectory/<uuid>`，**不删** `musicDirectory` 本身）
   - planner（独立插件 `task-planner`）：`planner_tasks` / `planner_dependencies`
-  - home：`graph_relations`/`graph_entities`/`graph_build_jobs`、`directory_documents`、`documents_content`、
+  - notes：`graph_relations`/`graph_entities`/`graph_build_jobs`、`directory_documents`、`documents_content`、
     `wiki_directories`、`documents`、`wiki`、`task_dependencies`、`todo_items`、`node_positions`、
     `images`（只删本插件引用的那些行）、设置键 `graph`（**用户文档会被删，确认框必须写清楚**）
   - harness：topics / dialogues / goals / usage / agent configs + Mnemon 存储目录（按工作区）
@@ -152,6 +152,13 @@ globalThis.__RB_HOST_RESOLVE__(spec) // '@host/main/database/orm' → 宿主那�
   **可安装的内置插件**（仅当有未安装项时出现，行内一个「安装」按钮）。
 
 ## 分轮实施
+
+> **改名记录（2026-09-26）**：内置插件 `home` 已改名为 `notes`——目录、id、路由（`/notes`）、
+> 菜单键、词条命名空间（`notes.*`）、通道前缀（`plugin:notes:*`）与图标一并改；
+> 数据表名与 AI 工具名（`manage_docs` / `manage_todos` / `manage_wikis` / `search_graph`）不变。
+> 旧 profile 里铺下的 `userData/plugins/home` 由启动时的 `removeRetiredBundledPlugins()` 清掉（数据保留）。
+> **下表 P0~P5 里的 `home` 均指今天的 `notes`**（历史记录按当时的名字保留）；P6 起独立插件
+> `task-planner` / `music-player` 已移出应用。
 
 | 轮    | 内容                                                                                                                                                                                                                                                                                                                                                                                                                                             | 验收                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

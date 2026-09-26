@@ -113,8 +113,9 @@ P1~P4 期间 core 还持有两张**静态注册表**（`src/main/plugins/builtin
 
 ## 结构与契约入口
 
-四个内置插件（`harness` / `home` / `music` / `planner`）已全部自包含在
-`src/plugins/<id>/{manifest,main,renderer,shared,locales}`，**迁移全部完成**。
+内置插件（`notes` / `harness`）与独立插件（`task-planner` / `music-player`，源码在
+`github.com/Aitenry/ryten-plugins`）都已自包含在各自的
+`src/plugins/<id>/{manifest,main,renderer,shared,locales}` 或插件仓库的 `plugins/<id>/**`，**迁移全部完成**。
 core 只剩「外壳 + 插件宿主 + DB 引擎 + 模型 Provider + 通用 preload 桥」。
 
 看代码时的入口（按需要选一处，不要从别处猜）：
@@ -135,8 +136,8 @@ core 的边界（本轮收尾后）：
 - `src/main/**` 不 import 任何插件模块，**唯一例外**是 `src/main/database/schema/index.ts`
   的 schema re-export（drizzle-kit 不解析 tsconfig paths，单一 schema 入口是既有约定）；
   渲染层同样零插件 import（`src/renderer/src/i18n/i18next.d.ts` 只做**类型**汇聚）；
-- core 不认识任何插件通道名（`plugin:home:graph-build-*` 已随 `BuildProgressProvider`
-  整体收进 home 插件）；
+- core 不认识任何插件通道名（`plugin:notes:graph-build-*` 已随 `BuildProgressProvider`
+  整体收进 notes 插件）；
 - **插件的唯一来源就是磁盘包**：`resources/plugins/<id>/`（随应用分发）→ 首次启动铺到
   `userData/plugins/<id>/` → 与第三方插件同一条装载链路；`pnpm dev` 下若产物缺失或落后于源码，
   `installer.ts` 会自动用 `scripts/build-plugins.mjs --dev` 补打（见 `PACKAGING.md`）；

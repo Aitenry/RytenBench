@@ -23,7 +23,7 @@ const AppContent: React.FC = () => {
    * 为什么：停用注册了 `appProvider` 的插件会让 Provider 层重构，外壳子树随之重挂，
    * 组件里的 local state 会被重置——`currentKey` 用 state 时表现为「启停插件后高亮乱掉」。
    * 路由是外壳之外的真源（HashRouter 状态不受子树重挂影响），直接派生即天然一致
-   * （顺带修掉旧问题：整页刷新停在 #/planner 时侧栏还高亮 home）。
+   * （顺带修掉旧问题：整页刷新停在 #/planner 时侧栏还高亮 notes）。
    * 非菜单路径（如插件被停用后的兜底重定向中间态）不会有高亮项，可接受。
    */
   const current = location.pathname.replace(/^\/+/, '').split('/')[0] ?? ''

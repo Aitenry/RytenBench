@@ -5,7 +5,7 @@ import { SystemSettings } from '@renderer/types/settings'
 /**
  * 渲染层 core 的 `window` / `window.api` 形状（preload 早期类型副本的延续）。
  *
- * 各插件的命名空间（music / planner / home 六键 / harness 的 harness·agents·mainAgent·workspace）
+ * 各插件的命名空间（music / planner / notes 六键 / harness 的 harness·agents·mainAgent·workspace）
  * 已随插件化删除；harness 渲染层也不再依赖本文件（改走插件自己的 renderer/api.ts）。
  * 插件的跨进程 DTO 现在归各插件自己的 `src/plugins/<id>/shared/types.ts`。
  */

@@ -42,7 +42,7 @@ import { BUILTIN_PLUGIN_MANIFESTS } from '../../plugins/manifests'
  * 插件包产物文件的命名模式（铺包时覆盖）。
  *
  * 渲染层现在是**多文件**产物（P3 起）：入口 `renderer.mjs` 加上若干懒加载
- * `chunk-<hash>.mjs`（home 的 GraphView / harness 的 codemirror 语言包等）。
+ * `chunk-<hash>.mjs`（notes 的 GraphView / harness 的 codemirror 语言包等）。
  * 因此不能再硬编码三件套，改为「按模式识别产物文件」。
  */
 const PACKAGE_FILE_RE = /^(plugin\.json|main\.cjs|renderer\.mjs|chunk-[A-Za-z0-9_-]+\.mjs)$/

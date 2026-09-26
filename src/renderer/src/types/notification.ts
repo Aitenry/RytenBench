@@ -2,10 +2,10 @@
  * 通知中心的**通用**通知类型（core 服务，插件可消费）。
  *
  * 归属边界：通知的「载体」属于外壳（铃铛列表在 `NotificationList`），
- * 而「通知的具体形状」属于产生它的插件（例如图谱构建进度属于 home）。
+ * 而「通知的具体形状」属于产生它的插件（例如图谱构建进度属于 notes）。
  * 因此 core 只声明最小通用契约：能定位、能分类、能点击、能显示标题与描述。
  *
- * 插件侧在自己的模块里扩展它（home 的 `providers/build-progress.ts` 定义
+ * 插件侧在自己的模块里扩展它（notes 的 `providers/build-progress.ts` 定义
  * `BuildProgressNotification`），扩展字段以可选形式存在于本类型上，
  * 列表按字段名读取——core 因此不需要 import 任何插件的通知类型。
  */

@@ -32,10 +32,10 @@ export default defineConfig({
     './src/plugins/harness/main/db/schema/harness.ts',
     './src/plugins/harness/main/db/schema/file-change.ts',
     './src/plugins/harness/main/db/schema/agent.ts',
-    './src/plugins/home/main/db/schema/todo.ts',
-    './src/plugins/home/main/db/schema/wiki.ts',
-    './src/plugins/home/main/db/schema/document.ts',
-    './src/plugins/home/main/db/schema/graph.ts'
+    './src/plugins/notes/main/db/schema/todo.ts',
+    './src/plugins/notes/main/db/schema/wiki.ts',
+    './src/plugins/notes/main/db/schema/document.ts',
+    './src/plugins/notes/main/db/schema/graph.ts'
   ],
   out: './drizzle',
   dbCredentials: {

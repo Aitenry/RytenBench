@@ -1,6 +1,6 @@
 import type { PluginManifest } from '../shared/plugin/types'
 import { harnessManifest } from './harness/manifest'
-import { homeManifest } from './home/manifest'
+import { notesManifest } from './notes/manifest'
 
 /**
  * 随应用分发的**内置插件清单注册表**（主进程用）。
@@ -13,6 +13,6 @@ import { homeManifest } from './home/manifest'
  * `task-planner` / `music-player` 就是这样的独立插件——源码与发布在
  * `github.com/Aitenry/ryten-plugins`。
  */
-export const BUILTIN_PLUGIN_MANIFESTS: PluginManifest[] = [harnessManifest, homeManifest]
+export const BUILTIN_PLUGIN_MANIFESTS: PluginManifest[] = [harnessManifest, notesManifest]
 
 export default BUILTIN_PLUGIN_MANIFESTS

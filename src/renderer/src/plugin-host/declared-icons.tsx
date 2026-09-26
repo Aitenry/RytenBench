@@ -2,7 +2,7 @@ import { type ReactNode } from 'react'
 import {
   RiCalendar2Line,
   RiChatAiLine,
-  RiDashboardLine,
+  RiStickyNoteLine,
   RiDiscLine,
   RiPlugLine
 } from '@remixicon/react'
@@ -16,11 +16,11 @@ import {
  * 插件的 plugin.json 没写 icon）一律回退到通用图标，绝不抛错——声明项只是首帧的
  * 占位，几百毫秒后会被插件的真实注册覆盖。
  *
- * 名单按四个内置插件清单里**实际用到的**名字维护（home/planner/music/harness）；
- * 新增内置插件时在这里补一行即可（P5 起磁盘包插件同样走这条路径）。
+ * 名单按内置插件清单里**实际用到的**名字维护（当前是 notes / harness）；新增内置插件时在这里补一行即可。
+ * 独立插件（task-planner / music-player）的清单也写名字，装上后同样经这里解析。
  */
 const DECLARED_MENU_ICONS: Record<string, ReactNode> = {
-  RiDashboardLine: <RiDashboardLine size={16} />,
+  RiStickyNoteLine: <RiStickyNoteLine size={16} />,
   RiCalendar2Line: <RiCalendar2Line size={16} />,
   RiDiscLine: <RiDiscLine size={16} />,
   RiChatAiLine: <RiChatAiLine size={16} />

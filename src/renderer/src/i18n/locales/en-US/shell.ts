@@ -5,7 +5,7 @@ export const enUSShell: typeof zhCNShell = {
   menu: {
     // Built-in plugins only; standalone plugins ship their own captions
     // (planner.menu.title / music.menu.title).
-    home: 'Home',
+    notes: 'Notes',
     harness: 'Assistant'
   },
   titleBar: {

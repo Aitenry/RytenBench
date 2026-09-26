@@ -17,7 +17,7 @@ import {
  * 设置弹窗 = shell 核心页（静态）+ 插件注册页（settingsSection 注册点动态合并）。
  *
  * - 核心页：general / model / system，始终存在；
- * - 插件页：music（音乐设置，随 music 插件）、graph（图谱设置，随 home 插件）、
+ * - 插件页：music（音乐设置，随 music 插件）、graph（图谱设置，随 notes 插件）、
  *   agents / skills / memory（随 harness 插件）……注册页随插件启停即时出现/消失；
  * - 聚焦模式（assistant）：只显示 assistant 分组页 + model（智能体 → 模型 → 技能 → 记忆）。
  */

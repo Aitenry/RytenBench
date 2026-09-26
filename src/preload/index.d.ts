@@ -6,7 +6,7 @@ import type { PluginListEntry } from '../shared/plugin/types'
 /**
  * preload 暴露给渲染层的 core 能力（`window.api`）。
  *
- * 各插件的命名空间（music / planner / home 的六个键 / harness 的
+ * 各插件的命名空间（music / planner / notes 的六个键 / harness 的
  * harness·agents·mainAgent·workspace）已全部删除——插件渲染层经自己目录下的
  * `renderer/api.ts` 走**通用桥** `window.api.plugin.invoke/on`（通道 `plugin:<ns>:*`），
  * 类型由插件自己的 `shared/types.ts` 提供。这里只声明 core 的外壳能力。

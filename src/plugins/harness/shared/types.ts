@@ -2,7 +2,7 @@
  * harness 插件的跨进程 DTO：主进程 IPC 的入参/出参形状，渲染层只读同一份定义。
  *
  * 分两部分：
- * 1. **行类型与视图类型**：沿袭 planner/home 的做法，由**主进程模块推导**（mapper 内部再用
+ * 1. **行类型与视图类型**：沿袭 planner/notes 的做法，由**主进程模块推导**（mapper 内部再用
  *    drizzle schema 的 `$inferSelect` 推导），不手工维护第二份字段表——schema 改一处即两端口径
  *    一致。这里只 `export type`，编译后不留任何运行期依赖：渲染层不会因此把 drizzle、main
  *    目录或 electron 打进产物（契约见 src/plugins/README.md）。

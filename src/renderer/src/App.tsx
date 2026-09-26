@@ -68,7 +68,7 @@ const PluginStateBridge: React.FC<{ children: React.ReactNode }> = ({ children }
         //    ②为什么不能也用 forgetPlugin（2026-09-26 实测）：停用**静态回退**的内置插件
         //    （P4 之后只剩「dev 没跑打包脚本」这一种情况）一旦把登记摘掉，重新启用时第 2 步
         //    会去 `plugin://<id>/renderer.js` 取渲染模块——那个文件根本不存在，于是插件永远回不来
-        //    （现象：工装「重新启用 home」等到超时，菜单不再出现）。停用是可逆的，登记必须留着，
+        //    （现象：工装「重新启用 notes」等到超时，菜单不再出现）。停用是可逆的，登记必须留着，
         //    重启用走宿主的 enable() 重新 install。
         const liveIds = new Set(list.map((e) => e.id))
         for (const descriptor of host.getDescriptors()) {

@@ -53,7 +53,7 @@ import { startRendererMemorySampling, stopRendererMemorySampling } from '../rend
  * 主进程 → 渲染层的事件通道（只有发送方、没有 ipcMain 处理器）。
  *
  * 它们必须在 plugin 的 `install` 里经 `ctx.registerEvent` 声明才会进 preload 的
- * 插件通道白名单（home 那轮踩过：不声明则渲染层订阅被拒）。
+ * 插件通道白名单（notes 那轮踩过：不声明则渲染层订阅被拒）。
  */
 export const HARNESS_EVENTS = {
   streamChunk: 'plugin:harness:harness-stream-chunk',
@@ -84,7 +84,7 @@ interface HarnessSenderEvent {
   sender: Electron.WebContents
 }
 
-/** 目标渲染帧：第一个存活窗口（与 home 图谱通道「广播给所有存活窗口」同一取舍） */
+/** 目标渲染帧：第一个存活窗口（与 notes 图谱通道「广播给所有存活窗口」同一取舍） */
 function primarySender(): Electron.WebContents | null {
   const win = BrowserWindow.getAllWindows().find((w) => !w.isDestroyed())
   return win ? win.webContents : null
@@ -1071,7 +1071,7 @@ function drainPendingQueue(
  * - 通道名一律 `plugin:harness:<原扁平名>`（命名空间 = manifest.id），交给 ctx.registerIpc，
  *   停用时随 ctx.dispose() 一次性摘除；
  * - 原先的 `ipcMain.on`（start-stream / cancel-stream / agent-watch）在「只有 handle」的
- *   新契约下改成普通 invoke 通道，preload 的 send 同步改 invoke（同 home 的 graph-build-start）；
+ *   新契约下改成普通 invoke 通道，preload 的 send 同步改 invoke（同 notes 的 graph-build-start）；
  * - 订阅用 ctx.effect 挂/摘：停用插件后不再向渲染层广播任何 harness 事件。
  */
 export function installHarnessIpc(ctx: MainPluginContext): void {

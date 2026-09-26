@@ -3,7 +3,7 @@
  *
  * 语义：
  * - **多值**：同一个 key 可以由多个插件分别贡献（例如 `harness.tool` 由
- *   planner / home / music 各贡献自己的工具），同一个插件也可以贡献多项；
+ *   planner / notes / music 各贡献自己的工具），同一个插件也可以贡献多项；
  * - **拉取（pull）**：注册表不通知、不派发。消费方（例如 harness 组装工具集时）
  *   在**需要的那一刻**调 `listContributions(key)` 取当前全部贡献，
  *   **顺序无关**——谁的 install 先跑都能拿到全部；

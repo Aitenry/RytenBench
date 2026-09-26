@@ -29,10 +29,10 @@ import { WORKSPACE_WATCHER_EVENT_CHANNELS } from './workspace/watcher'
 /**
  * 文档被 AI 工具改写/删除的事件通道。
  *
- * 发送方是 home 插件的 `manage_docs` 工具（`src/plugins/home/main/tools/docs.ts`，它按
+ * 发送方是 notes 插件的 `manage_docs` 工具（`src/plugins/notes/main/tools/docs.ts`，它按
  * 「插件不得 import harness」的铁律用字面量发这个通道名）；订阅方是 harness 的渲染层入口
  * （`renderer/plugin.tsx`），它再把它桥接成**宿主事件总线**的语义事件 `doc:changed`，
- * 由 home 的文档编辑器消费——home 因此不认识这个通道名。在 harness 这里声明通道名，
+ * 由 notes 的文档编辑器消费——notes 因此不认识这个通道名。在 harness 这里声明通道名，
  * 是为了让它进 preload 的插件通道白名单。
  */
 const HARNESS_DOC_CHANGED_CHANNEL = 'plugin:harness:harness-doc-changed'
@@ -45,7 +45,7 @@ const HARNESS_DOC_CHANGED_CHANNEL = 'plugin:harness:harness-doc-changed'
  *   智能体配置），共 63 个 `plugin:harness:*` 通道，全部经 `ctx.registerIpc`；
  * - 事件通道：主进程 → 渲染层的推送（流式 chunk、队列、目标、后台任务、子代理、
  *   提问、计划清单、工作区磁盘变化、改动记录、文档改写）逐个 `ctx.registerEvent` 声明，
- *   否则 preload 白名单会拒绝渲染层订阅（home 那轮踩过）；
+ *   否则 preload 白名单会拒绝渲染层订阅（notes 那轮踩过）；
  * - 启动接线：文件改动快照目录 + 工作区文件监听，原先写在 `src/main/index.ts`，
  *   现挪进 `ctx.effect`（可逆）。停用「AI 助手」就不再配置快照目录、也不再监听工作区；
  * - 工具注册表：本地工具 time/weather + 各插件的 `harness.tool` 贡献（拉取语义，

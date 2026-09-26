@@ -39,7 +39,7 @@ import { fileURLToPath } from 'node:url'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 // 只打**内置**插件：task-planner / music-player 是独立插件，构建与发布在 ryten-plugins 仓库
-const PLUGIN_IDS = ['home', 'harness']
+const PLUGIN_IDS = ['notes', 'harness']
 
 const args = process.argv.slice(2)
 const onlyIndex = args.indexOf('--plugin')

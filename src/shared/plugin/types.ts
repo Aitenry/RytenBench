@@ -14,7 +14,7 @@ export interface PluginManifest {
   /**
    * 稳定唯一标识。
    *
-   * - **内置**（随应用分发、默认启用、可由应用包重装）：`home` | `harness`；
+   * - **内置**（随应用分发、默认启用、可由应用包重装）：`notes` | `harness`；
    * - **外部/第三方**（不随应用分发、默认停用）：`plugin.<作者>.<名字>`（如示例插件 `plugin.demo`），
    *   或者不带前缀的中性短名（独立插件仓库里的 `task-planner` / `music-player`）。
    *

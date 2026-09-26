@@ -18,10 +18,10 @@ import { harnessApi } from './api'
  *
  * 另有一处**跨插件解耦**：主进程在 AI 工具改写文档后经
  * `plugin:harness:harness-doc-changed` 通知渲染层（通道由 main/index.ts 的
- * `ctx.registerEvent` 声明才进 preload 白名单）。订阅方是 home 插件的文档编辑器，
- * 但 home 不该认识 harness 的通道名——所以这里把它桥接成宿主事件总线的语义事件
- * `doc:changed`，home 只订阅 `'doc:changed'`（见 src/plugins/home/renderer/plugin.tsx）。
- * 订阅本身是可逆效果：停用 harness 即解绑（home 即便还在也收不到该事件）。
+ * `ctx.registerEvent` 声明才进 preload 白名单）。订阅方是 notes 插件的文档编辑器，
+ * 但 notes 不该认识 harness 的通道名——所以这里把它桥接成宿主事件总线的语义事件
+ * `doc:changed`，notes 只订阅 `'doc:changed'`（见 src/plugins/notes/renderer/plugin.tsx）。
+ * 订阅本身是可逆效果：停用 harness 即解绑（notes 即便还在也收不到该事件）。
  *
  * 停用后：路由/菜单/设置三页/全局 Provider/词条全部级联回滚（依赖者先卸载语义）。
  */
@@ -71,7 +71,7 @@ const plugin: Plugin = {
     // 词条随插件注册：停用即不再注册这些键（原先由中央 locales 无条件打包进首屏）
     ctx.use('i18n').addResources('translation', harnessLocales)
 
-    // 主进程事件 → 宿主事件总线（语义事件 `doc:changed`，消费方是 home 的文档编辑器）。
+    // 主进程事件 → 宿主事件总线（语义事件 `doc:changed`，消费方是 notes 的文档编辑器）。
     // 订阅作为可逆效果登记：停用 harness 时解绑；通道未进白名单时只告警不抛错
     // （异常从 install 逃逸会让插件装载失败）。
     const events = ctx.use('events')

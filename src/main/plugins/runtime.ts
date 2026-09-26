@@ -48,8 +48,8 @@ import * as sharedModelParams from '../../shared/model-params'
  * 而用应用根做基准既能找到随应用分发的 node_modules，又能命中 Node 的模块缓存，
  * 于是「宿主已加载的同一实例」这条语义自动成立。
  *
- * 表是**按需补齐**的：P1 保证 music 端到端跑通，同时把 planner/home/harness 的静态依赖
- * 一次性补齐。P2（planner）用到其中 5 个 `@host/main/**` 键，P3（home）9 个，
+ * 表是**按需补齐**的：P1 保证 music 端到端跑通，同时把 planner/notes/harness 的静态依赖
+ * 一次性补齐。P2（planner）用到其中 5 个 `@host/main/**` 键，P3（notes）9 个，
  * P4（harness）18 个 + `@host/shared/model-params`——也就是本表基本被吃满；其余外部依赖
  * （`@langchain/**`、`drizzle-orm`、`zod/v3|v4`、`electron`、`electron-log`、`jsdom`、
  * `mammoth`、`turndown`、`@electric-sql/pglite`、`openmeteo`…）走下面的裸模块解析。

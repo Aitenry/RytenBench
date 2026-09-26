@@ -20,7 +20,7 @@ type ToolFactory = () => StructuredToolInterface
  * - `get_weather`：数据源 `src/main/weather.ts` 属 core；
  * - `get_time`：纯本地时间。
  *
- * planner / home / music 的工具**不在这里**：它们的实现已搬进各自插件
+ * planner / notes / music 的工具**不在这里**：它们的实现已搬进各自插件
  * （`src/plugins/<id>/main/tools.ts`），由插件 `install(ctx)` 经
  * `ctx.contribute(HARNESS_TOOL_CONTRIBUTION, …)` 注册，这里在组装时拉取。
  */

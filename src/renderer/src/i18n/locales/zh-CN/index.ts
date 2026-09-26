@@ -9,7 +9,7 @@ import { zhCNMarkdown } from './markdown'
  * 简体中文是**源语言**：词条结构与文案以这里为准。
  * 其它语言文件必须以 `typeof zhCN` 声明，键多一个少一个都会编译报错。
  *
- * 注意：已插件化的词条（home / graph / graphSettings、harness 的几套）不在这里
+ * 注意：已插件化的词条（notes / graph / graphSettings、harness 的几套）不在这里
  * harness / agentSettings / memorySettings / skillsSettings）不在中央目录里，它们由插件在
  * install 时经 `ctx.use('i18n').addResources` 注册（见 src/plugins/<id>/locales/）；
  * 类型上仍由 i18next.d.ts 汇总，`t()` 键照旧有校验。
