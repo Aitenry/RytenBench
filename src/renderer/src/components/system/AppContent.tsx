@@ -1,5 +1,5 @@
 // AppContent.tsx
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useSyncExternalStore } from 'react'
 import { useLocation } from 'react-router-dom'
 import CustomFrame from '@renderer/components/system/CustomFrame'
 import LockScreen from '@renderer/components/system/LockScreen'
@@ -8,14 +8,25 @@ import { Window } from '../../../resource/types/window'
 import { MessageProvider } from '@renderer/providers/MessageProvider'
 import { useMessage } from '@renderer/hooks/useMessage'
 import { useTranslation } from '@renderer/i18n'
+import {
+  getLockScreenState,
+  setLockScreenState,
+  subscribeLockScreenState
+} from './lock-screen-state'
 
 const AppContent: React.FC = () => {
   const { viewMessage } = useMessage()
   const { t } = useTranslation()
   const location = useLocation()
   const [isLocked, setIsLocked] = useState(false)
-  const [lockCode, setLockCode] = useState<string | null>(null)
-  const [lockEnabled, setLockEnabled] = useState(true)
+  /**
+   * 锁屏开关 / 解锁码来自**模块级共享快照**（见 lock-screen-state.ts）：
+   * 设置页打开「启用锁屏」时立刻生效，不必等外壳重挂（那正是「开关打开后按 ESC 没反应」的根因）。
+   */
+  const { enabled: lockEnabled, code: lockCode } = useSyncExternalStore(
+    subscribeLockScreenState,
+    getLockScreenState
+  )
 
   /**
    * 侧栏高亮键**从路由派生**，不再用 useState。
@@ -28,20 +39,28 @@ const AppContent: React.FC = () => {
    */
   const current = location.pathname.replace(/^\/+/, '').split('/')[0] ?? ''
 
-  // Initialize lock screen settings
+  /**
+   * 挂载时从主进程读一次**真源**（electron-store 的 `lock`）；此后与设置页通过共享快照同步。
+   * 读失败按「不启用」兜底：解锁码未知时锁屏等于把人锁在进不去的界面里。
+   */
   useEffect(() => {
+    let cancelled = false
     const initializeLockScreen = async (): Promise<void> => {
       try {
         const result = await (window as unknown as Window).api.setting.getLockScreenCode()
-        setLockCode(result.code)
-        setLockEnabled(result.view)
+        if (cancelled) return
+        setLockScreenState({ enabled: result?.view ?? false, code: result?.code ?? null })
       } catch (error) {
         console.error('Failed to initialize lock screen:', error)
-        setIsLocked(false)
+        if (!cancelled) setLockScreenState({ enabled: false })
       }
     }
 
     initializeLockScreen().then()
+
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   // Update lock screen status locally (runtime state only)
@@ -51,9 +70,10 @@ const AppContent: React.FC = () => {
 
   // Handle lock screen action
   const handleLockScreen = useCallback((): void => {
-    if (!lockEnabled) return
+    // 开关关着、或还没拿到解锁码时不锁屏（宁可 ESC 没反应，也不能锁出一个进不去的界面）
+    if (!lockEnabled || !lockCode) return
     updateLockStatus(true)
-  }, [updateLockStatus, lockEnabled])
+  }, [updateLockStatus, lockEnabled, lockCode])
 
   // Verify password against stored hash
   const verifyPassword = async (inputPassword: string): Promise<boolean> => {

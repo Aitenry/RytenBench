@@ -14,6 +14,7 @@ import { useTranslation } from '@renderer/i18n'
 import { Window } from '../../../../resource/types/window'
 import type { SystemSettings, ThemeMode, AppLanguage } from '@renderer/types/settings'
 import { SettingsPageHeader, SettingsSection, SettingRow } from './SettingsUI'
+import { setLockScreenEnabled } from '../lock-screen-state'
 
 const GeneralSettings: React.FC = () => {
   const { t } = useTranslation()
@@ -69,6 +70,9 @@ const GeneralSettings: React.FC = () => {
 
   const handleLockViewChange = (checked: boolean): void => {
     if (!settings) return
+    // 先更新渲染层共享快照再落盘：ESC 的判定读的是它，这样开关一开就生效，
+    // 不必等重启（此前只落盘不通知外壳 → 「打开开关后按 ESC 没反应」，见 lock-screen-state.ts）
+    setLockScreenEnabled(checked)
     updateSettings({ lock: { ...settings.lock, view: checked } }).then()
   }
 
