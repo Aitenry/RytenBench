@@ -6,6 +6,7 @@ import {
   type ToolInfo
 } from '../../../../main/plugins/tool-contract'
 import { listContributions } from '../../../../main/plugins/contributions'
+import { mergeToolSources, type ToolSource } from './registry'
 import { buildGetWeatherTool } from './weather'
 import { buildGetTimeTool } from './time'
 
@@ -54,57 +55,82 @@ const localToolInfos: ToolInfo[] = [
   }
 ]
 
-/** 已告警过的重名（同名工具每轮组装都会撞上，这里只提示一次，避免刷日志） */
-const warnedConflicts = new Set<string>()
+// ============================================================================
+// MCP 工具（外部 MCP 服务器提供的工具）
+// ============================================================================
 
-function warnConflict(name: string): void {
-  if (warnedConflicts.has(name)) return
-  warnedConflicts.add(name)
-  console.warn(
-    `[Harness] 工具名冲突：'${name}' 已被更早注册的同名工具占用（本地工具优先），忽略后续贡献`
+/**
+ * MCP 工具提供者：由 `runtime/mcp.ts` 在插件 install 时注入（`setMcpToolProvider`）。
+ *
+ * 为什么用注入而不是直接 import：MCP 管理器要读 electron-store、要起子进程，直接 import
+ * 会让工具注册表带上仅主进程可用的依赖，离线回归（node 直接加载本模块）就跑不起来。
+ * 未注入时（插件未装载/被停用）退化为「没有 MCP 工具」，与「一台服务器都没配」同一条路径。
+ */
+let mcpToolProvider: (() => { tools: StructuredToolInterface[]; infos: ToolInfo[] }) | null =
+  null
+
+/** 注入/撤销 MCP 工具提供者（插件 install 的可逆装配里调用） */
+export function setMcpToolProvider(
+  provider?: () => { tools: StructuredToolInterface[]; infos: ToolInfo[] }
+): void {
+  mcpToolProvider = provider ?? null
+}
+
+/** 当前就绪的 MCP 工具（未注入或未连上时为空） */
+function currentMcpTools(): { tools: StructuredToolInterface[]; infos: ToolInfo[] } {
+  if (!mcpToolProvider) return { tools: [], infos: [] }
+  try {
+    return mcpToolProvider()
+  } catch (err) {
+    console.warn('[Harness] 读取 MCP 工具失败:', err)
+    return { tools: [], infos: [] }
+  }
+}
+
+/** 每次取工具集时现拉的三路来源（本地工具常量 + 插件贡献 + MCP 快照） */
+function toolSources(): {
+  local: ToolSource<StructuredToolInterface>[]
+  contributed: ToolSource<StructuredToolInterface>[]
+  mcp: ToolSource<StructuredToolInterface>[]
+} {
+  const contributed = listContributions<PluginToolContribution>(HARNESS_TOOL_CONTRIBUTION).map(
+    (item) => ({ info: item.info, build: item.build })
   )
+  const mcp = currentMcpTools()
+  const byName = new Map(mcp.tools.map((tool) => [tool.name, tool]))
+  const mcpSources: ToolSource<StructuredToolInterface>[] = []
+  for (const info of mcp.infos) {
+    const ready = byName.get(info.name)
+    if (ready) mcpSources.push({ info, build: () => ready })
+  }
+  return {
+    local: Object.entries(toolBuilders).map(([name, build]) => ({
+      info: localToolInfos.find((i) => i.name === name)!,
+      build
+    })),
+    contributed,
+    mcp: mcpSources
+  }
 }
 
 /**
- * 合并后的工具表：本地工具 + 各插件贡献。
+ * 合并后的工具表：本地工具 + 各插件贡献 + 已连接的 MCP 工具（规则见 tools/registry.ts）。
  *
  * **每次调用都重新拉取贡献**——这正是「插件启停即时生效」的落点：插件停用后贡献被宿主摘除，
  * 下一次组装（下一轮对话/子代理）就看不到它的工具。未装载任何插件时贡献为空数组，
- * 工具集退化为本地两个工具，**不抛错**。
+ * 工具集退化为本地两个工具，**不抛错**。MCP 同理：服务器断开或停用时其工具即刻消失。
  */
 function resolveToolBuilders(): Record<string, ToolFactory> {
-  const merged: Record<string, ToolFactory> = { ...toolBuilders }
-  for (const contribution of listContributions<PluginToolContribution>(HARNESS_TOOL_CONTRIBUTION)) {
-    if (contribution.name in merged) {
-      warnConflict(contribution.name)
-      continue
-    }
-    merged[contribution.name] = contribution.build
-  }
-  return merged
+  return mergeToolSources(toolSources()).builders
 }
 
 /**
- * 工具清单（设置 → 智能体页的工具下拉用）：本地工具 + 各插件贡献，同名的本地优先。
- * 每次调用即时拉取，因此插件的启停会立刻反映在这份清单里。
- *
- * 贡献部分**按 name 排序**：注册表本身顺序无关（按插件装载顺序入列），不排序的话
- * 启停过一次插件就会让设置页下拉的顺序发生变化。本地工具固定排在前。
+ * 工具清单（设置 → 智能体页的工具下拉用）：本地工具 + 各插件贡献 + MCP 工具，同名的本地优先。
+ * 每次调用即时拉取，因此插件启停与 MCP 连接状态都会立刻反映在这份清单里。
+ * 排序与去重规则与 `resolveToolBuilders` 同源（同一个 `mergeToolSources`），不会漂移。
  */
 export function listAvailableTools(): ToolInfo[] {
-  const infos: ToolInfo[] = [...localToolInfos]
-  const seen = new Set(infos.map((info) => info.name))
-  const contributed: ToolInfo[] = []
-  for (const contribution of listContributions<PluginToolContribution>(HARNESS_TOOL_CONTRIBUTION)) {
-    if (seen.has(contribution.name)) {
-      warnConflict(contribution.name)
-      continue
-    }
-    seen.add(contribution.name)
-    contributed.push(contribution.info)
-  }
-  contributed.sort((a, b) => a.name.localeCompare(b.name, 'en'))
-  return [...infos, ...contributed]
+  return mergeToolSources(toolSources()).infos as ToolInfo[]
 }
 
 // ============================================================================
