@@ -54,7 +54,7 @@ const STALE_ARTIFACT_RE = /^(renderer\.mjs|main\.cjs|chunk-[A-Za-z0-9_-]+\.mjs)$
  * 随应用分发的内置插件 id（单一真源 = `src/plugins/manifests.ts`）。
  *
  * 用清单的 id 而不是「目录名」来判定 bundled：`resources/plugins/` 里也可能有
- * 别的目录（例如作为第三方示例的 `demo-plugin`），它们不属于「内置」。
+ * 别的目录（例如手工放进去的第三方插件包），它们不属于「内置」。
  */
 const BUILTIN_IDS: ReadonlySet<string> = new Set(BUILTIN_PLUGIN_MANIFESTS.map((m) => m.id))
 
@@ -76,8 +76,8 @@ export function bundledPluginDir(id: string): string | null {
  *
  * 双重过滤：
  * - 只认「随应用分发的内置插件」（`src/plugins/manifests.ts` 里的 id）——
- *   `resources/plugins/` 下还可能有别的东西（构建脚本会把 `examples/demo-plugin`
- *   一起放进去当第三方插件示例），它们不该被自动铺进 userData、更不该默认启用；
+ *   `resources/plugins/` 下还可能有别的东西（例如手工放进去的第三方插件包），
+ *   它们不该被自动铺进 userData、更不该默认启用；
  * - 目录里必须真的有 `plugin.json`。
  *
  * （P1~P4 期间还有一层 `PACKAGED_READY_IDS` 白名单，P5 已删：四个插件都走磁盘包了。）

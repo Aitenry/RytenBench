@@ -159,7 +159,6 @@ disabled or uninstalled just like any other.
 | `harness`      | Built-in    | AI assistant workbench: topics, streaming, tools, memory, files       |
 | `task-planner` | Third-party | Planner with a Gantt chart and hierarchical task tree                 |
 | `music-player` | Third-party | Folder playlists, playback controls, mini player, metadata extraction |
-| `plugin.demo`  | Example     | Minimal external plugin: IPC ping/pong plus a self-rendered page      |
 
 Built-in means **shipped with the app and reinstallable at any time** — not "compiled in". Their
 source lives in this repository under `src/plugins/`, but at runtime they are loaded from
@@ -167,7 +166,7 @@ source lives in this repository under `src/plugins/`, but at runtime they are lo
 the app itself contains no import of a plugin implementation. `task-planner` and `music-player` are
 not bundled: they are published in the companion repository
 [`Aitenry/ryten-plugins`](https://github.com/Aitenry/ryten-plugins) and installed from the plugin
-repository. `examples/demo-plugin` in this repository is a minimal template.
+repository.
 
 ### Installing plugins
 
@@ -394,7 +393,6 @@ RytenBench/
 ├── resources/                        # Icons, tray assets, models-profile.json
 │   └── plugins/                      # Generated plugin packages (not committed)
 ├── scripts/build-plugins.mjs         # Plugin bundler
-├── examples/demo-plugin/             # Minimal third-party plugin template
 ├── drizzle/                          # Generated migrations and snapshots
 ├── build/                            # electron-builder resources (macOS entitlements)
 ├── .github/workflows/                # Release builds for Windows, macOS and Linux (on main)

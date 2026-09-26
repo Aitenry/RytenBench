@@ -25,7 +25,6 @@
  */
 import { build } from 'esbuild'
 import {
-  cpSync,
   mkdirSync,
   readFileSync,
   readdirSync,
@@ -331,9 +330,4 @@ for (const id of only ? [only] : PLUGIN_IDS) {
     console.error(`  ${id} 打包失败：${err.message}`)
     process.exitCode = 1
   }
-}
-// 第三方示例插件也一起分发（演示用，卸载后可从同一处重装）
-if (!only && existsSync(join(ROOT, 'examples/demo-plugin'))) {
-  cpSync(join(ROOT, 'examples/demo-plugin'), join(OUT_DIR, 'demo-plugin'), { recursive: true })
-  console.log('  demo-plugin 复制完成')
 }

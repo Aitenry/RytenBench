@@ -179,7 +179,7 @@ export function hostUiKeys(): string[] {
  *
  * 第三方插件如果在自己的构建里把 react/antd 标成 external，就靠这张表拿到宿主**唯一**的那份实例，
  * 杜绝双重 React / antd 上下文分裂。P5 起四个内置插件都走 `@host/vendor/<spec>` 桥（同一批实例，
- * 见上表），这里保留是为了仍用 `ctx.require` 的老式第三方插件（`examples/demo-plugin` 就是）。
+ * 见上表），这里保留是为了仍用 `ctx.require` 的老式第三方插件（兼容路径，仓内已无示例）。
  *
  * 与 HOST_UI 里 `@host/vendor/*` 指向的是**同一次 import**，因此两份表不会给出两个 React。
  */

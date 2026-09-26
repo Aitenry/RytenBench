@@ -49,7 +49,7 @@ interface PluginHostProviderProps {
  * - 只处理 `enabled` 条目（停用插件不该有菜单）；
  * - 字段形状校验：plugin.json 来自磁盘，运行期没有类型校验，脏数据不许进注册表；
  * - `labelKey` 必须**现在就能译出来**（`i18n.exists`）：词条由插件自己在 install 里注册的
- *   外部插件（如 `examples/demo-plugin` 的 `demo.menu.title`）此刻还没有词条，声明出去
+ *   外部插件（如某个插件包里的 `demo.menu.title`）此刻还没有词条，声明出去
  *   只会先闪一串原始键名——这类条目等真实注册，不损失什么。
  */
 function declarationsFromEntries(
