@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react'
-import { App, Button, Switch, Tag, theme } from 'antd'
+import { App, Button, Checkbox, Modal, Switch, Tag, theme } from 'antd'
 import { useTranslation } from '@renderer/i18n'
 import { usePlugins } from '@renderer/plugin-host/PluginHostContext'
 import type { PluginListEntry, PluginState } from '@shared/plugin/types'
@@ -13,18 +13,22 @@ import { SettingsPageHeader, SettingsSection } from './SettingsUI'
  * - **可安装的内置插件**（应用包里带着、但已被卸载）：列表末尾单独一区，行内「安装」。
  *
  * 卸载是**物理卸载**（删目录），因此必须先问数据（用户口径）：
- * - 「不保留数据并卸载」→ 调 `plugin.purge` 清数据 + 删目录 + 记 `uninstalled`；
- * - 「取消」→ **什么都不做**（= 保留数据 = 不卸载），面板不会发出任何请求。
+ * - 「同时删除该插件的全部数据」勾上 → 调 `plugin.purge` 清数据 + 删目录 + 记 `uninstalled`；
+ * - 不勾 → **什么都不做**（= 保留数据 = 不卸载），面板不会发出任何请求，确认按钮保持禁用。
  *
  * 实时 fiber 状态来自宿主描述符；启停经 `api.plugin.setEnabled` 持久化并广播，
  * 渲染层 host 即时装载/卸载（路由/菜单/设置页/Provider 立即反应）。
  */
 const PluginsPanel: React.FC = () => {
   const { t } = useTranslation()
-  const { message, modal } = App.useApp()
+  const { message } = App.useApp()
   const { token } = theme.useToken()
   const descriptors = usePlugins()
   const [entries, setEntries] = useState<PluginListEntry[]>([])
+  /** 卸载确认框的目标（null = 未打开） */
+  const [pending, setPending] = useState<PluginListEntry | null>(null)
+  /** 确认框里的「是否同时删除数据」勾选态；每次打开都重置为未勾选 */
+  const [purgeData, setPurgeData] = useState(false)
 
   const refresh = useCallback((): void => {
     window.api.plugin
@@ -85,31 +89,24 @@ const PluginsPanel: React.FC = () => {
     [message, t]
   )
 
-  /**
-   * 卸载（含数据询问）。取消按钮是「保留数据」——用户口径里那等于不卸载，
-   * 因此 onOk 之外不发任何请求。
-   */
-  const uninstall = useCallback(
-    (entry: PluginListEntry): void => {
-      modal.confirm({
-        title: t('settings.plugins.uninstallConfirmTitle', { name: entry.name }),
-        content: t('settings.plugins.uninstallConfirmContent'),
-        okText: t('settings.plugins.uninstallPurgeOk'),
-        cancelText: t('common.action.cancel'),
-        okButtonProps: { danger: true },
-        onOk: async () => {
-          try {
-            setEntries(await window.api.plugin.uninstall(entry.id, true))
-            message.success(t('settings.plugins.uninstallDone'))
-          } catch (err) {
-            message.error(t('settings.plugins.uninstallFail'))
-            console.error('[plugins] 卸载失败:', err)
-          }
-        }
-      })
-    },
-    [modal, message, t]
-  )
+  /** 打开卸载确认框（不勾「同时删除数据」时确认按钮保持禁用 = 不卸载） */
+  const uninstall = useCallback((entry: PluginListEntry): void => {
+    setPurgeData(false)
+    setPending(entry)
+  }, [])
+
+  const confirmUninstall = useCallback(async (): Promise<void> => {
+    const target = pending
+    if (!target || !purgeData) return
+    try {
+      setEntries(await window.api.plugin.uninstall(target.id, true))
+      message.success(t('settings.plugins.uninstallDone'))
+      setPending(null)
+    } catch (err) {
+      message.error(t('settings.plugins.uninstallFail'))
+      console.error('[plugins] 卸载失败:', err)
+    }
+  }, [pending, purgeData, message, t])
 
   const runtimeState = useCallback(
     (id: string): PluginState | undefined => descriptors.find((d) => d.manifest.id === id)?.state,
@@ -264,6 +261,60 @@ const PluginsPanel: React.FC = () => {
           ))}
         </SettingsSection>
       )}
+
+      {/* 卸载确认框：数据取舍是一个**勾选项**（不是塞进按钮文案），
+          不勾 = 保留数据 = 不卸载，确认按钮保持禁用 */}
+      <Modal
+        open={pending !== null}
+        title={t('settings.plugins.uninstallTitle', { name: pending?.name ?? '' })}
+        okText={t('settings.plugins.uninstallConfirm')}
+        cancelText={t('common.action.cancel')}
+        okButtonProps={{ danger: true, disabled: !purgeData }}
+        onOk={() => void confirmUninstall()}
+        onCancel={() => setPending(null)}
+        width={430}
+        destroyOnHidden
+      >
+        <div style={{ fontSize: 12.5, color: token.colorTextSecondary, lineHeight: 1.7 }}>
+          {t('settings.plugins.uninstallBody')}
+        </div>
+
+        <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
+          <Checkbox
+            checked={purgeData}
+            onChange={(e) => setPurgeData(e.target.checked)}
+            style={{ marginTop: 1 }}
+          />
+          <div style={{ cursor: 'pointer' }} onClick={() => setPurgeData((v) => !v)}>
+            <div style={{ fontSize: 13, color: token.colorText }}>
+              {t('settings.plugins.purgeCheckbox')}
+            </div>
+            <div
+              style={{
+                fontSize: 12,
+                color: token.colorTextTertiary,
+                lineHeight: 1.6,
+                marginTop: 2
+              }}
+            >
+              {pending?.purgeLabel
+                ? t('settings.plugins.purgeDetail', { label: pending.purgeLabel })
+                : t('settings.plugins.purgeDetailFallback')}
+            </div>
+          </div>
+        </div>
+
+        <div
+          style={{
+            fontSize: 12,
+            color: token.colorTextTertiary,
+            lineHeight: 1.6,
+            marginTop: 12
+          }}
+        >
+          {t('settings.plugins.purgeHint')}
+        </div>
+      </Modal>
     </div>
   )
 }

@@ -29,11 +29,13 @@ export const zhCNSettings = {
     installFail: '插件安装失败',
     uninstallFail: '插件卸载失败',
     uninstallDone: '插件已卸载',
-    uninstallConfirmTitle: '卸载「{{name}}」',
-    uninstallConfirmContent:
-      '卸载会删除该插件的全部数据（例如音乐曲库记录与应用托管的歌单目录），此操作不可撤销。' +
-      '若想保留数据，请选择「取消」并改用停用开关。',
-    uninstallPurgeOk: '不保留数据并卸载',
+    uninstallTitle: '卸载「{{name}}」',
+    uninstallBody: '插件目录会被删除，之后可以从「可安装的内置插件」重新安装。',
+    purgeCheckbox: '同时删除该插件的全部数据',
+    purgeDetail: '包含：{{label}}。此操作不可撤销。',
+    purgeDetailFallback: '包含该插件的全部业务数据，此操作不可撤销。',
+    purgeHint: '不勾选则不会卸载——只想让它暂时不生效，请改用右侧开关。',
+    uninstallConfirm: '卸载',
     availableTitle: '可安装的内置插件',
     availableDescription: '随应用分发，卸载后可随时装回来'
   },

@@ -67,7 +67,9 @@ function listEntries(): PluginListEntry[] {
       entry: ext.manifest.entry,
       // 清单里的路由/菜单元数据：渲染层首帧据此声明式预注册（见 shared/plugin/types.ts）
       routes: ext.manifest.routes,
-      menu: ext.manifest.menu
+      menu: ext.manifest.menu,
+      // 「卸载会删掉什么」：插件自己的 plugin.purge 贡献（停用/未装载时拿不到，面板有兜底文案）
+      purgeLabel: pluginPurge(ext.id)?.label
     })
   }
 

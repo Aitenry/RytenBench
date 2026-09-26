@@ -24,9 +24,9 @@ export interface PluginManifest {
   builtin: boolean
   /** 外部插件入口；内置插件省略（走 builtin 注册表显式 import）。外部门槛校验仍强制存在 */
   entry?: {
-    /** 外部插件渲染层入口（ESM），内置插件省略（走 builtin 注册表显式 import） */
+    /** 渲染层入口（ESM）：内置插件是 `renderer.mjs`，第三方插件通常是 `renderer.js` */
     renderer?: string
-    /** 外部插件主进程入口（CJS/ESM），内置插件省略（走 builtinMainRegistry） */
+    /** 主进程入口（CJS）：内置插件是 `main.cjs`，第三方插件通常是 `main.js` */
     main?: string
   }
   /** 依赖声明：install 中可访问的上下文键。未声明而访问 → UNDECLARED_ACCESS */
@@ -90,6 +90,13 @@ export interface PluginListEntry {
   routes?: { path: string; skeleton?: string }[]
   /** 侧栏菜单元数据（同上；`icon` 是 remixicon 名字符串，声明项按名字解析成节点） */
   menu?: { key: string; labelKey: string; icon: string; order?: number }
+  /**
+   * 该插件 `plugin.purge` 贡献自称「会删什么」的一句话（例如「音乐曲库与托管歌单目录」）。
+   *
+   * 只用于卸载确认框里把「同时删除的数据」写具体——贡献本身在插件仍装载时才存在，
+   * 因此刚启动/插件被停用时可能是 undefined，界面要有兜底文案。
+   */
+  purgeLabel?: string
 }
 
 /** 校验 manifest 最小字段是否齐全（非法插件静默跳过/拒绝安装） */

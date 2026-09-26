@@ -31,10 +31,15 @@ export const enUSSettings: typeof zhCNSettings = {
     installFail: 'Failed to install plugin',
     uninstallFail: 'Failed to uninstall plugin',
     uninstallDone: 'Plugin uninstalled',
-    uninstallConfirmTitle: 'Uninstall "{{name}}"',
-    uninstallConfirmContent:
-      'Uninstalling deletes all of this plugin\u2019s data (for example the music library records and app-managed playlist folders). This cannot be undone. To keep the data, choose Cancel and use the toggle instead.',
-    uninstallPurgeOk: 'Uninstall and delete data',
+    uninstallTitle: 'Uninstall "{{name}}"',
+    uninstallBody:
+      'The plugin directory is deleted; you can install it again from "Built-in plugins available to install".',
+    purgeCheckbox: 'Also delete all of this plugin\u2019s data',
+    purgeDetail: 'Includes: {{label}}. This cannot be undone.',
+    purgeDetailFallback: 'Includes all of this plugin\u2019s data. This cannot be undone.',
+    purgeHint:
+      'Nothing happens without this checked \u2014 to keep the data and just turn the feature off, use the toggle instead.',
+    uninstallConfirm: 'Uninstall',
     availableTitle: 'Built-in plugins available to install',
     availableDescription: 'Shipped with the app; can be installed again at any time'
   },
