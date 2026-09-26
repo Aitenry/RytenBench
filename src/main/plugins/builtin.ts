@@ -42,13 +42,11 @@ const staticModules: Record<string, MainPluginModule> = {
 }
 
 /**
- * 过渡共存规则（P1 建、P2 加 planner、P3 加 home）：**已作为插件包安装到 `userData/plugins/<id>/`
- * 的内置插件不再从这里装载**——它由 `scanner` + `loadExternalMain` 按磁盘包接管，静态那份只是
- * 「dev 还没跑打包脚本」时的回退。
- *
- * 只对 `PACKAGED_READY_IDS` 里的 id（P1 = music、P2 = planner、P3 = home）生效：harness 的宿主
- * 运行时接口是 P4 才补的，现在就跳过静态注册会让它既没有磁盘包来源、又没有静态来源，
- * 直接从界面上消失。
+ * 过渡共存规则（P1 建、P4 补齐）：**已作为插件包安装到 `userData/plugins/<id>/` 的内置插件
+ * 不再从这里装载**——它由 `scanner` + `loadExternalMain` 按磁盘包接管。四个插件现在都在
+ * `PACKAGED_READY_IDS` 里，所以这个静态注册表在正常安装下的实际作用只剩一个：
+ * **dev 还没跑 `scripts/build-plugins.mjs` 时**（`resources/plugins/` 没产物）的兜底。
+ * P5 会把它整体删掉。
  *
  * 「用户主动卸载过」也要按同样的口径**遮住**静态回退（2026-09-26 工装实测）：
  * 卸载后重启时插件并不在 `userData/plugins/`，静态回退于是把它**半个**装回来——主进程通道

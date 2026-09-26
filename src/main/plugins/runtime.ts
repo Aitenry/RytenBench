@@ -7,6 +7,7 @@ import * as databaseInstance from '../database/instance'
 import * as databaseOrm from '../database/orm'
 import * as databaseSchema from '../database/schema'
 import * as databaseSchemaCommon from '../database/schema/common'
+import * as databaseSchemaWorkspace from '../database/schema/workspace'
 import * as databaseWorkspaceContext from '../database/workspace-context'
 import * as mapperProvider from '../database/mapper/provider'
 import * as i18n from '../i18n'
@@ -48,9 +49,10 @@ import * as sharedModelParams from '../../shared/model-params'
  * 于是「宿主已加载的同一实例」这条语义自动成立。
  *
  * 表是**按需补齐**的：P1 保证 music 端到端跑通，同时把 planner/home/harness 的静态依赖
- * 一次性补齐。P2（planner）用到其中 5 个 `@host/main/**` 键，P3（home）用到 9 个，其余外部
- * 依赖（`@langchain/core/**`、`drizzle-orm`、`zod/v3|v4`、`electron`、`electron-log`、
- * `jsdom`、`mammoth`、`turndown`…）走下面的裸模块解析。
+ * 一次性补齐。P2（planner）用到其中 5 个 `@host/main/**` 键，P3（home）9 个，
+ * P4（harness）18 个 + `@host/shared/model-params`——也就是本表基本被吃满；其余外部依赖
+ * （`@langchain/**`、`drizzle-orm`、`zod/v3|v4`、`electron`、`electron-log`、`jsdom`、
+ * `mammoth`、`turndown`、`@electric-sql/pglite`、`openmeteo`…）走下面的裸模块解析。
  * PACKAGING.md 的契约面（主进程 20 个）已全部在表内。
  */
 
@@ -61,6 +63,7 @@ const HOST_MAIN: Record<string, unknown> = {
   '@host/main/database/orm': databaseOrm,
   '@host/main/database/schema': databaseSchema,
   '@host/main/database/schema/common': databaseSchemaCommon,
+  '@host/main/database/schema/workspace': databaseSchemaWorkspace,
   '@host/main/database/workspace-context': databaseWorkspaceContext,
   '@host/main/database/mapper/provider': mapperProvider,
   '@host/main/i18n': i18n,

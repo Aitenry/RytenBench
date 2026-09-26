@@ -80,9 +80,10 @@ function listEntries(): PluginListEntry[] {
 
   // ② 未安装的内置插件：应用包里有包、但目录没铺（用户卸载过）→ 供面板给「安装」按钮
   for (const id of bundledPluginIdsFromPackage()) {
-    // 过渡（P1 建、P2 加 planner、P3 加 home）：只把**宿主运行时接口已就绪**的内置包列为「可安装」。
-    // 剩下那个（P4 才补接口）即使应用包里有产物，也不该被装进来——
-    // 装了会在装载期找不到 @host/main/** 而整体失败；它们此刻正由静态注册表装载。
+    // 过渡（P1 建、P4 四个全到齐）：只把**宿主运行时接口已就绪**的内置包列为「可安装」。
+    // 现在四个插件都在 `PACKAGED_READY_IDS` 里，这个判断在正常安装下恒真，留着是为了
+    // 「应用包里有产物、但宿主接口还没补齐」这种**不应该再出现**的状态不至于被装进来
+    // （装了会在装载期找不到 @host/main/** 而整体失败）。P5 删。
     if (!isPackageReady(id)) continue
     if (entries.some((e) => e.id === id)) continue
     const manifest = bundledManifest(id)
@@ -103,13 +104,12 @@ function listEntries(): PluginListEntry[] {
     })
   }
 
-  // ③ 过渡（P1 建、P2 加 planner、P3 加 home）：**尚未迁到磁盘包**的内置插件仍按静态清单列出并可用。
+  // ③ 过渡（P1 建、P4 四个全到齐）：**尚未迁到磁盘包**的内置插件仍按静态清单列出并可用。
   //
-  // 为什么需要这一条：本方案是一轮一个插件搬（P2/P3/P4），宿主运行时表（runtime.ts）与
-  // 渲染层宿主 UI 表（host-ui.ts）也只按轮次补齐。在某个插件搬走之前，它既不在
-  // `userData/plugins/`（没铺包）也不该从清单里消失——否则渲染层拿不到它的启用态，
-  // 会把它当成「未安装」而整块卸载（菜单/路由/设置页全没）。
-  // 所以：`isPackageReady(id)` 为 false 的内置插件照旧由静态注册表装载、按清单列出。
+  // P4 之后四个插件都在 `PACKAGED_READY_IDS` 里，所以这一段在正常安装下**不再产出任何条目**
+  // （每个 id 要么已被 ① 列为磁盘包、要么已被 ② 列为可安装的内置包）。
+  // 它保留的唯一场景 = dev 没跑 `scripts/build-plugins.mjs`（应用包里没有产物、也没有已装包），
+  // 此时静态注册表兜底装载，清单也必须如实列出——否则渲染层会把它们当「未安装」整块卸掉。
   // P5 删掉这段与 `packaged.ts`，改为全部走磁盘包。
   for (const manifest of BUILTIN_PLUGIN_MANIFESTS) {
     if (isPackageReady(manifest.id)) continue
@@ -212,7 +212,7 @@ export function setPluginStateSyncHook(hook: PluginStateSyncHook): void {
 function applyEnabled(id: string, enabled: boolean): void {
   // 静态内置与磁盘包是**互斥**的两条路径，判据必须与 builtin.ts 的遮蔽规则一致：
   // 该插件本轮已可打包（isPackageReady）**且**确实装在 userData 里（isPluginInstalled）时，
-  // 静态模块不会被登记，才从磁盘包装载。否则（例如 P1~P3 里的 harness：
+  // 静态模块不会被登记，才从磁盘包装载。否则（dev 未打包、只能靠静态回退时：
   // 应用包里有包但没装到 userData）就只能走静态钩子——早先按「应用包里有目录」判断，
   // 会去 loadExternalMain 一个并不存在的已安装插件，抛「外部插件 'harness' 未找到」。
   if (enabled) {
@@ -292,8 +292,8 @@ function installPlugin(id: string): PluginListEntry[] {
     throw new Error(`'${id}' 不是随应用分发的内置插件，请用「安装插件」选择目录安装`)
   }
   if (!isPackageReady(id)) {
-    // 过渡（P1 建、P2 加 planner、P3 加 home）：只有宿主运行时接口已补齐的插件能装。harness 继续走
-    // 静态注册表，现在把它们铺到 userData 会因为在装载期找不到 @host/main/** 而整体失败。
+    // 过渡（P4 起四个插件都已就绪，此处恒真）：宿主运行时接口没补齐的内置包不该被装进来，
+    // 装了会在装载期找不到 @host/main/** 而整体失败。P5 删。
     throw new Error(`插件 '${id}' 暂不支持从应用包安装（宿主运行时接口将在后续轮次补齐）`)
   }
   if (!bundledPluginDir(id)) {

@@ -10,7 +10,9 @@ import {
   APP_RENDERER_MEMORY_DUMP
 } from '../../../main/plugins/app-hooks'
 import { onAppEvent } from '../../../main/plugins/app-events'
+import { PLUGIN_PURGE } from '../../../main/plugins/contributions'
 import { configureFileHistory } from './workspace/file-history'
+import { purgeHarnessData } from './purge'
 import { configureToolOutputStore } from './runtime/tool-output-store'
 import { preloadHarnessData } from './preload-cache'
 import { dumpRendererMemory } from './renderer-memory'
@@ -85,6 +87,12 @@ export function install(ctx: MainPluginContext): void {
   ctx.contribute(APP_BEFORE_QUIT, {
     label: 'harness.mnemon',
     run: () => closeAllMnemon()
+  })
+  // 卸载时「不保留数据」由宿主回调：删本插件的 7 张表行 + 三处托管目录
+  // （实现见 `./purge.ts`；工作区表与 harness 设置键刻意不动）
+  ctx.contribute(PLUGIN_PURGE, {
+    run: purgeHarnessData,
+    label: '会话、对话、目标、子代理配置、文件改动记录与记忆目录'
   })
 
   // ── 启动接线（原 src/main/index.ts）─────────────────────────────────────

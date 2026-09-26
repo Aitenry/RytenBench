@@ -16,25 +16,23 @@ import harness from '@plugins/harness/renderer/plugin'
 export const builtinPlugins: Plugin[] = [home, planner, music, harness]
 
 /**
- * **过渡常量（P1 建、P2 加 planner、P3 加 home）**：宿主 UI 桥已补齐、可以从磁盘包加载的内置插件。
+ * **过渡常量（P1 建、P2 加 planner、P3 加 home、P4 加 harness = 四个全到齐）**：
+ * 宿主 UI 桥已补齐、可以从磁盘包加载的内置插件。
  *
  * 必须与主进程的 `src/main/plugins/packaged.ts` 保持一致（两侧各一份，因为渲染层不能
- * import 主进程模块，而另建一个 shared 常量对这个短命的过渡白名单不划算）：
- * P1 = music，P2 planner，P3 home，P4 harness，**P5 连同这段判断一起删掉**。
+ * import 主进程模块，而另建一个 shared 常量对这个短命的过渡白名单不划算）。
+ * **P5 连同这段判断一起删掉**（那时四个插件都只从磁盘包装载）。
  */
-const PACKAGED_READY_IDS = new Set(['music', 'planner', 'home'])
+const PACKAGED_READY_IDS = new Set(['music', 'planner', 'home', 'harness'])
 
 /**
- * 过渡共存规则（P1 建、P2 加 planner、P3 加 home）：**已作为插件包安装到 `userData/plugins/<id>/`
- * 的内置插件不再走这里**。
+ * 过渡共存规则（P1 建、P4 补齐）：**已作为插件包安装到 `userData/plugins/<id>/` 的内置插件
+ * 不再走这里**。
  *
  * 磁盘包由主进程的 `loadExternalMain` 装载、渲染模块由 `plugin://<id>/renderer.mjs`
  * 加载（同一条外部插件链路），静态这份只是「dev 还没跑打包脚本」时的回退。
  * 不排除就会同时存在两个装载来源：主进程侧通道命名空间会直接冲突，渲染层侧
  * 路由/菜单/设置页也会各注册一遍。
- *
- * 只对 `PACKAGED_READY_IDS` 生效：harness 的宿主 UI 桥是 P4 才补的，
- * 现在排除它会让它从界面上彻底消失（既没有磁盘包来源、又没有静态来源）。
  *
  * 判断依据是主进程 `plugins-list`（`bundled: true` + `installed: true`），不是文件系统——
  * 渲染层沙箱里读不到 `userData/plugins`。取不到清单（异常启动路径）时保守地**不排除**

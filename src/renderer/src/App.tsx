@@ -66,8 +66,8 @@ const PluginStateBridge: React.FC<{ children: React.ReactNode }> = ({ children }
         //    一个「菜单/路由还在、主进程通道已没了」的僵尸插件。
         //
         //    ②为什么不能也用 forgetPlugin（2026-09-26 实测）：停用**静态回退**的内置插件
-        //    （P1~P3 过渡期里还没搬走的那个：harness）一旦把登记摘掉，重新启用时第 2 步
-        //    会去 `plugin://harness/renderer.js` 取渲染模块——那个文件根本不存在，于是插件永远回不来
+        //    （P4 之后只剩「dev 没跑打包脚本」这一种情况）一旦把登记摘掉，重新启用时第 2 步
+        //    会去 `plugin://<id>/renderer.js` 取渲染模块——那个文件根本不存在，于是插件永远回不来
         //    （现象：工装「重新启用 home」等到超时，菜单不再出现）。停用是可逆的，登记必须留着，
         //    重启用走宿主的 enable() 重新 install。
         const liveIds = new Set(list.map((e) => e.id))
