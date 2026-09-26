@@ -64,7 +64,7 @@ export function bundledPluginDir(id: string): string | null {
  * - 只认「随应用分发的内置插件」（`src/plugins/manifests.ts` 里的 id）——
  *   `resources/plugins/` 下还可能有别的东西（构建脚本会把 `examples/demo-plugin`
  *   一起放进去当第三方插件示例），它们不该被自动铺进 userData、更不该默认启用；
- * - 只认 `PACKAGED_READY_IDS`（P1 只有 music，见该常量的说明）；
+ * - 只认 `PACKAGED_READY_IDS`（P1 = music、P2 = planner，见该常量的说明）；
  * - 目录里必须真的有 `plugin.json`。
  */
 export function listBundledPluginIds(): string[] {

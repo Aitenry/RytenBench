@@ -38,14 +38,20 @@ resources/plugins/<id>/      ──▶   userData/plugins/<id>/
 `components/markdown/{MarkdownView,MarkdownLoad,TipTapMarkdownEditor}`、`components/system/{Skeleton,settings/SettingsUI}`、
 `components/{effects/ShinyText,provider/provider-mark}`、`route/RouteSkeleton`、`utils/{document,formatTime,providerMeta}`。
 
+**渲染层 vendor 8 个**：`@host/vendor/` 下的 `react`、`react/jsx-runtime`、`react-dom`、`react-dom/client`、
+`antd`、`@remixicon/react`、`@ant-design/icons`、`dayjs`（宿主里已有唯一实例的第三方；`vendor()` 用 `Object.keys`
+枚举命名导出，dayjs 只有默认导出因此显式写名单）。P2 实测：未把 dayjs 放进 vendor 时 planner 的渲染产物里
+带了一份独立的 dayjs（41.3KB → 走桥后 33.2KB），`isDayjs()` 与 antd DatePicker 的受控值会跨实例分裂。
+
 ### 主进程交接方式
 
-宿主在加载任何插件前挂上运行时表，并给插件 CJS 包注入 `require` 垫片：
+宿主在加载任何插件前挂上运行时表（实际实现见 `src/main/plugins/runtime.ts`）：
 
 ```js
-globalThis.__RB_HOST_RUNTIME__ = { '@host/main/database/orm': ormModule /* … 20 个 */ }
-// 插件包里的 require('@host/main/x') → 命中的直接返回上表里的同一实例（单例保住）
-// 其它裸模块（electron / langchain / zod / drizzle…）→ 按宿主自身的解析路径 require
+// 打包时插件里的 core/裸模块导入被改写成一句 require 垫片，最终落到这个全局函数：
+globalThis.__RB_HOST_RESOLVE__(spec) // '@host/main/database/orm' → 宿主那一份实例（单例保住）
+// 其它裸模块（electron / langchain / zod / drizzle…）
+// → 按宿主自身的解析路径（应用根）require 同一实例
 ```
 
 ### 渲染层交接方式
@@ -55,8 +61,9 @@ globalThis.__RB_HOST_RUNTIME__ = { '@host/main/database/orm': ormModule /* … 2
 需要：
 
 - CSP 的 `script-src` 加上 `plugin:`（现在是 `'self' blob:`）；
-- 宿主的 `__RB_HOST_UI__` 表在渲染层启动时挂上（15 个模块，静态 import 后聚合）；
-- 版本化：桥文件带 `?v=<宿主版本>`，插件包与宿主版本不匹配时加载失败要给出可读错误。
+- 宿主的 `__RB_HOST_UI__` 表在渲染层启动时挂上（15 个模块 + 8 个 vendor，静态 import 后聚合）；
+- 桥按 `?m=<键>` 逐个生成（键 = 打包产物里的说明符），导出名由渲染层一次性上报
+  （`plugin-host-ui-exports`）——主进程因此仍然不认识任何宿主模块。
 
 ## 安装 / 卸载 / 清数据
 
@@ -77,14 +84,14 @@ globalThis.__RB_HOST_RUNTIME__ = { '@host/main/database/orm': ormModule /* … 2
 
 ## 分轮实施
 
-| 轮    | 内容                                                                                                                                                                                  | 验收                                                                                                                                                                                                                                                                                      |
-| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| P0 ✅ | `scripts/build-plugins.mjs`：四插件打成 `resources/plugins/<id>/{plugin.json,main.cjs,renderer.mjs}`，`@host/**` 与第三方裸模块外置，manifest 由 `manifest.ts` 生成（单一真源）       | 四个包产出（dev：music 113/293KB、planner 107/221KB、home 666/898KB、harness 1722/2565KB），外置清单与本文契约一致                                                                                                                                                                        |
-| P1 ✅ | 宿主运行时（main `globalThis` + require 垫片；renderer `plugin://host/ui.js` 桥 + CSP `plugin:`）+ 首次安装 copy + **用 music 端到端**跑通 + **首帧声明式预注册**（见下节）           | 应用里 music 从 `userData/plugins/music` 装载；首帧侧栏即为「首页/计划/音乐/助手」（`test/probe-first-frame-menu.mjs`）；卸载（不保留数据）后目录/表数据/菜单/通道全没了，重启不会自动铺回来，重装后原样回来；`verify-plugin-host` 61 条全绿、`verify-plugin-install-uninstall` 41 条全绿 |
-| P2    | planner 同款                                                                                                                                                                          | 同上                                                                                                                                                                                                                                                                                      |
-| P3    | home 同款（含 GraphView 懒加载 chunk 仍在）                                                                                                                                           | 同上 + 文档数据 purge 验证                                                                                                                                                                                                                                                                |
-| P4    | harness 同款（含 workspace/mnemon 数据 purge）                                                                                                                                        | 同上                                                                                                                                                                                                                                                                                      |
-| P5    | 去掉静态注册表（`src/plugins/*/renderer/plugin.tsx` 的应用内 import、`main/plugins/builtin.ts`）、`electron-builder.yml` 加 `resources/plugins` 到 extraResources、面板改造、文档收尾 | `node test/verify-plugin-restructure.mjs` 改为「应用内零插件 import」；全套工装 + CDP 全绿                                                                                                                                                                                                |
+| 轮    | 内容                                                                                                                                                                                  | 验收                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| P0 ✅ | `scripts/build-plugins.mjs`：四插件打成 `resources/plugins/<id>/{plugin.json,main.cjs,renderer.mjs}`，`@host/**` 与第三方裸模块外置，manifest 由 `manifest.ts` 生成（单一真源）       | 四个包产出（dev：music 113/293KB、planner 107/221KB、home 666/898KB、harness 1722/2565KB），外置清单与本文契约一致                                                                                                                                                                                                                                                                                                                                                                   |
+| P1 ✅ | 宿主运行时（main `globalThis` + require 垫片；renderer `plugin://host/ui.js` 桥 + CSP `plugin:`）+ 首次安装 copy + **用 music 端到端**跑通 + **首帧声明式预注册**（见下节）           | 应用里 music 从 `userData/plugins/music` 装载；首帧侧栏即为「首页/计划/音乐/助手」（`test/probe-first-frame-menu.mjs`）；卸载（不保留数据）后目录/表数据/菜单/通道全没了，重启不会自动铺回来，重装后原样回来；`verify-plugin-host` 61 条全绿、`verify-plugin-install-uninstall` 44 条全绿（P2 起该工装的「哪些 id 已就绪」由 `packaged.ts` 驱动，条数随轮次增长）                                                                                                                    |
+| P2 ✅ | planner 同款（外加 planner 自己的 `plugin.purge`：`planner_dependencies` → `planner_tasks`；另把 **dayjs 纳入宿主 vendor 桥**，见上节）                                               | planner 从 `userData/plugins/planner` 装载（`loadedFrom().planner.source === 'package'`）；`plugin:planner:tasks-add` 由磁盘包应答并落库；卸载（不保留数据）后目录/两张表行/菜单/路由/`plugin:planner:*` 通道/harness 工具清单里的 `manage_planner` 全没了，且不碰 music 的数据；重启不会自动铺回来，重装后原样回来（数据仍为空）；`verify-plugin-planner-package` 43 条全绿，P1 工装（`verify-plugin-install-uninstall` 44 条 / `verify-plugin-host` 61 条 / 首帧与三个探针）仍全绿 |
+| P3    | home 同款（含 GraphView 懒加载 chunk 仍在）                                                                                                                                           | 同上 + 文档数据 purge 验证                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| P4    | harness 同款（含 workspace/mnemon 数据 purge）                                                                                                                                        | 同上                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| P5    | 去掉静态注册表（`src/plugins/*/renderer/plugin.tsx` 的应用内 import、`main/plugins/builtin.ts`）、`electron-builder.yml` 加 `resources/plugins` 到 extraResources、面板改造、文档收尾 | `node test/verify-plugin-restructure.mjs` 改为「应用内零插件 import」；全套工装 + CDP 全绿                                                                                                                                                                                                                                                                                                                                                                                           |
 
 ## 首帧声明式预注册（P1 落地，P5 复用同一机制）
 

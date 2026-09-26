@@ -3,6 +3,7 @@ import * as ReactJsxRuntime from 'react/jsx-runtime'
 import * as ReactDom from 'react-dom'
 import * as ReactDomClient from 'react-dom/client'
 import * as antd from 'antd'
+import dayjs from 'dayjs'
 import * as RemixIcons from '@remixicon/react'
 import * as AntIcons from '@ant-design/icons'
 
@@ -43,7 +44,8 @@ import * as providerMeta from '@renderer/utils/providerMeta'
  * `assertHostUiShape()` 在启动时会核对名单，缺名字会在控制台点名（而不是等插件白屏）。
  *
  * vendor（react/antd/图标）是真正的打包产物命名空间，用 `Object.keys` 枚举是可靠的：
- * 它们由宿主打包器产出，键就是导出名。
+ * 它们由宿主打包器产出，键就是导出名。例外是 **dayjs**：它只有默认导出（见下表内的说明），
+ * 因此和宿主 UI 模块一样显式写名单。
  */
 export interface HostUiEntry {
   /** 模块实例（插件的 import 最终取的就是这个对象） */
@@ -153,7 +155,18 @@ export const HOST_UI: Record<string, HostUiEntry> = {
   '@host/vendor/react-dom/client': vendor(ReactDomClient),
   '@host/vendor/antd': vendor(antd),
   '@host/vendor/@remixicon/react': vendor(RemixIcons),
-  '@host/vendor/@ant-design/icons': vendor(AntIcons)
+  '@host/vendor/@ant-design/icons': vendor(AntIcons),
+  /**
+   * dayjs 只有**默认导出**（可调用对象，静态方法挂在它自己身上）。
+   *
+   * 这里刻意不用 `vendor(dayjs)`：`vendor()` 用 `Object.keys` 枚举命名导出，而 dayjs 是函数、
+   * 拿到的是空名单（结果一样但语义含糊）。写成 `hostModule({ default: dayjs }, [])` 明说
+   * 「插件只能 `import dayjs from 'dayjs'`」，桥会生成 `export default m.default ?? m`。
+   *
+   * 为什么必须走桥（P2 实测）：宿主 `@renderer/i18n` import 了 dayjs 并全局设过 locale；
+   * 插件自带第二份会得到另一个 Dayjs 类，`isDayjs()`、antd DatePicker 受控值与 locale 全部分裂。
+   */
+  '@host/vendor/dayjs': hostModule({ default: dayjs }, [])
 }
 
 /** 宿主 UI 表里的全部模块键（渲染层 loader 据此判断哪些说明符该走桥） */

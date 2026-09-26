@@ -42,12 +42,12 @@ const staticModules: Record<string, MainPluginModule> = {
 }
 
 /**
- * 过渡共存规则（P1）：**已作为插件包安装到 `userData/plugins/<id>/` 的内置插件不再从这里
- * 装载**——它由 `scanner` + `loadExternalMain` 按磁盘包接管，静态那份只是「dev 还没跑打包
- * 脚本」时的回退。
+ * 过渡共存规则（P1 建、P2 加 planner）：**已作为插件包安装到 `userData/plugins/<id>/` 的内置插件
+ * 不再从这里装载**——它由 `scanner` + `loadExternalMain` 按磁盘包接管，静态那份只是「dev 还没跑
+ * 打包脚本」时的回退。
  *
- * 只对 `PACKAGED_READY_IDS` 里的 id（P1 = music）生效：另外三个插件的宿主运行时接口是
- * P2/P3/P4 才补的，现在就跳过静态注册会让它们既没有磁盘包来源、又没有静态来源，
+ * 只对 `PACKAGED_READY_IDS` 里的 id（P1 = music、P2 = planner）生效：home/harness 的宿主运行时
+ * 接口是 P3/P4 才补的，现在就跳过静态注册会让它们既没有磁盘包来源、又没有静态来源，
  * 直接从界面上消失。
  *
  * 「用户主动卸载过」也要按同样的口径**遮住**静态回退（2026-09-26 工装实测）：

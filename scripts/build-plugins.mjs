@@ -58,8 +58,19 @@ const ALIASES = [
  * 这份名单必须与 `src/renderer/src/plugin-host/host-ui.ts` 的 `@host/vendor/*` 键**一致**：
  * 打包器把命中的说明符改成桥引用，运行时渲染层 loader 再按 host-ui 表判断哪些说明符
  * 真的走桥（表里没有的裸模块保持原样，由 esbuild 打进包）。
+ *
+ * dayjs 也在名单里（P2 实测）：宿主 `@renderer/i18n` 已经 import 了 dayjs 并**全局设过 locale**，
+ * 插件自带第二份会得到另一个 Dayjs 类——`isDayjs()` 判定、antd DatePicker 的受控值互操作、
+ * 以及 locale 设置都会因此分裂（planner 未走桥时打包产物里确实带了一份 dayjs）。
  */
-const RENDERER_VENDOR = ['react', 'react-dom', 'antd', '@remixicon/react', '@ant-design/icons']
+const RENDERER_VENDOR = [
+  'react',
+  'react-dom',
+  'antd',
+  '@remixicon/react',
+  '@ant-design/icons',
+  'dayjs'
+]
 
 /** Node 内置模块（含 `node:` 前缀形式）：保持 external，运行期由 Node 自己解析 */
 const NODE_BUILTINS = new Set([

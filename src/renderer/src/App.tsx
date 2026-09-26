@@ -65,9 +65,9 @@ const PluginStateBridge: React.FC<{ children: React.ReactNode }> = ({ children }
         //    内置插件（例如 music）仍带着 builtin=true 留在静态注册表里，不移除就会留下
         //    一个「菜单/路由还在、主进程通道已没了」的僵尸插件。
         //
-        //    ②为什么不能也用 forgetPlugin（2026-09-26 实测）：停用静态内置插件（home/
-        //    planner/harness 在 P1 过渡期没有磁盘包）一旦把登记摘掉，重新启用时第 2 步会去
-        //    `plugin://home/renderer.js` 取渲染模块——那个文件根本不存在，于是插件永远回不来
+        //    ②为什么不能也用 forgetPlugin（2026-09-26 实测）：停用**静态回退**的内置插件
+        //    （P1/P2 过渡期里还没搬走的那两个：home/harness）一旦把登记摘掉，重新启用时第 2 步
+        //    会去 `plugin://home/renderer.js` 取渲染模块——那个文件根本不存在，于是插件永远回不来
         //    （现象：工装「重新启用 home」等到超时，菜单不再出现）。停用是可逆的，登记必须留着，
         //    重启用走宿主的 enable() 重新 install。
         const liveIds = new Set(list.map((e) => e.id))
@@ -87,8 +87,8 @@ const PluginStateBridge: React.FC<{ children: React.ReactNode }> = ({ children }
 
         // 2) 加载：清单里启用但尚未登记的插件渲染模块。
         //    注意条件里没有 `e.builtin` ——P1 起内置插件也是磁盘包（`plugin://<id>/renderer.mjs`
-        //    + 宿主 UI 桥），与第三方插件走完全相同的加载路径；已经在静态注册表里登记的
-        //    插件（dev 未打包那条回退）会因 `getDescriptor` 命中而被跳过。
+        //    + 宿主 UI 桥），与第三方插件走完全相同的加载路径；尚未搬走、仍靠静态回退的插件
+        //    已经在静态注册表里登记过，会因 `getDescriptor` 命中而被跳过。
         for (const e of list) {
           if (!e.enabled) continue
           if (host.getDescriptor(e.id)) continue

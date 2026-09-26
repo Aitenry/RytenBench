@@ -47,8 +47,9 @@ import * as sharedModelParams from '../../shared/model-params'
  * 而用应用根做基准既能找到随应用分发的 node_modules，又能命中 Node 的模块缓存，
  * 于是「宿主已加载的同一实例」这条语义自动成立。
  *
- * 表是**按需补齐**的：P1 只保证 music 端到端跑通，同时把 planner/home/harness 的
- * 静态依赖一次性补齐（它们此刻也已由磁盘包接管，见 builtin.ts 的过渡共存规则）。
+ * 表是**按需补齐**的：P1 保证 music 端到端跑通，同时把 planner/home/harness 的静态依赖
+ * 一次性补齐。P2 实测 planner 只用到其中 5 个 `@host/main/**` 键，其余外部依赖
+ * （`@langchain/core/tools`、`drizzle-orm`、`zod/v4`、`electron-log`）走下面的裸模块解析。
  * PACKAGING.md 的契约面（主进程 20 个）已全部在表内。
  */
 
