@@ -208,6 +208,31 @@ const api = {
         error?: string
       }>,
     /**
+     * 插件仓库（GitHub）里**可安装**的插件清单（索引 + 是否已安装）。
+     * 失败会抛错（网络不通 / 仓库不可达），面板据此提示，而不是显示成「没有插件」。
+     */
+    available: () =>
+      ipcRenderer.invoke('plugins-available') as Promise<{
+        repo: string
+        tag?: string
+        plugins: {
+          id: string
+          name: string
+          version: string
+          description?: string
+          asset: string
+          size?: number
+          installed: boolean
+        }[]
+      }>,
+    /** 从插件仓库安装（或升级）某个插件：下载资产 → sha256 校验 → 解压 → 装进 userData/plugins */
+    installFromGithub: (id: string) =>
+      ipcRenderer.invoke('plugins-install-github', id) as Promise<{
+        ok: boolean
+        id?: string
+        error?: string
+      }>,
+    /**
      * 卸载插件（= 移除插件代码）。
      *
      * `purgeData` 只决定**要不要连数据一起清**：true = 调插件的 `plugin.purge` 删表内记录与

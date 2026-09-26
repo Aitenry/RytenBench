@@ -23,6 +23,8 @@ import {
   IPC_PLUGIN_HOST_UI_EXPORTS,
   IPC_PLUGIN_STATE_CHANGED,
   IPC_PLUGINS_INSTALL,
+  IPC_PLUGINS_AVAILABLE,
+  IPC_PLUGINS_INSTALL_GITHUB,
   IPC_PLUGINS_LIST,
   IPC_PLUGINS_LIST_SYNC,
   IPC_PLUGINS_LOADED_FROM,
@@ -31,6 +33,7 @@ import {
 } from '../../shared/plugin/protocol'
 import type { PluginListEntry } from '../../shared/plugin/types'
 import { setHostUiExports } from '../plugins/host-ui-bridge'
+import { fetchPluginIndex, installPluginFromGithub, pluginsRepoUrl } from '../plugins/github'
 
 /**
  * 插件管理 IPC（core，始终注册）。
@@ -331,5 +334,50 @@ export function registerPluginsIpc(): void {
       throw new Error('plugins-uninstall 需要第二个参数 purgeData（是否清除插件数据）')
     }
     return await uninstallPlugin(id, purgeData)
+  })
+
+  /**
+   * 插件仓库（GitHub）里**可安装**的插件清单。
+   *
+   * 失败的语义与「空列表」不同：网络不通/仓库 404 要如实报错（面板据此提示「检查网络」），
+   * 而不是伪装成「没有插件可装」。
+   */
+  ipcMain.handle(IPC_PLUGINS_AVAILABLE, async () => {
+    const index = await fetchPluginIndex()
+    const installed = new Set(listEntries().map((e) => e.id))
+    return {
+      repo: pluginsRepoUrl(),
+      tag: index.tag,
+      plugins: index.plugins.map((p) => ({
+        ...p,
+        builtin: false,
+        installed: installed.has(p.id)
+      }))
+    }
+  })
+
+  /** 从插件仓库安装（或升级）某个插件 */
+  ipcMain.handle(IPC_PLUGINS_INSTALL_GITHUB, async (_event, id: unknown) => {
+    if (typeof id !== 'string' || id === '') throw new Error('plugins-install-github 参数非法')
+    try {
+      const result = await installPluginFromGithub(id)
+      // 用户是**主动点了「安装」**的：装完直接启用并装载主模块（与内置插件重装同一口径），
+      // 渲染层收到广播后会从 plugin://<id>/renderer.mjs 加载界面。
+      setEnabledOverride(id, true)
+      try {
+        loadExternalMain(id)
+      } catch (err) {
+        logger.error(`[Plugins] 从插件仓库装好的 '${id}' 装载失败:`, err)
+        throw new Error(
+          `插件 '${id}' 已安装，但装载失败：${err instanceof Error ? err.message : String(err)}`
+        )
+      }
+      broadcastPluginStateChanged()
+      return result
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      logger.warn(`[Plugins] 从插件仓库安装 '${id}' 失败:`, msg)
+      return { ok: false, id, error: msg }
+    }
   })
 }

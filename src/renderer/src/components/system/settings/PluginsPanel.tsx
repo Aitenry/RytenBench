@@ -1,9 +1,20 @@
 import React, { useEffect, useState, useCallback } from 'react'
-import { App, Button, Checkbox, Modal, Switch, Tag, theme } from 'antd'
+import { App, Button, Checkbox, Modal, Spin, Switch, Tag, theme } from 'antd'
 import { useTranslation } from '@renderer/i18n'
 import { usePlugins } from '@renderer/plugin-host/PluginHostContext'
 import type { PluginListEntry, PluginState } from '@shared/plugin/types'
 import { SettingsPageHeader, SettingsSection } from './SettingsUI'
+
+/** 插件仓库（GitHub）里可安装的一条（`api.plugin.available()` 的返回） */
+interface AvailableEntry {
+  id: string
+  name: string
+  version: string
+  description?: string
+  asset: string
+  size?: number
+  installed: boolean
+}
 
 /**
  * 插件管理面板（设置 → 插件）。
@@ -30,6 +41,12 @@ const PluginsPanel: React.FC = () => {
   const [pending, setPending] = useState<PluginListEntry | null>(null)
   /** 确认框里的「是否同时删除数据」勾选态；每次打开都重置为未勾选 */
   const [purgeData, setPurgeData] = useState(false)
+  /** 插件仓库面板：null = 未打开；[] = 已加载但仓库为空 */
+  const [repoOpen, setRepoOpen] = useState(false)
+  const [repoPlugins, setRepoPlugins] = useState<AvailableEntry[] | null>(null)
+  const [repoUrl, setRepoUrl] = useState('')
+  const [repoError, setRepoError] = useState<string | null>(null)
+  const [repoBusy, setRepoBusy] = useState<string | null>(null)
 
   const refresh = useCallback((): void => {
     window.api.plugin
@@ -44,6 +61,51 @@ const PluginsPanel: React.FC = () => {
     const unsub = window.api.plugin.onStateChanged(() => refresh())
     return unsub
   }, [refresh])
+
+  /** 拉取插件仓库索引（打开面板时、点「刷新」时） */
+  const loadRepo = useCallback(async (): Promise<void> => {
+    setRepoError(null)
+    setRepoPlugins(null)
+    try {
+      const result = await window.api.plugin.available()
+      setRepoUrl(result.repo)
+      setRepoPlugins(result.plugins)
+    } catch (err) {
+      setRepoError(err instanceof Error ? err.message : String(err))
+    }
+  }, [])
+
+  const openRepo = useCallback((): void => {
+    setRepoOpen(true)
+    void loadRepo()
+  }, [loadRepo])
+
+  /** 从插件仓库安装/升级一个插件 */
+  const installFromRepo = useCallback(
+    async (entry: AvailableEntry): Promise<void> => {
+      setRepoBusy(entry.id)
+      try {
+        const result = await window.api.plugin.installFromGithub(entry.id)
+        if (!result.ok) {
+          message.error(result.error || t('settings.plugins.installFail'))
+        } else {
+          message.success(
+            entry.installed
+              ? t('settings.plugins.repoUpgraded')
+              : t('settings.plugins.repoInstalled')
+          )
+          refresh()
+          void loadRepo()
+        }
+      } catch (err) {
+        message.error(t('settings.plugins.installFail'))
+        console.error('[plugins] 从插件仓库安装失败:', err)
+      } finally {
+        setRepoBusy(null)
+      }
+    },
+    [message, t, refresh, loadRepo]
+  )
 
   const toggle = useCallback(
     async (id: string, enabled: boolean): Promise<void> => {
@@ -194,8 +256,8 @@ const PluginsPanel: React.FC = () => {
         title={t('settings.plugins.pageTitle')}
         description={t('settings.plugins.pageDescription')}
         extra={
-          <Button size="small" onClick={() => void installExternal()}>
-            {t('settings.plugins.install')}
+          <Button size="small" onClick={openRepo}>
+            {t('settings.plugins.installFromRepo')}
           </Button>
         }
       />
@@ -317,6 +379,107 @@ const PluginsPanel: React.FC = () => {
         >
           {t('settings.plugins.purgeHint')}
         </div>
+      </Modal>
+
+      {/* 插件仓库（GitHub）：列出可安装/可升级的独立插件 */}
+      <Modal
+        open={repoOpen}
+        title={t('settings.plugins.repoTitle')}
+        onCancel={() => setRepoOpen(false)}
+        width={520}
+        destroyOnHidden
+        footer={
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Button size="small" type="text" onClick={() => void installExternal()}>
+              {t('settings.plugins.install')}
+            </Button>
+            <span style={{ display: 'flex', gap: 8 }}>
+              <Button size="small" onClick={() => void loadRepo()} disabled={repoPlugins === null}>
+                {t('settings.plugins.repoRefresh')}
+              </Button>
+              <Button size="small" type="primary" onClick={() => setRepoOpen(false)}>
+                {t('common.action.close')}
+              </Button>
+            </span>
+          </div>
+        }
+      >
+        <div style={{ fontSize: 12, color: token.colorTextTertiary, lineHeight: 1.6 }}>
+          {repoUrl ? t('settings.plugins.repoSource', { repo: repoUrl }) : ''}
+        </div>
+
+        {repoError !== null && (
+          <div style={{ fontSize: 12.5, color: token.colorError, marginTop: 12, lineHeight: 1.7 }}>
+            {t('settings.plugins.repoFailed', { reason: repoError })}
+          </div>
+        )}
+
+        {repoError === null && repoPlugins === null && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 16 }}>
+            <Spin size="small" />
+            <span style={{ fontSize: 12, color: token.colorTextTertiary }}>
+              {t('settings.plugins.repoLoading')}
+            </span>
+          </div>
+        )}
+
+        {repoPlugins !== null && repoPlugins.length === 0 && (
+          <div style={{ fontSize: 12.5, color: token.colorTextSecondary, marginTop: 12 }}>
+            {t('settings.plugins.repoEmpty')}
+          </div>
+        )}
+
+        {repoPlugins !== null &&
+          repoPlugins.map((entry) => (
+            <div
+              key={entry.id}
+              className="sui-row"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 12,
+                padding: '10px 0'
+              }}
+            >
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 13.5, fontWeight: 600, color: token.colorText }}>
+                    {entry.name}
+                  </span>
+                  <span style={{ fontSize: 11, color: token.colorTextTertiary }}>
+                    v{entry.version}
+                  </span>
+                  {entry.installed && (
+                    <span style={{ fontSize: 11, color: token.colorTextTertiary }}>
+                      {t('settings.plugins.repoInstalledBadge')}
+                    </span>
+                  )}
+                </div>
+                <div
+                  style={{
+                    fontSize: 12,
+                    color: token.colorTextSecondary,
+                    marginTop: 2,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap'
+                  }}
+                >
+                  {entry.description}
+                </div>
+              </div>
+              <Button
+                size="small"
+                loading={repoBusy === entry.id}
+                onClick={() => void installFromRepo(entry)}
+              >
+                {entry.installed
+                  ? t('settings.plugins.repoUpgrade')
+                  : t('settings.plugins.repoInstall')}
+              </Button>
+            </div>
+          ))}
       </Modal>
     </div>
   )

@@ -96,6 +96,22 @@ export interface Window {
       setEnabled: (id: string, enabled: boolean) => Promise<unknown[]>
       /** 无参 = 第三方插件选目录安装；带 id = 从应用包重装某个内置插件 */
       install: (id?: string) => Promise<{ ok: boolean; id?: string; error?: string }>
+      /** 插件仓库（GitHub）里可安装的插件清单（网络失败会抛错） */
+      available: () => Promise<{
+        repo: string
+        tag?: string
+        plugins: {
+          id: string
+          name: string
+          version: string
+          description?: string
+          asset: string
+          size?: number
+          installed: boolean
+        }[]
+      }>
+      /** 从插件仓库安装（或升级）某个插件 */
+      installFromGithub: (id: string) => Promise<{ ok: boolean; id?: string; error?: string }>
       /**
        * 卸载插件（总是移除插件代码）。`purgeData` 决定是否同时清数据：
        * false = 数据保留在库里（重装后仍可用），true = 调 `plugin.purge` 删表内记录与托管文件。

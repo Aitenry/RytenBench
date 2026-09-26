@@ -269,6 +269,9 @@ importers:
       json-llm-repair:
         specifier: ^0.1.5
         version: 0.1.5(zod@4.4.3)
+      jszip:
+        specifier: 3.10.1
+        version: 3.10.1
       katex:
         specifier: ^0.16.47
         version: 0.16.47
