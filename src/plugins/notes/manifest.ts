@@ -22,7 +22,7 @@ export const notesManifest: PluginManifest = {
    */
   inject: ['route', 'menu', 'settingsSection', 'appProvider', 'i18n', 'events'],
   routes: [{ path: '/notes' }],
-  menu: { key: 'notes', labelKey: 'shell.menu.notes', icon: 'RiStickyNoteLine', order: 10 }
+  menu: { key: 'notes', labelKey: 'shell.menu.notes', icon: 'RiDashboardLine', order: 10 }
 }
 
 export default notesManifest

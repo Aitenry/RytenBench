@@ -1,4 +1,4 @@
-import { RiStickyNoteLine, RiMindMap } from '@remixicon/react'
+import { RiDashboardLine, RiMindMap } from '@remixicon/react'
 import type { Plugin } from '@renderer/plugin-host/types'
 import manifest from '../manifest'
 import { notesLocales } from '../locales'
@@ -30,7 +30,7 @@ const plugin: Plugin = {
     ctx.use('menu').register({
       key: 'notes',
       labelKey: 'shell.menu.notes',
-      icon: <RiStickyNoteLine size={16} />,
+      icon: <RiDashboardLine size={16} />,
       order: 10
     })
     ctx.use('settingsSection').register({

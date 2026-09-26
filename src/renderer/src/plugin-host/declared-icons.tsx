@@ -2,7 +2,7 @@ import { type ReactNode } from 'react'
 import {
   RiCalendar2Line,
   RiChatAiLine,
-  RiStickyNoteLine,
+  RiDashboardLine,
   RiDiscLine,
   RiPlugLine
 } from '@remixicon/react'
@@ -20,7 +20,7 @@ import {
  * 独立插件（task-planner / music-player）的清单也写名字，装上后同样经这里解析。
  */
 const DECLARED_MENU_ICONS: Record<string, ReactNode> = {
-  RiStickyNoteLine: <RiStickyNoteLine size={16} />,
+  RiDashboardLine: <RiDashboardLine size={16} />,
   RiCalendar2Line: <RiCalendar2Line size={16} />,
   RiDiscLine: <RiDiscLine size={16} />,
   RiChatAiLine: <RiChatAiLine size={16} />

@@ -159,7 +159,8 @@ globalThis.__RB_HOST_RESOLVE__(spec) // '@host/main/database/orm' → 宿主那�
 ## 分轮实施
 
 > **改名记录（2026-09-26）**：内置插件 `home` 已改名为 `notes`——目录、id、路由（`/notes`）、
-> 菜单键、词条命名空间（`notes.*`）、通道前缀（`plugin:notes:*`）与图标一并改；
+> 菜单键、词条命名空间（`notes.*`）、通道前缀（`plugin:notes:*`）一并改；
+> **菜单图标保持原样**（仍是 `RiDashboardLine`，用户明确要求不动图标）；
 > 数据表名与 AI 工具名（`manage_docs` / `manage_todos` / `manage_wikis` / `search_graph`）不变。
 > 旧 profile 里铺下的 `userData/plugins/home` 由启动时的 `removeRetiredBundledPlugins()` 清掉（数据保留）。
 > 工装同步改名：`test/verify-plugin-home-package.mjs` → `test/verify-plugin-notes-package.mjs`
