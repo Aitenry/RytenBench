@@ -24,7 +24,15 @@
  * 跑法：node scripts/build-plugins.mjs [--plugin music] [--out resources/plugins] [--dev]
  */
 import { build } from 'esbuild'
-import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs'
+import {
+  cpSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+  existsSync
+} from 'node:fs'
 import { builtinModules } from 'node:module'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -196,6 +204,35 @@ const relOf = (base, abs) =>
     .replace(/\\/g, '/')
     .replace(/\.(ts|tsx|js|jsx)$/, '')
 
+/**
+ * 把多文件渲染产物里的**相对说明符**绝对化成 `plugin://<id>/<文件>`，返回改写处数。
+ *
+ * 为什么必须绝对化：插件的渲染入口是 `fetch` 下来再以 **blob URL** import 的
+ * （见 src/renderer/src/plugin-host/external-loader.ts），blob 模块没有可用的相对基准——
+ * `./chunk-x.mjs` 会被解析成 `blob:.../chunk-x.mjs`，取不到任何东西。宿主 UI 桥用的是
+ * 绝对 URL（`plugin://host/ui.js?m=…`），所以 P1/P2 的单文件产物一直没暴露这个问题。
+ *
+ * 只改写**确实指向本次产物文件**的相对说明符（按目标文件名比对），避免误伤字符串字面量。
+ */
+function absolutizeChunkSpecifiers(id, outDir) {
+  const emitted = new Set(readdirSync(outDir).filter((f) => f.endsWith('.mjs')))
+  /** 三种形态：`from "s"`、`import("s")`、语句起始的副作用导入 `import "s"` */
+  const REL_SPEC = /(\bfrom\s*|\bimport\s*\(\s*|(?:^|[;}\n])\s*import\s*)(['"])(\.{1,2}\/[^'"]+)\2/gm
+  let count = 0
+  for (const file of emitted) {
+    const full = join(outDir, file)
+    const source = readFileSync(full, 'utf-8')
+    const next = source.replace(REL_SPEC, (whole, prefix, quote, spec) => {
+      const target = relative(outDir, resolve(dirname(full), spec)).replace(/\\/g, '/')
+      if (!emitted.has(target)) return whole
+      count += 1
+      return `${prefix}${quote}plugin://${id}/${target}${quote}`
+    })
+    if (next !== source) writeFileSync(full, next)
+  }
+  return count
+}
+
 /** 由 manifest.ts 生成 plugin.json（单一真源，不手写第二份） */
 async function emitManifest(id, outDir) {
   const entry = join(ROOT, 'src/plugins', id, 'manifest.ts')
@@ -241,13 +278,26 @@ async function buildPlugin(id) {
     })
   }
 
-  // 渲染层入口：ESM（blob import 加载）；宿主 UI 与 vendor 经 plugin://host/ui.js 桥
+  // 渲染层入口：ESM 多文件（blob import 加载入口，懒加载 chunk 由 plugin:// 直接取）；
+  // 宿主 UI 与 vendor 经 plugin://host/ui.js 桥
   const rendererEntry = join(srcDir, 'renderer/plugin.tsx')
+  let chunkCount = 0
   if (existsSync(rendererEntry)) {
     await build({
-      entryPoints: [rendererEntry],
-      outfile: join(outDir, 'renderer.mjs'),
+      entryPoints: { renderer: rendererEntry },
+      outdir: outDir,
+      entryNames: 'renderer',
+      chunkNames: 'chunk-[hash]',
+      outExtension: { '.js': '.mjs' },
       bundle: true,
+      /**
+       * **必须开 splitting**（P3 实测）：不开时 esbuild 会把插件自己的动态 import 内联进入口，
+       * home 的 `lazy(() => import('./graph/GraphView'))` 于是把 ~1MB 的 echarts 并进
+       * `renderer.mjs`（首页是默认落点，等于每次启动都解析一份 echarts）。
+       * 开了之后：入口 + `chunk-<hash>.mjs`，懒加载 chunk 在真正 mount 时才由
+       * `plugin://<id>/chunk-<hash>.mjs` 取（绝对化见 absolutizeChunkSpecifiers）。
+       */
+      splitting: true,
       platform: 'browser',
       format: 'esm',
       target: 'chrome120',
@@ -258,11 +308,16 @@ async function buildPlugin(id) {
       sourcemap: isDev ? 'inline' : false,
       logLevel: 'warning'
     })
+    chunkCount = absolutizeChunkSpecifiers(id, outDir)
   }
 
   const size = (f) => (existsSync(join(outDir, f)) ? readFileSync(join(outDir, f)).length : 0)
+  const chunkFiles = readdirSync(outDir).filter((f) => f.endsWith('.mjs') && f !== 'renderer.mjs')
+  const chunkKB = chunkFiles.reduce((sum, f) => sum + size(f), 0) / 1024
   console.log(
-    `  ${id.padEnd(8)} manifest=${manifest.id} main.cjs=${(size('main.cjs') / 1024).toFixed(1)}KB renderer.mjs=${(size('renderer.mjs') / 1024).toFixed(1)}KB`
+    `  ${id.padEnd(8)} manifest=${manifest.id} main.cjs=${(size('main.cjs') / 1024).toFixed(1)}KB ` +
+      `renderer.mjs=${(size('renderer.mjs') / 1024).toFixed(1)}KB ` +
+      `chunks=${chunkFiles.length} 个 ${chunkKB.toFixed(1)}KB（改写 ${chunkCount} 处说明符）`
   )
 }
 

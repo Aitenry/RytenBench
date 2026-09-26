@@ -48,8 +48,9 @@ import * as sharedModelParams from '../../shared/model-params'
  * 于是「宿主已加载的同一实例」这条语义自动成立。
  *
  * 表是**按需补齐**的：P1 保证 music 端到端跑通，同时把 planner/home/harness 的静态依赖
- * 一次性补齐。P2 实测 planner 只用到其中 5 个 `@host/main/**` 键，其余外部依赖
- * （`@langchain/core/tools`、`drizzle-orm`、`zod/v4`、`electron-log`）走下面的裸模块解析。
+ * 一次性补齐。P2（planner）用到其中 5 个 `@host/main/**` 键，P3（home）用到 9 个，其余外部
+ * 依赖（`@langchain/core/**`、`drizzle-orm`、`zod/v3|v4`、`electron`、`electron-log`、
+ * `jsdom`、`mammoth`、`turndown`…）走下面的裸模块解析。
  * PACKAGING.md 的契约面（主进程 20 个）已全部在表内。
  */
 

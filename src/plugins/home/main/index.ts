@@ -1,5 +1,7 @@
 import type { MainPluginContext } from '../../../main/plugins/context'
+import { PLUGIN_PURGE } from '../../../main/plugins/contributions'
 import { HARNESS_TOOL_CONTRIBUTION } from '../../../main/plugins/tool-contract'
+import { purgeHomeData } from './purge'
 import { todoIpcHandlers } from './ipc/todo'
 import { documentIpcHandlers } from './ipc/document'
 import { wikiIpcHandlers } from './ipc/wiki'
@@ -25,6 +27,9 @@ import {
  *   （`manage_todos` / `manage_docs` / `manage_wikis` / `search_graph`，实现见
  *   `./tools/**`，读的都是本插件的 mapper）经 harness 的工具贡献点注册给模型；
  *   停用时贡献一并摘除，模型不再被提供这些工具。
+ * - `ctx.contribute(PLUGIN_PURGE, …)`：卸载时「不保留数据」由宿主回调，删本插件的
+ *   文档/目录/知识库/图谱/待办/画布坐标行（实现见 `./purge.ts`）。core 因此不需要知道
+ *   任何首页表名——注意这是**用户自己写的内容**，面板的确认框文案必须写清楚。
  *
  * 为什么 graph 从 core 的 IPC 分组移到本插件：图谱的数据、服务与事件全部属于首页
  * （`main/graph/**` + `main/db/mapper/graph.ts`），此前挂在 core 组常驻只是因为渲染层
@@ -44,6 +49,7 @@ export function install(ctx: MainPluginContext): void {
     HOME_GRAPH_BUILD_ERROR_CHANNEL
   )
   for (const tool of homeToolContributions) ctx.contribute(HARNESS_TOOL_CONTRIBUTION, tool)
+  ctx.contribute(PLUGIN_PURGE, { run: purgeHomeData, label: '文档、知识库、图谱与待办数据' })
 }
 
 export default { install }

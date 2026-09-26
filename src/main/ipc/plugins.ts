@@ -80,8 +80,8 @@ function listEntries(): PluginListEntry[] {
 
   // ② 未安装的内置插件：应用包里有包、但目录没铺（用户卸载过）→ 供面板给「安装」按钮
   for (const id of bundledPluginIdsFromPackage()) {
-    // 过渡（P1 建、P2 加 planner）：只把**宿主运行时接口已就绪**的内置包列为「可安装」。
-    // 其余两个（P3/P4 才补接口）即使应用包里有产物，也不该被装进来——
+    // 过渡（P1 建、P2 加 planner、P3 加 home）：只把**宿主运行时接口已就绪**的内置包列为「可安装」。
+    // 剩下那个（P4 才补接口）即使应用包里有产物，也不该被装进来——
     // 装了会在装载期找不到 @host/main/** 而整体失败；它们此刻正由静态注册表装载。
     if (!isPackageReady(id)) continue
     if (entries.some((e) => e.id === id)) continue
@@ -103,7 +103,7 @@ function listEntries(): PluginListEntry[] {
     })
   }
 
-  // ③ 过渡（P1 建、P2 加 planner）：**尚未迁到磁盘包**的内置插件仍按静态清单列出并可用。
+  // ③ 过渡（P1 建、P2 加 planner、P3 加 home）：**尚未迁到磁盘包**的内置插件仍按静态清单列出并可用。
   //
   // 为什么需要这一条：本方案是一轮一个插件搬（P2/P3/P4），宿主运行时表（runtime.ts）与
   // 渲染层宿主 UI 表（host-ui.ts）也只按轮次补齐。在某个插件搬走之前，它既不在
@@ -212,9 +212,9 @@ export function setPluginStateSyncHook(hook: PluginStateSyncHook): void {
 function applyEnabled(id: string, enabled: boolean): void {
   // 静态内置与磁盘包是**互斥**的两条路径，判据必须与 builtin.ts 的遮蔽规则一致：
   // 该插件本轮已可打包（isPackageReady）**且**确实装在 userData 里（isPluginInstalled）时，
-  // 静态模块不会被登记，才从磁盘包装载。否则（例如 P1/P2 里的 home/harness：
+  // 静态模块不会被登记，才从磁盘包装载。否则（例如 P1~P3 里的 harness：
   // 应用包里有包但没装到 userData）就只能走静态钩子——早先按「应用包里有目录」判断，
-  // 会去 loadExternalMain 一个并不存在的已安装插件，抛「外部插件 'home' 未找到」。
+  // 会去 loadExternalMain 一个并不存在的已安装插件，抛「外部插件 'harness' 未找到」。
   if (enabled) {
     stateSyncHook?.(id, true)
     if (!isPackageReady(id) || !isPluginInstalled(id)) return
@@ -292,7 +292,7 @@ function installPlugin(id: string): PluginListEntry[] {
     throw new Error(`'${id}' 不是随应用分发的内置插件，请用「安装插件」选择目录安装`)
   }
   if (!isPackageReady(id)) {
-    // 过渡（P1 建、P2 加 planner）：只有宿主运行时接口已补齐的插件能装。其余两个继续走
+    // 过渡（P1 建、P2 加 planner、P3 加 home）：只有宿主运行时接口已补齐的插件能装。harness 继续走
     // 静态注册表，现在把它们铺到 userData 会因为在装载期找不到 @host/main/** 而整体失败。
     throw new Error(`插件 '${id}' 暂不支持从应用包安装（宿主运行时接口将在后续轮次补齐）`)
   }

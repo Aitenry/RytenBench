@@ -29,12 +29,23 @@ import { BUILTIN_PLUGIN_MANIFESTS } from '../../plugins/manifests'
  *   内置 id，自动安装一律跳过（重装只能由用户点「安装」）。
  * - **应用升级要重新铺**：`seeded[id]` 记下上次铺包时的应用版本，版本变了就覆盖产物
  *   （否则应用升级后用户机器上还是旧版插件代码）。
- * - **只覆盖包自带的产物文件**（plugin.json/main.cjs/renderer.mjs），不删整个目录：
- *   插件目录里可能还有用户放进去的额外资源。
+ * - **只覆盖包自带的产物文件**（plugin.json / main.cjs / renderer.mjs / 渲染层懒加载
+ *   `chunk-*.mjs`），不删整个目录：插件目录里可能还有用户放进去的额外资源。
+ *   旧版本的 `chunk-*.mjs`（名字里有内容哈希，升级后会变）会被顺手清掉，否则每升一次级
+ *   就多留几十个再也不会被引用的文件。
  */
 
-/** 插件包自带的产物文件（铺包时覆盖的白名单） */
-const PACKAGE_FILES = ['plugin.json', 'main.cjs', 'renderer.mjs']
+/**
+ * 插件包产物文件的命名模式（铺包时覆盖）。
+ *
+ * 渲染层现在是**多文件**产物（P3 起）：入口 `renderer.mjs` 加上若干懒加载
+ * `chunk-<hash>.mjs`（home 的 GraphView / harness 的 codemirror 语言包等）。
+ * 因此不能再硬编码三件套，改为「按模式识别产物文件」。
+ */
+const PACKAGE_FILE_RE = /^(plugin\.json|main\.cjs|renderer\.mjs|chunk-[A-Za-z0-9_-]+\.mjs)$/
+
+/** 旧版残留的产物文件：与本包产物同模式、但本次不再产出的（升级清理） */
+const STALE_ARTIFACT_RE = /^(renderer\.mjs|main\.cjs|chunk-[A-Za-z0-9_-]+\.mjs)$/
 
 /**
  * 随应用分发的内置插件 id（单一真源 = `src/plugins/manifests.ts`）。
@@ -64,7 +75,7 @@ export function bundledPluginDir(id: string): string | null {
  * - 只认「随应用分发的内置插件」（`src/plugins/manifests.ts` 里的 id）——
  *   `resources/plugins/` 下还可能有别的东西（构建脚本会把 `examples/demo-plugin`
  *   一起放进去当第三方插件示例），它们不该被自动铺进 userData、更不该默认启用；
- * - 只认 `PACKAGED_READY_IDS`（P1 = music、P2 = planner，见该常量的说明）；
+ * - 只认 `PACKAGED_READY_IDS`（P1 = music、P2 = planner、P3 = home，见该常量的说明）；
  * - 目录里必须真的有 `plugin.json`。
  */
 export function listBundledPluginIds(): string[] {
@@ -103,13 +114,25 @@ export function installBundledPlugin(id: string, force = false): boolean {
   const dest = path.join(externalPluginsRoot(), id)
   try {
     fs.mkdirSync(dest, { recursive: true })
-    for (const file of PACKAGE_FILES) {
-      const from = path.join(src, file)
-      if (fs.existsSync(from)) fs.copyFileSync(from, path.join(dest, file))
+    const artifacts = fs.readdirSync(src).filter((f) => PACKAGE_FILE_RE.test(f))
+    for (const file of artifacts) {
+      fs.copyFileSync(path.join(src, file), path.join(dest, file))
+    }
+    // 升级清理：同模式但本次不再产出的产物（主要是旧的 chunk-<hash>.mjs）逐个删掉
+    const keep = new Set(artifacts)
+    for (const file of fs.readdirSync(dest)) {
+      if (!STALE_ARTIFACT_RE.test(file) || keep.has(file)) continue
+      try {
+        fs.rmSync(path.join(dest, file), { force: true })
+      } catch {
+        // 删不掉只影响目录整洁，不影响加载（入口只引用本包的 chunk）
+      }
     }
     setPluginSeeded(id, app.getVersion())
     invalidateInstalledPluginIds()
-    logger.info(`[Plugins] 插件包已${force ? '重' : '首次'}安装: ${id} → ${dest}`)
+    logger.info(
+      `[Plugins] 插件包已${force ? '重' : '首次'}安装: ${id} → ${dest}（产物 ${artifacts.length} 个）`
+    )
     return true
   } catch (err) {
     logger.error(`[Plugins] 插件包 '${id}' 安装失败:`, err)
