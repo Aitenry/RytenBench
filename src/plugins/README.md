@@ -98,13 +98,18 @@ export default {
   宿主重渲染；`Tab` 是底栏那一行，`Popup` 是悬停弹层。插件状态放模块级可订阅快照里
   （见 `src/plugins/music/renderer/audio/store.ts`），外壳因此完全不 import 插件模块。
 
-## 装配入口（三份注册表，都在 core）
+## 装配入口（P5 起只剩清单注册表）
 
-| 位置                                      | 内容                                                                                 |
-| ----------------------------------------- | ------------------------------------------------------------------------------------ |
-| `src/plugins/manifests.ts`                | **四端唯一的清单注册表**：只 import 各插件的 `manifest.ts`（无 react/electron 依赖） |
-| `src/main/plugins/builtin.ts`             | 内置插件主模块：`{ <id>: install(ctx) }` 静态登记                                    |
-| `src/renderer/src/plugin-host/builtin.ts` | 内置插件渲染模块：`[home, planner, music, harness]` 显式导入                         |
+| 位置                       | 内容                                                                                                    |
+| -------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `src/plugins/manifests.ts` | **唯一**的清单注册表：只 import 各插件的 `manifest.ts`（无 react/electron 依赖），供主进程铺包/面板列举 |
+
+P1~P4 期间 core 还持有两张**静态注册表**（`src/main/plugins/builtin.ts` 的主模块登记、
+`src/renderer/src/plugin-host/builtin.ts` 的渲染模块登记）与一张过渡白名单
+（`src/main/plugins/packaged.ts`）。P5 已全部删除：四个内置插件与第三方插件走**完全相同**的
+磁盘包链路（`resources/plugins/<id>/` → 首次启动铺到 `userData/plugins/<id>/` → 装载），
+应用里不再有任何插件实现的应用内 import（`node test/verify-plugin-restructure.mjs` 断言）。
+方案与分轮验收见 `PACKAGING.md`。
 
 ## 结构与契约入口
 
@@ -129,7 +134,11 @@ core 的边界（本轮收尾后）：
 
 - `src/main/**` 不 import 任何插件模块，**唯一例外**是 `src/main/database/schema/index.ts`
   的 schema re-export（drizzle-kit 不解析 tsconfig paths，单一 schema 入口是既有约定）；
+  渲染层同样零插件 import（`src/renderer/src/i18n/i18next.d.ts` 只做**类型**汇聚）；
 - core 不认识任何插件通道名（`plugin:home:graph-build-*` 已随 `BuildProgressProvider`
   整体收进 home 插件）；
+- **插件的唯一来源就是磁盘包**：`resources/plugins/<id>/`（随应用分发）→ 首次启动铺到
+  `userData/plugins/<id>/` → 与第三方插件同一条装载链路；`pnpm dev` 下若产物缺失或落后于源码，
+  `installer.ts` 会自动用 `scripts/build-plugins.mjs --dev` 补打（见 `PACKAGING.md`）；
 - 插件参与宿主时机的唯一方式是贡献点 + 事件订阅，贡献随 `ctx.dispose()` 摘除
   ⇒ **停用插件即不再执行它的任何钩子**。

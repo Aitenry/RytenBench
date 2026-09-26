@@ -82,9 +82,11 @@ export function findExternalPlugin(id: string): ScannedExternalPlugin | null {
 /**
  * 已安装插件的 id 集合（缓存）。
  *
- * 为什么缓存：调用方是**热路径**——`builtin.ts` 的过渡共存判断（每次读内置注册表都要问
- * 「这个 id 是不是已经被磁盘包接管」）与插件面板的列表合并。每次真去 readdir + 解析 N 份
- * plugin.json 太浪费。安装 / 卸载 / 重装目录之后调 `invalidateInstalledPluginIds()` 刷新。
+ * 为什么缓存：插件面板的列表合并要在每次 `plugins-list` 时问「哪些 id 已经装在
+ * `userData/plugins/` 下」，而每次都真去 readdir + 解析 N 份 `plugin.json` 太浪费。
+ * 安装 / 卸载 / 重装目录之后调 `invalidateInstalledPluginIds()` 刷新。
+ *
+ * （P5 前它还有个热路径调用方——`builtin.ts` 的过渡共存判断；那张静态注册表已删。）
  */
 let installedIdsCache: Set<string> | null = null
 
@@ -97,9 +99,4 @@ export function installedPluginIds(): Set<string> {
 /** 目录被改动过（安装/卸载/重装）后刷新缓存 */
 export function invalidateInstalledPluginIds(): void {
   installedIdsCache = null
-}
-
-/** 该 id 是否已作为插件包安装在 userData/plugins/ 下 */
-export function isPluginInstalled(id: string): boolean {
-  return installedPluginIds().has(id)
 }

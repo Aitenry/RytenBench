@@ -1,9 +1,8 @@
 import { app, BrowserWindow, ipcMain, crashReporter } from 'electron'
 import { electronApp, optimizer } from '@electron-toolkit/utils'
 import logger from 'electron-log'
-import { initPluginHost, pushPluginChannels, syncBuiltinPluginIpcs } from './plugins/host'
+import { initPluginHost, pushPluginChannels } from './plugins/host'
 import { registerPluginScheme, registerPluginProtocolHandler } from './plugins/protocol'
-import { setPluginStateSyncHook } from './ipc/plugins'
 import { registerLifecycleHooks } from './lifecycle'
 import { createLoadingWindow } from './windows/loading-window'
 import { createMainWindow } from './windows/main-window'
@@ -64,11 +63,8 @@ app
     })
 
     // 注册 IPC：core（window/setting/dialog/provider/plugins）常驻 + 按启用态装载插件宿主
+    // （插件全部来自 `userData/plugins/<id>/` 的磁盘包；启停由 plugins-set-enabled 驱动）
     initPluginHost()
-    // 启停插件时，主进程同名注册/注销对应 IPC 组
-    setPluginStateSyncHook((id, enabled) => {
-      syncBuiltinPluginIpcs({ [id]: enabled }, [id])
-    })
     // 应用版本（加载页展示）
     ipcMain.handle('app-version', () => app.getVersion())
     // Mermaid 预览窗口（HTML 模板存于资源文件 ./resource/mermaid-preview.html）

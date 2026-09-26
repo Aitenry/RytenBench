@@ -22,8 +22,10 @@ preload 976 行单文件里装着全部插件的 API 命名空间。渲染层 17
 
 1. **主进程**：`main/index.ts` 导出 `install(ctx)`，把原 `ipcMain.handle('x-y', …)` 收成
    `ctx.registerIpc({ 'plugin:<ns>:x-y': … })`；表与查询搬到 `main/db/{schema,mapper}.ts`；
-   服务搬到 `main/services/**`；从 `src/main/ipc/index.ts` 的 `builtinIpcGroups` 删除该组，
-   在 `src/main/plugins/builtin.ts` 登记主模块。
+   服务搬到 `main/services/**`；从 `src/main/ipc/index.ts` 的 `builtinIpcGroups` 删除该组。
+   （P1~P4 期间还要在 `src/main/plugins/builtin.ts` 静态登记主模块，并配一份渲染层的
+   `plugin-host/builtin.ts` 登记；**P5 起这两张表连同过渡白名单 `packaged.ts` 都已删除**——
+   插件只从 `resources/plugins/<id>/` 的磁盘包装载，`pnpm build:plugins` 出产物。）
 2. **通道命名**：`<prefix>-<rest>` → `plugin:<ns>:<rest>`；主进程 → 渲染层的事件通道同样改名，
    并确认 `pushPluginChannels()` 会把它们推给 preload（内置插件的 `on` 订阅也走白名单）。
 3. **preload**：删除该插件的命名空间；类型声明同步删除（`src/preload/index.d.ts`、

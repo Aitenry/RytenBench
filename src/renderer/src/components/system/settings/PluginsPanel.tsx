@@ -170,13 +170,12 @@ const PluginsPanel: React.FC = () => {
           </div>
         </div>
         <div className="flex items-center gap-2" style={{ flexShrink: 0 }}>
-          {/* 「卸载」只对**能物理卸载**的插件出现：第三方插件、以及已迁到磁盘包的内置插件
-              （bundled=true）。过渡期里还没搬走的内置插件没有包目录可删，只给开关。 */}
-          {(entry.bundled || !entry.builtin) && (
-            <Button size="small" danger type="text" onClick={() => uninstall(entry)}>
-              {t('settings.plugins.uninstall')}
-            </Button>
-          )}
+          {/* 已安装就能物理卸载：磁盘包（内置或第三方）都在 userData/plugins/<id>/ 下，
+              卸载 = 问数据 → 清数据 → 删目录 → 记账。P5 前「还没迁到磁盘包的内置插件」
+              只有开关没有卸载按钮，那种条目已随静态注册表一起消失。 */}
+          <Button size="small" danger type="text" onClick={() => uninstall(entry)}>
+            {t('settings.plugins.uninstall')}
+          </Button>
           <Switch
             checked={entry.enabled}
             onChange={(checked) => {

@@ -2,14 +2,8 @@ import { ipcMain, BrowserWindow } from 'electron'
 import * as fs from 'fs'
 import * as path from 'path'
 import logger from 'electron-log'
-import {
-  clearEnabledOverride,
-  clearUninstalled,
-  getEnabledOverride,
-  setEnabledOverride
-} from '../plugins/store'
-import { BUILTIN_PLUGIN_MANIFESTS } from '../../plugins/manifests'
-import { isPluginInstalled, scanExternalPlugins } from '../plugins/scanner'
+import { clearEnabledOverride, clearUninstalled, setEnabledOverride } from '../plugins/store'
+import { scanExternalPlugins } from '../plugins/scanner'
 import { installExternalPlugin, uninstallExternalPlugin } from '../plugins/lifecycle'
 import {
   isBundledPluginId,
@@ -24,7 +18,6 @@ import {
   listBundledPluginIds,
   removeBundledPlugin
 } from '../plugins/installer'
-import { isPackageReady } from '../plugins/packaged'
 import { pluginPurge } from '../plugins/contributions'
 import {
   IPC_PLUGIN_HOST_UI_EXPORTS,
@@ -80,11 +73,6 @@ function listEntries(): PluginListEntry[] {
 
   // ② 未安装的内置插件：应用包里有包、但目录没铺（用户卸载过）→ 供面板给「安装」按钮
   for (const id of bundledPluginIdsFromPackage()) {
-    // 过渡（P1 建、P4 四个全到齐）：只把**宿主运行时接口已就绪**的内置包列为「可安装」。
-    // 现在四个插件都在 `PACKAGED_READY_IDS` 里，这个判断在正常安装下恒真，留着是为了
-    // 「应用包里有产物、但宿主接口还没补齐」这种**不应该再出现**的状态不至于被装进来
-    // （装了会在装载期找不到 @host/main/** 而整体失败）。P5 删。
-    if (!isPackageReady(id)) continue
     if (entries.some((e) => e.id === id)) continue
     const manifest = bundledManifest(id)
     if (!manifest) continue
@@ -104,43 +92,13 @@ function listEntries(): PluginListEntry[] {
     })
   }
 
-  // ③ 过渡（P1 建、P4 四个全到齐）：**尚未迁到磁盘包**的内置插件仍按静态清单列出并可用。
-  //
-  // P4 之后四个插件都在 `PACKAGED_READY_IDS` 里，所以这一段在正常安装下**不再产出任何条目**
-  // （每个 id 要么已被 ① 列为磁盘包、要么已被 ② 列为可安装的内置包）。
-  // 它保留的唯一场景 = dev 没跑 `scripts/build-plugins.mjs`（应用包里没有产物、也没有已装包），
-  // 此时静态注册表兜底装载，清单也必须如实列出——否则渲染层会把它们当「未安装」整块卸掉。
-  // P5 删掉这段与 `packaged.ts`，改为全部走磁盘包。
-  for (const manifest of BUILTIN_PLUGIN_MANIFESTS) {
-    if (isPackageReady(manifest.id)) continue
-    if (entries.some((e) => e.id === manifest.id)) continue
-    const enabled = getEnabledOverride(manifest.id) ?? true
-    entries.push({
-      id: manifest.id,
-      name: manifest.name,
-      version: manifest.version,
-      description: manifest.description,
-      icon: manifest.icon,
-      builtin: true,
-      // bundled=false：面板据此不显示「卸载」（它还没有磁盘包可删）
-      bundled: false,
-      installed: true,
-      enabled,
-      state: enabled ? 'active' : 'inactive',
-      // 静态内置插件在渲染层构造期就完成真实注册，这两项只是让「首帧声明」对四类插件
-      // 口径一致（真实注册优先，声明项会被合并掉）
-      routes: manifest.routes,
-      menu: manifest.menu
-    })
-  }
-
   return entries
 }
 
 /**
  * 应用包里的内置插件 id（读 `resources/plugins/` 下的插件包目录）。
  *
- * 用包里的清单而不是静态 `BUILTIN_PLUGIN_MANIFESTS`：面板要显示的是
+ * 用包里的清单而不是源码里的静态清单：面板要显示的是
  * **能装回来的那个包**的信息（版本可能与源码不同），而且这样 core 侧不必认识任何插件。
  */
 function bundledPluginIdsFromPackage(): string[] {
@@ -197,32 +155,16 @@ export function broadcastPluginStateChanged(): void {
 }
 
 /**
- * 主进程插件宿主注册的状态同步钩子（plugins/host.ts 初始化时设置）：
- * 启停插件时同名注册/注销对应的内置 IPC 组。
- * 用钩子注入避免 host.ts ↔ plugins.ts 的循环依赖。
+ * 启停某插件的主进程侧：装载/卸载它的磁盘包主模块。
+ *
+ * P5 起没有第二条路径了（应用内的静态插件注册表已删），因此这里就是一句
+ * load/unload——早先的 `stateSyncHook`（通知静态注册表同名注册/注销）已经不需要。
+ * 未安装的 id 不在这里判：`loadExternalMain` 找不到目录会抛「外部插件 '<id>' 未找到」，
+ * 而调用方（面板开关）只在已安装的条目上触发。
  */
-type PluginStateSyncHook = (id: string, enabled: boolean) => void
-let stateSyncHook: PluginStateSyncHook | null = null
-
-export function setPluginStateSyncHook(hook: PluginStateSyncHook): void {
-  stateSyncHook = hook
-}
-
-/** 启停某插件的主进程侧：静态内置走钩子，磁盘包走 load/unloadExternalMain */
 function applyEnabled(id: string, enabled: boolean): void {
-  // 静态内置与磁盘包是**互斥**的两条路径，判据必须与 builtin.ts 的遮蔽规则一致：
-  // 该插件本轮已可打包（isPackageReady）**且**确实装在 userData 里（isPluginInstalled）时，
-  // 静态模块不会被登记，才从磁盘包装载。否则（dev 未打包、只能靠静态回退时：
-  // 应用包里有包但没装到 userData）就只能走静态钩子——早先按「应用包里有目录」判断，
-  // 会去 loadExternalMain 一个并不存在的已安装插件，抛「外部插件 'harness' 未找到」。
-  if (enabled) {
-    stateSyncHook?.(id, true)
-    if (!isPackageReady(id) || !isPluginInstalled(id)) return
-    loadExternalMain(id)
-  } else {
-    stateSyncHook?.(id, false)
-    unloadExternalMain(id)
-  }
+  if (enabled) loadExternalMain(id)
+  else unloadExternalMain(id)
 }
 
 /**
@@ -233,7 +175,7 @@ function applyEnabled(id: string, enabled: boolean): void {
  *
  * 顺序有讲究：
  * ① `plugin.purge` 贡献必须在**插件仍装载**时调用（它要读自己的 mapper / 托管目录）；
- * ② 摘除 IPC（`stateSyncHook` + `unloadExternalMain`）：渲染层随后由广播驱动卸载；
+ * ② 摘除 IPC（`unloadExternalMain`）：渲染层随后由广播驱动卸载；
  * ③ 删 `userData/plugins/<id>/`；④ 记 `uninstalled`、清启用覆写；⑤ 广播。
  */
 async function uninstallPlugin(id: string, purgeData: boolean): Promise<PluginListEntry[]> {
@@ -261,8 +203,7 @@ async function uninstallPlugin(id: string, purgeData: boolean): Promise<PluginLi
     logger.warn(`[Plugins] ${id} 没有 plugin.purge 贡献，数据未被清除（只删目录）`)
   }
 
-  // ② 摘除主进程装载（含静态内置钩子与磁盘包模块）
-  stateSyncHook?.(id, false)
+  // ② 摘除主进程装载（磁盘包模块）
   unloadExternalMain(id)
 
   // ③ 删目录
@@ -291,11 +232,6 @@ function installPlugin(id: string): PluginListEntry[] {
   if (!isBundledPluginId(id)) {
     throw new Error(`'${id}' 不是随应用分发的内置插件，请用「安装插件」选择目录安装`)
   }
-  if (!isPackageReady(id)) {
-    // 过渡（P4 起四个插件都已就绪，此处恒真）：宿主运行时接口没补齐的内置包不该被装进来，
-    // 装了会在装载期找不到 @host/main/** 而整体失败。P5 删。
-    throw new Error(`插件 '${id}' 暂不支持从应用包安装（宿主运行时接口将在后续轮次补齐）`)
-  }
   if (!bundledPluginDir(id)) {
     throw new Error(
       `应用包里找不到插件 '${id}'（resources/plugins/${id}）。` +
@@ -307,7 +243,6 @@ function installPlugin(id: string): PluginListEntry[] {
   // 重装后按默认启用态装载（内置默认启用；用户此前显式停用过就保持停用）
   if (isEnabledPlugin(id)) {
     try {
-      if (isBundledPluginId(id)) stateSyncHook?.(id, true)
       loadExternalMain(id)
     } catch (err) {
       logger.error(`[Plugins] 插件 '${id}' 重装后装载失败:`, err)

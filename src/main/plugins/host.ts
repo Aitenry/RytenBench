@@ -3,74 +3,33 @@ import * as fs from 'fs'
 import * as path from 'path'
 import logger from 'electron-log'
 import { getEnabledOverride } from './store'
-import { findExternalPlugin, isPluginInstalled, scanExternalPlugins } from './scanner'
+import { findExternalPlugin, scanExternalPlugins } from './scanner'
 import { ensureBundledPluginsInstalled } from './installer'
 import { installHostRuntime } from './runtime'
 import { registerCoreIpc } from '../ipc'
 import { BUILTIN_PLUGIN_MANIFESTS } from '../../plugins/manifests'
-import { builtinMainModules } from './builtin'
 import { MainPluginContextImpl } from './context'
 import { IPC_PLUGIN_CHANNELS_SYNC, IPC_PLUGIN_CHANNELS_UPDATED } from '../../shared/plugin/protocol'
 
 /**
  * 主进程插件宿主。
  *
- * 只有**一条**装载路径（内置与外部插件完全相同）：
- * `src/plugins/<id>/main/index.ts` 导出 `install(ctx)`，通道经
+ * 只有**一条**装载路径（内置与第三方完全相同）：`userData/plugins/<id>/main.cjs`
+ * 导出 `install(ctx)`（CJS）或让模块自身即 install 函数；通道经
  * `ctx.registerIpc({ 'plugin:<ns>:...': handler })` 注册，停用时 `ctx.dispose()`
  * 一次性回滚（效果 LIFO + 通道摘除 + 贡献摘除）。
  *
- * core 的角色到此为止：注册自己的 IPC（`registerCoreIpc`）、按持久化启用态装载/卸载插件、
- * 把通道清单推给 preload 白名单。core 不认识任何插件模块，也不认识任何插件通道名。
+ * core 的角色到此为止：注册自己的 IPC（`registerCoreIpc`）、把应用包里的插件铺到 userData、
+ * 按持久化启用态装载/卸载插件、把通道清单推给 preload 白名单。core 不认识任何插件模块，
+ * 也不认识任何插件通道名。
  *
- * 旧路径（`src/main/ipc/index.ts` 的 builtinIpcGroups + `ipc-capture.ts` 猴补丁）已随
- * core 收尾整体删除。
+ * 历史（P1~P4 的过渡形态）已删：应用内的静态插件注册表（`./builtin.ts`）、
+ * 「已就绪白名单」（`./packaged.ts`）与 `stateSyncHook` 都没了——四个内置插件现在
+ * 与第三方插件走完全相同的磁盘包链路（见 src/plugins/PACKAGING.md）。
  */
 
-/** 已装配的内置插件主模块 */
-const builtinPlugins = new Map<string, { ctx: MainPluginContextImpl; teardown: () => void }>()
-
-/** 已装载的外部插件主模块 */
+/** 已装载的插件主模块（键 = id，内置与第三方不分家） */
 const externalMains = new Map<string, { ctx: MainPluginContextImpl; teardown: () => void }>()
-
-/** 内置插件组的启用默认值（内置默认启用） */
-export function isBuiltinPluginEnabled(id: string): boolean {
-  return getEnabledOverride(id) ?? true
-}
-
-/** 注册某插件的主模块（幂等；未登记的内置 id 只记日志） */
-export function registerPluginIpc(id: string): void {
-  if (builtinPlugins.has(id)) return
-
-  const module = builtinMainModules[id]
-  if (!module) {
-    logger.warn(`[Plugins] 无内置主模块: ${id}`)
-    return
-  }
-
-  const ctx = new MainPluginContextImpl(id)
-  let dispose: void | (() => void)
-  try {
-    dispose = module.install(ctx)
-  } catch (err) {
-    ctx.dispose()
-    logger.error(`[Plugins] ${id} 主模块装载失败:`, err)
-    throw err
-  }
-  builtinPlugins.set(id, { ctx, teardown: () => runTeardown(id, dispose, ctx) })
-  logger.info(`[Plugins] 主模块装载: ${id}（通道 ${ctx.channels.length} 个）`)
-  pushPluginChannels()
-}
-
-/** 注销某插件的主模块（幂等） */
-export function disposePluginIpc(id: string): void {
-  const entry = builtinPlugins.get(id)
-  if (!entry) return
-  entry.teardown()
-  builtinPlugins.delete(id)
-  logger.info(`[Plugins] 主模块卸载: ${id}`)
-  pushPluginChannels()
-}
 
 /** install 返回的 dispose 先跑，再回滚 ctx.effect 登记的效果、通道与贡献 */
 function runTeardown(id: string, dispose: void | (() => void), ctx: MainPluginContextImpl): void {
@@ -84,17 +43,8 @@ function runTeardown(id: string, dispose: void | (() => void), ctx: MainPluginCo
   ctx.dispose()
 }
 
-/** diff 同步：enabled → 注册；disabled → 注销（core 不受影响） */
-export function syncBuiltinPluginIpcs(next: Record<string, boolean>, ids: string[]): void {
-  for (const id of ids) {
-    const enabled = Boolean(next[id])
-    if (enabled) registerPluginIpc(id)
-    else disposePluginIpc(id)
-  }
-}
-
 /**
- * 应用启动：注册 core IPC + preload 通道同步入口 + 按启用态装载内置插件 + 装载已启用的外部插件。
+ * 应用启动：注册 core IPC + preload 通道同步入口 + 装载已启用的插件（全部来自磁盘包）。
  *
  * 顺序有意义：`registerCoreIpc()` 与 preload 通道同步入口（`plugin-channels-sync`）
  * 都必须在任何窗口创建之前完成——preload 先于页面脚本执行，它用同步 IPC 取回白名单，
@@ -104,33 +54,21 @@ export function initPluginHost(): void {
   // 顺序不可换：
   // ① 宿主运行时表（`globalThis.__RB_HOST_RESOLVE__`）必须在**任何插件 main.cjs 被 require
   //    之前**挂上——插件包里的 `require('@host/main/x')` 会立刻调它；
-  // ② 首次安装把应用包里的插件铺到 userData/plugins/，之后的扫描/装载就只剩「磁盘包」一条路径；
+  // ② 首次安装把应用包里的插件铺到 userData/plugins/（dev 下会先按需补打产物），
+  //    之后的扫描/装载就只剩「磁盘包」一条路径；
   // ③ core 自己的 IPC 与 preload 的通道同步入口（都必须在窗口创建之前）。
   installHostRuntime()
   ensureBundledPluginsInstalled()
   registerCoreIpc()
   registerPluginChannelsSync()
-  for (const id of Object.keys(builtinMainModules)) {
-    if (!isBuiltinPluginEnabled(id)) continue
-    try {
-      registerPluginIpc(id)
-    } catch (err) {
-      // 单个插件装配失败不拖垮启动：渲染层拿到的是「已启用但通道不存在」，
-      // 插件面板里会显示该插件状态；运行期启停走 plugins-set-enabled（错误会回抛给界面）
-      logger.error(`[Plugins] ${id} 启动装配失败:`, err)
-    }
-  }
   initExternalMains()
 }
 
 // ---------- 通道清单（preload 白名单 + 事件订阅门控） ----------
 
-/** 当前全部已启用插件（内置 + 外部）占用的通道 */
+/** 当前全部已启用插件占用的通道 */
 export function activePluginChannels(): string[] {
-  return [
-    ...[...builtinPlugins.values()].flatMap((e) => e.ctx.channels),
-    ...[...externalMains.values()].flatMap((e) => e.ctx.channels)
-  ]
+  return [...externalMains.values()].flatMap((e) => e.ctx.channels)
 }
 
 /**
@@ -248,8 +186,8 @@ export function isEnabledPlugin(id: string): boolean {
 export interface PluginLoadInfo {
   /** userData/plugins/<id>/ 下是否有插件包（内置铺包或第三方） */
   installed: boolean
-  /** package = 由磁盘包提供；builtin = 静态注册表回退；absent = 当前未装载 */
-  source: 'package' | 'builtin' | 'absent'
+  /** package = 由磁盘包提供；absent = 已铺包但当前未装载（停用） */
+  source: 'package' | 'absent'
   /** 磁盘包主入口绝对路径（installed 时才有；工装用它证明是包在应答） */
   file?: string
 }
@@ -257,10 +195,9 @@ export interface PluginLoadInfo {
 /**
  * 各插件主模块的装载来源。
  *
- * 为什么需要它：P1 的过渡共存期里同一个插件既可能来自磁盘包、又可能来自静态注册表
- * （dev 没跑打包脚本时的回退），光看「通道可用」分不出来源。这个函数让 CDP 工装能断言
- * 「music 的 handler 确实由 userData/plugins/music/main.cjs 提供」，也能断言
- * 「卸载后目录没了、包来源消失」。
+ * 为什么需要它：工装要能断言「<id> 的 handler 确实由 userData/plugins/<id>/main.cjs 提供」，
+ * 也能断言「卸载后目录没了、包来源消失」。P1~P4 期间 `source` 还可能是 `'builtin'`
+ * （静态注册表回退），P5 删掉静态注册表后只剩这两态。
  */
 export function pluginLoadInfo(): Record<string, PluginLoadInfo> {
   const out: Record<string, PluginLoadInfo> = {}
@@ -272,9 +209,6 @@ export function pluginLoadInfo(): Record<string, PluginLoadInfo> {
       source: 'package',
       ...(scanned ? { file: path.join(scanned.dir, entryRel) } : {})
     }
-  }
-  for (const id of builtinPlugins.keys()) {
-    out[id] = { installed: isPluginInstalled(id), source: 'builtin' }
   }
   // 已铺包但当前停用（未装载）的插件：也如实报 installed，避免工装把「停用」误判成「没装」
   for (const scanned of scanExternalPlugins()) {

@@ -1,4 +1,5 @@
 import { app } from 'electron'
+import { spawnSync } from 'child_process'
 import * as fs from 'fs'
 import * as path from 'path'
 import logger from 'electron-log'
@@ -10,7 +11,6 @@ import {
   setPluginSeeded
 } from './store'
 import { externalPluginsRoot, findExternalPlugin, invalidateInstalledPluginIds } from './scanner'
-import { PACKAGED_READY_IDS } from './packaged'
 import { BUILTIN_PLUGIN_MANIFESTS } from '../../plugins/manifests'
 
 /**
@@ -71,12 +71,13 @@ export function bundledPluginDir(id: string): string | null {
 /**
  * 应用包内所有可安装插件的 id（按目录扫描；读不到清单的目录跳过）。
  *
- * 三重过滤：
+ * 双重过滤：
  * - 只认「随应用分发的内置插件」（`src/plugins/manifests.ts` 里的 id）——
  *   `resources/plugins/` 下还可能有别的东西（构建脚本会把 `examples/demo-plugin`
  *   一起放进去当第三方插件示例），它们不该被自动铺进 userData、更不该默认启用；
- * - 只认 `PACKAGED_READY_IDS`（P1 = music、P2 = planner、P3 = home，见该常量的说明）；
  * - 目录里必须真的有 `plugin.json`。
+ *
+ * （P1~P4 期间还有一层 `PACKAGED_READY_IDS` 白名单，P5 已删：四个插件都走磁盘包了。）
  */
 export function listBundledPluginIds(): string[] {
   const root = bundledPluginsRoot()
@@ -91,10 +92,72 @@ export function listBundledPluginIds(): string[] {
       (e) =>
         e.isDirectory() &&
         BUILTIN_IDS.has(e.name) &&
-        PACKAGED_READY_IDS.has(e.name) &&
         fs.existsSync(path.join(root, e.name, 'plugin.json'))
     )
     .map((e) => e.name)
+}
+
+/** 某内置插件在应用包里的产物是否落后于它的源码（dev 用；只看 mtime） */
+function isPackageOlderThanSources(id: string): boolean {
+  const artifact = path.join(bundledPluginsRoot(), id, 'main.cjs')
+  if (!fs.existsSync(artifact)) return true
+  const artifactTime = fs.statSync(artifact).mtimeMs
+  const srcRoot = path.join(app.getAppPath(), 'src', 'plugins', id)
+  let newestSource = 0
+  const walk = (dir: string): void => {
+    let entries: fs.Dirent[]
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name)
+      if (entry.isDirectory()) walk(full)
+      else newestSource = Math.max(newestSource, fs.statSync(full).mtimeMs)
+    }
+  }
+  walk(srcRoot)
+  return newestSource > artifactTime
+}
+
+/**
+ * **dev 专用**：启动时按需补打插件包。
+ *
+ * 为什么必须有：P5 删掉了应用内的静态插件注册表，`pnpm dev` 下如果 `resources/plugins/`
+ * 是空的，界面上就**一个插件都没有**（空壳）。这里在安装流程之前用同一个脚本补打：
+ * - 缺产物 → 打那一个插件（`--dev`：不压缩 + inline sourcemap，便于调试）；
+ * - 产物比源码旧（改了插件源码忘了重打包，P3 实测踩过）→ 重打那一个；
+ * - 打包后仍是老样子（脚本报错）→ 只记日志，让「界面没插件」的现象自己说话。
+ *
+ * 用 `ELECTRON_RUN_AS_NODE=1` 让 Electron 自己的二进制以 Node 身份跑构建脚本——
+ * 打包后的应用里没有独立的 node，dev 下用 `process.execPath` 最省事。
+ */
+function ensureDevPackagesBuilt(): void {
+  if (app.isPackaged) return
+  const script = path.join(app.getAppPath(), 'scripts', 'build-plugins.mjs')
+  if (!fs.existsSync(script)) return
+  const ids = BUILTIN_PLUGIN_MANIFESTS.map((m) => m.id)
+  const missing = ids.filter(
+    (id) => !fs.existsSync(path.join(bundledPluginsRoot(), id, 'plugin.json'))
+  )
+  const stale = ids.filter((id) => !missing.includes(id) && isPackageOlderThanSources(id))
+  const targets = [...new Set([...missing, ...stale])]
+  if (targets.length === 0) return
+
+  logger.info(
+    `[Plugins] dev：重新打包插件（缺产物：${missing.join('/') || '无'}；产物落后于源码：${stale.join('/') || '无'}）`
+  )
+  for (const id of targets) {
+    const result = spawnSync(process.execPath, [script, '--plugin', id, '--dev'], {
+      cwd: app.getAppPath(),
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+      stdio: 'ignore'
+    })
+    if (result.status !== 0) {
+      logger.error(`[Plugins] dev 打包 '${id}' 失败（status=${result.status}），该插件本轮不可用`)
+    }
+  }
 }
 
 /**
@@ -147,6 +210,7 @@ export function installBundledPlugin(id: string, force = false): boolean {
  * 目录，内置与第三方因此走同一条装载路径。用户主动卸载过的 id 一律跳过。
  */
 export function ensureBundledPluginsInstalled(): void {
+  ensureDevPackagesBuilt()
   const ids = listBundledPluginIds()
   if (ids.length === 0) {
     logger.warn(

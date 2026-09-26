@@ -13,7 +13,7 @@ import {
 } from '@renderer/plugin-host/PluginHostContext'
 import type { Plugin } from '@renderer/plugin-host/types'
 import type { PluginListEntry } from '@shared/plugin/types'
-import { builtinPlugins, resolveBuiltinPlugins, vendorModules } from '@renderer/plugin-host/builtin'
+import { vendorModules } from '@renderer/plugin-host/host-ui'
 import { loadExternalPlugin } from '@renderer/plugin-host/external-loader'
 
 // shell 常驻 Provider（插件系统之外的应用骨架层）。
@@ -130,14 +130,15 @@ const PluginStateBridge: React.FC<{ children: React.ReactNode }> = ({ children }
 
 const App: React.FC = () => {
   /**
-   * 首帧权威清单：宿主在构造期**同步预装载**内置插件（否则首帧没有路由/菜单，点菜单会导航到空路由），
-   * 所以必须在同一时机拿到主进程的权威启用态，而不是先按 manifest 默认值全装一遍再异步卸载——
-   * 那样被停用插件的 Provider 会短暂挂载并订阅事件通道，而主进程并没有装载它的通道
-   * （2026-09-26 事故：整页 RUNTIME ERROR / 插件通道未启用: plugin:music:play-track）。
-   *
-   * 同一份清单还带 `routes`/`menu` 元数据，供宿主做**首帧声明式预注册**——磁盘包插件的
-   * 渲染模块要异步加载，没有这一步首帧侧栏会缺它的菜单（见 plugin-host/host.ts 的 declare()）。
-   * 取不到时返回 null，各消费点退回老行为（启用态按内置默认、声明表为空）。
+   * 首帧权威清单：P5 起应用里没有静态插件，四个内置插件与第三方插件一样要等渲染模块
+   * 从 `plugin://<id>/renderer.mjs` 加载完才真实注册。因此必须在**构造宿主的同一时机**
+   * 拿到主进程的权威启用态与元数据：
+   * - 启用态：只声明/装载用户启用的插件，避免「先按默认值全装一遍再异步卸载」——
+   *   那样被停用插件的 Provider 会短暂挂载并订阅事件通道，而主进程并没有它的通道
+   *   （2026-09-26 事故：整页 RUNTIME ERROR / 插件通道未启用: plugin:music:play-track）。
+   * - 元数据（`routes`/`menu`）：宿主据此**首帧声明式预注册**菜单与路由，否则首帧侧栏
+   *   空着、点菜单还会导航到空路由（见 plugin-host/host.ts 的 declare()）。
+   * 取不到时返回 null，各消费点退回「无声明、无初始插件」（随后仍由异步清单装载）。
    */
   const syncEntries = useMemo<PluginListEntry[] | null>(() => {
     try {
@@ -159,18 +160,15 @@ const App: React.FC = () => {
   }, [syncEntries])
 
   /**
-   * 要交给宿主的插件集合：排除「已作为插件包安装」的内置插件（它们随后由
-   * PluginStateBridge 从 `plugin://<id>/renderer.mjs` 加载）。取不到同步清单时
-   * 保守返回全部静态内置插件（dev 未打包的回退路径）。
+   * 交给宿主的**初始**插件集合：P5 起是空数组。
+   *
+   * 以前这里是应用内静态 import 的四个内置插件（`@plugins/<id>/renderer/plugin`），
+   * 磁盘包那条链路只负责「排除已被包接管的」。现在应用里没有任何插件代码的静态 import，
+   * 四个内置插件与第三方插件一样，全部由下面的 PluginStateBridge 从
+   * `plugin://<id>/renderer.mjs` 加载；首帧的菜单/路由由清单元数据的**声明式预注册**撑住
+   * （见 plugin-host/host.ts 的 declare 与 App 下面第一段 useMemo）。
    */
-  const initialPlugins = useMemo<Plugin[]>(() => {
-    try {
-      return resolveBuiltinPlugins(syncEntries ?? [])
-    } catch (err) {
-      console.warn('[plugins] 解析内置插件回退集合失败，按全部静态插件装载:', err)
-      return builtinPlugins
-    }
-  }, [syncEntries])
+  const initialPlugins = useMemo<Plugin[]>(() => [], [])
 
   return (
     <HashRouter>
