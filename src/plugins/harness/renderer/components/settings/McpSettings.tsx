@@ -38,7 +38,8 @@ import type { McpServerInput, McpServerView, McpToolInfo } from '../../../shared
 
 /** 表单值（env/headers 用数组形态承载键值对，提交时折叠成对象） */
 interface ServerFormValues {
-  name: string
+  /** 新建时可以为空（必填校验交给 Form.Item 的 rules） */
+  name?: string
   description?: string
   transport: 'stdio' | 'http' | 'sse'
   command?: string
@@ -60,6 +61,11 @@ interface RowAction {
   danger?: boolean
 }
 
+/** 表单窗口的初始值来源：新建（空）或编辑某台服务器；`toolsEnabled` 由父组件按当前启用清单算好 */
+type FormSeed =
+  | { mode: 'create'; toolsEnabled: boolean }
+  | { mode: 'edit'; server: McpServerView; toolsEnabled: boolean }
+
 const McpSettings: React.FC = () => {
   const {
     token: { colorTextSecondary, colorTextTertiary, colorSuccess, colorError, colorFillAlter }
@@ -76,15 +82,20 @@ const McpSettings: React.FC = () => {
   /** 正在切开关的服务器 id（行内开关的 loading） */
   const [togglingId, setTogglingId] = useState<string | null>(null)
 
-  const [formOpen, setFormOpen] = useState(false)
-  const [editing, setEditing] = useState<McpServerView | null>(null)
+  /**
+   * 表单窗口的初始值（**弹窗打开时一次性喂给内层表单**，见 ServerForm）。
+   *
+   * 为什么把表单做成「按初始值挂载的子组件」而不是上面持有一个 useForm 实例：
+   * 同一个实例被两个 Modal 轮流连（先开后关）时，antd 的字段注册/连线时序很脆——
+   * 实测 Form.List（环境变量 / 请求头）在编辑既有服务器时不回填。改成「每次打开用一个
+   * 全新的表单实例、由 initialValues 注入」后，既没有跨次残留，也不受挂载顺序影响。
+   */
+  const [formSeed, setFormSeed] = useState<FormSeed | null>(null)
   const [saving, setSaving] = useState(false)
   const [testing, setTesting] = useState(false)
   /** 试连结果：就地显示在表单里（成功给工具数，失败给原始错误） */
   const [testResult, setTestResult] = useState<{ ok: boolean; text: string } | null>(null)
   const [toolsView, setToolsView] = useState<{ server: McpServerView } | null>(null)
-  const [form] = Form.useForm<ServerFormValues>()
-  const transport = Form.useWatch('transport', form)
 
   const load = useCallback(async () => {
     try {
@@ -127,36 +138,25 @@ const McpSettings: React.FC = () => {
   // ── 表单：打开 / 提交 ────────────────────────────────────────────────
 
   const openCreate = (): void => {
-    setEditing(null)
     setTestResult(null)
-    form.resetFields()
-    form.setFieldsValue({ transport: 'stdio', enabled: true, toolsEnabled: true, env: [] })
-    setFormOpen(true)
+    setFormSeed({ mode: 'create', toolsEnabled: true })
   }
 
   const openEdit = (view: McpServerView): void => {
-    const config = view.config
-    setEditing(view)
     setTestResult(null)
-    form.setFieldsValue({
-      name: config.name,
-      description: config.description,
-      transport: config.transport,
-      command: config.command,
-      argsText: (config.args ?? []).join('\n'),
-      env: Object.entries(config.env ?? {}).map(([key, value]) => ({ key, value })),
-      cwd: config.cwd,
-      url: config.url,
-      headers: Object.entries(config.headers ?? {}).map(([key, value]) => ({ key, value })),
-      timeoutMs: config.timeoutMs ?? null,
-      enabled: config.enabled,
-      toolsEnabled: serverEnabledCount(view) > 0 || view.tools.length === 0
-    })
-    setFormOpen(true)
+    // 「工具可用」的初始态从这里定：该服务器已有任一工具在启用清单里 → 视为已勾选；
+    // 连不上（还没有工具清单）时也按勾选显示，避免用户以为开关被关掉了
+    const enabledCount = view.tools.filter((tool) => enabledSet.has(tool.name)).length
+    setFormSeed({ mode: 'edit', server: view, toolsEnabled: enabledCount > 0 || view.tools.length === 0 })
+  }
+
+  const closeForm = (): void => {
+    setFormSeed(null)
+    setTestResult(null)
   }
 
   /** 表单值 → IPC 入参（键值对折成对象、参数按行拆、空值不落库） */
-  const toInput = (values: ServerFormValues): McpServerInput => {
+  const toInput = (values: ServerFormValues, editing?: McpServerView | null): McpServerInput => {
     const pairs = (
       rows?: { key?: string; value?: string }[]
     ): Record<string, string> | undefined => {
@@ -193,16 +193,11 @@ const McpSettings: React.FC = () => {
   /** 这台服务器的全部工具名（用于并入 / 移出 mainAgent.mcpTools） */
   const toolNamesOf = (view: McpServerView): string[] => view.tools.map((tool) => tool.name)
 
-  const handleSave = async (): Promise<void> => {
-    let values: ServerFormValues
-    try {
-      values = await form.validateFields()
-    } catch {
-      return
-    }
+  const handleSave = async (values: ServerFormValues): Promise<void> => {
+    const editing = formSeed?.mode === 'edit' ? formSeed.server : null
     setSaving(true)
     try {
-      const saved = await harnessApi.mcp.save(toInput(values))
+      const saved = await harnessApi.mcp.save(toInput(values, editing))
       // 【工具可用】的落点：把这台服务器的工具并入 / 移出 mainAgent.mcpTools。
       // 关键是**先摘掉这台服务器名下的全部工具名再按勾选补回**——用户可能在服务器上
       // 删过工具，只做并集会留下永远挂不上的幽灵名字。
@@ -216,7 +211,7 @@ const McpSettings: React.FC = () => {
       await harnessApi.mcp.setToolsEnabled(next)
       setEnabledTools(next)
       message.success(t('mcpSettings.messages.saved', { name: saved.name }))
-      setFormOpen(false)
+      closeForm()
       await load()
     } catch (error) {
       viewMessage(
@@ -338,17 +333,12 @@ const McpSettings: React.FC = () => {
     }
   }
 
-  const handleTest = async (): Promise<void> => {
-    let values: ServerFormValues
-    try {
-      values = await form.validateFields()
-    } catch {
-      return
-    }
+  const handleTest = async (values: ServerFormValues): Promise<void> => {
+    const editing = formSeed?.mode === 'edit' ? formSeed.server : null
     setTesting(true)
     setTestResult(null)
     try {
-      const result = await harnessApi.mcp.test(toInput(values))
+      const result = await harnessApi.mcp.test(toInput(values, editing))
       if (result.ok) {
         const count = result.tools?.length ?? 0
         setTestResult({
@@ -432,8 +422,6 @@ const McpSettings: React.FC = () => {
     else if (key === 'reconnect') void handleReconnect()
     else if (key === 'remove') handleRemove(view)
   }
-
-  const isStdio = transport !== 'http' && transport !== 'sse'
 
   return (
     <div>
@@ -527,166 +515,18 @@ const McpSettings: React.FC = () => {
         )}
       </SettingsSection>
 
-      {/* ── 新增 / 编辑 ── */}
-      <Modal
-        open={formOpen}
-        title={
-          editing
-            ? t('mcpSettings.form.editTitle', { name: editing.config.name })
-            : t('mcpSettings.form.createTitle')
-        }
-        onCancel={() => setFormOpen(false)}
-        onOk={handleSave}
-        confirmLoading={saving}
-        width={620}
-        okText={t('common.action.save')}
-        cancelText={t('common.action.cancel')}
-        footer={[
-          <Button key="test" onClick={handleTest} loading={testing}>
-            {testing ? t('mcpSettings.form.testing') : t('mcpSettings.form.test')}
-          </Button>,
-          <Button key="cancel" onClick={() => setFormOpen(false)}>
-            {t('common.action.cancel')}
-          </Button>,
-          <Button key="save" type="primary" loading={saving} onClick={handleSave}>
-            {t('common.action.save')}
-          </Button>
-        ]}
-      >
-        <Form form={form} layout="vertical" size="small" style={{ paddingTop: 4 }}>
-          {/* 基本信息（纯文本分组标签，不用装饰性标题） */}
-          <div style={{ fontSize: 12, color: colorTextTertiary, margin: '2px 0 8px' }}>
-            {t('mcpSettings.form.groups.basic')}
-          </div>
-          <Form.Item
-            label={t('mcpSettings.field.name')}
-            name="name"
-            rules={[{ required: true, message: t('mcpSettings.field.namePlaceholder') }]}
-            extra={t('mcpSettings.field.nameHint')}
-          >
-            <Input placeholder={t('mcpSettings.field.namePlaceholder')} />
-          </Form.Item>
-          <Form.Item label={t('mcpSettings.field.description')} name="description">
-            <Input placeholder={t('mcpSettings.field.descriptionPlaceholder')} />
-          </Form.Item>
-
-          <div style={{ fontSize: 12, color: colorTextTertiary, margin: '10px 0 8px' }}>
-            {t('mcpSettings.form.groups.connection')}
-          </div>
-          <Form.Item
-            label={t('mcpSettings.field.transport')}
-            name="transport"
-            extra={t('mcpSettings.field.transportHint')}
-          >
-            <Select
-              options={[
-                { value: 'stdio', label: t('mcpSettings.transport.stdio') },
-                { value: 'http', label: t('mcpSettings.transport.http') },
-                { value: 'sse', label: t('mcpSettings.transport.sse') }
-              ]}
-            />
-          </Form.Item>
-
-          {isStdio ? (
-            <>
-              <Form.Item
-                label={t('mcpSettings.field.command')}
-                name="command"
-                rules={[{ required: true, message: t('mcpSettings.field.commandPlaceholder') }]}
-              >
-                <Input placeholder={t('mcpSettings.field.commandPlaceholder')} />
-              </Form.Item>
-              <Form.Item
-                label={t('mcpSettings.field.args')}
-                name="argsText"
-                extra={t('mcpSettings.field.argsHint')}
-              >
-                <Input.TextArea
-                  rows={2}
-                  placeholder={t('mcpSettings.field.argsPlaceholder')}
-                  style={{ fontFamily: 'monospace' }}
-                />
-              </Form.Item>
-              <KeyValueList
-                name="env"
-                label={t('mcpSettings.field.env')}
-                keyPlaceholder={t('mcpSettings.field.envPlaceholder')}
-                addLabel={t('mcpSettings.field.addEnv')}
-                extra={editing ? t('mcpSettings.field.secretsKept') : undefined}
-              />
-              <Form.Item label={t('mcpSettings.field.cwd')} name="cwd">
-                <Input placeholder={t('mcpSettings.field.cwdPlaceholder')} />
-              </Form.Item>
-            </>
-          ) : (
-            <>
-              <Form.Item
-                label={t('mcpSettings.field.url')}
-                name="url"
-                rules={[{ required: true, message: t('mcpSettings.field.urlPlaceholder') }]}
-              >
-                <Input placeholder={t('mcpSettings.field.urlPlaceholder')} />
-              </Form.Item>
-              <KeyValueList
-                name="headers"
-                label={t('mcpSettings.field.headers')}
-                keyPlaceholder={t('mcpSettings.field.headerPlaceholder')}
-                addLabel={t('mcpSettings.field.addHeader')}
-                extra={editing ? t('mcpSettings.field.secretsKept') : undefined}
-              />
-            </>
-          )}
-
-          <div style={{ fontSize: 12, color: colorTextTertiary, margin: '10px 0 8px' }}>
-            {t('mcpSettings.form.groups.options')}
-          </div>
-          <div className="flex gap-3">
-            <Form.Item label={t('mcpSettings.field.timeout')} name="timeoutMs" style={{ flex: 1 }}>
-              <InputNumber
-                min={1000}
-                step={1000}
-                style={{ width: '100%' }}
-                placeholder={t('mcpSettings.field.timeoutPlaceholder')}
-              />
-            </Form.Item>
-            <Form.Item
-              label={t('mcpSettings.field.enabled')}
-              name="enabled"
-              valuePropName="checked"
-              style={{ flex: 1 }}
-              extra={t('mcpSettings.field.enabledHint')}
-            >
-              <Switch />
-            </Form.Item>
-            <Form.Item
-              label={t('mcpSettings.field.toolsEnabled')}
-              name="toolsEnabled"
-              valuePropName="checked"
-              style={{ flex: 1 }}
-              extra={t('mcpSettings.field.toolsEnabledHint')}
-            >
-              <Switch />
-            </Form.Item>
-          </div>
-
-          {/* 试连结果就地显示：成功给工具数，失败给原始错误（用户据此改配置） */}
-          {testResult && (
-            <div
-              style={{
-                fontSize: 12,
-                color: testResult.ok ? colorSuccess : colorError,
-                wordBreak: 'break-all',
-                background: colorFillAlter,
-                borderRadius: 6,
-                padding: '6px 8px'
-              }}
-            >
-              <RiFlashlightLine size={12} style={{ marginRight: 6 }} />
-              {testResult.text}
-            </div>
-          )}
-        </Form>
-      </Modal>
+      {/* ── 新增 / 编辑（每次打开挂载一个全新的表单实例，见 formSeed 的注释）── */}
+      {formSeed && (
+        <ServerFormModal
+          seed={formSeed}
+          saving={saving}
+          testing={testing}
+          testResult={testResult}
+          onClose={closeForm}
+          onSubmit={(values) => void handleSave(values)}
+          onTest={(values) => void handleTest(values)}
+        />
+      )}
 
       {/* ── 工具清单（结构化明细：名称 + 描述两列对齐） ── */}
       <Modal
@@ -784,6 +624,255 @@ const KeyValueList: React.FC<{
         )}
       </Form.List>
     </Form.Item>
+  )
+}
+
+/**
+ * 新增 / 编辑服务器的表单窗口。
+ *
+ * **每次打开挂载一个新实例**（`{formSeed && <ServerFormModal …/>}`）：表单实例由本组件
+ * 自己持有（`Form.useForm`），初始值走 `initialValues`，因此
+ *  - 打开前不需要「先 set 值再连表单」的时序配合（用父组件的实例时，值可能在挂载前被丢掉）；
+ *  - 关掉再打开不会残留上一次的字段（含 `Form.List` 的行）；
+ *  - `transport` 切换时 stdio / http 两组字段由 `Form.useWatch` 决定渲染哪一组。
+ *
+ * 固定高度：body 限高 + 只有表单区滚动（与设置页其余表单弹窗同款），
+ * 条目再多也不会把底部按钮顶出视口。
+ */
+const ServerFormModal: React.FC<{
+  seed: FormSeed
+  saving: boolean
+  testing: boolean
+  testResult: { ok: boolean; text: string } | null
+  onClose: () => void
+  onSubmit: (values: ServerFormValues) => void
+  onTest: (values: ServerFormValues) => void
+}> = ({ seed, saving, testing, testResult, onClose, onSubmit, onTest }) => {
+  const {
+    token: { colorTextTertiary, colorSuccess, colorError, colorFillAlter }
+  } = theme.useToken()
+  const { t } = useTranslation()
+  const [form] = Form.useForm<ServerFormValues>()
+  const transport = Form.useWatch('transport', form)
+  const editing = seed.mode === 'edit' ? seed.server : null
+
+  /** 打开时的初始值：新建给一份可用默认值；编辑把既有配置摊平进字段（凭据是掩码） */
+  const initialValues: ServerFormValues =
+    seed.mode === 'edit'
+      ? {
+          name: seed.server.config.name,
+          description: seed.server.config.description,
+          transport: seed.server.config.transport,
+          command: seed.server.config.command,
+          argsText: (seed.server.config.args ?? []).join('\n'),
+          env: Object.entries(seed.server.config.env ?? {}).map(([key, value]) => ({
+            key,
+            value
+          })),
+          cwd: seed.server.config.cwd,
+          url: seed.server.config.url,
+          headers: Object.entries(seed.server.config.headers ?? {}).map(([key, value]) => ({
+            key,
+            value
+          })),
+          timeoutMs: seed.server.config.timeoutMs,
+          enabled: seed.server.config.enabled,
+          toolsEnabled: seed.toolsEnabled
+        }
+      : {
+          transport: 'stdio',
+          enabled: true,
+          toolsEnabled: seed.toolsEnabled,
+          env: []
+        }
+
+  /** 校验通过才回调（保存与「测试连接」都先过这一关，避免拿半填配置去连） */
+  const withValidValues = async (handler: (values: ServerFormValues) => void): Promise<void> => {
+    try {
+      handler(await form.validateFields())
+    } catch {
+      // 校验失败：antd 已在字段下方标红，这里不额外提示
+    }
+  }
+
+  const isStdio = transport !== 'http' && transport !== 'sse'
+
+  return (
+    <Modal
+      open
+      title={
+        editing
+          ? t('mcpSettings.form.editTitle', { name: editing.config.name })
+          : t('mcpSettings.form.createTitle')
+      }
+      onCancel={onClose}
+      width={620}
+      okText={t('common.action.save')}
+      cancelText={t('common.action.cancel')}
+      footer={[
+        <Button
+          key="test"
+          loading={testing}
+          onClick={() => void withValidValues(onTest)}
+        >
+          {testing ? t('mcpSettings.form.testing') : t('mcpSettings.form.test')}
+        </Button>,
+        <Button key="cancel" onClick={onClose}>
+          {t('common.action.cancel')}
+        </Button>,
+        <Button
+          key="save"
+          type="primary"
+          loading={saving}
+          onClick={() => void withValidValues(onSubmit)}
+        >
+          {t('common.action.save')}
+        </Button>
+      ]}
+      /**
+       * 固定高度的表单窗口（与设置页其余表单弹窗同款：body 限高 + 自定义滚动条）。
+       *
+       * 不设上限时，条目一多（环境变量 / 请求头各几行）窗口会一路长高，底部按钮被顶出视口，
+       * 用户找不到「保存」。这里锁住高度、**只有表单区滚动**，标题与按钮始终留在屏幕内，
+       * 弹窗也不会随内容忽高忽低。
+       */
+      styles={{ body: { maxHeight: 560, padding: '16px 20px', overflowY: 'auto' } }}
+      classNames={{ body: 'custom-scrollbar' }}
+    >
+      <Form form={form} layout="vertical" size="small" initialValues={initialValues}>
+        {/* 基本信息（纯文本分组标签，不用装饰性标题） */}
+        <div style={{ fontSize: 12, color: colorTextTertiary, margin: '2px 0 8px' }}>
+          {t('mcpSettings.form.groups.basic')}
+        </div>
+        <Form.Item
+          label={t('mcpSettings.field.name')}
+          name="name"
+          rules={[{ required: true, message: t('mcpSettings.field.namePlaceholder') }]}
+          extra={t('mcpSettings.field.nameHint')}
+        >
+          <Input placeholder={t('mcpSettings.field.namePlaceholder')} />
+        </Form.Item>
+        <Form.Item label={t('mcpSettings.field.description')} name="description">
+          <Input placeholder={t('mcpSettings.field.descriptionPlaceholder')} />
+        </Form.Item>
+
+        <div style={{ fontSize: 12, color: colorTextTertiary, margin: '10px 0 8px' }}>
+          {t('mcpSettings.form.groups.connection')}
+        </div>
+        <Form.Item
+          label={t('mcpSettings.field.transport')}
+          name="transport"
+          extra={t('mcpSettings.field.transportHint')}
+        >
+          <Select
+            options={[
+              { value: 'stdio', label: t('mcpSettings.transport.stdio') },
+              { value: 'http', label: t('mcpSettings.transport.http') },
+              { value: 'sse', label: t('mcpSettings.transport.sse') }
+            ]}
+          />
+        </Form.Item>
+
+        {isStdio ? (
+          <>
+            <Form.Item
+              label={t('mcpSettings.field.command')}
+              name="command"
+              rules={[{ required: true, message: t('mcpSettings.field.commandPlaceholder') }]}
+            >
+              <Input placeholder={t('mcpSettings.field.commandPlaceholder')} />
+            </Form.Item>
+            <Form.Item
+              label={t('mcpSettings.field.args')}
+              name="argsText"
+              extra={t('mcpSettings.field.argsHint')}
+            >
+              <Input.TextArea
+                rows={2}
+                placeholder={t('mcpSettings.field.argsPlaceholder')}
+                style={{ fontFamily: 'monospace' }}
+              />
+            </Form.Item>
+            <KeyValueList
+              name="env"
+              label={t('mcpSettings.field.env')}
+              keyPlaceholder={t('mcpSettings.field.envPlaceholder')}
+              addLabel={t('mcpSettings.field.addEnv')}
+              extra={editing ? t('mcpSettings.field.secretsKept') : undefined}
+            />
+            <Form.Item label={t('mcpSettings.field.cwd')} name="cwd">
+              <Input placeholder={t('mcpSettings.field.cwdPlaceholder')} />
+            </Form.Item>
+          </>
+        ) : (
+          <>
+            <Form.Item
+              label={t('mcpSettings.field.url')}
+              name="url"
+              rules={[{ required: true, message: t('mcpSettings.field.urlPlaceholder') }]}
+            >
+              <Input placeholder={t('mcpSettings.field.urlPlaceholder')} />
+            </Form.Item>
+            <KeyValueList
+              name="headers"
+              label={t('mcpSettings.field.headers')}
+              keyPlaceholder={t('mcpSettings.field.headerPlaceholder')}
+              addLabel={t('mcpSettings.field.addHeader')}
+              extra={editing ? t('mcpSettings.field.secretsKept') : undefined}
+            />
+          </>
+        )}
+
+        <div style={{ fontSize: 12, color: colorTextTertiary, margin: '10px 0 8px' }}>
+          {t('mcpSettings.form.groups.options')}
+        </div>
+        <div className="flex gap-3">
+          <Form.Item label={t('mcpSettings.field.timeout')} name="timeoutMs" style={{ flex: 1 }}>
+            <InputNumber
+              min={1000}
+              step={1000}
+              style={{ width: '100%' }}
+              placeholder={t('mcpSettings.field.timeoutPlaceholder')}
+            />
+          </Form.Item>
+          <Form.Item
+            label={t('mcpSettings.field.enabled')}
+            name="enabled"
+            valuePropName="checked"
+            style={{ flex: 1 }}
+            extra={t('mcpSettings.field.enabledHint')}
+          >
+            <Switch />
+          </Form.Item>
+          <Form.Item
+            label={t('mcpSettings.field.toolsEnabled')}
+            name="toolsEnabled"
+            valuePropName="checked"
+            style={{ flex: 1 }}
+            extra={t('mcpSettings.field.toolsEnabledHint')}
+          >
+            <Switch />
+          </Form.Item>
+        </div>
+
+        {/* 试连结果就地显示：成功给工具数，失败给原始错误（用户据此改配置） */}
+        {testResult && (
+          <div
+            style={{
+              fontSize: 12,
+              color: testResult.ok ? colorSuccess : colorError,
+              wordBreak: 'break-all',
+              background: colorFillAlter,
+              borderRadius: 6,
+              padding: '6px 8px'
+            }}
+          >
+            <RiFlashlightLine size={12} style={{ marginRight: 6 }} />
+            {testResult.text}
+          </div>
+        )}
+      </Form>
+    </Modal>
   )
 }
 
