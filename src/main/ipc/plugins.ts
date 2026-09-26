@@ -438,12 +438,15 @@ export function registerPluginsIpc(): void {
     return await installLocalAndEnable(source)
   })
 
-  /** 弹系统选择框挑一个本地来源并安装（面板两个按钮走它；取消返回 `{ ok: true, canceled: true }`） */
-  ipcMain.handle(IPC_PLUGINS_PICK_LOCAL, async (_event, kind: unknown) => {
-    if (kind !== 'zip' && kind !== 'dir') {
-      throw new Error("plugins-pick-local 的参数必须是 'zip' 或 'dir'")
-    }
-    const source = await pickLocalPluginSource(kind)
+  /**
+   * 弹系统选择框挑一个本地来源并安装（面板**唯一**的本地安装入口）。
+   *
+   * 一个对话框两个筛选器：`.zip` 压缩包，或插件文件夹里的 `plugin.json`
+   * （Windows 的系统选择框不能同时选文件与目录，见 local-install.ts 的说明）。
+   * 取消返回 `{ ok: true, canceled: true }`——取消不是失败，面板不弹错误。
+   */
+  ipcMain.handle(IPC_PLUGINS_PICK_LOCAL, async () => {
+    const source = await pickLocalPluginSource()
     if (!source) return { ok: true as const, canceled: true as const }
     return await installLocalAndEnable(source)
   })

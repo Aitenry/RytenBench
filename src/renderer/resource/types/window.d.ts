@@ -112,7 +112,7 @@ export interface Window {
       }>
       /** 从插件仓库安装（或升级）某个插件 */
       installFromGithub: (id: string) => Promise<{ ok: boolean; id?: string; error?: string }>
-      /** 从本地路径安装插件：`.zip` 压缩包或插件包目录（装完自动启用并装载） */
+      /** 从本地路径安装插件：`.zip` 压缩包、插件包目录，或该目录里的 `plugin.json` */
       installLocal: (source: string) => Promise<{
         ok: boolean
         canceled?: boolean
@@ -123,7 +123,7 @@ export interface Window {
         error?: string
       }>
       /** 弹系统选择框挑一个本地来源并安装（取消返回 `{ ok: true, canceled: true }`） */
-      pickLocal: (kind: 'zip' | 'dir') => Promise<{
+      installLocalFromDialog: () => Promise<{
         ok: boolean
         canceled?: boolean
         id?: string

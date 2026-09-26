@@ -34,12 +34,12 @@ export function readExternalManifest(dir: string): PluginManifest {
   return { ...manifest, builtin: false }
 }
 
-/** 安装外部插件：dialog 选目录 → 校验 → 复制（返回新插件 id） */
+/** 安装外部插件：dialog 选路径（压缩包 / 插件文件夹里的 plugin.json）→ 校验 → 复制 */
 export async function installExternalPlugin(): Promise<string> {
-  // 旧的「选目录安装」入口保留（面板已改用两个显式的「压缩包 / 文件夹」按钮），
+  // 旧的「选目录安装」入口保留（面板已改用单一的「从本地安装」按钮），
   // 内部直接复用本地安装链路：选择框 + 校验 + 落地只有一份实现（见 local-install.ts）
-  const src = await pickLocalPluginSource('dir')
-  if (!src) throw new Error('未选择目录')
+  const src = await pickLocalPluginSource()
+  if (!src) throw new Error('未选择插件压缩包或插件文件夹')
   const info = await installPluginFromLocalPath(src)
   return info.id
 }

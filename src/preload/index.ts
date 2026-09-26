@@ -235,7 +235,7 @@ const api = {
         error?: string
       }>,
     /**
-     * 从**本地路径**安装插件：`.zip` 压缩包或插件包目录（构建产物，例如 dist/<id>）。
+     * 从**本地路径**安装插件：`.zip` 压缩包、插件包目录，或该目录里的 `plugin.json`。
      *
      * 与从仓库安装同一套校验与落地语义：装完自动启用并装载。失败不抛错，
      * 返回 `{ ok: false, error }`（路径不存在、包里没有 plugin.json、id 撞内置插件……）。
@@ -251,11 +251,11 @@ const api = {
         error?: string
       }>,
     /**
-     * 弹系统选择框挑一个本地来源并安装：`'zip'` = 压缩包，`'dir'` = 插件文件夹。
+     * 弹系统选择框挑一个本地来源并安装（面板上**唯一**的本地安装入口）。
      * 用户取消时返回 `{ ok: true, canceled: true }`（取消不是错误）。
      */
-    pickLocal: (kind: 'zip' | 'dir') =>
-      ipcRenderer.invoke('plugins-pick-local', kind) as Promise<{
+    installLocalFromDialog: () =>
+      ipcRenderer.invoke('plugins-pick-local') as Promise<{
         ok: boolean
         canceled?: boolean
         id?: string

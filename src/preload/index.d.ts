@@ -107,10 +107,10 @@ interface Api {
     }>
     /** 从插件仓库安装（或升级）某个插件 */
     installFromGithub: (id: string) => Promise<{ ok: boolean; id?: string; error?: string }>
-    /** 从本地路径安装插件：`.zip` 压缩包或插件包目录（装完自动启用并装载） */
+    /** 从本地路径安装插件：`.zip` 压缩包、插件包目录，或该目录里的 `plugin.json` */
     installLocal: (source: string) => Promise<LocalPluginInstallResult>
-    /** 弹系统选择框挑一个本地来源并安装（`'zip'` = 压缩包 / `'dir'` = 文件夹；取消返回 canceled） */
-    pickLocal: (kind: 'zip' | 'dir') => Promise<LocalPluginInstallResult>
+    /** 弹系统选择框挑一个本地来源并安装（面板唯一的本地安装入口；取消返回 canceled） */
+    installLocalFromDialog: () => Promise<LocalPluginInstallResult>
     /**
      * 卸载插件并返回最新列表。
      * 卸载本身总是移除插件代码；`purgeData` 决定要不要同时清数据（false = 数据保留在库里）。

@@ -121,33 +121,32 @@ const PluginsPanel: React.FC = () => {
   )
 
   /**
-   * 本地安装：`'zip'` = 选压缩包，`'dir'` = 选插件文件夹。
+   * 从本地安装（面板上**唯一**的本地安装入口）。
    *
-   * 走主进程的系统选择框（渲染层拿不到真实路径），装完主进程会自动启用并装载，
-   * 面板收到广播后刷新列表。用户取消时 `canceled: true`——**不算失败**，不弹错误。
+   * 走主进程的系统选择框（渲染层拿不到真实路径）：一个对话框两个筛选器——
+   * `.zip` 压缩包，或插件文件夹里的 `plugin.json`（Windows 的选择框不能同时选文件与目录）。
+   * 装完主进程会自动启用并装载，面板收到广播后刷新列表；用户取消时 `canceled: true`——
+   * **不算失败**，不弹错误。
    */
-  const installLocal = useCallback(
-    async (kind: 'zip' | 'dir'): Promise<void> => {
-      try {
-        const result = await window.api.plugin.pickLocal(kind)
-        if (result.canceled) return
-        if (!result.ok) {
-          message.error(result.error || t('settings.plugins.installFail'))
-          return
-        }
-        message.success(
-          result.upgraded
-            ? t('settings.plugins.localUpgraded', { name: result.name ?? result.id ?? '' })
-            : t('settings.plugins.localInstalled', { name: result.name ?? result.id ?? '' })
-        )
-        refresh()
-      } catch (err) {
-        message.error(t('settings.plugins.installFail'))
-        console.error('[plugins] 本地安装失败:', err)
+  const installLocal = useCallback(async (): Promise<void> => {
+    try {
+      const result = await window.api.plugin.installLocalFromDialog()
+      if (result.canceled) return
+      if (!result.ok) {
+        message.error(result.error || t('settings.plugins.installFail'))
+        return
       }
-    },
-    [message, t, refresh]
-  )
+      message.success(
+        result.upgraded
+          ? t('settings.plugins.localUpgraded', { name: result.name ?? result.id ?? '' })
+          : t('settings.plugins.localInstalled', { name: result.name ?? result.id ?? '' })
+      )
+      refresh()
+    } catch (err) {
+      message.error(t('settings.plugins.installFail'))
+      console.error('[plugins] 本地安装失败:', err)
+    }
+  }, [message, t, refresh])
 
   /** 从应用包重装某个内置插件 */
   const reinstall = useCallback(
@@ -272,11 +271,8 @@ const PluginsPanel: React.FC = () => {
         description={t('settings.plugins.pageDescription')}
         extra={
           <div className="flex items-center gap-2">
-            <Button size="small" onClick={() => void installLocal('zip')}>
-              {t('settings.plugins.installLocalZip')}
-            </Button>
-            <Button size="small" onClick={() => void installLocal('dir')}>
-              {t('settings.plugins.installLocalDir')}
+            <Button size="small" onClick={() => void installLocal()}>
+              {t('settings.plugins.installLocal')}
             </Button>
             <Button size="small" onClick={openRepo}>
               {t('settings.plugins.installFromRepo')}
