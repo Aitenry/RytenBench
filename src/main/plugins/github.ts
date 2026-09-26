@@ -9,6 +9,7 @@ import { externalPluginsRoot, findExternalPlugin, invalidateInstalledPluginIds }
 import { readExternalManifest } from './lifecycle'
 import { isBundledPluginId } from './host'
 import { isValidManifest } from '../../shared/plugin/types'
+import { pluginAssetUrl, pluginIndexUrl, resolveIndexBase } from '../../shared/plugin/index-url'
 
 /**
  * **从 GitHub 安装插件**（独立插件仓库的发行链路）。
@@ -23,9 +24,11 @@ import { isValidManifest } from '../../shared/plugin/types'
  *
  * 覆盖地址：环境变量 `RB_PLUGINS_REPO`（形如 `https://raw.githubusercontent.com/<owner>/<repo>/main`）。
  * 离线工装用它指向本机 fixture 服务器（此时索引与资产同源，`http://127.0.0.1:<port>/<asset>`）。
+ *
+ * URL 规则（含「索引里没有 tag 时走 `releases/latest/download/...`」这条）在
+ * `src/shared/plugin/index-url.ts`，由 `test/verify-plugin-asset-url.mjs` 逐分支断言——
+ * 真 GitHub 地址没法在离线工装里实测，只能把规则本身锁住。
  */
-const DEFAULT_INDEX_BASE = 'https://raw.githubusercontent.com/Aitenry/ryten-plugins/main'
-const DEFAULT_RELEASE_BASE = 'https://github.com/Aitenry/ryten-plugins/releases/download'
 
 /** 索引里的一条插件 */
 export interface AvailablePlugin {
@@ -40,26 +43,14 @@ export interface AvailablePlugin {
 
 /** 解析后的索引 */
 export interface PluginIndex {
-  /** 资产所在的 Release tag（CI 发布时写入；缺失时回退 latest） */
+  /** 资产所在的 Release tag（CI 发布时写入；缺失时回退「最新 Release」） */
   tag?: string
   plugins: AvailablePlugin[]
 }
 
 /** 索引基址（`RB_PLUGINS_REPO` 覆盖，末尾斜杠忽略） */
 function indexBase(): string {
-  return (process.env.RB_PLUGINS_REPO || DEFAULT_INDEX_BASE).replace(/\/+$/, '')
-}
-
-/** 本机 fixture 模式：索引走 HTTP，资产与索引同源 */
-function isFixtureMode(): boolean {
-  return /^https?:\/\/(127\.0\.0\.1|localhost)/.test(indexBase())
-}
-
-/** Release 资产基址 */
-function releaseBase(): string {
-  const override = process.env.RB_PLUGINS_RELEASE_BASE
-  if (override) return override.replace(/\/+$/, '')
-  return isFixtureMode() ? indexBase() : DEFAULT_RELEASE_BASE
+  return resolveIndexBase(process.env.RB_PLUGINS_REPO)
 }
 
 export function pluginsRepoUrl(): string {
@@ -68,7 +59,7 @@ export function pluginsRepoUrl(): string {
 
 /** 读索引（形状不对的条目直接丢弃，坏索引不该把面板搞崩） */
 export async function fetchPluginIndex(): Promise<PluginIndex> {
-  const url = `${indexBase()}/plugins.json`
+  const url = pluginIndexUrl(process.env.RB_PLUGINS_REPO)
   const res = await net.fetch(url, { cache: 'no-store' })
   if (!res.ok) throw new Error(`读取插件索引失败：HTTP ${res.status}（${url}）`)
   const raw = (await res.json()) as { tag?: unknown; plugins?: unknown }
@@ -84,11 +75,14 @@ export async function fetchPluginIndex(): Promise<PluginIndex> {
   return { tag: typeof raw.tag === 'string' ? raw.tag : undefined, plugins }
 }
 
-/** 资产 URL：fixture 模式下与索引同源，否则走 Release 下载地址（需要 tag） */
+/** 资产 URL：fixture 模式下与索引同源，否则走 Release 下载地址（无 tag 时指向最新 Release） */
 function assetUrl(entry: AvailablePlugin, tag?: string): string {
-  return isFixtureMode()
-    ? `${releaseBase()}/${entry.asset}`
-    : `${releaseBase()}/${tag ?? 'latest'}/${entry.asset}`
+  return pluginAssetUrl({
+    asset: entry.asset,
+    tag,
+    repoOverride: process.env.RB_PLUGINS_REPO,
+    releaseOverride: process.env.RB_PLUGINS_RELEASE_BASE
+  })
 }
 
 /** 下载资产到临时文件，并按索引里的 sha256 校验完整性 */

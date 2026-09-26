@@ -24,6 +24,11 @@ plugins.json（索引，提交回 main）
 
 - **安装实现**：`src/main/plugins/github.ts`（索引 → 下载 → sha256 → 解压（拒绝目录穿越/子目录）→ 安装/升级）。
   地址可用 `RB_PLUGINS_REPO` 覆盖（离线工装用插件仓库自带的 fixture 服务器指向本机 HTTP）。
+- **URL 规则单独锁住**：索引/资产地址由纯函数 `src/shared/plugin/index-url.ts` 生成，
+  `node --experimental-strip-types test/verify-plugin-asset-url.mjs` 逐分支断言（18 条）——
+  重点是「索引里没有 tag 时走 `releases/latest/download/<asset>`」而不是 404 的
+  `releases/download/latest/<asset>`。真 GitHub 地址要等仓库发布后才存在，这是唯一
+  无法端到端实测的一段：fixture 只覆盖「索引与资产同源」那条分支（`verify-github-plugin-install` 19 条）。
 - **命名**：独立插件的目录名与 id 一致（`task-planner` / `music-player`），IPC 命名空间随之成为
   `plugin:task-planner:*` / `plugin:music-player:*`；**数据库表名不变**（`planner_tasks` / `music_folders`），
   所以老用户的数据在「内置 → 独立」这次搬家前后是同一批行。
