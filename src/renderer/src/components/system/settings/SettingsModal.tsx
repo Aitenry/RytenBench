@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useEffect, useMemo, useCallback, useSyncExternalStore } from 'react'
 import { Modal, theme } from 'antd'
 import { RiSettings3Line, RiBrainAi3Line, RiComputerLine, RiPlugLine } from '@remixicon/react'
 import GeneralSettings from './GeneralSettings'
@@ -7,6 +7,11 @@ import ModelSettings from './ModelSettings'
 import PluginsPanel from './PluginsPanel'
 import { useTranslation } from '@renderer/i18n'
 import { usePluginSettingsSections } from '@renderer/plugin-host/PluginHostContext'
+import {
+  getSettingsModalState,
+  setSettingsModalTab,
+  subscribeSettingsModalState
+} from './settings-modal-state'
 
 /**
  * 设置弹窗 = shell 核心页（静态）+ 插件注册页（settingsSection 注册点动态合并）。
@@ -54,17 +59,11 @@ export type SettingsScope = 'full' | 'assistant'
 interface SettingsModalProps {
   open: boolean
   onClose: () => void
-  initialTab?: SettingsTab
   /** 展示范围：assistant = 聚焦模式（只显示助手页 + 模型页）；默认 full = 全部设置页 */
   scope?: SettingsScope
 }
 
-const SettingsModal: React.FC<SettingsModalProps> = ({
-  open,
-  onClose,
-  initialTab,
-  scope = 'full'
-}) => {
+const SettingsModal: React.FC<SettingsModalProps> = ({ open, onClose, scope = 'full' }) => {
   const {
     token: {
       colorTextSecondary,
@@ -147,23 +146,25 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
     return firstTab()
   }
 
-  const [activeTab, setActiveTab] = useState<SettingsTab>(() => pickTab(initialTab))
+  /**
+   * 当前页签存在**模块级 store** 里（`settings-modal-state.ts`），不放在组件 state：
+   * 插件启停会让 Provider 链变化 → 其下整棵外壳子树重挂 → 本组件被重建，
+   * 组件内 state 会丢（表现为「点插件开关，设置内容刷新并跳回通用」）。
+   * 这里只做「把 store 里的 tab 解析成当前可用的页签」，失效的 tab 自然回退到首个可用页签。
+   */
+  const storedTab = useSyncExternalStore(subscribeSettingsModalState, getSettingsModalState).tab as
+    SettingsTab | undefined
+  const activeTab = pickTab(storedTab)
+  const setActiveTab = useCallback((tab: SettingsTab) => setSettingsModalTab(tab), [])
 
-  // 每次打开弹窗时同步外部传入的 initialTab（聚焦模式下收敛到白名单内的页签）
+  /**
+   * 状态自愈：store 里的 tab 若已不可用（所属插件的设置页被停用、或聚焦模式下不在白名单里），
+   * 把解析后的实际页签写回 store。否则会出现「UI 显示 A 页、store 记着 B 页」，
+   * 等 B 页恢复可用（插件重新启用）就莫名其妙跳回去。
+   */
   useEffect(() => {
-    if (open) {
-      setActiveTab(pickTab(initialTab))
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, initialTab, onlyTabs, tabMeta])
-
-  // 插件停用导致当前页签消失时，回退到首个可用页签
-  useEffect(() => {
-    if (open && !tabMeta[activeTab]) {
-      setActiveTab(pickTab(undefined))
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, tabMeta])
+    if (open && storedTab !== activeTab) setSettingsModalTab(activeTab)
+  }, [open, storedTab, activeTab])
 
   /** 聚焦模式只渲染白名单内的分组，其余系统级页面整组隐藏 */
   const navGroups = useMemo(

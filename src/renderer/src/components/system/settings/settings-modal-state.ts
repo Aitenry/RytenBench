@@ -1,21 +1,21 @@
 import type { SettingsScope } from './SettingsModal'
 
 /**
- * 设置弹窗的开合状态（模块级可订阅快照）。
+ * 设置弹窗的状态（模块级可订阅快照）。
  *
- * 为什么不放在 `CustomFrame` 的 useState 里：插件自己的 Provider 随插件装卸
- * （`ctx.use('appProvider')`），而 Provider 增删会让 `PluginProvidersShell` 之下的整棵
- * 外壳子树重挂（React 的类型调和语义，见 App.tsx 里 PluginProvidersShell 的注释）。
- * 状态留在组件里时，停用任意注册了 Provider 的插件（music / harness）都会把用户
- * 正在看的设置弹窗直接关掉——工装 verify-plugin-host 的「当前设置页所属插件被停用时
- * 回退到可用页签」断言的正是这个行为。
+ * 为什么不放在 `CustomFrame` / `SettingsModal` 的 useState 里：插件自己的 Provider 随插件装卸
+ * （`ctx.use('appProvider')`），而 Provider 增删会让 `PluginProvidersShell` 之下的整棵外壳子树
+ * 重挂（React 的类型调和语义，见 App.tsx 里 PluginProvidersShell 的注释）。状态留在组件里时：
+ * - 停用任意注册了 Provider 的插件（music / harness）会把用户正在看的设置弹窗直接关掉；
+ * - 更隐蔽的是**当前页签**也会被重置——齿轮打开时 `tab` 是 undefined，重挂后就会回落到
+ *   首个可用页签（2026-09-26 用户实测：「点插件开关会刷新设置内容并跳回通用」）。
  *
- * 外置到模块级后：插件启停不再打断设置页；页签本身的回退（当前页所属插件被停用 →
- * 落到首个可用页签）仍由 SettingsModal 按注册表自行处理。
+ * 因此弹窗的「开着没 / 在哪一页 / 什么范围」三件事全部外置到这里：
+ * `SettingsModal` 只按注册表把 `tab` 解析成实际可用的页签（页签随插件启停增删）。
  */
 export interface SettingsModalState {
   open: boolean
-  /** 打开时希望聚焦的页签（undefined = 首个可用页签） */
+  /** 当前页签（undefined = 交给 SettingsModal 解析为首个可用页签） */
   tab: string | undefined
   scope: SettingsScope
 }
@@ -48,6 +48,17 @@ function publish(patch: Partial<SettingsModalState>): void {
 /** 打开设置弹窗（tab 缺省 = 首个可用页签；scope='assistant' = 只显示助手相关页） */
 export function openSettingsModal(tab?: string, scope: SettingsScope = 'full'): void {
   publish({ open: true, tab, scope })
+}
+
+/**
+ * 切换当前页签（侧栏导航点击）。
+ *
+ * 必须是模块级写入：外壳子树重挂会重建 `SettingsModal`，页签若只存在组件 state 里就会丢。
+ * 页签本身随插件启停增删，失效的 tab 由 `SettingsModal` 的解析逻辑回退到首个可用页签。
+ */
+export function setSettingsModalTab(tab: string | undefined): void {
+  if (state.tab === tab) return
+  publish({ tab })
 }
 
 export function closeSettingsModal(): void {

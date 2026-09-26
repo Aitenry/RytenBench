@@ -170,7 +170,6 @@ const CustomFrame: React.FC<CustomFrameProps> = ({ currentKey }) => {
         <SettingsModal
           open={settingsModal.open}
           onClose={closeSettingsModal}
-          initialTab={settingsModal.tab}
           scope={settingsModal.scope}
         />
       </div>
