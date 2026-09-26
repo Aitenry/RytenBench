@@ -36,7 +36,11 @@ import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
 import FileRef from './FileRefNode'
 import { useTranslation } from '@renderer/i18n'
 
-import { getProviderColor, reasoningEffortLabel } from '@renderer/utils/providerMeta'
+import {
+  defaultReasoningEffort,
+  getProviderColor,
+  reasoningEffortLabel
+} from '@renderer/utils/providerMeta'
 import ProviderMark from '@renderer/components/provider/provider-mark'
 import type { Attachment } from '../types'
 
@@ -164,9 +168,14 @@ const HarnessInput: React.FC<HarnessInputProps> = ({
     [flatOptions, selectedProviderId]
   )
 
-  /** 当前模型档案声明的推理档位（空 = 未收录，面板里不给选） */
+  /** 当前模型档案声明的推理档位（空 = 没有思考档位，面板里不显示「推理等级」这一行） */
   const effortLevels = selectedOption?.effortLevels ?? []
   const currentEffort = selectedOption?.reasoningEffort ?? null
+  /**
+   * 实际生效的档位：显式选过就用它，没选过就是该模型的「中等思考」默认档
+   * （与主进程 thinking-params 的兜底同一份算法，所以界面显示的就是真正会下发的档位）。
+   */
+  const effectiveEffort = currentEffort ?? defaultReasoningEffort(effortLevels)
 
   /** 模型搜索：按展示名与协议名过滤，保留分组结构 */
   const filteredGroups = useMemo(() => {
@@ -225,10 +234,10 @@ const HarnessInput: React.FC<HarnessInputProps> = ({
   /**
    * 写入推理等级：落到该模型自己的配置列（provider.reasoning_effort），
    * 由主进程按协议族翻译成各家字段。保存后 providers-changed 广播会让列表刷新。
-   * null = 未设置（不下发档位参数，走模型默认）。
+   * 档位只来自模型档案（面板里不再有「默认/未设置」项），所以这里只写具体档位。
    */
   const selectEffort = useCallback(
-    async (level: string | null): Promise<void> => {
+    async (level: string): Promise<void> => {
       if (selectedProviderId == null) return
       setSavingEffort(true)
       try {
@@ -842,27 +851,29 @@ const HarnessInput: React.FC<HarnessInputProps> = ({
     )
   }
 
-  /** 面板标题行（二级页：返回 + 标题） */
+  /**
+   * 面板标题行（二级页：返回 + 标题）。
+   * **整行都是返回热区**（用户 2026-09-27：不要只有前面那个小箭头能点），
+   * 所以这里是一个占满整行的 button，箭头只是它里面的图标。
+   */
   const menuHeader = (title: string, onBack: () => void): React.ReactNode => (
-    <div className="hmm-head">
-      <button
-        type="button"
-        className="hmm-back"
-        onClick={onBack}
-        aria-label={t('harness.input.back')}
-      >
-        <RiArrowLeftSLine size={16} />
-      </button>
+    <button
+      type="button"
+      className="hmm-head"
+      onClick={onBack}
+      aria-label={t('harness.input.back')}
+    >
+      <RiArrowLeftSLine size={16} className="hmm-back-icon" />
       <span className="hmm-title">{title}</span>
-    </div>
+    </button>
   )
 
-  /** 推理等级一行（含「默认」= 未设置） */
-  const effortItem = (value: string | null, label: string): React.ReactNode => {
-    const active = (currentEffort ?? null) === value
+  /** 推理等级一行（档位表里的某一档；「默认」不再是可选项——有档位就必有一档在用） */
+  const effortItem = (value: string, label: string): React.ReactNode => {
+    const active = effectiveEffort === value
     return (
       <button
-        key={value ?? '__default'}
+        key={value}
         type="button"
         className={`hmm-item${active ? ' is-active' : ''}`}
         disabled={savingEffort}
@@ -885,25 +896,16 @@ const HarnessInput: React.FC<HarnessInputProps> = ({
             </span>
             <RiArrowRightSLine size={16} className="hmm-row-chev" />
           </button>
+          {/* 有思考档位才给这一行：模型没有档位表时整行不存在（不是灰掉、也不是显示「—」） */}
           {effortLevels.length > 0 ? (
             <button type="button" className="hmm-row" onClick={() => setMenuView('effort')}>
               <span className="hmm-row-label">{t('harness.input.effortLabel')}</span>
               <span className="hmm-row-value">
-                {currentEffort ? reasoningEffortLabel(currentEffort) : t('harness.input.effortDefault')}
+                {effectiveEffort ? reasoningEffortLabel(effectiveEffort) : ''}
               </span>
               <RiArrowRightSLine size={16} className="hmm-row-chev" />
             </button>
-          ) : (
-            // 档案未收录档位的模型：入口保留但不可点，悬停说明原因（免得看着像坏了）
-            <Tooltip title={t('harness.input.effortUnavailableHint')} placement="left">
-              <div className="hmm-row is-disabled" aria-disabled="true">
-                <span className="hmm-row-label">{t('harness.input.effortLabel')}</span>
-                <span className="hmm-row-value">
-                  {currentEffort ? reasoningEffortLabel(currentEffort) : '—'}
-                </span>
-              </div>
-            </Tooltip>
-          )}
+          ) : null}
         </>
       )}
 
@@ -960,7 +962,6 @@ const HarnessInput: React.FC<HarnessInputProps> = ({
         <>
           {menuHeader(t('harness.input.effortLabel'), () => setMenuView('root'))}
           <div className="hmm-list">
-            {effortItem(null, t('harness.input.effortDefault'))}
             {effortLevels.map((level) => effortItem(level, reasoningEffortLabel(level)))}
           </div>
           {selectedOption?.effortControllable ? null : (
@@ -971,9 +972,7 @@ const HarnessInput: React.FC<HarnessInputProps> = ({
     </div>
   )
 
-  const effortTriggerText = currentEffort
-    ? reasoningEffortLabel(currentEffort)
-    : t('harness.input.effortDefault')
+  const effortTriggerText = effectiveEffort ? reasoningEffortLabel(effectiveEffort) : ''
 
   return (
     <div
@@ -1154,22 +1153,20 @@ const HarnessInput: React.FC<HarnessInputProps> = ({
             display: flex;
             align-items: center;
             gap: 4px;
+            width: 100%;
             height: 30px;
-            padding: 0 6px 0 2px;
-          }
-          .harness-model-menu .hmm-back {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            width: 24px;
-            height: 24px;
+            /* 与下面的列表留 3px（用户指定；列表首项自身有圆角高亮，贴太紧会连成一片） */
+            margin: 0 0 3px;
+            padding: 0 8px 0 4px;
             border: 0;
-            border-radius: 6px;
+            border-radius: 8px;
             background: transparent;
-            color: var(--hmm-secondary);
+            text-align: left;
             cursor: pointer;
+            /* 整行可点返回：悬停给整行底色，而不是只亮那个小箭头 */
           }
-          .harness-model-menu .hmm-back:hover { background: var(--hmm-hover); }
+          .harness-model-menu .hmm-head:hover { background: var(--hmm-hover); }
+          .harness-model-menu .hmm-back-icon { flex-shrink: 0; color: var(--hmm-secondary); }
           .harness-model-menu .hmm-title { font-size: 12px; color: var(--hmm-tertiary); }
           .harness-model-menu .hmm-search { padding: 0 4px 6px; }
           .harness-model-menu .hmm-search-icon { color: var(--hmm-tertiary); }
@@ -1318,7 +1315,9 @@ const HarnessInput: React.FC<HarnessInputProps> = ({
               <span className="harness-model-trigger-name">
                 {selectedOption?.label ?? t('harness.input.modelPlaceholder')}
               </span>
-              <span className="harness-model-trigger-effort">{effortTriggerText}</span>
+              {effortTriggerText ? (
+                <span className="harness-model-trigger-effort">{effortTriggerText}</span>
+              ) : null}
               {menuOpen ? (
                 <RiArrowUpSLine size={14} className="harness-model-trigger-chev" />
               ) : (

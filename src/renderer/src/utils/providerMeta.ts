@@ -17,6 +17,7 @@ export {
   REASONING_EFFORT_ORDER,
   REASONING_EFFORT_PRESETS,
   REASONING_EFFORT_CHIPS,
+  defaultReasoningEffort,
   supportsReasoningEffort,
   reasoningEffortLabel,
   sortReasoningEfforts,

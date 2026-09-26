@@ -172,6 +172,26 @@ export const REASONING_EFFORT_PRESETS: readonly string[] = REASONING_EFFORT_ORDE
  */
 export const REASONING_EFFORT_CHIPS: readonly string[] = ['low', 'medium', 'high', 'max']
 
+/**
+ * 未显式选择档位时的**默认思考力度**：优先 `medium`，没有 medium 就取排序后的中间那一档。
+ *
+ * 用户口径（2026-09-27）：「不要默认选项，要从已有的选项里面选择……如果有思考等级就选择中等思考」——
+ * 也就是说「未设置」不是一个可见状态：模型有哪些档位就从中默认挑「中等思考」，
+ * 输入框里显示的就是这个真正会下发的档位。
+ *
+ * - `[none, low, medium, high, xhigh, max]` → `medium`
+ * - `[low, high, max]`（DeepSeek 那类）→ `high`（中间，也正好是 DeepSeek 自己的默认）
+ * - `[low, high]` → `high`；`[low]` → `low`；`[]` → null（没有思考档位，不下发也不显示）
+ */
+export function defaultReasoningEffort(
+  levels: readonly string[] | null | undefined
+): string | null {
+  const sorted = sortReasoningEfforts(levels)
+  if (sorted.length === 0) return null
+  if (sorted.includes('medium')) return 'medium'
+  return sorted[Math.floor(sorted.length / 2)]
+}
+
 /** 档位展示名：拉丁原文首字母大写（等宽/拉丁用原文，不译成中文，避免和协议值两套叫法） */
 export function reasoningEffortLabel(effort: string): string {
   const key = (effort ?? '').trim()

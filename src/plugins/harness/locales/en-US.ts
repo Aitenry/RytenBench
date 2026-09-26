@@ -72,9 +72,6 @@ export const harnessEnUS: typeof harnessZhCN = {
       modelEmpty: 'No matching model',
       modelMenuAria: 'Choose model and reasoning effort',
       effortLabel: 'Reasoning effort',
-      effortDefault: 'Default',
-      effortUnavailableHint:
-        'No reasoning levels stored for this model — add them under "Available levels" in model settings',
       effortNotSentHint: 'This protocol does not send the parameter; the value is only stored',
       effortSaveFailed: 'Failed to save the reasoning effort',
       back: 'Back',

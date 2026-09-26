@@ -123,6 +123,8 @@ export const HOST_UI: Record<string, HostUiEntry> = {
     'TOP_K_PROVIDERS',
     'supportsThinkingControl',
     'REASONING_EFFORT_ORDER',
+    'REASONING_EFFORT_PRESETS',
+    'defaultReasoningEffort',
     'supportsReasoningEffort',
     'reasoningEffortLabel',
     'sortReasoningEfforts',

@@ -80,8 +80,6 @@ export const harnessZhCN = {
       modelEmpty: '没有匹配的模型',
       modelMenuAria: '选择模型与推理等级',
       effortLabel: '推理等级',
-      effortDefault: '默认',
-      effortUnavailableHint: '当前模型未收录推理等级，可在模型设置的「可选档位」里自己填',
       effortNotSentHint: '当前接口协议不下发该参数，仅记录',
       effortSaveFailed: '推理等级保存失败',
       back: '返回',

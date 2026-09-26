@@ -31,6 +31,7 @@
  */
 
 import {
+  defaultReasoningEffort,
   resolveReasoningFamily,
   resolveThinkingFamily,
   type ThinkingMode
@@ -47,8 +48,14 @@ export interface ThinkingParamsInput {
   /** 自定义端点是否走 Anthropic 兼容协议 */
   anthropicFormat?: boolean
   mode: ThinkingMode
-  /** 推理等级（null / undefined / 空串 = 未设置，不下发任何档位参数） */
+  /**
+   * 推理等级：null / undefined / 空串 = 用户没选。
+   * 没选时按模型档案的档位表取「中等思考」兜底（见 defaultReasoningEffort）；
+   * 连档位表都没有（模型没有思考档位）就不下发任何档位参数。
+   */
   effort?: string | null
+  /** 该模型档案声明的档位表（models-profile 的 capabilities.reasoning_effort_levels） */
+  effortLevels?: readonly string[] | null
   /** 当前生效的输出上限（max_tokens 列，或模型档案的输出上限） */
   maxTokens: number | null
 }
@@ -136,9 +143,12 @@ function applyThinkingMode(acc: ParamsAccumulator, input: ThinkingParamsInput): 
   }
 }
 
-/** 推理等级参数：未设置或未适配的供应商都不写任何键 */
+/** 推理等级参数：未设置档位且模型有档位表时按「中等思考」兜底；没有档位表就什么都不写 */
 function applyReasoningEffort(acc: ParamsAccumulator, input: ThinkingParamsInput): void {
-  const effort = normalizeEffort(input.effort)
+  const explicit = normalizeEffort(input.effort)
+  // 思考被显式关掉时不兜底：用户要的就是「别思考」，别在这里把它又打开
+  const fallback = input.mode === 'off' ? null : defaultReasoningEffort(input.effortLevels)
+  const effort = explicit || (fallback ?? '')
   if (!effort) return
 
   const { provider, anthropicFormat = false } = input
