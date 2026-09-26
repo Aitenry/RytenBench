@@ -36,8 +36,8 @@ import type { HarnessToolInfo } from './types'
  * （`window.api.plugin.invoke/on`，通道名 `plugin:harness:*`）。
  *
  * 事件订阅同样走通用桥：通道必须由插件主进程 `ctx.registerEvent` 声明才进 preload
- * 白名单，**插件停用时订阅调用会抛「插件通道未启用」**——调用方在 useEffect 里订阅时
- * 必须容忍这种失败（历史教训：异常从 useEffect 逃逸会卸载整棵渲染树，白屏）。
+ * 白名单；插件停用时订阅调用**不再抛错**（preload 只告警），但没有发送方 ⇒ 事件不会来——
+ * 调用方仍要按「可能永远收不到事件」写（历史教训：异常从 useEffect 逃逸会卸载整棵渲染树，白屏）。
  *
  * 契约见 src/plugins/README.md；类型取自 shared/types.ts（跨进程 DTO，运行期零依赖）。
  */

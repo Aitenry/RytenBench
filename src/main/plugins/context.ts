@@ -57,7 +57,7 @@ export interface MainPluginContext {
    *
    * 这些通道与 `registerIpc` 注册的通道一起进入 `activePluginChannels()`，
    * 由 `pushPluginChannels()` 推给 preload 的白名单缓存；不声明就等于渲染层
-   * 订阅不到（`window.api.plugin.on` 抛「插件通道未启用」）。
+   * 订阅不到（preload 只会在订阅时告警，主进程侧根本没有人往该通道发送）。
    * 通道同样必须落在 `plugin:<命名空间>:` 内。
    */
   registerEvent(...channels: string[]): void

@@ -22,7 +22,8 @@ export const IPC_PLUGIN_CHANNELS_UPDATED = 'plugin-channels-updated'
  * 为什么需要它：`IPC_PLUGIN_CHANNELS_UPDATED` 是推送（did-finish-load 补推），
  * 而渲染层的首个订阅（插件 Provider 的 useEffect）发生在页面脚本执行期——
  * 早于 did-finish-load，于是「首帧就订阅事件通道」必然撞上白名单还没到的竞态
- * （表现为 `window.api.plugin.on` 抛「插件通道未启用」）。preload 在启动时用一次
+ * （当时表现为 `window.api.plugin.on` 抛「插件通道未启用」；现在订阅只告警，
+ * 但白名单没到就会刷出无意义的告警）。preload 在启动时用一次
  * 同步 IPC 取回权威清单，之后仍由推送增量刷新。
  */
 export const IPC_PLUGIN_CHANNELS_SYNC = 'plugin-channels-sync'
@@ -34,7 +35,7 @@ export const IPC_PLUGIN_CHANNELS_SYNC = 'plugin-channels-sync'
  * 渲染层宿主在构造期会**同步预装载**内置插件（否则首帧没有路由/菜单），但它此前只能先按
  * manifest 默认值（内置=启用）装载，等异步 `plugins-list` 回来才把用户停用的插件卸掉。
  * 这个空窗期里被停用插件的 Provider 已经挂载并订阅事件通道，而主进程根本没装载它的通道
- * → preload 白名单拒绝 → 抛错被 ErrorBoundary 接住（整页 RUNTIME ERROR）。
+ * → preload 白名单拒绝订阅（当时直接抛错）→ 被 ErrorBoundary 接住（整页 RUNTIME ERROR）。
  * preload 在启动时用一次同步 IPC 取回权威启用态，渲染层即可**一开始就只装载启用的插件**。
  */
 export const IPC_PLUGINS_LIST_SYNC = 'plugins-list-sync'

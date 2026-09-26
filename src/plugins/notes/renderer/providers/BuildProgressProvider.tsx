@@ -64,8 +64,8 @@ const buildStateToNotification = (
  * 是外壳唯一认识插件通道名的残留。搬进来之后 core 完全不认识插件通道；
  * 代价是「停用 notes 就没有进度浮层」——这正是期望语义（停用 = 卸载它的内容）。
  *
- * 订阅失败仍要吞掉：插件重新启用与 preload 白名单推送之间存在时序窗口
- * （`window.api.plugin.on` 对未声明的通道会抛「插件通道未启用」），
+ * 订阅失败仍要吞掉：插件重新启用与 preload 白名单推送之间存在时序窗口（`window.api.plugin.on`
+ * 对未声明/未启用的通道现在只打一条告警、不再抛错，但「订阅了却没有发送方」同样是常态），
  * 异常若从 useEffect 逃逸会卸载整棵树（白屏）。
  */
 export const BuildProgressProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -234,7 +234,7 @@ export const BuildProgressProvider: React.FC<{ children: React.ReactNode }> = ({
    * 订阅本插件的构建事件（主进程 → 渲染层）。
    *
    * 通道经 `ctx.registerEvent` 声明才进 preload 白名单；插件刚被启用时推送可能还没到，
-   * `window.api.plugin.on` 会抛错——统一 try/catch 降级为「没有进度事件」，
+   * 此时 `window.api.plugin.on` 只告警、不抛错——仍统一 try/catch 降级为「没有进度事件」，
    * 绝不让异常从 useEffect 逃逸（那会卸载整棵树 → 白屏）。
    */
   useEffect(() => {

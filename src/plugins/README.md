@@ -50,11 +50,12 @@ export function install(ctx: MainPluginContext): void | (() => void) {
   （`music` → `plugin:music:*`；外部插件 `plugin.demo` → `plugin:demo:*`）。宿主权威校验，
   重复占用报错。渲染层经 preload 通用桥 `window.api.plugin.invoke/on` 调用。
 - **事件通道**：`ctx.registerEvent('plugin:<ns>:<channel>')` 声明只有发送方的通道
-  （`webContents.send` 用）。preload 的白名单只收录插件**声明过**的通道，
-  不声明则渲染层 `window.api.plugin.on(...)` 抛「插件通道未启用」。
+  （`webContents.send` 用）。preload 的白名单只收录插件**声明过**的通道；
+  不声明时订阅不会抛错（preload 只打一条告警），但主进程侧没有任何发送方，
+  事件永远不来——所以声明仍然是必须的。
   preload 启动时会用一次同步 IPC（`plugin-channels-sync`）把权威清单取回来，
   之后启停变化由 `pushPluginChannels()` 增量刷新——插件 Provider 在 useEffect 里的
-  首个订阅因此不会撞上「推送还没到」的竞态。
+  首个订阅因此不会因为「推送还没到」而刷出无意义的告警。
 - **可逆装配**：`ctx.effect` 的效果按 LIFO 回滚；`install` 返回的 dispose 最先执行；
   IPC 通道随 `ctx.dispose()` 全部摘除。停用插件 = 卸载它的全部内容。
 - 插件的主进程代码可以照常 `import` core 模块（`@main/database/orm`、settings、workspace 等）；
