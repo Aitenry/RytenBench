@@ -122,9 +122,7 @@ export const zhCN = {
     manage_todos: { label: '待办管理', description: '查看、创建、更新和删除待办事项' },
     manage_docs: { label: '文档管理', description: '搜索、查看、创建、编辑和删除文档' },
     manage_wikis: { label: '知识库', description: '浏览和管理知识库、目录、文档归档' },
-    search_graph: { label: '图谱搜索', description: '在知识图谱中搜索实体' },
-    manage_planner: { label: '规划管理', description: '查看甘特图和任务树结构' },
-    manage_music: { label: '音乐管理', description: '查看歌单和曲目' }
+    search_graph: { label: '图谱搜索', description: '在知识图谱中搜索实体' }
   },
   /** 模型重试失败后的「换模型继续」弹窗 */
   modelRecovery: {
@@ -231,9 +229,7 @@ export const enUS: typeof zhCN = {
       label: 'Knowledge base',
       description: 'Browse and manage knowledge bases, folders and archived documents'
     },
-    search_graph: { label: 'Graph search', description: 'Search entities in the knowledge graph' },
-    manage_planner: { label: 'Planner', description: 'Inspect the Gantt chart and task tree' },
-    manage_music: { label: 'Music', description: 'Browse playlists and tracks' }
+    search_graph: { label: 'Graph search', description: 'Search entities in the knowledge graph' }
   },
   modelRecovery: {
     header: 'Model request failed',

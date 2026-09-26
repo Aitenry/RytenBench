@@ -87,3 +87,24 @@ export function setPluginSeeded(id: string, version: string): void {
   const map = pluginsStore.get('seeded') ?? {}
   pluginsStore.set('seeded', { ...map, [id]: version })
 }
+
+/**
+ * 本应用曾经铺过包的全部 id（`seeded` 的键）。
+ *
+ * 用途：判断「某个已安装插件是不是本应用铺的」——升级清理要用（见 `installer.ts` 的
+ * `removeRetiredBundledPlugins()`）。**不能**用目录扫描代替：目录扫描分不清
+ * 「本应用铺的内置包」与「用户自己装的第三方插件」。
+ */
+export function getSeededPluginIds(): string[] {
+  const map = pluginsStore.get('seeded') ?? {}
+  return Object.keys(map)
+}
+
+/** 清掉某 id 的铺包记录（该 id 不再是内置插件、或用户把它卸载掉时调用） */
+export function clearPluginSeeded(id: string): void {
+  const map = pluginsStore.get('seeded') ?? {}
+  if (!(id in map)) return
+  const rest = { ...map }
+  delete rest[id]
+  pluginsStore.set('seeded', rest)
+}

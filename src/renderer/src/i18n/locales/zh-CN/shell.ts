@@ -4,9 +4,9 @@
    中文落进等宽族会回退成宋体，和页面其它中文不是一套字。 */
 export const zhCNShell = {
   menu: {
+    // 只保留**内置**插件的菜单文案；独立插件（task-planner / music-player）自带
+    // planner.menu.title / music.menu.title（见各自 locales）。
     home: '首页',
-    planner: '计划',
-    music: '音乐',
     harness: '助手'
   },
   titleBar: {

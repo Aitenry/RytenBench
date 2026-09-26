@@ -13,15 +13,13 @@ import {
 import type { PgUpdateSetSource } from 'drizzle-orm/pg-core'
 import logger from 'electron-log'
 import { withOrm } from '../../../../../main/database/orm'
-// 迁移说明：core 的表统一经 core 的 schema 汇总入口取用（含 music_folders/music_tracks——
-// 它们归 music 插件所有，wiki 只在自己包里读「已入库」的歌单行；跨插件 provide/inject
-// 留给 harness 那轮统一处理）。
+// 迁移说明：core 的表统一经 core 的 schema 汇总入口取用。
+// 这里**只** import 本插件自己的表与宿主的共享表（images）——第三方插件的表（如音乐的歌单）
+// 既不该也不一定存在（插件没装时表都没有），封面清理因此改成「删不掉就留着」（见 deleteWiki）。
 import {
   directory_documents,
   documents,
   images,
-  music_folders,
-  music_tracks,
   wiki,
   wiki_directories,
   documents_content
@@ -166,13 +164,12 @@ async function deleteWiki(id: number): Promise<boolean> {
       .where(eq(wiki_directories.wiki_id, id))
     const docIds = docIdRows.map((r) => r.doc_id)
 
-    // 2. 在事务中删除文档及知识库
-    await db.transaction(async (tx) => {
-      const wikiRows = await tx
-        .select({ image_id: wiki.image_id })
-        .from(wiki)
-        .where(eq(wiki.id, id))
+    // 2. 记下封面 id（删库之后就查不到了），再在事务中删除文档与知识库
+    const wikiImageId =
+      (await db.select({ image_id: wiki.image_id }).from(wiki).where(eq(wiki.id, id)).limit(1))[0]
+        ?.image_id ?? null
 
+    await db.transaction(async (tx) => {
       if (docIds.length > 0) {
         // 修复：文档是工作区级实体、可被多个知识库目录共享——只删除不再被任何
         // 知识库目录引用的文档（此前整行删除，连坐其他知识库静默丢文）
@@ -189,35 +186,32 @@ async function deleteWiki(id: number): Promise<boolean> {
         )
       }
       await tx.delete(wiki).where(eq(wiki.id, id))
+    })
 
-      // 知识库封面不再被任何表引用时删除（修复：images 只增不删,换封面/删库后残留）
-      const wikiImageId = wikiRows[0]?.image_id ?? null
-      if (wikiImageId) {
-        const [inWiki, inDocContent, inMusicFolders, inMusicTracks] = [
-          await tx.select({ c: count() }).from(wiki).where(eq(wiki.image_id, wikiImageId)),
-          await tx
-            .select({ c: count() })
-            .from(documents_content)
-            .where(eq(documents_content.image_id, wikiImageId)),
-          await tx
-            .select({ c: count() })
-            .from(music_folders)
-            .where(eq(music_folders.image_id, wikiImageId)),
-          await tx
-            .select({ c: count() })
-            .from(music_tracks)
-            .where(eq(music_tracks.image_id, wikiImageId))
-        ]
-        const refs =
-          Number(inWiki[0]?.c ?? 0) +
-          Number(inDocContent[0]?.c ?? 0) +
-          Number(inMusicFolders[0]?.c ?? 0) +
-          Number(inMusicTracks[0]?.c ?? 0)
-        if (refs === 0) {
-          await tx.delete(images).where(eq(images.id, wikiImageId))
+    // 3. 封面（images 行）的清理放在事务之外，并**单独兜住外键错误**：
+    //    `images` 是宿主的共享表，除本插件外还有别的插件引用它（例如音乐插件的歌单封面）。
+    //    早先这里在事务内先数一遍 `music_folders` / `music_tracks` 的引用数再决定删不删——
+    //    那等于让 home 认识第三方插件的表名，而且音乐插件没装（表不存在）时查询会直接报错。
+    //    现在只按**本插件自己的**引用数判断，然后尝试删一次；若仍被别的插件引用，外键会拒绝，
+    //    捕获取消即可（图片行留着无害，总比让「删除知识库」整体失败强）。
+    if (wikiImageId) {
+      const [inWiki, inDocContent] = [
+        await db.select({ c: count() }).from(wiki).where(eq(wiki.image_id, wikiImageId)),
+        await db
+          .select({ c: count() })
+          .from(documents_content)
+          .where(eq(documents_content.image_id, wikiImageId))
+      ]
+      const refs = Number(inWiki[0]?.c ?? 0) + Number(inDocContent[0]?.c ?? 0)
+      if (refs === 0) {
+        try {
+          await db.delete(images).where(eq(images.id, wikiImageId))
+        } catch (err) {
+          // 仍被别的插件（如音乐的封面）引用：外键拒绝删除，留这条图片行即可
+          logger.info(`[home] 封面 ${wikiImageId} 仍被其它插件引用，保留（不删除）`, err)
         }
       }
-    })
+    }
 
     logger.info(`Deleted wiki ${id}; ${docIds.length} associated doc(s) handled (shared kept).`)
     return true

@@ -6,7 +6,7 @@ import { tool } from '@langchain/core/tools'
 import type { StructuredToolInterface } from '@langchain/core/tools'
 import * as z from 'zod/v4'
 import { mainFormat, mainPlural } from '../../../../main/i18n'
-import { getPlannerToolTexts } from '../../../../main/i18n/tool-results-planner'
+import { getTodoToolTexts } from '../../../../main/i18n/tool-results-todos'
 import type { PluginToolContribution } from '../../../../main/plugins/tool-contract'
 
 // ============================================================================
@@ -19,7 +19,7 @@ async function listTodosHandler(params: {
   page?: number
   pageSize?: number
 }): Promise<string> {
-  const tr = getPlannerToolTexts()
+  const tr = getTodoToolTexts()
   const { getAllTodoItems, getTodoItemsPaginated, getTodoItemsByStatus, getTodoItemsByPriority } =
     await import('../db/mapper/todo')
   const { page = 1, pageSize = 20, status, priority } = params
@@ -88,7 +88,7 @@ async function addTodoHandler(params: {
   due_date?: string
   category?: string
 }): Promise<string> {
-  const tr = getPlannerToolTexts()
+  const tr = getTodoToolTexts()
   const { addTodoItem, getTodoItemById } = await import('../db/mapper/todo')
   const newId = await addTodoItem({
     title: params.title,
@@ -119,7 +119,7 @@ async function updateTodoHandler(params: {
   due_date?: string | null
   category?: string
 }): Promise<string> {
-  const tr = getPlannerToolTexts()
+  const tr = getTodoToolTexts()
   const { updateTodoItem, getTodoItemById } = await import('../db/mapper/todo')
   const rows = await getTodoItemById(params.id)
   if (!rows.length) return mainFormat(tr.todos.notFound, { id: params.id })
@@ -137,7 +137,7 @@ async function updateTodoHandler(params: {
 }
 
 async function deleteTodoHandler(params: { id: number }): Promise<string> {
-  const tr = getPlannerToolTexts()
+  const tr = getTodoToolTexts()
   const { deleteTodoItem, getTodoItemById } = await import('../db/mapper/todo')
   const rows = await getTodoItemById(params.id)
   if (!rows.length) return mainFormat(tr.todos.notFound, { id: params.id })
@@ -162,7 +162,7 @@ export function buildManageTodosTool(): StructuredToolInterface {
         case 'delete':
           return deleteTodoHandler(params as Parameters<typeof deleteTodoHandler>[0])
         default:
-          return mainFormat(getPlannerToolTexts().common.unknownCommand, {
+          return mainFormat(getTodoToolTexts().common.unknownCommand, {
             command,
             supported: 'list, add, update, delete'
           })

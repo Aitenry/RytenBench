@@ -1,22 +1,18 @@
 import type { PluginManifest } from '../shared/plugin/types'
 import { harnessManifest } from './harness/manifest'
 import { homeManifest } from './home/manifest'
-import { musicManifest } from './music/manifest'
-import { plannerManifest } from './planner/manifest'
 
 /**
- * 四端唯一的**内置插件清单注册表**（主进程 / preload / 渲染层 / 外部插件工具共用）：
- * 只 import 各插件的 `manifest.ts`，不 import 任何实现。
+ * 随应用分发的**内置插件清单注册表**（主进程用）。
  *
- * 为什么单列一份：`plugins-list` 的启用态合并、渲染层 `plugin.tsx` 的 manifest
- * 都指向同一个对象，id/name/version/description 只有一处可改。
- * 顺序即设置面板与插件的默认装载顺序。
+ * 只 import 各插件的 `manifest.ts`，不 import 任何实现。这里的 id 面决定「哪些插件算内置」：
+ * 会被铺进 `userData/plugins/`（首次启动）、默认启用、面板显示「内置」徽章、可按 id 重装。
+ *
+ * **不在这里的插件 = 第三方插件**：不随应用分发、不自动安装、默认停用，
+ * 由用户从 GitHub（见应用侧的「从 GitHub 安装」）或本地目录装进来。
+ * `task-planner` / `music-player` 就是这样的独立插件——源码与发布在
+ * `github.com/Aitenry/ryten-plugins`。
  */
-export const BUILTIN_PLUGIN_MANIFESTS: PluginManifest[] = [
-  harnessManifest,
-  homeManifest,
-  musicManifest,
-  plannerManifest
-]
+export const BUILTIN_PLUGIN_MANIFESTS: PluginManifest[] = [harnessManifest, homeManifest]
 
 export default BUILTIN_PLUGIN_MANIFESTS

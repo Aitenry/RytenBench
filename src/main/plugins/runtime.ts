@@ -14,7 +14,7 @@ import * as i18n from '../i18n'
 import * as toolResultsAgent from '../i18n/tool-results-agent'
 import * as toolResultsDocs from '../i18n/tool-results-docs'
 import * as toolResultsFs from '../i18n/tool-results-fs'
-import * as toolResultsPlanner from '../i18n/tool-results-planner'
+import * as toolResultsTodos from '../i18n/tool-results-todos'
 import * as appEvents from '../plugins/app-events'
 import * as appHooks from '../plugins/app-hooks'
 import * as contributions from '../plugins/contributions'
@@ -70,7 +70,7 @@ const HOST_MAIN: Record<string, unknown> = {
   '@host/main/i18n/tool-results-agent': toolResultsAgent,
   '@host/main/i18n/tool-results-docs': toolResultsDocs,
   '@host/main/i18n/tool-results-fs': toolResultsFs,
-  '@host/main/i18n/tool-results-planner': toolResultsPlanner,
+  '@host/main/i18n/tool-results-todos': toolResultsTodos,
   '@host/main/plugins/app-events': appEvents,
   '@host/main/plugins/app-hooks': appHooks,
   '@host/main/plugins/contributions': contributions,

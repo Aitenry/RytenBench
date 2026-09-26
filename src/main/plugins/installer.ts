@@ -4,9 +4,12 @@ import * as fs from 'fs'
 import * as path from 'path'
 import logger from 'electron-log'
 import {
+  clearEnabledOverride,
+  clearPluginSeeded,
   clearUninstalled,
-  getUninstalledBuiltins,
   getPluginSeeded,
+  getSeededPluginIds,
+  getUninstalledBuiltins,
   markUninstalled,
   setPluginSeeded
 } from './store'
@@ -211,6 +214,7 @@ export function installBundledPlugin(id: string, force = false): boolean {
  */
 export function ensureBundledPluginsInstalled(): void {
   ensureDevPackagesBuilt()
+  removeRetiredBundledPlugins()
   const ids = listBundledPluginIds()
   if (ids.length === 0) {
     logger.warn(
@@ -232,6 +236,41 @@ export function ensureBundledPluginsInstalled(): void {
     // 已安装但铺包版本变了（应用升级）→ 覆盖产物文件
     if (getPluginSeeded(id) !== version) installBundledPlugin(id, true)
   }
+}
+
+/**
+ * **升级清理**：把「曾经是本应用的内置插件、现在不再是」的旧铺包删掉。
+ *
+ * 为什么需要：`task-planner` / `music-player` 这两个插件曾经是内置的（当年 id 还是
+ * `planner` / `music`），本应用在用户机器上铺过一份到 `userData/plugins/<id>/`。
+ * 现在它们改成独立插件（新 id），旧目录就成了**谁也不认识的孤儿**：
+ * - 旧代码要 `@host/main/i18n/tool-results-planner` 这类宿主模块，新版本已经删了
+ *   → 装载必然失败，面板里显示「加载失败」；
+ * - 它的 id 又不在内置清单里，`ensureBundledPluginsInstalled()` 不会管它
+ *   → 用户既用不了也（大概率）想不到去卸载。
+ *
+ * 判据用 `plugins.json` 的 `seeded` 记录（=**本应用自己铺过的 id**），因此绝不会误删
+ * 用户自己安装的第三方插件。只删**代码目录**，不碰数据库里的行——那两个插件的新版本
+ * 沿用同一批表（`planner_tasks` / `music_folders` …），装回来数据照旧。
+ */
+function removeRetiredBundledPlugins(): void {
+  let removed = 0
+  for (const id of getSeededPluginIds()) {
+    if (BUILTIN_IDS.has(id)) continue
+    const found = findExternalPlugin(id)
+    if (found) {
+      try {
+        fs.rmSync(found.dir, { recursive: true, force: true })
+        removed += 1
+        logger.info(`[Plugins] 已清理不再是内置插件的旧铺包: ${id} → ${found.dir}`)
+      } catch (err) {
+        logger.warn(`[Plugins] 清理旧铺包失败（忽略）: ${id}`, err)
+      }
+    }
+    clearPluginSeeded(id)
+    clearEnabledOverride(id)
+  }
+  if (removed > 0) invalidateInstalledPluginIds()
 }
 
 /**

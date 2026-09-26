@@ -8,7 +8,7 @@ import { getMainLanguage } from './index'
  * 因此必须跟随界面语言。
  *
  * 与 `tool-results.ts`（mnemon 工具组）、`tool-results-fs.ts`（文件/溢出/提问）、
- * `tool-results-docs.ts`（知识库/文档）、`tool-results-planner.ts`（规划）的分工：
+ * `tool-results-docs.ts`（知识库/文档）、`tool-results-todos.ts`（待办）的分工：
  * 这边是运行时工具、子代理与目标驱动器。
  *
  * 中文是源语言，`enUSAgentToolTexts` 用 `typeof zhCNAgentToolTexts` 约束，

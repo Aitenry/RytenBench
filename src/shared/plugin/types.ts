@@ -11,7 +11,16 @@
 
 /** 插件清单（plugin.json / 内置插件 manifest） */
 export interface PluginManifest {
-  /** 稳定唯一标识。内置：'home'|'harness'|'planner'|'music'；外部：'plugin.<author>.<name>' */
+  /**
+   * 稳定唯一标识。
+   *
+   * - **内置**（随应用分发、默认启用、可由应用包重装）：`home` | `harness`；
+   * - **外部/第三方**（不随应用分发、默认停用）：`plugin.<作者>.<名字>`（如示例插件 `plugin.demo`），
+   *   或者不带前缀的中性短名（独立插件仓库里的 `task-planner` / `music-player`）。
+   *
+   * 命名空间规则：id 去掉开头的 `plugin.` 段即 IPC 命名空间（`plugin:<命名空间>:*`），
+   * 因此 `plugin.demo` 与 `demo` 会撞到同一个命名空间，宿主会拒绝第二个（见 `channelNamespace`）。
+   */
   id: string
   /** 展示名 */
   name: string

@@ -8,7 +8,7 @@
  *
  * 为什么不让组件直接订阅宿主事件总线：`HostServices.events` 只在插件 install 作用域里可用
  * （经 `ctx.use('events')` 取），React 组件拿不到宿主实例。这与音乐插件的
- * 「模块级可订阅快照 + 外壳插槽」是同一套做法（见 src/plugins/music/renderer/audio/store.ts）。
+ * 「模块级可订阅快照 + 外壳插槽」是同一套做法（见独立插件 music-player 的 audio/store.ts）。
  */
 export interface DocChangedPayload {
   docId: number

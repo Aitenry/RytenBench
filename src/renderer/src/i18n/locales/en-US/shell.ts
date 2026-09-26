@@ -3,9 +3,9 @@ import type { zhCNShell } from '../zh-CN/shell'
 /* App shell copy: window frame, route skeleton and build-progress notifications. */
 export const enUSShell: typeof zhCNShell = {
   menu: {
+    // Built-in plugins only; standalone plugins ship their own captions
+    // (planner.menu.title / music.menu.title).
     home: 'Home',
-    planner: 'Planner',
-    music: 'Music',
     harness: 'Assistant'
   },
   titleBar: {
