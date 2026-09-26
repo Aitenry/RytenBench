@@ -134,7 +134,9 @@ const UserMessage: React.FC<UserMessageProps> = ({
   ): React.ReactNode => {
     const active = hovered === kind
     return (
-      <Tooltip title={title}>
+      /* 与助手消息操作栏（MessageActions 的 tooltipCommon）对齐：都朝下弹，
+         避免朝上盖住用户刚写完的那段提问正文 */
+      <Tooltip title={title} placement="bottom">
         <button
           type="button"
           aria-label={title}

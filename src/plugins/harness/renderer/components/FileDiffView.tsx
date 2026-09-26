@@ -73,7 +73,9 @@ const DiffToolbarButton: React.FC<DiffToolbarButtonProps> = ({
         : {}
   const baseColor = toneStyle.color ?? colorTextSecondary
   return (
-    <Tooltip title={title}>
+    /* 这几个按钮只在差异视图的**顶部操作行**里用（保留/撤销/上一处/下一处），
+       提示朝下弹：朝上会盖住编辑器工具条与页签栏（用户 2026-09-26 统一工具条方向）。 */
+    <Tooltip title={title} placement="bottom">
       <button
         type="button"
         data-diff-btn={testId}

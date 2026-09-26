@@ -660,7 +660,9 @@ const DocTreePanel: React.FC<DocTreePanelProps> = ({
         </span>
         <span style={{ marginLeft: 2, fontSize: 11, color: token.colorTextTertiary }}>{count}</span>
         <span style={{ flex: 1 }} />
-        <Tooltip title={t('notes.tree.createNamed', { name: label })}>
+        {/* 提示朝右弹（用户 2026-09-26）：这个 + 在左栏树里，朝上会压住同一栏上一行的
+            分区标题/计数，朝右则落在右侧主区上，不遮本栏内容 */}
+        <Tooltip title={t('notes.tree.createNamed', { name: label })} placement="right">
           <button
             style={{
               width: 20,

@@ -484,7 +484,8 @@ const EditorToolbar: React.FC<EditorToolbarProps> = ({ editor, onLinkClick }) =>
     active = false,
     disabled = false
   ): React.ReactNode => (
-    <Tooltip title={title} key={title}>
+    /* 工具条贴着编辑区上沿，提示统一朝下弹：朝上会盖住上面那排按钮/页签（用户 2026-09-26） */
+    <Tooltip title={title} key={title} placement="bottom">
       <button
         className={`tiptap-toolbar-btn${active ? ' tiptap-toolbar-btn-active' : ''}`}
         onMouseDown={prevent}
@@ -676,7 +677,7 @@ const BubbleButtons: React.FC<BubbleButtonsProps> = ({ editor, onLinkClick }) =>
     action: () => void,
     active = false
   ): React.ReactNode => (
-    <Tooltip title={title} key={title}>
+    <Tooltip title={title} key={title} placement="bottom">
       <button
         className={`tiptap-toolbar-btn${active ? ' tiptap-toolbar-btn-active' : ''}`}
         onMouseDown={prevent}

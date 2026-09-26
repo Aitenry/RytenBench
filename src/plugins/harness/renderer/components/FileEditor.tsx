@@ -585,7 +585,9 @@ const FileEditor: React.FC<FileEditorProps> = ({
         )}
       </div>
 
-      {/* 工具条：路径 + 视图切换 + 折行 + 重新载入 */}
+      {/* 工具条：路径 + 视图切换 + 折行 + 重新载入。
+          这一排按钮贴着页签栏下沿，提示统一朝**下**弹（placement="bottom"）：
+          朝上（antd 默认）会盖住上面的页签文字，朝下压在正文上沿、不遮任何操作入口。 */}
       {activeFile && !activeFile.tool && (
         <div
           ref={toolbarRef}
@@ -606,7 +608,7 @@ const FileEditor: React.FC<FileEditorProps> = ({
           </span>
           <div className="flex-1" />
           {activeFile.diskChanged && (
-            <Tooltip title={t('harness.fileEditor.diskChangedTip')}>
+            <Tooltip title={t('harness.fileEditor.diskChangedTip')} placement="bottom">
               <span className="flex items-center gap-1 text-[11.5px]" style={{ color: '#c98a2b' }}>
                 <RiFileWarningLine size={13} />
                 {t('harness.fileEditor.diskChanged')}
@@ -618,7 +620,7 @@ const FileEditor: React.FC<FileEditorProps> = ({
               文案在 Tooltip 里。 */}
           {isMarkdown && viewMode === 'edit' && !activeReadOnly && (
             <div className="flex items-center">
-              <Tooltip title={t('harness.fileEditor.mdRichTip')}>
+              <Tooltip title={t('harness.fileEditor.mdRichTip')} placement="bottom">
                 <button
                   style={toolbarBtn(!activeFile.markdownSource)}
                   onClick={() => onSetMarkdownSource(activeFile.path, false)}
@@ -626,7 +628,7 @@ const FileEditor: React.FC<FileEditorProps> = ({
                   <RiMarkdownLine size={13} />
                 </button>
               </Tooltip>
-              <Tooltip title={t('harness.fileEditor.mdSourceTip')}>
+              <Tooltip title={t('harness.fileEditor.mdSourceTip')} placement="bottom">
                 <button
                   style={toolbarBtn(Boolean(activeFile.markdownSource))}
                   onClick={() => onSetMarkdownSource(activeFile.path, true)}
@@ -638,7 +640,7 @@ const FileEditor: React.FC<FileEditorProps> = ({
           )}
           {pendingOfActive.some((c) => c.status === 'pending') && (
             <div className="flex items-center">
-              <Tooltip title={t('harness.fileEditor.modeEdit')}>
+              <Tooltip title={t('harness.fileEditor.modeEdit')} placement="bottom">
                 <button
                   style={toolbarBtn(viewMode === 'edit')}
                   onClick={() => onChangeView(activeFile.path, 'edit')}
@@ -646,7 +648,7 @@ const FileEditor: React.FC<FileEditorProps> = ({
                   <RiCodeSSlashLine size={13} />
                 </button>
               </Tooltip>
-              <Tooltip title={t('harness.fileEditor.modeDiff')}>
+              <Tooltip title={t('harness.fileEditor.modeDiff')} placement="bottom">
                 <button
                   style={toolbarBtn(viewMode === 'diff')}
                   onClick={() => onChangeView(activeFile.path, 'diff')}
@@ -657,13 +659,13 @@ const FileEditor: React.FC<FileEditorProps> = ({
             </div>
           )}
           {!activeReadOnly && (
-            <Tooltip title={t('harness.fileEditor.reloadTip')}>
+            <Tooltip title={t('harness.fileEditor.reloadTip')} placement="bottom">
               <button style={toolbarBtn(false)} onClick={() => onReloadFile(activeFile.path)}>
                 <RiArrowGoBackLine size={13} />
               </button>
             </Tooltip>
           )}
-          <Tooltip title={t('harness.fileEditor.wrapTip')}>
+          <Tooltip title={t('harness.fileEditor.wrapTip')} placement="bottom">
             <button style={toolbarBtn(wrap)} onClick={toggleWrap}>
               <RiTextWrap size={13} />
             </button>
