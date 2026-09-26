@@ -153,6 +153,21 @@ const api = {
   plugin: {
     list: () => ipcRenderer.invoke('plugins-list') as Promise<PluginListEntry[]>,
     /**
+     * **同步**取一次插件清单（含启用态）。
+     *
+     * 渲染层宿主在构造期要同步决定装载哪些内置插件（首帧既要有路由/菜单，又不能把用户
+     * 停用的插件先装一遍再卸——那会让被停用插件的 Provider 订阅到不存在的通道）。
+     * 只有同步 IPC 能在这个时机拿到主进程的权威启用态；失败时退回空数组，让上层按默认值走。
+     */
+    listSync: (): PluginListEntry[] => {
+      try {
+        const list = ipcRenderer.sendSync('plugins-list-sync')
+        return Array.isArray(list) ? (list as PluginListEntry[]) : []
+      } catch {
+        return []
+      }
+    },
+    /**
      * 只读诊断：当前主进程里各插件贡献的宿主生命周期钩子（数量 + 标签）
      * 与工作区事件订阅数。用于验证「停用插件后钩子不再执行」（见 main/ipc/misc.ts）。
      */
@@ -187,13 +202,24 @@ const api = {
       }
       return ipcRenderer.invoke(channel, ...args) as Promise<unknown>
     },
-    /** 订阅外部插件事件通道：白名单缓存门控（主进程为准） */
+    /**
+     * 订阅插件事件通道。
+     *
+     * 只强校验通道名格式；**白名单只用于提示，不再抛错**。原因（2026-09-26 实测事故）：
+     * 白名单是主进程已装载通道的缓存，天然可能滞后于渲染层（插件停用后的空窗期、主进程
+     * 插件模块装载失败、dev 下 HMR 重载顺序……）。此前这里直接抛错，异常从插件 Provider 的
+     * useEffect 逃逸 → ErrorBoundary 接管 → 整个界面变成「RUNTIME ERROR」。
+     * 现在的语义：订阅照常建立（真正权威在主进程——插件没装载就没人往该通道发消息），
+     * 通道当时不在白名单里只提示一条告警。
+     */
     on: (channel: string, callback: (data: unknown) => void) => {
       if (typeof channel !== 'string' || !PLUGIN_CHANNEL_RE.test(channel)) {
         throw new Error(`非法插件通道名: ${String(channel)}`)
       }
       if (!enabledPluginChannels.has(channel)) {
-        throw new Error(`插件通道未启用: ${channel}`)
+        console.warn(
+          `[plugin] 订阅的通道当前未启用（主进程为准，插件未装载时不会收到事件）: ${channel}`
+        )
       }
       const handler = (_event: Electron.IpcRendererEvent, data: unknown): void => callback(data)
       ipcRenderer.on(channel, handler)

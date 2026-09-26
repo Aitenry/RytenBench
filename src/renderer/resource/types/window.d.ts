@@ -85,6 +85,8 @@ export interface Window {
     }
     plugin: {
       list: () => Promise<unknown[]>
+      /** 同步取一次插件清单（含启用态）；宿主首帧靠它决定只装载启用的内置插件 */
+      listSync: () => { id: string; builtin: boolean; enabled: boolean }[]
       setEnabled: (id: string, enabled: boolean) => Promise<unknown[]>
       install: () => Promise<{ ok: boolean; id?: string; error?: string }>
       uninstall: (id: string) => Promise<unknown[]>

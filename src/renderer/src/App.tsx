@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react'
+import React, { useEffect, useMemo } from 'react'
 import { HashRouter } from 'react-router-dom'
 import { MessageContext } from '@renderer/contexts/MessageContext'
 import { NotificationProvider } from '@renderer/contexts/NotificationContext'
@@ -110,12 +110,39 @@ const PluginStateBridge: React.FC<{ children: React.ReactNode }> = ({ children }
 }
 
 const App: React.FC = () => {
+  /**
+   * 首帧启用态：宿主在构造期**同步预装载**内置插件（否则首帧没有路由/菜单，点菜单会导航到空路由），
+   * 所以必须在同一时机拿到主进程的权威启用态，而不是先按 manifest 默认值全装一遍再异步卸载——
+   * 那样被停用插件的 Provider 会短暂挂载并订阅事件通道，而主进程并没有装载它的通道
+   * （2026-09-26 事故：整页 RUNTIME ERROR / 插件通道未启用: plugin:music:play-track）。
+   *
+   * 取不到时返回 undefined，宿主退回「内置默认启用」的老行为（最坏情况是短暂多装一次）。
+   */
+  const initialEnabled = useMemo<Record<string, boolean> | undefined>(() => {
+    try {
+      const list = window.api.plugin.listSync()
+      if (!Array.isArray(list) || list.length === 0) return undefined
+      const map: Record<string, boolean> = {}
+      for (const entry of list) {
+        if (entry.builtin) map[entry.id] = entry.enabled
+      }
+      return Object.keys(map).length > 0 ? map : undefined
+    } catch (err) {
+      console.warn('[plugins] 同步启用清单失败，按默认启用态装载:', err)
+      return undefined
+    }
+  }, [])
+
   return (
     <HashRouter>
       {/* 全局错误边界：渲染错误不再让整个应用白屏死掉，而是给出可恢复的提示卡 */}
       <AppErrorBoundary>
         {/* 插件宿主根：内置插件按启用态装载，路由/菜单/设置页/Provider 全部注册表驱动 */}
-        <PluginHostProvider plugins={builtinPlugins} vendorModules={vendorModules}>
+        <PluginHostProvider
+          plugins={builtinPlugins}
+          vendorModules={vendorModules}
+          enabledOverride={initialEnabled}
+        >
           <PluginStateBridge>
             <CoreProviders>
               <PluginProvidersShell>

@@ -27,6 +27,18 @@ export const IPC_PLUGIN_CHANNELS_UPDATED = 'plugin-channels-updated'
  */
 export const IPC_PLUGIN_CHANNELS_SYNC = 'plugin-channels-sync'
 
+/**
+ * 渲染层 → 主进程：**同步**取一次插件启用清单（`ipcRenderer.sendSync`）。
+ *
+ * 为什么需要它（2026-09-26 用户实测报错「插件通道未启用: plugin:music:play-track」）：
+ * 渲染层宿主在构造期会**同步预装载**内置插件（否则首帧没有路由/菜单），但它此前只能先按
+ * manifest 默认值（内置=启用）装载，等异步 `plugins-list` 回来才把用户停用的插件卸掉。
+ * 这个空窗期里被停用插件的 Provider 已经挂载并订阅事件通道，而主进程根本没装载它的通道
+ * → preload 白名单拒绝 → 抛错被 ErrorBoundary 接住（整页 RUNTIME ERROR）。
+ * preload 在启动时用一次同步 IPC 取回权威启用态，渲染层即可**一开始就只装载启用的插件**。
+ */
+export const IPC_PLUGINS_LIST_SYNC = 'plugins-list-sync'
+
 /** 主进程 → 渲染层：插件启停/安装/卸载后的状态广播 */
 export const IPC_PLUGIN_STATE_CHANGED = 'plugin-state-changed'
 

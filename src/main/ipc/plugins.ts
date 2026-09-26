@@ -8,6 +8,7 @@ import { BUILTIN_PLUGIN_MANIFESTS } from '../../plugins/manifests'
 import {
   IPC_PLUGIN_STATE_CHANGED,
   IPC_PLUGINS_LIST,
+  IPC_PLUGINS_LIST_SYNC,
   IPC_PLUGINS_SET_ENABLED,
   IPC_PLUGINS_INSTALL,
   IPC_PLUGINS_UNINSTALL
@@ -79,6 +80,18 @@ export function setPluginStateSyncHook(hook: PluginStateSyncHook): void {
 
 export function registerPluginsIpc(): void {
   ipcMain.handle(IPC_PLUGINS_LIST, () => listEntries())
+
+  // 同步取启用清单：渲染层首帧要靠它决定「只装载用户启用的内置插件」，
+  // 否则会先按默认值装载一遍再卸载（见 protocol.ts 里该常量的说明）。
+  // listEntries 本身是同步的（读 electron-store + 同步扫插件目录），可以直接当返回值。
+  ipcMain.on(IPC_PLUGINS_LIST_SYNC, (event) => {
+    try {
+      event.returnValue = listEntries()
+    } catch (err) {
+      logger.warn('[Plugins] 同步插件清单失败:', err)
+      event.returnValue = []
+    }
+  })
 
   ipcMain.handle(IPC_PLUGINS_SET_ENABLED, (_event, id: unknown, enabled: unknown) => {
     if (typeof id !== 'string' || typeof enabled !== 'boolean') {

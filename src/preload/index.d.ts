@@ -65,6 +65,11 @@ interface Api {
   plugin: {
     /** 已发现插件与启用态（内置目录 + 外部扫描合并） */
     list: () => Promise<PluginListEntry[]>
+    /**
+     * **同步**取一次插件清单（含启用态）。
+     * 渲染层宿主在构造期要同步决定装载哪些内置插件，只有同步 IPC 能在这个时机拿到权威状态。
+     */
+    listSync: () => PluginListEntry[]
     /** 启用/停用插件（写入持久化并广播，渲染层即时装载/卸载） */
     setEnabled: (id: string, enabled: boolean) => Promise<PluginListEntry[]>
     /** 安装外部插件（弹目录选择；返回 ok/error） */
