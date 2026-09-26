@@ -21,7 +21,7 @@ import ToolTextPreview from './ToolTextPreview'
 import StreamTextWindow from './StreamTextWindow'
 import FoldBody from './FoldBody'
 import { ToolProgressCard, ToolResultCard, type ToolCardStyle } from './ToolResultCard'
-import { TOOL_IN_PROGRESS_ICONS } from '../../utils/toolIcons'
+import { toolIconFor } from '../../utils/toolIcons'
 import { MONO_FONT, TruncatedTooltipText } from './TruncatedTooltipText'
 
 import {
@@ -1310,11 +1310,8 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
           }
           // 其余工具（含无卡片数据的异常完成态）：通用折叠，进行中光泽头 + 输入/输出详情
           const toolLabel = getToolStatusLabel(t, toolName, phase)
-          // 进行中折叠头展示该工具完成后的定制卡片同款图标；mnemon 记忆工具用大脑图标；其余不显示
-          const inProgressIcon =
-            inProgress &&
-            (TOOL_IN_PROGRESS_ICONS[toolName] ||
-              (toolName.startsWith('mnemon_') ? RiBrain4Line : undefined))
+          // 进行中折叠头展示该工具完成后的定制卡片同款图标；MCP / mnemon 走前缀兜底；其余不显示
+          const inProgressIcon = inProgress && toolIconFor(toolName)
           return (
             <Collapse
               styles={COLLAPSE_HEADER_CENTERED}
@@ -1559,11 +1556,8 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
                 }
                 // 其余工具（含无卡片数据的异常完成态）：通用折叠，进行中光泽头 + 输入/输出详情
                 const toolLabel = getToolStatusLabel(t, toolName, phase)
-                // 进行中折叠头展示该工具完成后的定制卡片同款图标；mnemon 记忆工具用大脑图标；其余不显示
-                const inProgressIcon =
-                  inProgress &&
-                  (TOOL_IN_PROGRESS_ICONS[toolName] ||
-                    (toolName.startsWith('mnemon_') ? RiBrain4Line : undefined))
+                // 进行中折叠头展示该工具完成后的定制卡片同款图标；MCP / mnemon 走前缀兜底；其余不显示
+                const inProgressIcon = inProgress && toolIconFor(toolName)
                 return (
                   <Collapse
                     styles={COLLAPSE_HEADER_CENTERED}
@@ -2022,15 +2016,13 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
         /**
          * 组头图标：**认不出工具名时不能摆 `<RunIcon/>`**。
          *
-         * `TOOL_IN_PROGRESS_ICONS` 只收录内置工具（以及 mnemon 走大脑图标），
-         * MCP/自建工具名（`mcp__…` 之类）取到的是 undefined——直接渲染 undefined 组件会抛
-         * 「Element type is invalid … Check the render method of `AssistantMessage`」，
-         * 整条消息白屏（这条踩过：工装夹具里全是 read_file / grep，恰好都在表里，漏了这条路径）。
-         * 与逐卡渲染处的兜底保持一致：内置 → 表里图标，mnemon → 大脑图标，其余 → 不摆图标。
+         * `TOOL_IN_PROGRESS_ICONS` 只收录内置工具名，但 MCP（`mcp__…`）与 Mnemon（`mnemon_…`）
+         * 是运行期才知道的名字，所以走 `toolIconFor` 的**前缀兜底**；仍认不出时必须不摆图标——
+         * 直接渲染 undefined 组件会抛「Element type is invalid … Check the render method of
+         * `AssistantMessage`」，整条消息白屏（这条踩过：工装夹具里全是 read_file / grep，
+         * 恰好都在表里，漏了这条路径）。与逐卡渲染处的兜底保持一致。
          */
-        const RunIcon =
-          TOOL_IN_PROGRESS_ICONS[entry.name] ??
-          (entry.name.startsWith('mnemon_') ? RiBrain4Line : undefined)
+        const RunIcon = toolIconFor(entry.name)
         const headLabel = (
           <span
             data-tool-run={entry.name}

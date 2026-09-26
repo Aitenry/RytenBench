@@ -10,7 +10,7 @@ import {
 import { ShinyIcon } from '@renderer/components/effects/ShinyText'
 
 import { useWorkspaceBridge } from '../../contexts/workspace-bridge'
-import { formatBytes, TOOL_CARD_ICONS, TOOL_IN_PROGRESS_ICONS } from '../../utils/toolIcons'
+import { formatBytes, TOOL_CARD_ICONS, toolIconFor } from '../../utils/toolIcons'
 import { MONO_FONT, TruncatedTooltipText } from './TruncatedTooltipText'
 import type { ToolCall, ToolCard, ToolCardKind } from '../../../shared/types'
 
@@ -432,7 +432,8 @@ export const ToolProgressCard: React.FC<{
     progress === 'preparing'
       ? ` · ${t('harness.assistantMessage.toolPreparing')}`
       : ` · ${t('harness.assistantMessage.toolExecuting')}`
-  const Icon = TOOL_IN_PROGRESS_ICONS[tool.name] || RiTerminalBoxLine
+  // MCP / mnemon 这类运行期才知道名字的工具走前缀兜底；仍认不出退到终端图标（与旧行为一致）
+  const Icon = toolIconFor(tool.name) || RiTerminalBoxLine
   return (
     <CardShell
       style={style}

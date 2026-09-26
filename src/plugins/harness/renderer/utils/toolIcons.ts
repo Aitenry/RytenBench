@@ -1,13 +1,22 @@
 import type { ComponentType, CSSProperties } from 'react'
 import {
+  RiBrain4Line,
   RiEye2Line,
   RiFileEditLine,
   RiFolderOpenLine,
   RiListCheck,
   RiPencilLine,
+  RiPlug2Line,
   RiSearchLine,
   RiTerminalBoxLine
 } from '@remixicon/react'
+
+/**
+ * 前缀兜底键（名字运行期才知道的工具族）。前缀同时登记进 `TOOL_IN_PROGRESS_ICONS`
+ * （键就是前缀本身），`toolIconFor` 按「精确命中 → 前缀命中」两级查找。
+ */
+export const MCP_TOOL_ICON_KEY = 'mcp__'
+export const MNEMON_TOOL_ICON_KEY = 'mnemon_'
 
 /**
  * 工具图标映射（单独放 .ts：这些是常量，放在组件文件里会触发
@@ -33,7 +42,27 @@ export const TOOL_IN_PROGRESS_ICONS: Record<
   grep: RiSearchLine,
   execute: RiTerminalBoxLine,
   write_todos: RiListCheck,
-  read_todos: RiListCheck
+  read_todos: RiListCheck,
+  // 前缀兜底：MCP 外部工具（插头）与 Mnemon 记忆工具（大脑）——名字运行期才知道
+  [MCP_TOOL_ICON_KEY]: RiPlug2Line,
+  [MNEMON_TOOL_ICON_KEY]: RiBrain4Line
+}
+
+/**
+ * 按工具名取图标：先精确匹配，再按已知前缀兜底（MCP / Mnemon），认不出返回 undefined。
+ *
+ * 调用方必须按「不摆图标」处理 undefined——渲染 undefined 组件会整条消息白屏
+ * （见 AssistantMessage 的注释与回归工装）。
+ */
+export function toolIconFor(
+  name: string
+): ComponentType<{ size?: number | string; color?: string; style?: CSSProperties }> | undefined {
+  const exact = TOOL_IN_PROGRESS_ICONS[name]
+  if (exact) return exact
+  for (const prefix of [MCP_TOOL_ICON_KEY, MNEMON_TOOL_ICON_KEY]) {
+    if (name.startsWith(prefix)) return TOOL_IN_PROGRESS_ICONS[prefix]
+  }
+  return undefined
 }
 
 /** 完成态卡片图标（按语义分类） */
