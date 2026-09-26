@@ -71,6 +71,8 @@ function listEntries(): PluginListEntry[] {
       enabled,
       state: enabled ? 'active' : 'inactive',
       entry: ext.manifest.entry,
+      // 应用包里的同名副本版本：面板据此把菜单项写成「更新」（版本不同）或「重新安装」（同版本）
+      bundledVersion: bundled ? (bundledManifest(ext.id)?.version ?? undefined) : undefined,
       // 清单里的路由/菜单元数据：渲染层首帧据此声明式预注册（见 shared/plugin/types.ts）
       routes: ext.manifest.routes,
       menu: ext.manifest.menu,

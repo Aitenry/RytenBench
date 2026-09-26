@@ -1,5 +1,6 @@
-import React, { useEffect, useState, useCallback } from 'react'
-import { App, Button, Checkbox, Modal, Switch, Tag, theme } from 'antd'
+import React, { useEffect, useRef, useState, useCallback } from 'react'
+import { App, Button, Checkbox, Dropdown, Modal, Tag, theme, type MenuProps } from 'antd'
+import { RiMore2Line } from '@remixicon/react'
 import { useTranslation } from '@renderer/i18n'
 import { usePlugins } from '@renderer/plugin-host/PluginHostContext'
 import type { PluginListEntry, PluginState } from '@shared/plugin/types'
@@ -21,8 +22,12 @@ interface AvailableEntry {
  * 插件管理面板（设置 → 插件）。
  *
  * 列表数据来自主进程 `plugins-list`，口径是「`userData/plugins/<id>/` 里装了什么」：
- * - **已安装**：名字 + 内置/第三方标签 + 版本 + 描述，右侧「卸载」+ 启用开关；
+ * - **已安装**：名字 + 内置/第三方标签 + 版本 + 描述（停用会标出来），右侧一个「⋯」菜单；
  * - **可安装的内置插件**（应用包里带着、但已被卸载）：列表末尾单独一区，行内「安装」。
+ *
+ * 行内操作为什么收进「⋯」菜单（2026-09-26 用户要求）：一列「卸载」文字按钮 + 一个开关
+ * 在列表里很吵，而且**启停与卸载是同一层级的三件事**（更新 / 启用停用 / 卸载）。
+ * 菜单项按可用性出现：没有更新来源的插件（本地装的、又不在仓库里）就不显示更新项。
  *
  * 卸载是**物理卸载**（删目录），两件事分开（用户口径）：
  * - 卸载本身 = **移除插件代码**（删 `userData/plugins/<id>/`，记 `uninstalled`，重启不复活）；
@@ -48,6 +53,14 @@ const PluginsPanel: React.FC = () => {
   const [repoUrl, setRepoUrl] = useState('')
   const [repoError, setRepoError] = useState<string | null>(null)
   const [repoBusy, setRepoBusy] = useState<string | null>(null)
+  /**
+   * 仓库里各插件的版本（id → version）：第三方插件的「更新」来源。
+   *
+   * 单独拉、失败就当没有（不阻断列表）：离线时面板照常可用，只是不显示更新项。
+   * 主进程侧索引有 60s 缓存，所以这里频繁调用不会反复打网络。
+   */
+  const [repoVersions, setRepoVersions] = useState<Record<string, string>>({})
+  const repoCheckedAt = useRef(0)
 
   const refresh = useCallback((): void => {
     window.api.plugin
@@ -71,10 +84,30 @@ const PluginsPanel: React.FC = () => {
       const result = await window.api.plugin.available()
       setRepoUrl(result.repo)
       setRepoPlugins(result.plugins)
+      setRepoVersions(Object.fromEntries(result.plugins.map((p) => [p.id, p.version])))
     } catch (err) {
       setRepoError(err instanceof Error ? err.message : String(err))
     }
   }, [])
+
+  /**
+   * 静默拉一次仓库版本（只为行菜单的「更新」项）：失败就保持空表，不弹错误。
+   * 60s 内不重复尝试——离线时打开面板不该每次都卡一次网络超时。
+   */
+  const loadRepoVersions = useCallback(async (): Promise<void> => {
+    if (Date.now() - repoCheckedAt.current < 60_000) return
+    repoCheckedAt.current = Date.now()
+    try {
+      const result = await window.api.plugin.available()
+      setRepoVersions(Object.fromEntries(result.plugins.map((p) => [p.id, p.version])))
+    } catch {
+      setRepoVersions({})
+    }
+  }, [])
+
+  useEffect(() => {
+    void loadRepoVersions()
+  }, [loadRepoVersions])
 
   const openRepo = useCallback((): void => {
     setRepoOpen(true)
@@ -118,6 +151,47 @@ const PluginsPanel: React.FC = () => {
       }
     },
     [message, t]
+  )
+
+  /**
+   * 该插件可用的「更新来源」版本：内置看应用包里的副本，第三方看插件仓库索引。
+   * 都没有（本地自己装的、又不在仓库里）→ null = 行菜单不显示更新项。
+   */
+  const updateSourceVersion = useCallback(
+    (entry: PluginListEntry): string | null => {
+      const source = entry.builtin ? entry.bundledVersion : repoVersions[entry.id]
+      return source ?? null
+    },
+    [repoVersions]
+  )
+
+  /**
+   * 更新 / 重新安装：内置插件从应用包重新铺包，第三方插件从插件仓库重新下载。
+   * 两者语义相同——**用来源里的那份代码覆盖当前安装**，数据不动（用户口径：代码与数据是两件事）。
+   */
+  const applyUpdate = useCallback(
+    async (entry: PluginListEntry, kind: 'update' | 'reinstall'): Promise<void> => {
+      try {
+        const result = entry.builtin
+          ? await window.api.plugin.install(entry.id)
+          : await window.api.plugin.installFromGithub(entry.id)
+        if (!result.ok) {
+          message.error(result.error || t('settings.plugins.installFail'))
+          return
+        }
+        message.success(
+          kind === 'update'
+            ? t('settings.plugins.updateDone', { name: entry.name })
+            : t('settings.plugins.reinstallDone')
+        )
+        refresh()
+        void loadRepoVersions()
+      } catch (err) {
+        message.error(t('settings.plugins.installFail'))
+        console.error('[plugins] 更新失败:', err)
+      }
+    },
+    [message, t, refresh, loadRepoVersions]
   )
 
   /**
@@ -199,6 +273,35 @@ const PluginsPanel: React.FC = () => {
   const renderRow = (entry: PluginListEntry): React.ReactNode => {
     const state = runtimeState(entry.id)
     const failed = state === 'error'
+    const sourceVersion = updateSourceVersion(entry)
+    // 有更新来源才给「更新 / 重新安装」项；版本相同就写「重新安装」（同一条动作，名字照实说）
+    const hasSource = sourceVersion !== null
+    const updateKind: 'update' | 'reinstall' =
+      hasSource && sourceVersion !== entry.version ? 'update' : 'reinstall'
+    const menuItems: MenuProps['items'] = [
+      hasSource
+        ? {
+            key: 'update',
+            label:
+              updateKind === 'update'
+                ? t('settings.plugins.updateTo', { version: String(sourceVersion) })
+                : t('settings.plugins.reinstallAction')
+          }
+        : null,
+      {
+        key: 'toggle',
+        label: entry.enabled ? t('settings.plugins.disable') : t('settings.plugins.enable')
+      },
+      { type: 'divider' as const },
+      { key: 'uninstall', danger: true, label: t('settings.plugins.uninstall') }
+    ].filter(Boolean) as MenuProps['items']
+
+    const onMenuClick: MenuProps['onClick'] = ({ key }) => {
+      if (key === 'update') void applyUpdate(entry, updateKind)
+      else if (key === 'toggle') void toggle(entry.id, !entry.enabled)
+      else if (key === 'uninstall') uninstall(entry)
+    }
+
     return (
       <div
         key={entry.id}
@@ -231,6 +334,12 @@ const PluginsPanel: React.FC = () => {
               )}
             </Tag>
             <span style={{ fontSize: 11, color: token.colorTextTertiary }}>v{entry.version}</span>
+            {/* 开关收进菜单后，启停状态要在这里说清楚（只在停用时出现 = 结构携带信息） */}
+            {!entry.enabled && (
+              <span style={{ fontSize: 11, color: token.colorTextTertiary }}>
+                {t('settings.plugins.disabledBadge')}
+              </span>
+            )}
           </div>
           <div
             style={{
@@ -246,20 +355,18 @@ const PluginsPanel: React.FC = () => {
             {failed && <span style={{ color: token.colorError, marginLeft: 8 }}>（加载失败）</span>}
           </div>
         </div>
-        <div className="flex items-center gap-2" style={{ flexShrink: 0 }}>
-          {/* 已安装就能物理卸载：磁盘包（内置或第三方）都在 userData/plugins/<id>/ 下，
-              卸载 = 问数据 → 清数据 → 删目录 → 记账。P5 前「还没迁到磁盘包的内置插件」
-              只有开关没有卸载按钮，那种条目已随静态注册表一起消失。 */}
-          <Button size="small" danger type="text" onClick={() => uninstall(entry)}>
-            {t('settings.plugins.uninstall')}
+        {/* 行内操作收进「⋯」菜单：更新 / 启用停用 / 卸载（2026-09-26 用户要求）。
+            已安装的插件都能物理卸载：磁盘包（内置或第三方）都在 userData/plugins/<id>/ 下，
+            卸载 = 问数据 → 清数据 → 删目录 → 记账。 */}
+        <Dropdown
+          menu={{ items: menuItems, onClick: onMenuClick }}
+          trigger={['click']}
+          placement="bottomRight"
+        >
+          <Button size="small" type="text" aria-label={t('settings.plugins.moreActions')}>
+            <RiMore2Line size={16} />
           </Button>
-          <Switch
-            checked={entry.enabled}
-            onChange={(checked) => {
-              void toggle(entry.id, checked)
-            }}
-          />
-        </div>
+        </Dropdown>
       </div>
     )
   }

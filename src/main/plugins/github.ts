@@ -56,8 +56,20 @@ export function pluginsRepoUrl(): string {
   return indexBase()
 }
 
+/**
+ * 索引缓存（60s）。
+ *
+ * 为什么需要：面板打开时就会读一次索引（用来把菜单里的更新项写成「更新」还是「重新安装」），
+ * 而 raw.githubusercontent 在部分网络下并不快——同一分钟内重复打开设置不该反复打网络。
+ * 只缓存索引进来的**静态内容**（tag + 各插件版本/asset/sha256）；「是否已安装」由
+ * `plugins-available` 的处理函数现算，不受缓存影响。
+ */
+const INDEX_TTL_MS = 60_000
+let indexCache: { at: number; value: PluginIndex } | null = null
+
 /** 读索引（形状不对的条目直接丢弃，坏索引不该把面板搞崩） */
 export async function fetchPluginIndex(): Promise<PluginIndex> {
+  if (indexCache && Date.now() - indexCache.at < INDEX_TTL_MS) return indexCache.value
   const url = pluginIndexUrl(process.env.RB_PLUGINS_REPO)
   const res = await net.fetch(url, { cache: 'no-store' })
   if (!res.ok) throw new Error(`读取插件索引失败：HTTP ${res.status}（${url}）`)
@@ -71,7 +83,12 @@ export async function fetchPluginIndex(): Promise<PluginIndex> {
       typeof (p as AvailablePlugin).asset === 'string' &&
       typeof (p as AvailablePlugin).version === 'string'
   )
-  return { tag: typeof raw.tag === 'string' ? raw.tag : undefined, plugins }
+  const value: PluginIndex = {
+    tag: typeof raw.tag === 'string' ? raw.tag : undefined,
+    plugins
+  }
+  indexCache = { at: Date.now(), value }
+  return value
 }
 
 /** 资产 URL：fixture 模式下与索引同源，否则走 Release 下载地址（无 tag 时指向最新 Release） */
