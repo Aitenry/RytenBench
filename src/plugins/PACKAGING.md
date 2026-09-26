@@ -130,6 +130,28 @@ globalThis.__RB_HOST_RESOLVE__(spec) // '@host/main/database/orm' → 宿主那�
 - 桥按 `?m=<键>` 逐个生成（键 = 打包产物里的说明符），导出名由渲染层一次性上报
   （`plugin-host-ui-exports`）——主进程因此仍然不认识任何宿主模块。
 
+### `plugin://` 的状态码契约（2026-09-26 修）
+
+判定全在**零依赖纯函数** `src/main/plugins/protocol-routing.ts` 里（`protocol.ts` 只负责
+「按判定取文件 / 生成桥 ESM」），因此可以脱离 Electron 用
+`node --experimental-strip-types test/verify-plugin-protocol-404.mjs` 直接跑真实代码。契约：
+
+| 情况 | 状态码 |
+| --- | --- |
+| URL 非法 / 非 `plugin:` / 桥缺 `?m=` | 400 |
+| 插件未安装 / 桥路径不是 `ui.js` | 404 |
+| 插件已停用（早于文件判定，不泄露文件是否存在） | 403 |
+| 路径归一化后跑出插件目录（`%2e%2e%2f` 这类编码穿越） | 403 |
+| **文件不存在**（含「路径是目录」） | **404** |
+| 真实读取故障 | 500 |
+
+**为什么缺失文件必须是 404**：`net.fetch('file:///…')` 取不到文件时是**抛异常**
+（`Error: net::ERR_FILE_NOT_FOUND`），不是返回 404 响应——于是缺失文件会掉进 catch 被当成
+「读取失败 500 + warn」。内置插件包的 `plugin.css` 本来就不随包分发（类名由宿主构建期
+Tailwind 扫 `src/plugins/**` 编译进宿主 CSS），结果是**每次启用插件都在主日志里留一条带堆栈的
+假报错**，同时消费方的 `res.ok` 判断永远走不到。修成 404 后：可选资源缺失走「静默跳过」
+（主进程只记 debug），真实故障才留 warn。
+
 ### 渲染层多文件产物（P3 落地）
 
 渲染入口仍是**一个** `renderer.mjs`，但它不再是一个巨型单文件：插件自己的动态 import
@@ -160,7 +182,9 @@ globalThis.__RB_HOST_RESOLVE__(spec) // '@host/main/database/orm' → 宿主那�
   编译时加 `source(none)`，否则 Tailwind 会自动扫整个仓库，两份插件的 CSS 会变成同一份全集）；
 - 宿主装载插件时 `fetch('plugin://<id>/plugin.css')` 并注入 `<head><style data-plugin-css="<id>">`，
   停用/卸载时摘除（`src/renderer/src/plugin-host/plugin-css.ts`，在 `host.enable/disable` 里调用）；
-- 包里没有这个文件时**静默跳过**（只留一条 debug 日志），旧包与纯 JS 样式的插件照常可用；
+- 包里没有这个文件时**静默跳过**（只留一条 debug 日志），旧包与纯 JS 样式的插件照常可用——
+  内置插件本来就属于这一类（它们没有 `plugin.css`，靠宿主构建期扫描出类名），
+  所以这条路径必须依赖「协议处理器把缺失文件如实回 404」，见上一节的状态码契约；
 - 用内联 `<style>` 而不是 `<link rel="stylesheet" href="plugin://…">`：CSP 里只有
   `style-src 'self' 'unsafe-inline'`，没有 `style-src plugin:`。
 
@@ -171,17 +195,41 @@ globalThis.__RB_HOST_RESOLVE__(spec) // '@host/main/database/orm' → 宿主那�
 渲染层（`App.tsx` 的 `PluginStateBridge`）在 stamp 或版本变化时先 `forgetPlugin` 再重新
 `fetch + install`，于是新 `renderer.mjs` 与新 `plugin.css` 一起生效。
 
-**回归**：`node test/probe-plugin-css-coverage.mjs`（离线：逐个类名找规则，宿主 CSS 缺 48 个
-→ 加上插件自带 CSS 后 0 个缺；并核对 zip 里带上 `plugin.css`、无 preflight、两份 CSS 不是同一份）；
-`node test/probe-external-plugin-ui.mjs`（装机：装「去掉 plugin.css 的包」→ 无注入、缺规则、
-截图；换成真包 → 注入 9804B/2986B、规则齐、重新截图；两张截图逐像素比对 **music 3.9%** 的采样点
-发生变化；停用摘样式 / 启用重新注入）。
+**回归**：`node test/verify-plugin-protocol-404.mjs`（离线：直接加载零依赖的路由纯函数，
+断言缺失文件 404 / 目录 404 / 停用 403 / 编码穿越 403 / 桥缺 `?m=` 400，
+以及处理器源码里缺失分支只记 debug）；`node test/probe-plugin-css-coverage.mjs`
+（离线：逐个类名找规则，宿主 CSS 缺 48 个 → 加上插件自带 CSS 后 0 个缺；并核对 zip 里带上
+`plugin.css`、无 preflight、两份 CSS 不是同一份）；`node test/probe-external-plugin-ui.mjs`
+（装机：装「去掉 plugin.css 的包」→ 无注入、缺规则、截图；换成真包 → 注入 9804B/2986B、
+规则齐、重新截图；两张截图逐像素比对 **music 3.9%** 的采样点发生变化；停用摘样式 / 启用重新注入）。
 
 ## 安装 / 卸载 / 清数据
 
 - **首次启动（内置插件）**：把 `resources/plugins/<id>/`（现在只有 `notes` / `harness`）copy 到
   `userData/plugins/<id>/`；`plugins.json` 的 `uninstalled` 列表里的插件**跳过**（用户卸载过就不自动装回来）。
 - **安装（重装内置插件）**：从 `resources/plugins/<id>/` 重新 copy，并清掉 `uninstalled` 记录。
+- **自动更新（内置插件，2026-09-26 用户口径「内置的插件并没有检测更新，每次进去都得手动到设置页点更新」）**：
+  启动时、铺包与装载之前（`ensureBundledPluginsInstalled()`），对每个已安装的内置插件比一次
+  **应用包副本 vs 已安装副本的内容指纹**（`src/main/plugins/package-digest.ts`：文件集 → 字节数 → 逐文件 sha1），
+  不一致就静默覆盖产物并在主日志留一行
+  `[Plugins] <id> 已安装副本与应用包不一致（changed: renderer.mjs）→ 自动更新`（末尾一条 `内置插件自动更新完成：…` 汇总）。
+  - **为什么不能只看版本号**：`plugins.json.seeded[id]` 记的是**应用版本**，dev 下恒为 `0.1.0`——
+    重打了插件产物也不会触发（用户遇到的正是这个：改一版插件就得去设置页点一次「更新」）；
+    同版本重发、副本被写坏、旧版残留 `chunk-*.mjs` 同理，版本号都不动。
+  - 版本号不同的情形（应用升级）仍先用 `seeded` 判据直接重铺，不白花一次内容比对。
+  - 判定「一致」时**什么都不做**：不重写任何产物文件（mtime 不变，避免每次启动都 churn 一遍）。
+    实测两个内置插件共 3447KB 产物，「一致」判定（含逐文件 sha1）合计 **14.4ms**；
+    文件集/字节数不符时走纯 `stat` 路径（0.4~1.8ms），根本不读内容。
+  - 用户主动卸载过的（`uninstalled`）照旧不装回来；第三方插件不参与这条路径
+    （它们的更新来源是插件仓库，仍由面板「⋯ → 更新」触发）。
+  - 回归：`node --experimental-strip-types test/verify-bundled-plugin-drift.mjs`
+    （离线 29 条：一致 / 缺产物 / 残留 chunk / **同长度改写（证明必须读盘算哈希，不能只看大小）** /
+    边界与「应用包里没有」/ 非产物文件忽略 / 真实产物上的正反例与耗时实测 / 源码守卫）；
+    `node test/probe-builtin-plugin-autoupdate.mjs`
+    （端到端 22 条，4 个阶段：空 userData 首铺并逐字节一致 → 破坏已安装副本（同长度改 `renderer.mjs`
+    + 删一个 chunk + 塞一个残留 chunk）→ 重启后**无人点过任何按钮**即逐字节恢复、残留 chunk 被清掉、
+    菜单照常且渲染包真的能装载 → 再重启一次产物 mtime 全不变（无 churn）→ 改**应用包**那份（模拟重打包）
+    → 重启跟着更新）。
 - **安装（独立插件）**：设置 → 插件 →「从插件仓库安装」→ 读索引、下载 zip、校验 sha256、解压装进
   `userData/plugins/<id>/`，随后自动启用并装载（见上文「独立插件仓库」）。
 - **安装（本地：压缩包 / 文件夹，2026-09-26 新增）**：设置 → 插件 →「从本地安装」（**一个**入口）。

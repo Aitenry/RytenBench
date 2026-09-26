@@ -14,6 +14,7 @@ import {
   setPluginSeeded
 } from './store'
 import { externalPluginsRoot, findExternalPlugin, invalidateInstalledPluginIds } from './scanner'
+import { detectPackageDrift, PACKAGE_FILE_RE, STALE_ARTIFACT_RE } from './package-digest'
 import { BUILTIN_PLUGIN_MANIFESTS } from '../../plugins/manifests'
 
 /**
@@ -32,23 +33,16 @@ import { BUILTIN_PLUGIN_MANIFESTS } from '../../plugins/manifests'
  *   内置 id，自动安装一律跳过（重装只能由用户点「安装」）。
  * - **应用升级要重新铺**：`seeded[id]` 记下上次铺包时的应用版本，版本变了就覆盖产物
  *   （否则应用升级后用户机器上还是旧版插件代码）。
+ * - **版本没变但包内容变了也要重新铺**（2026-09-26 用户要求「内置插件要自己检测更新，
+ *   别每次都要我去设置页点更新」）：版本号不是可靠判据——dev 下重打产物、同版本重发、
+ *   副本被写坏，版本号都不动。因此 `seeded[id] === app.getVersion()` 之后还要比一次
+ *   **包内容指纹**（`package-digest.ts` 的 `detectPackageDrift`，文件集 → 字节数 → sha1），
+ *   不一致就静默重铺——内置插件是应用自己管的代码，刷新它不需要用户参与。
  * - **只覆盖包自带的产物文件**（plugin.json / main.cjs / renderer.mjs / 渲染层懒加载
  *   `chunk-*.mjs`），不删整个目录：插件目录里可能还有用户放进去的额外资源。
  *   旧版本的 `chunk-*.mjs`（名字里有内容哈希，升级后会变）会被顺手清掉，否则每升一次级
  *   就多留几十个再也不会被引用的文件。
  */
-
-/**
- * 插件包产物文件的命名模式（铺包时覆盖）。
- *
- * 渲染层现在是**多文件**产物（P3 起）：入口 `renderer.mjs` 加上若干懒加载
- * `chunk-<hash>.mjs`（notes 的 GraphView / harness 的 codemirror 语言包等）。
- * 因此不能再硬编码三件套，改为「按模式识别产物文件」。
- */
-const PACKAGE_FILE_RE = /^(plugin\.json|main\.cjs|renderer\.mjs|chunk-[A-Za-z0-9_-]+\.mjs)$/
-
-/** 旧版残留的产物文件：与本包产物同模式、但本次不再产出的（升级清理） */
-const STALE_ARTIFACT_RE = /^(renderer\.mjs|main\.cjs|chunk-[A-Za-z0-9_-]+\.mjs)$/
 
 /**
  * 随应用分发的内置插件 id（单一真源 = `src/plugins/manifests.ts`）。
@@ -211,6 +205,12 @@ export function installBundledPlugin(id: string, force = false): boolean {
  *
  * 必须在**扫描外部插件之前**调用（`initPluginHost()` 开头）：扫描看到的是铺完之后的
  * 目录，内置与第三方因此走同一条装载路径。用户主动卸载过的 id 一律跳过。
+ *
+ * 三种情况会铺包（其余一律不动，避免每次启动无谓地重写文件、把 mtime 全部刷新一遍）：
+ * - 没装过（首次启动 / 用户手工删了目录）；
+ * - `seeded[id]` 与当前应用版本不同（应用升级）；
+ * - 版本没变但**包内容与已安装副本不一致**（dev 重打产物、同版本重发、副本被写坏）——
+ *   用户口径「内置插件要自己检测更新」（2026-09-26）。
  */
 export function ensureBundledPluginsInstalled(): void {
   ensureDevPackagesBuilt()
@@ -225,16 +225,40 @@ export function ensureBundledPluginsInstalled(): void {
   }
   const uninstalled = new Set(getUninstalledBuiltins())
   const version = app.getVersion()
+  /** 本轮自动更新的插件（日志里给一条汇总，便于用户从主日志确认「它自己更新了」） */
+  const refreshed: string[] = []
 
   for (const id of ids) {
     if (uninstalled.has(id)) continue
-    if (!findExternalPlugin(id)) {
+    const installed = findExternalPlugin(id)
+    if (!installed) {
       // 首次安装（或用户手工删了目录）：铺一份，并清掉可能残留的 uninstalled 标记之外的记录
       installBundledPlugin(id)
       continue
     }
     // 已安装但铺包版本变了（应用升级）→ 覆盖产物文件
-    if (getPluginSeeded(id) !== version) installBundledPlugin(id, true)
+    if (getPluginSeeded(id) !== version) {
+      installBundledPlugin(id, true)
+      refreshed.push(id)
+      continue
+    }
+    // 版本号没变：比内容指纹。这一步就是「检测更新」——旧实现只看 seeded 版本号，
+    // 于是 dev 重打产物 / 同版本重发时用户机器上永远还是旧代码，只能去设置页手点。
+    const src = bundledPluginDir(id)
+    if (!src) continue
+    const drift = detectPackageDrift(src, installed.dir)
+    if (!drift.drifted) continue
+    logger.info(
+      `[Plugins] ${id} 已安装副本与应用包不一致（${drift.reason}${
+        drift.summary ? `: ${drift.summary}` : ''
+      }）→ 自动更新`
+    )
+    installBundledPlugin(id, true)
+    refreshed.push(id)
+  }
+
+  if (refreshed.length > 0) {
+    logger.info(`[Plugins] 内置插件自动更新完成：${refreshed.join(', ')}`)
   }
 }
 

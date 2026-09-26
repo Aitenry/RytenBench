@@ -17,7 +17,11 @@ import { pluginUrl } from '@shared/plugin/protocol'
  * 细节：
  * - 用 `fetch` + 内联 `<style>`（CSP 里 `style-src 'self' 'unsafe-inline'` 允许），
  *   而不是 `<link rel="stylesheet" href="plugin://...">`（那要求 `style-src plugin:`）；
- * - 包里没有 `plugin.css` 时**静默跳过**（旧包、或纯 JS 样式的插件），只留一条 debug 日志；
+ * - 包里没有 `plugin.css` 时**静默跳过**（旧包、或纯 JS 样式的插件），只留一条 debug 日志。
+ *   前提是协议处理器把「文件不存在」如实回 **404**（2026-09-26 修复：它曾让 net.fetch
+ *   抛 `ERR_FILE_NOT_FOUND`，于是这里的 `res.ok` 判断永远走不到，主进程还每次打一条
+ *   带堆栈的假 warn——内置插件本就由宿主构建期 Tailwind 扫描 `src/plugins/**` 出类名，
+ *   不带 plugin.css，于是每次启用都刷日志）；
  * - 同一个 id 重复注入时先移除旧的（幂等），停用后 `document` 里不留痕迹。
  */
 
