@@ -354,8 +354,19 @@ body {
   background-color: #fff;
 }
 
-/* 箭头跟着气泡底色走（不带箭头的提示不受影响） */
-:root:not(.dark) .ant-tooltip .ant-tooltip-arrow,
+/* 箭头跟着气泡底色走（不带箭头的提示不受影响）。
+ *
+ * ⚠️ 只涂 `::before`：antd v6 的箭头是**两层**——
+ *   `.ant-tooltip-arrow` 外层是 16×16 的方形槽位（不旋转，只做位移），
+ *   `::before` 才是用 clip-path 裁出来的箭头形状（真正贴在气泡上的那一小块）。
+ * 两层一起涂白时，外层那块 16×16 的轴对齐白方块会露在气泡边上——用户 2026-09-26
+ * 截图反馈的「气泡下面多出一个大方块」就是它（实测：外层 `background: rgb(255,255,255)`
+ * 且 `transform` 只有位移、没有旋转；::before 才有 clip-path）。
+ */
+:root:not(.dark) .ant-tooltip .ant-tooltip-arrow {
+  background: transparent;
+}
+
 :root:not(.dark) .ant-tooltip .ant-tooltip-arrow::before {
   background: #fff;
 }
