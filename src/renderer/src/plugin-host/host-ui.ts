@@ -122,6 +122,10 @@ export const HOST_UI: Record<string, HostUiEntry> = {
     'SAMPLING_PARAM_SPECS',
     'TOP_K_PROVIDERS',
     'supportsThinkingControl',
+    'REASONING_EFFORT_ORDER',
+    'supportsReasoningEffort',
+    'reasoningEffortLabel',
+    'sortReasoningEfforts',
     'formatTokenCount',
     'CAPABILITY_OPTIONS',
     'CAPABILITY_BADGES',
@@ -143,9 +147,13 @@ export const HOST_UI: Record<string, HostUiEntry> = {
     { default: TipTapMarkdownEditor },
     []
   ),
-  '@host/renderer/components/effects/ShinyText': hostModule({ default: ShinyText, ShinyIcon }, [
-    'ShinyIcon'
-  ]),
+  '@host/renderer/components/effects/ShinyText': hostModule(
+    // ShinyText 必须同时给具名与默认：harness 插件里是 `import { ShinyText, ShinyIcon }`，
+    // 只给 default 时桥里没有 `ShinyText` 这个绑定 → 运行期 undefined → JSX 直接抛
+    // 「Element type is invalid」（test/verify-plugin-host-ui-exports.mjs 就是防这一类）。
+    { default: ShinyText, ShinyText, ShinyIcon },
+    ['ShinyText', 'ShinyIcon']
+  ),
   '@host/renderer/components/provider/provider-mark': hostModule({ default: ProviderMark }, []),
 
   // ---------- vendor（宿主里的唯一实例） ----------
