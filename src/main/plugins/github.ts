@@ -70,6 +70,10 @@ let indexCache: { at: number; value: PluginIndex } | null = null
 /** 读索引（形状不对的条目直接丢弃，坏索引不该把面板搞崩） */
 export async function fetchPluginIndex(): Promise<PluginIndex> {
   if (indexCache && Date.now() - indexCache.at < INDEX_TTL_MS) return indexCache.value
+  // 索引地址保持干净（不带 cache-buster）：实测 `?t=<随机>` 仍然吃到 CDN 的
+  // `x-cache: HIT` 旧内容，加了也没用，反而多一次未命中（2026-09-26 实测：
+  // CI 发完 v0.1.1 后 raw CDN 仍返回 tag=v0.1.0 的旧索引约 1~2 分钟）。
+  // 结论：**索引可能比 Release 晚几分钟**，面板的「刷新」会重新读（受同一 CDN 限制）。
   const url = pluginIndexUrl(process.env.RB_PLUGINS_REPO)
   const res = await net.fetch(url, { cache: 'no-store' })
   if (!res.ok) throw new Error(`读取插件索引失败：HTTP ${res.status}（${url}）`)

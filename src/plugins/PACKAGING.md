@@ -29,6 +29,11 @@ plugins.json（索引，提交回 main）
   重点是「索引里没有 tag 时走 `releases/latest/download/<asset>`」而不是 404 的
   `releases/download/latest/<asset>`。fixture 只覆盖「索引与资产同源」那条分支
   （`verify-github-plugin-install` 19 条），其余分支由这份离线断言兜住。
+- **索引可能比 Release 晚几分钟**：`raw.githubusercontent.com` 的 CDN 会缓存索引。
+  2026-09-26 实测：CI 发完 v0.1.1、资产已可下载，应用读到的索引仍是 `tag=v0.1.0` 约 1~2 分钟；
+  试过在 URL 上加 `?t=<随机>` 做 cache-buster，**仍然吃到 `x-cache: HIT` 的旧内容**（加了没用，
+  反而多一次未命中），所以最终保持干净 URL、把这条写进文档：面板的「刷新」会重新读，
+  但同样受 CDN 限制；发布后立刻验证时先确认索引里的 `tag` 已经是新版本。
 - **仓库已发布并实测（2026-09-26）**：`Aitenry/ryten-plugins` 已建（public，MIT，README 英文），
   推 tag `v0.1.0` 后 CI 成功（run #1，约 30s）——Release 里两个 zip 的 `digest` 与 CI 提交回 `main`
   的 `plugins.json`（`tag: v0.1.0`）里的 `size`/`sha256` **逐字节一致**。
