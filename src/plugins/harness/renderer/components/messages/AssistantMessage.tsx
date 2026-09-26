@@ -344,7 +344,7 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
      * 两处共用同一个函数：这个胶囊的几何（18px 高、9px 圆角、1px 描边、6px 点、4px 间距）
      * 写两遍必然漂移——这个项目里「同一约束写两处」踩过不止一次。
      */
-    const countPill = (count: number, dotColor: string, prefix = ''): React.ReactNode => (
+    const countPill = (count: number, dotColor: string): React.ReactNode => (
       <span
         data-count-pill={count}
         style={{
@@ -375,10 +375,7 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
           }}
         />
         {/* lineHeight:1：不让行高把胶囊撑高，垂直居中交给 flex */}
-        <span style={{ lineHeight: 1 }}>
-          {prefix}
-          {count}
-        </span>
+        <span style={{ lineHeight: 1 }}>{count}</span>
       </span>
     )
 
@@ -2060,11 +2057,11 @@ const AssistantMessage: React.FC<AssistantMessageProps> = React.memo(
               {entry.name}
             </span>
             {/* 状态点 + 计数：点与数字同在胶囊里居中（见 countPill）。
-                × 前缀：这一格是「同名调用几次」，与任务段的「本段还有几步」区分开 */}
+                这一格是折叠头里的「同名工具调用了几次」；任务段头上的「本段还有几步」共用
+                同一个胶囊，只靠所在的折叠头区分，数字上不再加 `×` 前缀 */}
             {countPill(
               entry.indices.length,
-              activeNow ? token.colorPrimary : allDone ? token.colorSuccess : colorBorderSecondary,
-              '×'
+              activeNow ? token.colorPrimary : allDone ? token.colorSuccess : colorBorderSecondary
             )}
           </span>
         )
