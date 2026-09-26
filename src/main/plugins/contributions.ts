@@ -61,7 +61,7 @@ export function contributionKeys(): string[] {
 /**
  * 贡献点键：**插件自清数据**（`plugin.purge`）。
  *
- * 卸载插件时宿主会先问一次「要不要保留数据」：用户选「不保留」才真正卸载，此时宿主
+ * 用途：卸载插件时，用户勾了「同时删除该插件的全部数据」才真正卸载它的数据，此时宿主
  * 调这里的贡献，让**插件自己**删自己的数据——表在 core 的 schema 里、行在同一个 PGlite 库里，
  * 但「哪些表 / 哪些托管目录属于我」只有插件自己知道，core 不该硬编码任何插件表名。
  *
@@ -70,7 +70,9 @@ export function contributionKeys(): string[] {
  * - 宿主在**插件仍处于装载状态**时调用 `run()`（要读自己的 mapper / 托管目录），
  *   因此 `run` 可以放心 import 自己插件的模块（不会拿到已 dispose 的上下文）；
  * - `run` 只删**数据**：不删表结构（迁移不动，避免出现「卸载后迁移对不上」的库），
- *   也不碰用户自己的原始文件（例如 music 只删应用托管的歌单目录，不删用户音乐）。
+ *   也不碰用户自己的原始文件（例如 music 只删应用托管的歌单目录，不删用户音乐）；
+ * - `label` 会经 `PluginListEntry.purgeLabel` 显示在卸载确认框的勾选项里（「包含：……」），
+ *   所以要写成用户看得懂的短语。
  */
 export const PLUGIN_PURGE = 'plugin.purge'
 

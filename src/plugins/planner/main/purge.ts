@@ -5,7 +5,7 @@ import { planner_dependencies, planner_tasks } from './db/schema'
 /**
  * planner 插件的**自清数据**实现（`plugin.purge` 贡献，契约见 `src/main/plugins/contributions.ts`）。
  *
- * 卸载插件且用户选择「不保留数据」时由宿主调用。本插件的全部用户数据就是两张表里的行：
+ * 卸载插件且用户勾了「同时删除该插件的全部数据」时由宿主调用。本插件的全部用户数据就是两张表里的行：
  *
  * 1. `planner_dependencies`（任务依赖关系）——**先删**。它对 `planner_tasks` 有两条外键
  *    （`task_id` / `depends_on_task_id`，均 `onDelete('cascade')`），先删父表当然也会级联删掉，

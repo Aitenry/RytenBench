@@ -18,7 +18,7 @@ import { closeAllMnemon } from './mnemon-singleton'
 /**
  * harness 插件的**自清数据**实现（`plugin.purge` 贡献，契约见 `src/main/plugins/contributions.ts`）。
  *
- * 卸载插件且用户选择「不保留数据」时由宿主调用。这是四个插件里数据面最大的一块：
+ * 卸载插件且用户勾了「同时删除该插件的全部数据」时由宿主调用。这是四个插件里数据面最大的一块：
  *
  * **① 共享 PGlite 里的 7 张表**（顺序：子 → 父；`harness_goals` / `topic_compactions` 没有外键，
  * 只能显式删——见 `db/schema/harness.ts` 的注释）：

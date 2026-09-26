@@ -13,7 +13,7 @@ import { plannerToolContributions } from './tools'
  * - `ctx.contribute(HARNESS_TOOL_CONTRIBUTION, …)`：本插件自己的 AI 工具
  *   （`manage_planner`，实现在 `./tools.ts`，读的是本插件的 mapper）经 harness 的工具
  *   贡献点注册给模型；插件停用时贡献一并摘除，工具集里自然不再有它；
- * - `ctx.contribute(PLUGIN_PURGE, …)`：卸载时「不保留数据」由宿主回调，删本插件的
+ * - `ctx.contribute(PLUGIN_PURGE, …)`：卸载时「同时删除该插件的全部数据」勾上后由宿主回调，删本插件的
  *   任务/依赖行（实现见 `./purge.ts`）。core 因此不需要知道任何计划表名。
  * - 本插件没有「主进程 → 渲染层」的事件通道（无 webContents.send / safeSend），
  *   因此不需要 `ctx.registerEvent`。

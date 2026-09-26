@@ -76,7 +76,7 @@ interface Api {
     install: (id?: string) => Promise<{ ok: boolean; id?: string; error?: string }>
     /**
      * 卸载插件并返回最新列表。
-     * `purgeData` 必须显式传：false（= 保留数据）会被主进程直接拒绝，true 才真的清数据 + 删目录。
+     * 卸载本身总是移除插件代码；`purgeData` 决定要不要同时清数据（false = 数据保留在库里）。
      */
     uninstall: (id: string, purgeData: boolean) => Promise<PluginListEntry[]>
     /** 插件启用态变化推送（含安装/卸载） */

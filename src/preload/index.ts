@@ -208,10 +208,10 @@ const api = {
         error?: string
       }>,
     /**
-     * 卸载插件。
+     * 卸载插件（= 移除插件代码）。
      *
-     * `purgeData` 是用户口径的落点：**选择「保留数据」= 不卸载**，所以传 false 会被主进程
-     * 直接拒绝并抛中文可读错误；只有 true（「不保留数据并卸载」）才真的删数据 + 删目录。
+     * `purgeData` 只决定**要不要连数据一起清**：true = 调插件的 `plugin.purge` 删表内记录与
+     * 应用托管的文件；false = 只删插件目录，数据留在库里（重装后仍然可用）。
      */
     uninstall: (id: string, purgeData: boolean) =>
       ipcRenderer.invoke('plugins-uninstall', id, purgeData) as Promise<PluginListEntry[]>,

@@ -33,13 +33,14 @@ export const enUSSettings: typeof zhCNSettings = {
     uninstallDone: 'Plugin uninstalled',
     uninstallTitle: 'Uninstall "{{name}}"',
     uninstallBody:
-      'The plugin directory is deleted; you can install it again from "Built-in plugins available to install".',
+      'The plugin code is removed (it can be installed again from "Built-in plugins available to install"); its data is kept by default.',
     purgeCheckbox: 'Also delete all of this plugin\u2019s data',
     purgeDetail: 'Includes: {{label}}. This cannot be undone.',
     purgeDetailFallback: 'Includes all of this plugin\u2019s data. This cannot be undone.',
     purgeHint:
-      'Nothing happens without this checked \u2014 to keep the data and just turn the feature off, use the toggle instead.',
+      'Without this checked only the plugin code is removed; the database records stay and are there again after reinstalling.',
     uninstallConfirm: 'Uninstall',
+    uninstallKeptData: 'Plugin uninstalled, data kept',
     availableTitle: 'Built-in plugins available to install',
     availableDescription: 'Shipped with the app; can be installed again at any time'
   },

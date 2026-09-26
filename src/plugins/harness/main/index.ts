@@ -88,7 +88,7 @@ export function install(ctx: MainPluginContext): void {
     label: 'harness.mnemon',
     run: () => closeAllMnemon()
   })
-  // 卸载时「不保留数据」由宿主回调：删本插件的 7 张表行 + 三处托管目录
+  // 卸载时「同时删除该插件的全部数据」勾上后由宿主回调：删本插件的 7 张表行 + 三处托管目录
   // （实现见 `./purge.ts`；工作区表与 harness 设置键刻意不动）
   ctx.contribute(PLUGIN_PURGE, {
     run: purgeHarnessData,

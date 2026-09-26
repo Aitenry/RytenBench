@@ -9,7 +9,7 @@ import { music_folders, music_tracks } from './db/schema'
 /**
  * music 插件的**自清数据**实现（`plugin.purge` 贡献，契约见 `src/main/plugins/contributions.ts`）。
  *
- * 卸载插件且用户选择「不保留数据」时由宿调用，做两件事：
+ * 卸载插件且用户勾了「同时删除该插件的全部数据」时由宿调用，做两件事：
  *
  * 1. **删行**：`music_tracks` → `music_folders`（顺序不能反：曲目对歌单有外键级联，
  *    先删父表会连带删子表，但显式按序删更可控），外加两表引用过、之后没人再引用的

@@ -27,7 +27,7 @@ import {
  *   （`manage_todos` / `manage_docs` / `manage_wikis` / `search_graph`，实现见
  *   `./tools/**`，读的都是本插件的 mapper）经 harness 的工具贡献点注册给模型；
  *   停用时贡献一并摘除，模型不再被提供这些工具。
- * - `ctx.contribute(PLUGIN_PURGE, …)`：卸载时「不保留数据」由宿主回调，删本插件的
+ * - `ctx.contribute(PLUGIN_PURGE, …)`：卸载时「同时删除该插件的全部数据」勾上后由宿主回调，删本插件的
  *   文档/目录/知识库/图谱/待办/画布坐标行（实现见 `./purge.ts`）。core 因此不需要知道
  *   任何首页表名——注意这是**用户自己写的内容**，面板的确认框文案必须写清楚。
  *

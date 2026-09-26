@@ -97,8 +97,8 @@ export interface Window {
       /** 无参 = 第三方插件选目录安装；带 id = 从应用包重装某个内置插件 */
       install: (id?: string) => Promise<{ ok: boolean; id?: string; error?: string }>
       /**
-       * 卸载插件。`purgeData` 必须显式传：false（= 保留数据）会被主进程直接拒绝，
-       * true 才真的清数据 + 删目录（用户口径见 src/plugins/PACKAGING.md）。
+       * 卸载插件（总是移除插件代码）。`purgeData` 决定是否同时清数据：
+       * false = 数据保留在库里（重装后仍可用），true = 调 `plugin.purge` 删表内记录与托管文件。
        */
       uninstall: (id: string, purgeData: boolean) => Promise<unknown[]>
       onStateChanged: (callback: () => void) => () => void

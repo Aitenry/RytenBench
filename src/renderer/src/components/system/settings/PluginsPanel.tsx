@@ -12,9 +12,10 @@ import { SettingsPageHeader, SettingsSection } from './SettingsUI'
  * - **已安装**：名字 + 内置/第三方标签 + 版本 + 描述，右侧「卸载」+ 启用开关；
  * - **可安装的内置插件**（应用包里带着、但已被卸载）：列表末尾单独一区，行内「安装」。
  *
- * 卸载是**物理卸载**（删目录），因此必须先问数据（用户口径）：
- * - 「同时删除该插件的全部数据」勾上 → 调 `plugin.purge` 清数据 + 删目录 + 记 `uninstalled`；
- * - 不勾 → **什么都不做**（= 保留数据 = 不卸载），面板不会发出任何请求，确认按钮保持禁用。
+ * 卸载是**物理卸载**（删目录），两件事分开（用户口径）：
+ * - 卸载本身 = **移除插件代码**（删 `userData/plugins/<id>/`，记 `uninstalled`，重启不复活）；
+ * - 勾「同时删除该插件的全部数据」= 连表内记录与应用托管的文件一起清（调 `plugin.purge`）；
+ *   不勾 = 数据留在库里，重装后照旧可用。
  *
  * 实时 fiber 状态来自宿主描述符；启停经 `api.plugin.setEnabled` 持久化并广播，
  * 渲染层 host 即时装载/卸载（路由/菜单/设置页/Provider 立即反应）。
@@ -89,7 +90,7 @@ const PluginsPanel: React.FC = () => {
     [message, t]
   )
 
-  /** 打开卸载确认框（不勾「同时删除数据」时确认按钮保持禁用 = 不卸载） */
+  /** 打开卸载确认框（数据勾选项每次重置为未勾选 = 默认保留数据） */
   const uninstall = useCallback((entry: PluginListEntry): void => {
     setPurgeData(false)
     setPending(entry)
@@ -97,10 +98,13 @@ const PluginsPanel: React.FC = () => {
 
   const confirmUninstall = useCallback(async (): Promise<void> => {
     const target = pending
-    if (!target || !purgeData) return
+    if (!target) return
     try {
-      setEntries(await window.api.plugin.uninstall(target.id, true))
-      message.success(t('settings.plugins.uninstallDone'))
+      // 卸载 = 移除插件代码；purgeData 只决定要不要连数据一起清（P5 起的用户口径）
+      setEntries(await window.api.plugin.uninstall(target.id, purgeData))
+      message.success(
+        purgeData ? t('settings.plugins.uninstallDone') : t('settings.plugins.uninstallKeptData')
+      )
       setPending(null)
     } catch (err) {
       message.error(t('settings.plugins.uninstallFail'))
@@ -262,14 +266,13 @@ const PluginsPanel: React.FC = () => {
         </SettingsSection>
       )}
 
-      {/* 卸载确认框：数据取舍是一个**勾选项**（不是塞进按钮文案），
-          不勾 = 保留数据 = 不卸载，确认按钮保持禁用 */}
+      {/* 卸载确认框：卸载 = 移除插件代码；「同时删除数据」是一个**勾选项**（默认不勾 = 留数据） */}
       <Modal
         open={pending !== null}
         title={t('settings.plugins.uninstallTitle', { name: pending?.name ?? '' })}
         okText={t('settings.plugins.uninstallConfirm')}
         cancelText={t('common.action.cancel')}
-        okButtonProps={{ danger: true, disabled: !purgeData }}
+        okButtonProps={{ danger: true }}
         onOk={() => void confirmUninstall()}
         onCancel={() => setPending(null)}
         width={430}

@@ -170,10 +170,12 @@ function applyEnabled(id: string, enabled: boolean): void {
 }
 
 /**
- * 卸载插件（含数据询问的最终执行）。
+ * 卸载插件。
  *
- * @param purgeData 用户口径：`false` = 选择「保留数据」→ **不是卸载**，直接拒绝；
- *                  `true` = 选择「不保留数据」→ 先清数据、再摘除装载、最后删目录。
+ * @param purgeData 用户口径（P5 起语义按用户澄清调整为两件独立的事）：
+ *                  - 卸载本身 = **移除插件代码**（删 `userData/plugins/<id>/`，写 `uninstalled`）；
+ *                  - `purgeData` = **是否同时清除插件的数据**（表内记录 + 应用托管的文件）。
+ *                  因此 `false` 也照样卸载，只是把数据留着（重装后还能用）。
  *
  * 顺序有讲究：
  * ① `plugin.purge` 贡献必须在**插件仍装载**时调用（它要读自己的 mapper / 托管目录）；
@@ -184,25 +186,24 @@ async function uninstallPlugin(id: string, purgeData: boolean): Promise<PluginLi
   if (!listEntries().some((e) => e.id === id)) {
     throw new Error(`插件 '${id}' 未安装，无法卸载`)
   }
-  if (!purgeData) {
-    throw new Error(
-      `已取消卸载：卸载 '${id}' 必须同时清除它的数据（表内记录与应用托管的文件）。` +
-        `若想保留数据，请勿卸载；也可以先停用该插件。`
-    )
-  }
 
-  // ① 清数据（插件自己实现；没贡献 purge 的插件跳过）
-  const purge = pluginPurge(id)
-  if (purge) {
-    try {
-      await purge.run()
-      logger.info(`[Plugins] ${id} 数据已清除（${purge.label}）`)
-    } catch (err) {
-      // 清数据失败不阻断卸载：目录/通道该摘的仍要摘，否则会留下「装不了也卸不掉」的死状态
-      logger.error(`[Plugins] ${id} 清除数据失败（继续卸载）:`, err)
-    }
+  // ① 清数据（插件自己实现；没贡献 purge 的插件跳过）。不清时留一句日志，
+  //    免得日后看到「卸载了但库里还有行」时怀疑是 purge 没跑
+  if (!purgeData) {
+    logger.info(`[Plugins] ${id} 保留数据卸载：只删插件代码，表内记录与托管文件原样保留`)
   } else {
-    logger.warn(`[Plugins] ${id} 没有 plugin.purge 贡献，数据未被清除（只删目录）`)
+    const purge = pluginPurge(id)
+    if (purge) {
+      try {
+        await purge.run()
+        logger.info(`[Plugins] ${id} 数据已清除（${purge.label}）`)
+      } catch (err) {
+        // 清数据失败不阻断卸载：目录/通道该摘的仍要摘，否则会留下「装不了也卸不掉」的死状态
+        logger.error(`[Plugins] ${id} 清除数据失败（继续卸载）:`, err)
+      }
+    } else {
+      logger.warn(`[Plugins] ${id} 没有 plugin.purge 贡献，数据未被清除（只删目录）`)
+    }
   }
 
   // ② 摘除主进程装载（磁盘包模块）

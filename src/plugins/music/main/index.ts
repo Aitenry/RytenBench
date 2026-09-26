@@ -16,7 +16,7 @@ import { musicToolContributions } from './tools'
  * - `ctx.contribute(HARNESS_TOOL_CONTRIBUTION, …)`：本插件自己的 AI 工具
  *   （`manage_music`，实现见 `./tools.ts`，读本插件的 mapper）经 harness 的工具贡献点
  *   注册给模型；停用时贡献一并摘除，模型不再被提供该工具。
- * - `ctx.contribute(PLUGIN_PURGE, …)`：卸载时「不保留数据」由宿主回调，删本插件的
+ * - `ctx.contribute(PLUGIN_PURGE, …)`：卸载时「同时删除该插件的全部数据」勾上后由宿主回调，删本插件的
  *   表行与应用托管的歌单目录（实现见 `./purge.ts`）。core 因此不需要知道任何音乐表名。
  */
 export function install(ctx: MainPluginContext): void {
