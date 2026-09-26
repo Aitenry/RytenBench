@@ -40,6 +40,17 @@ export type { StartMemoryAgentResult } from '../main/runtime/memory-agent'
 export type { FileChangeView, FileChangeContent } from '../main/workspace/file-history'
 export type { WorkspaceFsChange } from '../main/workspace/watcher'
 
+/* ── MCP 服务器（配置 / 状态 / 工具，设置 → MCP 页与工具集装的公用契约） ── */
+export type {
+  McpServerConfig,
+  McpServerInput,
+  McpServerStatus,
+  McpServerView,
+  McpToolInfo,
+  McpTransport,
+  MainAgentConfig
+} from './mcp'
+
 /* ── 流式 chunk（主进程 StructuredMessage + 注入的 topicId） ── */
 export type { StreamChunk } from '../main/types'
 

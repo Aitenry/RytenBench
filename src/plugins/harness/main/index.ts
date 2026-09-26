@@ -23,6 +23,16 @@ import { harnessTopicIpcHandlers } from './ipc/harness-topic'
 import { mnemonIpcHandlers } from './ipc/mnemon'
 import { workspaceIpcHandlers } from './ipc/workspace'
 import { agentIpcHandlers } from './ipc/agent'
+import { MCP_EVENT_CHANNELS, mcpIpcHandlers } from './ipc/mcp'
+import {
+  configureMcp,
+  closeAllMcp,
+  currentMcpTools,
+  refreshCatalog,
+  setMcpModuleBase
+} from './runtime/mcp'
+import { readMcpServers } from './runtime/mcp-store'
+import { setMcpToolProvider } from './tools/builders'
 import { WORKSPACE_FILE_HISTORY_EVENT_CHANNELS } from './workspace/file-history'
 import { WORKSPACE_WATCHER_EVENT_CHANNELS } from './workspace/watcher'
 
@@ -65,12 +75,14 @@ export function install(ctx: MainPluginContext): void {
   ctx.registerIpc(mnemonIpcHandlers())
   ctx.registerIpc(workspaceIpcHandlers())
   ctx.registerIpc(agentIpcHandlers())
+  ctx.registerIpc(mcpIpcHandlers())
 
   // ── 主进程 → 渲染层的事件通道（只有发送方）─────────────────────────────
   ctx.registerEvent(
     ...HARNESS_EVENT_CHANNELS,
     ...WORKSPACE_FILE_HISTORY_EVENT_CHANNELS,
     ...WORKSPACE_WATCHER_EVENT_CHANNELS,
+    ...Object.values(MCP_EVENT_CHANNELS),
     HARNESS_DOC_CHANGED_CHANNEL
   )
 
@@ -87,6 +99,11 @@ export function install(ctx: MainPluginContext): void {
   ctx.contribute(APP_BEFORE_QUIT, {
     label: 'harness.mnemon',
     run: () => closeAllMnemon()
+  })
+  ctx.contribute(APP_BEFORE_QUIT, {
+    label: 'harness.mcp',
+    // 退出前关掉 MCP 连接：stdio 服务器是应用起的子进程，不关会留下孤儿进程
+    run: () => closeAllMcp()
   })
   // 卸载时「同时删除该插件的全部数据」勾上后由宿主回调：删本插件的 7 张表行 + 三处托管目录
   // （实现见 `./purge.ts`；工作区表与 harness 设置键刻意不动）
@@ -105,6 +122,14 @@ export function install(ctx: MainPluginContext): void {
     // 同样放 userData。停用时经 configureToolOutputStore('') 降级——见下方回滚。
     configureToolOutputStore(join(app.getPath('userData'), 'tool-output'))
 
+    // ── MCP 客户端接线（可逆）────────────────────────────────────────────
+    // 配置读取器由这里注入（管理器本身不 import electron，可离线回归）；
+    // 应用根一并注入：MCP SDK 是 ESM-only，而插件主进程是 CJS，
+    // 只能用 createRequire(应用根) 惰性加载（理由见 runtime/mcp.ts 顶部注释）。
+    configureMcp(readMcpServers)
+    setMcpModuleBase(app.getAppPath())
+    setMcpToolProvider(currentMcpTools)
+
     // 工作区文件监听：数据库初始化完成（设置已加载）后跟随当前工作区启动。
     // 初始化未完成时插件就被停用的话（stopped）不能再起监听。
     let stopped = false
@@ -115,6 +140,9 @@ export function install(ctx: MainPluginContext): void {
       } catch (err) {
         logger.warn('[Harness] 工作区文件监听启动失败:', err)
       }
+      // MCP 服务器预热：连接与工具发现都在后台跑（起子进程/联网可能要几秒），
+      // 不阻塞启动；连不上的那台只在设置页与日志里体现，不影响其余工具。
+      void refreshCatalog().catch((err) => logger.warn('[Harness] MCP 预热失败:', err))
     })
 
     // 系统设置里切换/重建工作区（core 发 `app.workspace-changed`）→ 监听换根目录。
@@ -134,6 +162,11 @@ export function install(ctx: MainPluginContext): void {
       // 停用即「不再配置快照/详情目录」：写入处按空目录降级为「无快照 / 无详情」（不抛错）
       configureFileHistory('')
       configureToolOutputStore('')
+      // MCP 同样是可逆装配：摘掉提供者并关掉所有连接（stdio 子进程不能留在系统里）
+      setMcpToolProvider(undefined)
+      configureMcp(undefined)
+      setMcpModuleBase(undefined)
+      void closeAllMcp()
     }
   })
 }

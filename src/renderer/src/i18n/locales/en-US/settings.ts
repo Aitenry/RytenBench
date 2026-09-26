@@ -12,6 +12,7 @@ export const enUSSettings: typeof zhCNSettings = {
     agents: 'Agents',
     skills: 'Skills',
     memory: 'Memory',
+    mcp: 'MCP',
     plugins: 'Plugins'
   },
   plugins: {

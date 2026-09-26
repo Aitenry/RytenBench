@@ -14,6 +14,10 @@ import type {
   MnemonBodyInsight,
   MnemonBodyRef,
   MnemonSnapshot,
+  McpServerConfig,
+  McpServerInput,
+  McpServerView,
+  McpToolInfo,
   PaginatedResult,
   PendingQuestionView,
   QueuedMessageView,
@@ -369,9 +373,51 @@ export const harnessApi = {
   /* ── 主智能体配置（默认工具与技能） ── */
   mainAgent: {
     get: () =>
-      invoke('plugin:harness:main-agent-get') as Promise<{ tools: string[]; skills: string[] }>,
+      invoke('plugin:harness:main-agent-get') as Promise<{
+        tools: string[]
+        skills: string[]
+        mcpTools?: string[]
+      }>,
     update: (config: { tools: string[]; skills: string[] }) =>
       invoke('plugin:harness:main-agent-update', config) as Promise<boolean>
+  },
+
+  /* ── MCP 服务器（设置 → MCP 页） ── */
+  mcp: {
+    /** 服务器清单 + 实时状态（打开设置页会重连一次，拿的是当前真实状态） */
+    list: () => invoke('plugin:harness:mcp-servers-list') as Promise<McpServerView[]>,
+    save: (input: McpServerInput) =>
+      invoke('plugin:harness:mcp-server-save', input) as Promise<McpServerConfig>,
+    remove: (id: string) => invoke('plugin:harness:mcp-server-remove', id) as Promise<boolean>,
+    toggle: (id: string, enabled: boolean) =>
+      invoke('plugin:harness:mcp-server-toggle', id, enabled) as Promise<boolean>,
+    /** 手动重连全部服务器（外部进程被系统杀掉 / 网络恢复后点一下即可） */
+    reconnect: () => invoke('plugin:harness:mcp-server-reconnect') as Promise<boolean>,
+    /** 试连**尚未保存**的配置：连上返回工具清单，连不上返回原始错误（不抛错） */
+    test: (input: McpServerInput) =>
+      invoke('plugin:harness:mcp-server-test', input) as Promise<{
+        ok: boolean
+        tools?: McpToolInfo[]
+        error?: string
+      }>,
+    /** 导入 mcp.json 形态的配置 */
+    importServers: (raw: unknown) =>
+      invoke('plugin:harness:mcp-servers-import', raw) as Promise<{
+        imported: string[]
+        failed: { name: string; reason: string }[]
+      }>,
+    /** 导入：弹出文件选择框读取 mcp.json（主进程读文件，渲染层不碰 fs） */
+    pickImportFile: () =>
+      invoke('plugin:harness:mcp-servers-import-file') as Promise<{
+        imported: string[]
+        failed: { name: string; reason: string }[]
+      } | null>,
+    /** 勾选/取消一台服务器带来的全部工具（写入 mainAgent.mcpTools） */
+    setToolsEnabled: (toolNames: string[]) =>
+      invoke('plugin:harness:mcp-tools-set', toolNames) as Promise<boolean>,
+    /** 目录变化（连上/断开/增删工具）：MCP 页与智能体页的工具下拉都据此刷新 */
+    onCatalogUpdated: (callback: () => void): (() => void) =>
+      on('plugin:harness:harness-mcp-updated', () => callback())
   },
 
   /* ── 工作区文件与改动审查（AI 改动复核 + 文件浏览器） ── */

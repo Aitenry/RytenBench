@@ -605,5 +605,102 @@ export const harnessEnUS: typeof harnessZhCN = {
       'No Skills found in this directory. Make sure each subdirectory contains a {{filename}} file.',
     savedDir: 'Skills directory saved',
     clearedDir: 'Skills directory cleared'
+  },
+  /* ── mcpSettings (Settings → MCP) ── */
+  mcpSettings: {
+    pageTitle: 'MCP',
+    pageDescription:
+      'Connect external MCP servers (a local stdio process or a remote HTTP/SSE endpoint). The tools a server exposes show up in the agent tool list.',
+    list: {
+      sectionTitle: 'Servers',
+      newServer: 'Add',
+      importFile: 'Import config',
+      reconnect: 'Reconnect',
+      reconnectDone: 'Reconnected {{count}} server(s)',
+      empty: 'No MCP servers yet — use "Add" or "Import config" in the top right',
+      toolCount: '{{count}} tools',
+      toolCount_one: '{{count}} tool',
+      toolCount_other: '{{count}} tools',
+      enabledForModel: '{{count}} tools enabled',
+      notEnabledForModel: 'No tools enabled',
+      viewTools: 'View tools',
+      edit: 'Edit',
+      remove: 'Delete',
+      manual: 'Reconnect',
+      removeConfirmTitle: 'Delete MCP server "{{name}}"?',
+      removeConfirmBody:
+        'This only removes the local configuration entry; the server itself is untouched. This cannot be undone.',
+      removed: '"{{name}}" deleted',
+      enableFailedWithReason: 'Could not toggle the server: {{reason}}',
+      connectFailed: 'Connection failed'
+    },
+    status: {
+      ok: 'Connected',
+      error: 'Connection failed',
+      disabled: 'Disabled',
+      unconfigured: 'Incomplete config'
+    },
+    field: {
+      name: 'Name',
+      namePlaceholder: 'e.g. filesystem / github / postgres',
+      nameHint: 'Used as the tool name prefix; latin letters and dashes work best',
+      description: 'Description (optional)',
+      descriptionPlaceholder: 'What this server provides, so it stays identifiable',
+      transport: 'Transport',
+      transportHint: 'Use stdio for local commands, HTTP (SSE fallback) for remote endpoints',
+      command: 'Command',
+      commandPlaceholder: 'e.g. npx / uvx / node',
+      args: 'Arguments',
+      argsPlaceholder: 'One argument per line, e.g. -y',
+      argsHint: 'One argument per line; leave empty for none',
+      env: 'Environment variables',
+      envPlaceholder: 'e.g. GITHUB_TOKEN',
+      envValuePlaceholder: 'value',
+      addEnv: 'Add variable',
+      cwd: 'Working directory (optional)',
+      cwdPlaceholder: 'Defaults to the app working directory',
+      url: 'URL',
+      urlPlaceholder: 'e.g. https://example.com/mcp',
+      headers: 'Headers',
+      headerPlaceholder: 'e.g. Authorization',
+      headerValuePlaceholder: 'value',
+      addHeader: 'Add header',
+      timeout: 'Call timeout (ms)',
+      timeoutPlaceholder: 'Empty uses the default 60000',
+      enabled: 'Enabled',
+      enabledHint: 'When disabled the server is not connected and its tools disappear',
+      toolsEnabled: 'Tools available',
+      toolsEnabledHint: 'When checked every tool of this server joins the agent tool list',
+      secretsKept: 'Stored values are not echoed back; leave empty to keep them'
+    },
+    transport: {
+      stdio: 'stdio (local command)',
+      http: 'HTTP (remote endpoint)',
+      sse: 'SSE (remote endpoint)'
+    },
+    form: {
+      createTitle: 'Add MCP server',
+      editTitle: 'Edit MCP server: {{name}}',
+      groups: {
+        basic: 'Basics',
+        connection: 'Connection',
+        options: 'Options'
+      },
+      test: 'Test connection',
+      testing: 'Connecting…',
+      testOk: 'Connected, found {{count}} tools',
+      testEmpty: 'Connected, but this server exposes no tools',
+      testFailed: 'Connection failed'
+    },
+    messages: {
+      saved: '"{{name}}" saved',
+      saveFailedWithReason: 'Save failed: {{reason}}',
+      loadFailedWithReason: 'Could not load MCP servers: {{reason}}',
+      importDone: 'Imported {{count}} server(s)',
+      importNone: 'No servers were imported',
+      importFailedWithReason: 'Import failed: {{reason}}',
+      importPartial: 'Some entries were not imported',
+      saveHint: 'Saving reconnects this server right away'
+    }
   }
 }

@@ -6,7 +6,8 @@ import {
   RiBook2Line,
   RiMindMap,
   RiBarChartHorizontalLine,
-  RiPlayListLine
+  RiPlayListLine,
+  RiPlug2Line
 } from '@remixicon/react'
 import React from 'react'
 
@@ -18,5 +19,7 @@ export const toolIconMap: Record<string, React.ReactNode> = {
   RiBook2Line: <RiBook2Line size={16} />,
   RiMindMap: <RiMindMap size={16} />,
   RiBarChartHorizontalLine: <RiBarChartHorizontalLine size={16} />,
-  RiPlayListLine: <RiPlayListLine size={16} />
+  RiPlayListLine: <RiPlayListLine size={16} />,
+  // MCP 工具（外部服务器提供，图标名由主进程 runtime/mcp.ts 统一给出）
+  RiPlug2Line: <RiPlug2Line size={16} />
 }

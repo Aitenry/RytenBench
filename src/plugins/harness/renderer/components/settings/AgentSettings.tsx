@@ -133,11 +133,33 @@ const AgentSettings: React.FC = () => {
     }
   }, [viewMessage, t])
 
+  /** 只重取工具清单（MCP 目录变化时用：不动分页、不动用户正在编辑的表单值） */
+  const refreshTools = useCallback(async () => {
+    try {
+      setAvailableTools(await harnessApi.harness.getTools())
+    } catch {
+      // 工具清单取不到不影响其余功能：保持上一份即可，不弹错
+    }
+  }, [])
+
   useEffect(() => {
     loadOptions().then((wsId) => {
       loadPage(1, wsId)
     })
   }, [loadPage, loadOptions])
+
+  // MCP 服务器连接/断开会改变可用工具集：订阅后即时刷新下拉，
+  // 用户不用先关掉设置再打开才看得到刚连上的 MCP 工具
+  useEffect(() => {
+    try {
+      return harnessApi.mcp.onCatalogUpdated(() => {
+        void refreshTools()
+      })
+    } catch (err) {
+      console.warn('[agent-settings] MCP 目录订阅失败:', err)
+      return
+    }
+  }, [refreshTools])
 
   // 监听工作区切换
   useEffect(() => {

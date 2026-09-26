@@ -12,6 +12,7 @@ import {
 import { harnessQueue } from '../queue-store'
 import type { MainIpcHandlers, MainPluginContext } from '../../../../main/plugins/context'
 import type { ToolInfo } from '../types'
+import { effectiveMainAgentTools, type MainAgentConfig } from '../../shared/mcp'
 import { HarnessService } from '../service/harness'
 import { buildTools, listAvailableTools } from '../tools/builders'
 import { readVirtualTextFile } from '../runtime/fs-backend'
@@ -215,9 +216,8 @@ async function runHarnessTurn(
   }
 
   // 加载主智能体默认配置（electron-store）
-  const mainAgentDefaults = settingsStore.get('mainAgent') as
-    { tools?: string[]; skills?: string[] } | undefined
-  const tools = buildTools(mainAgentDefaults?.tools ?? [])
+  const mainAgentDefaults = settingsStore.get('mainAgent') as MainAgentConfig | undefined
+  const tools = buildTools(effectiveMainAgentTools(mainAgentDefaults))
   const harnessSettings = settingsStore.get('harness') as HarnessSettings | undefined
   logger.info(`[Harness] Creating model with providerId: ${options?.providerId ?? 'default'}`)
 
@@ -227,11 +227,13 @@ async function runHarnessTurn(
     const title = question.slice(0, 50)
     const workspaceId = harnessSettings?.activeWorkspaceId ?? 0
     try {
+      // 话题上记一份「本轮启用的工具」快照（含 MCP 页勾选的 MCP 工具，与真正挂载的口径一致）
+      const selected = effectiveMainAgentTools(mainAgentDefaults)
       topicId = await createTopic(
         workspaceId,
         title,
         undefined,
-        mainAgentDefaults?.tools?.length ? JSON.stringify(mainAgentDefaults.tools) : undefined
+        selected.length ? JSON.stringify(selected) : undefined
       )
     } catch (err) {
       logger.error('Failed to create topic:', err)
@@ -1116,9 +1118,8 @@ export function installHarnessIpc(ctx: MainPluginContext): void {
       }
     ) => {
       // 加载主智能体默认配置（electron-store）
-      const mainAgentDefaults = settingsStore.get('mainAgent') as
-        { tools?: string[]; skills?: string[] } | undefined
-      const tools = buildTools(mainAgentDefaults?.tools ?? [])
+      const mainAgentDefaults = settingsStore.get('mainAgent') as MainAgentConfig | undefined
+      const tools = buildTools(effectiveMainAgentTools(mainAgentDefaults))
       logger.info(`[Harness] Creating model with providerId: ${options?.providerId ?? 'default'}`)
       const model = await getProviderService().createModel(options?.providerId)
       const harnessSettings = settingsStore.get('harness') as HarnessSettings | undefined

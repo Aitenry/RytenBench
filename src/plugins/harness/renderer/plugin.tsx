@@ -1,10 +1,17 @@
-import { RiChatAiLine, RiAiAgentLine, RiFileAi2Line, RiBrain4Line } from '@remixicon/react'
+import {
+  RiChatAiLine,
+  RiAiAgentLine,
+  RiFileAi2Line,
+  RiBrain4Line,
+  RiPlug2Line
+} from '@remixicon/react'
 import type { Plugin } from '@renderer/plugin-host/types'
 import manifest from '../manifest'
 import { harnessLocales } from '../locales'
 import AgentSettings from './components/settings/AgentSettings'
 import SkillsSettings from './components/settings/SkillsSettings'
 import MemorySettings from './components/settings/MemorySettings'
+import McpSettings from './components/settings/McpSettings'
 import { harnessAppProvider } from './provider'
 import { harnessApi } from './api'
 
@@ -66,6 +73,15 @@ const plugin: Plugin = {
       group: 'assistant',
       order: 30,
       Component: MemorySettings
+    })
+    sections.register({
+      // MCP 服务器管理：外部工具来源，排在「记忆」之后（同一分组，智能体 → 技能 → 记忆 → MCP）
+      tabKey: 'mcp',
+      labelKey: 'settings.nav.mcp',
+      icon: <RiPlug2Line size={16} />,
+      group: 'assistant',
+      order: 40,
+      Component: McpSettings
     })
 
     // 词条随插件注册：停用即不再注册这些键（原先由中央 locales 无条件打包进首屏）

@@ -11,6 +11,7 @@ export const zhCNSettings = {
     agents: '智能体',
     skills: '技能',
     memory: '记忆',
+    mcp: 'MCP',
     plugins: '插件'
   },
   plugins: {

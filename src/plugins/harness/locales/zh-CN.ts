@@ -604,5 +604,103 @@ export const harnessZhCN = {
     emptyDescription: '此目录中未发现任何技能，请确保子目录中包含 {{filename}} 文件',
     savedDir: '技能目录已保存',
     clearedDir: '已清空技能目录'
+  },
+  /* ── mcpSettings（设置 → MCP 页） ── */
+  /* MCP（Model Context Protocol）服务器管理页词条。 */
+  mcpSettings: {
+    pageTitle: 'MCP',
+    pageDescription:
+      '接入外部 MCP 服务器（stdio 本地进程或 HTTP/SSE 远程地址），服务器暴露的工具会出现在智能体的工具清单里。',
+    list: {
+      sectionTitle: '服务器',
+      newServer: '新增',
+      importFile: '导入配置',
+      reconnect: '重新连接',
+      reconnectDone: '已重新连接 {{count}} 台服务器',
+      empty: '还没有 MCP 服务器，点右上角「新增」或「导入配置」接入一台',
+      toolCount: '{{count}} 个工具',
+      toolCount_one: '{{count}} 个工具',
+      toolCount_other: '{{count}} 个工具',
+      enabledForModel: '已启用 {{count}} 个工具',
+      notEnabledForModel: '未启用工具',
+      viewTools: '查看工具',
+      edit: '编辑',
+      remove: '删除',
+      manual: '手动重连',
+      removeConfirmTitle: '删除 MCP 服务器「{{name}}」？',
+      removeConfirmBody: '只删除本机的这份配置；不影响该服务器本身。此操作不可撤销。',
+      removed: '已删除「{{name}}」',
+      enableFailedWithReason: '切换启用状态失败：{{reason}}',
+      connectFailed: '连接失败'
+    },
+    status: {
+      ok: '已连接',
+      error: '连接失败',
+      disabled: '已停用',
+      unconfigured: '配置不完整'
+    },
+    /* 字段名（表单标签与详情面板共用；分组标签是纯文本，不带装饰） */
+    field: {
+      name: '名称',
+      namePlaceholder: '如：filesystem / github / postgres',
+      nameHint: '工具名前缀取自这里，建议用英文与连字符',
+      description: '说明（可选）',
+      descriptionPlaceholder: '这台服务器接的是什么，便于以后分辨',
+      transport: '连接方式',
+      transportHint: '本地命令用 stdio；远程服务用 HTTP（可回退 SSE）',
+      command: '命令',
+      commandPlaceholder: '如 npx / uvx / node',
+      args: '参数',
+      argsPlaceholder: '每行一个参数，如：-y',
+      argsHint: '每行一个参数，留空表示无参数',
+      env: '环境变量',
+      envPlaceholder: '如 GITHUB_TOKEN',
+      envValuePlaceholder: '值',
+      addEnv: '添加环境变量',
+      cwd: '工作目录（可选）',
+      cwdPlaceholder: '留空则用应用当前目录',
+      url: '地址',
+      urlPlaceholder: '如 https://example.com/mcp',
+      headers: '请求头',
+      headerPlaceholder: '如 Authorization',
+      headerValuePlaceholder: '值',
+      addHeader: '添加请求头',
+      timeout: '调用超时（毫秒）',
+      timeoutPlaceholder: '留空用默认 60000',
+      enabled: '启用',
+      enabledHint: '停用后不连接，其工具即刻从工具清单移除',
+      toolsEnabled: '工具可用',
+      toolsEnabledHint: '勾选后这台服务器的全部工具进入智能体工具清单',
+      secretsKept: '已保存的值不回显，留空表示不改动'
+    },
+    transport: {
+      stdio: 'stdio（本地命令）',
+      http: 'HTTP（远程地址）',
+      sse: 'SSE（远程地址）'
+    },
+    form: {
+      createTitle: '新增 MCP 服务器',
+      editTitle: '编辑 MCP 服务器：{{name}}',
+      groups: {
+        basic: '基本信息',
+        connection: '连接',
+        options: '选项'
+      },
+      test: '测试连接',
+      testing: '正在连接…',
+      testOk: '连接成功，发现 {{count}} 个工具',
+      testEmpty: '连接成功，但这台服务器没有暴露工具',
+      testFailed: '连接失败'
+    },
+    messages: {
+      saved: '「{{name}}」已保存',
+      saveFailedWithReason: '保存失败：{{reason}}',
+      loadFailedWithReason: '读取 MCP 服务器失败：{{reason}}',
+      importDone: '已导入 {{count}} 台服务器',
+      importNone: '没有导入任何服务器',
+      importFailedWithReason: '导入失败：{{reason}}',
+      importPartial: '部分条目未导入',
+      saveHint: '保存后会立即重连这台服务器'
+    }
   }
 }
