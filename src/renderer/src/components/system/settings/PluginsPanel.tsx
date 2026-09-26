@@ -1,8 +1,9 @@
 import React, { useEffect, useState, useCallback } from 'react'
-import { App, Button, Checkbox, Modal, Spin, Switch, Tag, theme } from 'antd'
+import { App, Button, Checkbox, Modal, Switch, Tag, theme } from 'antd'
 import { useTranslation } from '@renderer/i18n'
 import { usePlugins } from '@renderer/plugin-host/PluginHostContext'
 import type { PluginListEntry, PluginState } from '@shared/plugin/types'
+import { SkeletonListRows } from '@renderer/components/system/Skeleton'
 import { SettingsPageHeader, SettingsSection } from './SettingsUI'
 
 /** 插件仓库（GitHub）里可安装的一条（`api.plugin.available()` 的返回） */
@@ -415,11 +416,12 @@ const PluginsPanel: React.FC = () => {
         )}
 
         {repoError === null && repoPlugins === null && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 16 }}>
-            <Spin size="small" />
-            <span style={{ fontSize: 12, color: token.colorTextTertiary }}>
+          // 加载态走骨架物料（全项目统一：不再用 antd Spin，见 test/verify-skeleton-unification.mjs）
+          <div style={{ marginTop: 16 }}>
+            <SkeletonListRows rows={2} icon />
+            <div style={{ fontSize: 12, color: token.colorTextTertiary, marginTop: 8 }}>
               {t('settings.plugins.repoLoading')}
-            </span>
+            </div>
           </div>
         )}
 
