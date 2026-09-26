@@ -64,11 +64,32 @@ export interface PluginListEntry {
   description?: string
   icon?: string
   builtin: boolean
+  /**
+   * 是否**随应用分发**（可从应用包随时重装）。
+   *
+   * 与 `builtin` 的区别：`builtin` 是「展示用的来源标签」，`bundled` 是「应用包里有没有
+   * 这个插件的包」这一事实。P1 之后内置插件也会被卸载掉目录，那时它仍然 `bundled: true`
+   * 但 `installed: false`，面板据此给出「安装」按钮。
+   */
+  bundled?: boolean
+  /** userData/plugins/<id>/ 里当前是否有这个插件（false = 只存在于应用包里） */
+  installed: boolean
   enabled: boolean
   state: PluginState
   error?: string
-  /** 外部插件入口（渲染层 loader 与主进程装载依据） */
+  /** 插件入口（渲染层 loader 与主进程装载依据） */
   entry?: { renderer?: string; main?: string }
+  /**
+   * 路由元数据（与 `PluginManifest.routes` 同形，直接来自清单）。
+   *
+   * 用途是**首帧声明式预注册**：磁盘包插件的渲染模块要 fetch + import 之后才 install，
+   * 首帧侧栏/路由表会是空的（菜单「晚几百毫秒才弹出来」）。渲染层拿这份元数据在
+   * 宿主构造期同步登记一遍，插件模块加载完成后由它自己的真实注册覆盖（见
+   * `renderer/src/plugin-host/host.ts` 的 `declare()`）。
+   */
+  routes?: { path: string; skeleton?: string }[]
+  /** 侧栏菜单元数据（同上；`icon` 是 remixicon 名字符串，声明项按名字解析成节点） */
+  menu?: { key: string; labelKey: string; icon: string; order?: number }
 }
 
 /** 校验 manifest 最小字段是否齐全（非法插件静默跳过/拒绝安装） */

@@ -63,24 +63,27 @@ interface Api {
     onUpdate: (callback: (data: WeatherData) => void) => () => void
   }
   plugin: {
-    /** 已发现插件与启用态（内置目录 + 外部扫描合并） */
+    /** 已安装插件与启用态（内置铺包 + 第三方扫描合并；未安装的内置插件也在列） */
     list: () => Promise<PluginListEntry[]>
     /**
-     * **同步**取一次插件清单（含启用态）。
-     * 渲染层宿主在构造期要同步决定装载哪些内置插件，只有同步 IPC 能在这个时机拿到权威状态。
+     * **同步**取一次插件清单（含启用态/安装态）。
+     * 渲染层宿主在构造期要同步决定装载哪些静态内置插件，只有同步 IPC 能在这个时机拿到权威状态。
      */
     listSync: () => PluginListEntry[]
     /** 启用/停用插件（写入持久化并广播，渲染层即时装载/卸载） */
     setEnabled: (id: string, enabled: boolean) => Promise<PluginListEntry[]>
-    /** 安装外部插件（弹目录选择；返回 ok/error） */
-    install: () => Promise<{ ok: boolean; id?: string; error?: string }>
-    /** 卸载外部插件（删除用户插件目录，返回最新列表） */
-    uninstall: (id: string) => Promise<PluginListEntry[]>
+    /** 无参 = 第三方插件「选目录安装」；带 id = 从应用包重装某个内置插件 */
+    install: (id?: string) => Promise<{ ok: boolean; id?: string; error?: string }>
+    /**
+     * 卸载插件并返回最新列表。
+     * `purgeData` 必须显式传：false（= 保留数据）会被主进程直接拒绝，true 才真的清数据 + 删目录。
+     */
+    uninstall: (id: string, purgeData: boolean) => Promise<PluginListEntry[]>
     /** 插件启用态变化推送（含安装/卸载） */
     onStateChanged: (callback: () => void) => () => void
-    /** 外部插件通道调用（plugin:<id>: 前缀；经主进程权威校验） */
+    /** 插件通道调用（plugin:<id>: 前缀；经主进程权威校验） */
     invoke: (channel: string, ...args: unknown[]) => Promise<unknown>
-    /** 订阅外部插件事件通道（白名单缓存门控） */
+    /** 订阅插件事件通道（白名单缓存门控） */
     on: (channel: string, callback: (data: unknown) => void) => () => void
     /**
      * 只读诊断：主进程里各插件贡献的宿主生命周期钩子（标签）+ 工作区事件订阅数。
@@ -93,6 +96,20 @@ interface Api {
       memoryDump: string[]
       workspaceListeners: number
     }>
+    /**
+     * 只读诊断：各插件主模块的**装载来源**。
+     * `package` = 由 `userData/plugins/<id>/main.cjs` 提供；`builtin` = 静态注册表回退。
+     */
+    loadedFrom: () => Promise<
+      Record<
+        string,
+        { installed: boolean; source: 'package' | 'builtin' | 'absent'; file?: string }
+      >
+    >
+    /** 只读诊断：若干张表的行数（表名按标识符白名单校验） */
+    tableCounts: (tables: string[]) => Promise<Record<string, number>>
+    /** 上报宿主 UI 表的「键 → 导出名」（`plugin://host/ui.js` 桥据此生成） */
+    reportHostUi: (names: Record<string, string[]>) => void
   }
   mermaid: {
     /** 全屏窗口预览 SVG（可拖拽/缩放画布） */

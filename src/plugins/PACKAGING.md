@@ -43,7 +43,7 @@ resources/plugins/<id>/      ──▶   userData/plugins/<id>/
 宿主在加载任何插件前挂上运行时表，并给插件 CJS 包注入 `require` 垫片：
 
 ```js
-globalThis.__RB_HOST_RUNTIME__ = { '@host/main/database/orm': ormModule, /* … 20 个 */ }
+globalThis.__RB_HOST_RUNTIME__ = { '@host/main/database/orm': ormModule /* … 20 个 */ }
 // 插件包里的 require('@host/main/x') → 命中的直接返回上表里的同一实例（单例保住）
 // 其它裸模块（electron / langchain / zod / drizzle…）→ 按宿主自身的解析路径 require
 ```
@@ -53,6 +53,7 @@ globalThis.__RB_HOST_RUNTIME__ = { '@host/main/database/orm': ormModule, /* … 
 渲染层插件包是 ESM（`plugin://` + blob import 加载），宿主 UI 以 **ESM 桥**提供：
 `plugin://host/ui.js`（由协议处理器生成，内容是 `const H = globalThis.__RB_HOST_UI__; export const X = H.X;` 形式的具名导出）。
 需要：
+
 - CSP 的 `script-src` 加上 `plugin:`（现在是 `'self' blob:`）；
 - 宿主的 `__RB_HOST_UI__` 表在渲染层启动时挂上（15 个模块，静态 import 后聚合）；
 - 版本化：桥文件带 `?v=<宿主版本>`，插件包与宿主版本不匹配时加载失败要给出可读错误。
@@ -76,14 +77,51 @@ globalThis.__RB_HOST_RUNTIME__ = { '@host/main/database/orm': ormModule, /* … 
 
 ## 分轮实施
 
-| 轮 | 内容 | 验收 |
-| --- | --- | --- |
-| P0 ✅ | `scripts/build-plugins.mjs`：四插件打成 `resources/plugins/<id>/{plugin.json,main.cjs,renderer.mjs}`，`@host/**` 与第三方裸模块外置，manifest 由 `manifest.ts` 生成（单一真源） | 四个包产出（dev：music 113/293KB、planner 107/221KB、home 666/898KB、harness 1722/2565KB），外置清单与本文契约一致 |
-| P1 | 宿主运行时（main `globalThis` + require 垫片；renderer `plugin://host/ui.js` 桥 + CSP `plugin:`）+ 首次安装 copy + **用 music 端到端**跑通 | 应用里 music 从 `userData/plugins/music` 装载；卸载（不保留数据）后目录/表数据/菜单/通道全没了；重装后原样回来；CDP 断言 |
-| P2 | planner 同款 | 同上 |
-| P3 | home 同款（含 GraphView 懒加载 chunk 仍在） | 同上 + 文档数据 purge 验证 |
-| P4 | harness 同款（含 workspace/mnemon 数据 purge） | 同上 |
-| P5 | 去掉静态注册表（`src/plugins/*/renderer/plugin.tsx` 的应用内 import、`main/plugins/builtin.ts`）、`electron-builder.yml` 加 `resources/plugins` 到 extraResources、面板改造、文档收尾 | `node test/verify-plugin-restructure.mjs` 改为「应用内零插件 import」；全套工装 + CDP 全绿 |
+| 轮    | 内容                                                                                                                                                                                  | 验收                                                                                                                                                                                                                                                                                      |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P0 ✅ | `scripts/build-plugins.mjs`：四插件打成 `resources/plugins/<id>/{plugin.json,main.cjs,renderer.mjs}`，`@host/**` 与第三方裸模块外置，manifest 由 `manifest.ts` 生成（单一真源）       | 四个包产出（dev：music 113/293KB、planner 107/221KB、home 666/898KB、harness 1722/2565KB），外置清单与本文契约一致                                                                                                                                                                        |
+| P1 ✅ | 宿主运行时（main `globalThis` + require 垫片；renderer `plugin://host/ui.js` 桥 + CSP `plugin:`）+ 首次安装 copy + **用 music 端到端**跑通 + **首帧声明式预注册**（见下节）           | 应用里 music 从 `userData/plugins/music` 装载；首帧侧栏即为「首页/计划/音乐/助手」（`test/probe-first-frame-menu.mjs`）；卸载（不保留数据）后目录/表数据/菜单/通道全没了，重启不会自动铺回来，重装后原样回来；`verify-plugin-host` 61 条全绿、`verify-plugin-install-uninstall` 41 条全绿 |
+| P2    | planner 同款                                                                                                                                                                          | 同上                                                                                                                                                                                                                                                                                      |
+| P3    | home 同款（含 GraphView 懒加载 chunk 仍在）                                                                                                                                           | 同上 + 文档数据 purge 验证                                                                                                                                                                                                                                                                |
+| P4    | harness 同款（含 workspace/mnemon 数据 purge）                                                                                                                                        | 同上                                                                                                                                                                                                                                                                                      |
+| P5    | 去掉静态注册表（`src/plugins/*/renderer/plugin.tsx` 的应用内 import、`main/plugins/builtin.ts`）、`electron-builder.yml` 加 `resources/plugins` 到 extraResources、面板改造、文档收尾 | `node test/verify-plugin-restructure.mjs` 改为「应用内零插件 import」；全套工装 + CDP 全绿                                                                                                                                                                                                |
+
+## 首帧声明式预注册（P1 落地，P5 复用同一机制）
+
+**问题**：磁盘包插件的渲染模块要 `fetch` + `import` 之后才 `install(ctx)`，而静态内置插件在宿主构造期
+就同步注册完了。于是磁盘包插件的菜单/路由「晚几百毫秒才弹出来」，首帧侧栏缺它——点击侧栏还会导航到
+空路由（`No routes matched`）。
+
+**做法**（三端各一小步，没有新增协议）：
+
+1. 主进程 `plugins-list` 的每个条目带上清单里的 `routes`/`menu`（`PluginListEntry.routes/menu`，
+   与 `PluginManifest` 同形；磁盘包读 `plugin.json`，过渡期的静态内置插件直接用
+   `BUILTIN_PLUGIN_MANIFESTS`）。
+2. 渲染层 `PluginHost.declare(id, { menu?, routes? })` 把这份元数据记进**声明表**（按 id 记账）；
+   `getMenus()`/`getRoutes()` 返回「真实注册 + 尚未被真实注册覆盖的声明」——同一 `key`/`path`
+   **以真实注册为准**，顺序仍按 `order`。声明项只有元数据，路由落到 `MainRoutes` 的
+   `PluginRouteView` 时会走「既无 `load` 也无 `Component`」分支，渲染 `<RouteSkeleton>`。
+3. `App.tsx` 用已有的同步 `api.plugin.listSync()` 结果构造声明，`PluginHostProvider` 在**构造宿主
+   的同一渲染周期内**（早于任何子组件）调用 `declare`。静态内置插件此刻已完成真实注册，声明是冗余的
+   （合并时真实优先）；真正受益的是磁盘包插件。
+4. 清理：`disable()`（含 withdrawal 连带卸载）与 `forgetPlugin()`/`removeExternal()` 都删掉该 id 的
+   声明，否则停用/卸载后菜单会残留。
+5. 图标：清单里 `menu.icon` 是**名字字符串**（`RiDiscLine`），声明项由
+   `plugin-host/declared-icons.tsx` 显式映射成节点，未知名字回退通用图标；**真实注册仍由插件自己传
+   组件**，不经过这张表。
+
+**P5 之后**：声明机制保留（第一个插件搬走后每次都靠它撑首帧），删掉的只是过渡期的静态注册表与
+`packaged.ts` 白名单。
+
+### 卸载的边界（P1 实测踩到，P2~P4 同样适用）
+
+- **卸载必须记 `uninstalled`**：内置插件走 `removeBundledPlugin()`（删目录 + 记账），不能复用第三方语义的
+  `uninstallExternalPlugin()`（只删目录），否则下次启动 `ensureBundledPluginsInstalled()` 立刻把包铺回来。
+- **未安装就不该有静态回退**：`builtin.ts` 的遮蔽规则是「已装包 **或** 用户卸载过」都遮住静态模块。
+  否则卸载后重启时主进程通道被静态模块装回来（界面按未安装处理），之后从面板「安装」会撞
+  Electron 的「Attempted to register a second handler」。
+- **停用 ≠ 移除登记**：渲染层桥对「只是停用」的插件调 `host.disable()` 而不是 `forgetPlugin()`——登记一丢，
+  没有磁盘包的静态内置插件重新启用时就再也回不来（会去 `plugin://<id>/renderer.js` 找不存在的文件）。
 
 ## 风险与既有约束
 

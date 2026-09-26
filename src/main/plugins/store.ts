@@ -6,10 +6,18 @@ import logger from 'electron-log'
  *
  * 只存「显式覆写」：内置插件默认启用、外部插件默认停用——
  * 未写入的 id 取默认值，避免每次内置插件新增都要迁移存量配置。
+ *
+ * 同一个文件还存两类**内置插件安装状态**（物理卸载方案见 src/plugins/PACKAGING.md）：
+ * - `uninstalled`：用户主动卸载过的内置插件 id（启动时不再自动装回来）；
+ * - `seeded`：每个内置插件上次铺包时的应用版本（应用升级后覆盖插件包）。
  */
 export const Store = _Store['default'] || _Store
 
-export const pluginsStore = new Store<{ states?: Record<string, boolean> }>({
+export const pluginsStore = new Store<{
+  states?: Record<string, boolean>
+  uninstalled?: string[]
+  seeded?: Record<string, string>
+}>({
   name: 'plugins'
 })
 
@@ -33,4 +41,49 @@ export function clearEnabledOverride(id: string): void {
   delete rest[id]
   pluginsStore.set('states', rest)
   logger.info(`[Plugins] 已清除 ${id} 的启用覆写`)
+}
+
+// ---------- 内置插件的安装状态 ----------
+
+/**
+ * 用户主动卸载过的内置插件 id。
+ *
+ * 语义严格限定在「内置」：外部插件（用户自己装的）目录被删掉就没了，不需要这个标记；
+ * 内置插件**必须**记一笔，否则下次启动 `ensureBundledPluginsInstalled()` 会把它装回来，
+ * 「物理卸载」就退化成了「卸载后自动复活」。
+ */
+export function getUninstalledBuiltins(): string[] {
+  const list = pluginsStore.get('uninstalled') ?? []
+  return Array.isArray(list) ? list.filter((id): id is string => typeof id === 'string') : []
+}
+
+/** 记下「用户卸载了内置插件 id」 */
+export function markUninstalled(id: string): void {
+  const list = getUninstalledBuiltins()
+  if (list.includes(id)) return
+  pluginsStore.set('uninstalled', [...list, id])
+  logger.info(`[Plugins] 已记录 ${id} 为已卸载（不再自动安装）`)
+}
+
+/** 清掉某内置插件的已卸载记录（重装时调用） */
+export function clearUninstalled(id: string): void {
+  const list = getUninstalledBuiltins()
+  if (!list.includes(id)) return
+  pluginsStore.set(
+    'uninstalled',
+    list.filter((x) => x !== id)
+  )
+  logger.info(`[Plugins] 已清除 ${id} 的已卸载记录`)
+}
+
+/** 某内置插件上次铺包时的应用版本（未铺过返回 undefined） */
+export function getPluginSeeded(id: string): string | undefined {
+  const map = pluginsStore.get('seeded') ?? {}
+  return map[id]
+}
+
+/** 记下某内置插件本次铺包时的应用版本 */
+export function setPluginSeeded(id: string, version: string): void {
+  const map = pluginsStore.get('seeded') ?? {}
+  pluginsStore.set('seeded', { ...map, [id]: version })
 }

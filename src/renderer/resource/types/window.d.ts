@@ -85,11 +85,22 @@ export interface Window {
     }
     plugin: {
       list: () => Promise<unknown[]>
-      /** 同步取一次插件清单（含启用态）；宿主首帧靠它决定只装载启用的内置插件 */
-      listSync: () => { id: string; builtin: boolean; enabled: boolean }[]
+      /** 同步取一次插件清单（含启用态/安装态）；宿主首帧靠它决定只装载哪些静态内置插件 */
+      listSync: () => {
+        id: string
+        builtin: boolean
+        bundled?: boolean
+        installed: boolean
+        enabled: boolean
+      }[]
       setEnabled: (id: string, enabled: boolean) => Promise<unknown[]>
-      install: () => Promise<{ ok: boolean; id?: string; error?: string }>
-      uninstall: (id: string) => Promise<unknown[]>
+      /** 无参 = 第三方插件选目录安装；带 id = 从应用包重装某个内置插件 */
+      install: (id?: string) => Promise<{ ok: boolean; id?: string; error?: string }>
+      /**
+       * 卸载插件。`purgeData` 必须显式传：false（= 保留数据）会被主进程直接拒绝，
+       * true 才真的清数据 + 删目录（用户口径见 src/plugins/PACKAGING.md）。
+       */
+      uninstall: (id: string, purgeData: boolean) => Promise<unknown[]>
       onStateChanged: (callback: () => void) => () => void
       /** 通用桥：调用插件通道（`plugin:<命名空间>:<channel>`） */
       invoke: (channel: string, ...args: unknown[]) => Promise<unknown>
@@ -102,6 +113,17 @@ export interface Window {
         memoryDump: string[]
         workspaceListeners: number
       }>
+      /** 只读诊断：各插件主模块的装载来源（磁盘包 / 静态注册表） */
+      loadedFrom: () => Promise<
+        Record<
+          string,
+          { installed: boolean; source: 'package' | 'builtin' | 'absent'; file?: string }
+        >
+      >
+      /** 只读诊断：若干张表的行数（表名按标识符白名单校验） */
+      tableCounts: (tables: string[]) => Promise<Record<string, number>>
+      /** 上报宿主 UI 表的「键 → 导出名」（plugin://host/ui.js 桥据此生成） */
+      reportHostUi: (names: Record<string, string[]>) => void
     }
     mermaid: {
       /** 全屏窗口预览 SVG（可拖拽/缩放画布） */

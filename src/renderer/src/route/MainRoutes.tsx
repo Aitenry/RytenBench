@@ -22,6 +22,11 @@ const PluginRouteView: React.FC<{ route: RegisteredRoute }> = ({ route }) => {
     )
   }
   const Eager = route.Component
+  // 既无 load 也无 Component 的分支有两个来源：
+  // ① 插件的真实注册没给组件（异常产物）；
+  // ② **首帧声明式预注册**的占位路由（宿主按清单 `routes` 元数据登记，等插件渲染模块
+  //    加载完成后由真实注册按 path 覆盖，见 plugin-host/host.ts 的 declare()）。
+  // ②是常规路径，这里渲染骨架屏而不是空白，正好衔接到真实路由。
   return Eager ? <Eager /> : <RouteSkeleton variant={route.skeleton ?? 'generic'} />
 }
 

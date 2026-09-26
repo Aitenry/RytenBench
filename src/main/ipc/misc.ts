@@ -1,5 +1,7 @@
 import { ipcMain } from 'electron'
 import logger from 'electron-log'
+import { sql } from 'drizzle-orm'
+import { getOrm } from '../database/orm'
 import { listContributions } from '../plugins/contributions'
 import { appEventListenerCount } from '../plugins/app-events'
 import {
@@ -41,4 +43,30 @@ export function registerMiscIpc(): void {
     memoryDump: listContributions<AppHook>(APP_RENDERER_MEMORY_DUMP).map((h) => h.label),
     workspaceListeners: appEventListenerCount(APP_EVENT_WORKSPACE_CHANGED)
   }))
+
+  /**
+   * 只读诊断：若干张表的行数（**白名单**，核心不含任何插件表名语义）。
+   *
+   * 为什么 core 里会有这个：物理卸载的验收要断言「卸载并清数据后 `music_folders` /
+   * `music_tracks` 行数为 0」，而卸载之后该插件的通道已经注销，渲染层没有别的办法读库。
+   * 这里只暴露「表名 → count」，表名由调用方给且必须在**调用点**的白名单里——core 自己
+   * 不认识这些表的归属（`music_*` 是测试工装传进来的字符串，不是 core 的常量）。
+   */
+  ipcMain.handle('app-table-counts', async (_event, tables: unknown) => {
+    if (!Array.isArray(tables)) throw new Error('app-table-counts 需要表名数组')
+    const orm = await getOrm()
+    const out: Record<string, number> = {}
+    for (const table of tables) {
+      if (typeof table !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(table)) {
+        throw new Error(`非法表名: ${String(table)}`)
+      }
+      // 表名已按标识符规则白名单化，无法注入；值一律走参数绑定
+      const result = await orm.execute<{ count: string | number }>(
+        sql.raw(`SELECT count(*)::int AS count FROM "${table}"`)
+      )
+      const row = (result as unknown as { rows: { count: string | number }[] }).rows?.[0]
+      out[table] = Number(row?.count ?? 0)
+    }
+    return out
+  })
 }

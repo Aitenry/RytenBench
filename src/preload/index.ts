@@ -178,16 +178,50 @@ const api = {
         memoryDump: string[]
         workspaceListeners: number
       }>,
+    /**
+     * 只读诊断：各插件主模块**从哪来**。
+     *
+     * P1 的过渡共存期里同一个插件可能来自磁盘包（`userData/plugins/<id>/main.cjs`）或静态
+     * 注册表（dev 未跑打包脚本时的回退），`plugins-list` 分不出来源。工装用它断言
+     * 「music 的 handler 确实由磁盘包应答」。
+     */
+    loadedFrom: () =>
+      ipcRenderer.invoke('plugins-loaded-from') as Promise<
+        Record<
+          string,
+          { installed: boolean; source: 'package' | 'builtin' | 'absent'; file?: string }
+        >
+      >,
+    /**
+     * 只读诊断：若干张表的行数（工装用，验证「卸载并清数据后插件表行数为 0」）。
+     * 表名由调用方传入并按标识符白名单校验；core 不含任何插件表名常量。
+     */
+    tableCounts: (tables: string[]) =>
+      ipcRenderer.invoke('app-table-counts', tables) as Promise<Record<string, number>>,
     setEnabled: (id: string, enabled: boolean) =>
       ipcRenderer.invoke('plugins-set-enabled', id, enabled) as Promise<PluginListEntry[]>,
-    install: () =>
-      ipcRenderer.invoke('plugins-install') as Promise<{
+    /** 无参：第三方插件「选目录安装」；带 id：从应用包重装某个内置插件 */
+    install: (id?: string) =>
+      ipcRenderer.invoke('plugins-install', id) as Promise<{
         ok: boolean
         id?: string
         error?: string
       }>,
-    uninstall: (id: string) =>
-      ipcRenderer.invoke('plugins-uninstall', id) as Promise<PluginListEntry[]>,
+    /**
+     * 卸载插件。
+     *
+     * `purgeData` 是用户口径的落点：**选择「保留数据」= 不卸载**，所以传 false 会被主进程
+     * 直接拒绝并抛中文可读错误；只有 true（「不保留数据并卸载」）才真的删数据 + 删目录。
+     */
+    uninstall: (id: string, purgeData: boolean) =>
+      ipcRenderer.invoke('plugins-uninstall', id, purgeData) as Promise<PluginListEntry[]>,
+    /**
+     * 上报宿主 UI 表的「键 → 导出名」（渲染层启动最早期一次）。
+     * 主进程的 `plugin://host/ui.js?m=<key>` 桥按这份清单生成 ESM 具名导出。
+     */
+    reportHostUi: (names: Record<string, string[]>) => {
+      ipcRenderer.send('plugin-host-ui-exports', names)
+    },
     onStateChanged: (callback: () => void) => {
       const handler = (): void => callback()
       ipcRenderer.on('plugin-state-changed', handler)

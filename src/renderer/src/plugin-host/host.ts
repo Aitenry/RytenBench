@@ -10,6 +10,7 @@ import type {
   HostServiceKey,
   HostServices,
   Plugin,
+  PluginDeclaration,
   RegisteredMenuItem,
   RegisteredRoute,
   SettingsSectionRegistration
@@ -71,6 +72,14 @@ export class PluginHost {
   /** 自定义键 → 提供者插件 id 与其提供的值（注册表本身就是 provide 的真源） */
   private readonly provides = new Map<string, { pluginId: string; value: unknown }>()
 
+  /**
+   * 声明式预注册表（id → 清单里的 routes/menu 元数据），**不是**真实注册表。
+   *
+   * 见 `declare()`：磁盘包插件的渲染模块要异步 import 之后才 install，这份声明让它
+   * 的菜单/路由在首帧就位；真实注册出现后按 key/path 覆盖声明（`getMenus`/`getRoutes`）。
+   */
+  private readonly declarations = new Map<string, PluginDeclaration>()
+
   private readonly routeRegistry = new ScopedRegistry<RegisteredRoute>()
   private readonly menuRegistry = new ScopedRegistry<RegisteredMenuItem>()
   private readonly settingsRegistry = new ScopedRegistry<SettingsSectionRegistration>()
@@ -128,11 +137,23 @@ export class PluginHost {
     }
   }
 
-  /** 登记插件（内置在构造时登记；外部插件在运行时加载后登记） */
+  /**
+   * 登记插件（构造期登记静态内置；运行期加载完成的磁盘包插件也走这里）。
+   *
+   * 同 id 重复登记时**替换**旧条目：重装插件后会拿到一个新的 `Plugin` 对象
+   * （`forgetPlugin` 也可能因为某条路径没走到而留下旧条目），此时必须用新的
+   * install 函数，否则重装后「找不到路由/菜单」。
+   */
   registerPlugin(plugin: Plugin): void {
-    if (this.plugins.some((p) => p.manifest.id === plugin.manifest.id)) return
-    this.plugins.push(plugin)
-    this.states.set(plugin.manifest.id, 'inactive')
+    const existing = this.plugins.findIndex((p) => p.manifest.id === plugin.manifest.id)
+    if (existing >= 0) {
+      this.plugins[existing] = plugin
+    } else {
+      this.plugins.push(plugin)
+    }
+    if (!this.states.has(plugin.manifest.id)) {
+      this.states.set(plugin.manifest.id, 'inactive')
+    }
     this.bump()
   }
 
@@ -146,9 +167,31 @@ export class PluginHost {
     const plugin = this.plugins.find((p) => p.manifest.id === id)
     if (!plugin || plugin.manifest.builtin) return
     await this.disable(id).catch(() => undefined)
+    this.declarations.delete(id)
     this.plugins = this.plugins.filter((p) => p.manifest.id !== id)
     this.states.delete(id)
     this.errors.delete(id)
+    this.bump()
+  }
+
+  /**
+   * 彻底移除某个已登记插件（先停用，再从登记表里摘掉）。
+   *
+   * 与 `removeExternal` 的区别：**不检查 builtin**。P1 起内置插件也是磁盘包，卸载后
+   * 主进程清单里就没有它了；此时渲染层必须把静态注册表里那一份也摘掉，否则会留下
+   * 「菜单/路由还在、主进程通道已注销」的僵尸插件（点进去只报通道未注册）。
+   * 依赖 `applyEnabled` 的 diff 是做不到的：它只处理清单里出现过的 id。
+   */
+  async forgetPlugin(id: string): Promise<void> {
+    if (!this.plugins.some((p) => p.manifest.id === id)) return
+    await this.disable(id).catch(() => undefined)
+    // disable 对「本来就没启用」的 id 会提前返回，所以声明项在这里再删一次（幂等）
+    this.declarations.delete(id)
+    this.plugins = this.plugins.filter((p) => p.manifest.id !== id)
+    this.states.delete(id)
+    this.errors.delete(id)
+    this.ctxs.delete(id)
+    this.removeAllProvides(id)
     this.bump()
   }
 
@@ -280,6 +323,30 @@ export class PluginHost {
     }
   }
 
+  // ---------- 声明式预注册（首帧占位） ----------
+
+  /**
+   * 按**清单元数据**预注册某个插件的菜单与路由（同步，不依赖插件渲染模块是否加载完）。
+   *
+   * 为什么需要：磁盘包插件（P1 起 music 走的就是这条）的渲染模块要 `fetch` + `import`
+   * 之后才 `install(ctx)`，于是首帧侧栏只有静态内置的三个菜单，音乐菜单要等几百毫秒
+   * 才「弹出来」（2026-09-26 实测：工装的早期菜单断言直接失败）。
+   * 主进程清单（`PluginListEntry.routes/menu`）里本来就有这两项元数据，宿主在构造期
+   * 照着声明一遍，首帧即完整；插件模块加载完成后它自己的真实注册按 `key`/`path` 覆盖
+   * 声明（`getMenus`/`getRoutes` 的合并规则），因此**声明永远只是占位**。
+   *
+   * 只有元数据、没有组件与加载器：声明出来的路由落到 `MainRoutes` 的 `PluginRouteView`
+   * 会走「既无 `load` 也无 `Component`」那条分支，渲染 `<RouteSkeleton/>`（骨架 variant
+   * 就取清单里的 `skeleton`）。菜单图标由调用方先用 `declaredMenuIcon()` 解析成节点。
+   *
+   * 清理时机：`disable()`（含 withdrawal 连带卸载）、`forgetPlugin()`/`removeExternal()`
+   * 都会删掉该 id 的声明，否则停用/卸载后菜单会残留到下次启动。
+   */
+  declare(id: string, declaration: PluginDeclaration): void {
+    this.declarations.set(id, declaration)
+    this.bump()
+  }
+
   /** 外部插件取 vendored 模块实例 */
   requireVendor(name: string): unknown {
     return (this.vendorModules ?? {})[name]
@@ -359,7 +426,11 @@ export class PluginHost {
   }
 
   async disable(id: string): Promise<void> {
-    if (!this.enabled.has(id)) return
+    if (!this.enabled.has(id)) {
+      // 未启用也要把声明项清干净：声明是首帧占位（可能先于 enable 存在），停用态不该有菜单
+      if (this.declarations.delete(id)) this.bump()
+      return
+    }
     for (const pid of this.withdrawalOrder(id)) {
       const ctx = this.ctxs.get(pid)
       this.states.set(pid, 'unloading')
@@ -371,6 +442,8 @@ export class PluginHost {
       this.providerRegistry.removeAll(pid, () => this.bump())
       this.globalRegistry.removeAll(pid, () => this.bump())
       this.bottomBarRegistry.removeAll(pid, () => this.bump())
+      // 1.5) 声明项一并清掉：否则「停用插件」后菜单会被首帧声明补回来（残留到下次启动）
+      this.declarations.delete(pid)
       // 2) 逆序回滚 effects + install dispose
       await ctx?.dispose().catch(() => undefined)
       this.removeAllProvides(pid)
@@ -430,13 +503,49 @@ export class PluginHost {
   // ---------- 查询 ----------
 
   getRoutes(): RegisteredRoute[] {
-    return this.cached('routes', () => this.routeRegistry.getAll())
+    return this.cached('routes', () => this.mergeDeclaredRoutes(this.routeRegistry.getAll()))
   }
 
   getMenus(): RegisteredMenuItem[] {
-    return this.cached('menus', () =>
-      this.menuRegistry.getAll().sort((a, b) => a.order - b.order || a.key.localeCompare(b.key))
-    )
+    return this.cached('menus', () => this.mergeDeclaredMenus(this.menuRegistry.getAll()))
+  }
+
+  /**
+   * 真实注册 + 声明项合并：同一 `key`/`path` **以真实注册为准**。
+   *
+   * 插件渲染模块加载完成后会注册自己那一份，声明项于是在这里被同 key/path 的判定挡掉；
+   * 顺序仍按 `order`（再按 key 兜底），所以声明项不会打乱侧栏次序。
+   */
+  private mergeDeclaredMenus(real: RegisteredMenuItem[]): RegisteredMenuItem[] {
+    const seen = new Set(real.map((m) => m.key))
+    const merged = [...real]
+    for (const [pluginId, declaration] of this.declarations) {
+      const d = declaration.menu
+      if (!d || seen.has(d.key)) continue
+      seen.add(d.key)
+      merged.push({
+        pluginId,
+        key: d.key,
+        labelKey: d.labelKey,
+        icon: d.icon,
+        order: d.order ?? 0
+      })
+    }
+    return merged.sort((a, b) => a.order - b.order || a.key.localeCompare(b.key))
+  }
+
+  /** 路由版合并规则（同 `path` 真实注册优先）；声明路由没有 load/Component，落到骨架屏 */
+  private mergeDeclaredRoutes(real: RegisteredRoute[]): RegisteredRoute[] {
+    const seen = new Set(real.map((r) => r.path))
+    const merged = [...real]
+    for (const [pluginId, declaration] of this.declarations) {
+      for (const d of declaration.routes ?? []) {
+        if (seen.has(d.path)) continue
+        seen.add(d.path)
+        merged.push({ pluginId, path: d.path, skeleton: d.skeleton })
+      }
+    }
+    return merged
   }
 
   getMenuKeys(): string[] {

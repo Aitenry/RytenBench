@@ -16,17 +16,26 @@ export const zhCNSettings = {
   },
   plugins: {
     pageTitle: '插件管理',
-    pageDescription: '启停内置功能或管理外部插件',
+    pageDescription: '卸载/安装插件，或临时停用某项功能',
     listTitle: '已安装插件',
     listDescription: '停用后对应功能会立即从应用移除，重新启用即时恢复',
     builtinBadge: '内置',
-    externalBadge: '外部',
+    externalBadge: '第三方',
     switchFail: '插件状态切换失败',
-    install: '安装插件',
+    install: '安装第三方插件',
+    reinstall: '安装',
+    reinstallDone: '插件已重新安装',
     uninstall: '卸载',
     installFail: '插件安装失败',
-    uninstallConfirmTitle: '卸载插件',
-    uninstallConfirmContent: '确认卸载该插件？其目录将被删除。'
+    uninstallFail: '插件卸载失败',
+    uninstallDone: '插件已卸载',
+    uninstallConfirmTitle: '卸载「{{name}}」',
+    uninstallConfirmContent:
+      '卸载会删除该插件的全部数据（例如音乐曲库记录与应用托管的歌单目录），此操作不可撤销。' +
+      '若想保留数据，请选择「取消」并改用停用开关。',
+    uninstallPurgeOk: '不保留数据并卸载',
+    availableTitle: '可安装的内置插件',
+    availableDescription: '随应用分发，卸载后可随时装回来'
   },
   general: {
     pageTitle: '通用设置',

@@ -47,6 +47,24 @@ export const IPC_PLUGINS_SET_ENABLED = 'plugins-set-enabled'
 export const IPC_PLUGINS_INSTALL = 'plugins-install'
 export const IPC_PLUGINS_UNINSTALL = 'plugins-uninstall'
 
+/**
+ * 渲染层 → 主进程：上报宿主 UI 表的「键 → 导出名」清单（单向 send，无返回值）。
+ *
+ * 为什么需要：插件渲染包的 `@host/**` 说明符被改写成 `plugin://host/ui.js?m=<key>`，
+ * 桥模块由主进程按这份清单生成 ESM（`export const X = m["X"]`）——而 ESM 的具名导出
+ * 必须静态写死，主进程无法反射渲染进程的模块命名空间。渲染层在启动最早期
+ * （`installHostUi()`，早于任何插件渲染模块的 fetch）发一次即可。
+ */
+export const IPC_PLUGIN_HOST_UI_EXPORTS = 'plugin-host-ui-exports'
+
+/**
+ * 渲染层 → 主进程：查询当前已装载的插件**来自哪个文件**（只读诊断）。
+ *
+ * 用于验证「music 由磁盘包接管」而不是静态注册表：返回
+ * `{ id: { source: 'package' | 'builtin' | 'absent', file?: string } }`。
+ */
+export const IPC_PLUGINS_LOADED_FROM = 'plugins-loaded-from'
+
 /** 外部插件通道前缀校验正则（plugin:<命名空间>:...，命名空间允许字母数字 . _ -） */
 export const PLUGIN_CHANNEL_RE = /^plugin:[A-Za-z0-9._-]+:/
 
@@ -56,12 +74,36 @@ export function pluginIdFromChannel(channel: string): string | null {
   return m ? m[1] : null
 }
 
-/** 从 plugin://<id>/<relPath> URL 解析出插件 id 与相对路径 */
+/**
+ * 从 `plugin://<id>/<relPath>?<query>` 解析出插件 id 与相对路径。
+ *
+ * 用 URL 解析而不是手写正则（2026-09-26 修复）：`plugin://host/ui.js?m=…` 这种带
+ * **查询串**的写法里，`?m=…` 不属于路径，正则的 `(\/.*)?$` 会直接匹配失败（`?` 不在
+ * 允许集合内）→ 协议处理器判成「非法 URL」/「找不到模块」，宿主 UI 桥整条链路 404。
+ * URL 解析还顺带处理了 authority 段与百分号编码。
+ */
 export function parsePluginUrl(url: string): { id: string; relPath: string } | null {
-  const m = /^plugin:\/\/([A-Za-z0-9._-]+)(\/.*)?$/.exec(url)
-  if (!m) return null
-  const relPath = decodeURIComponent(m[2] ?? '/').replace(/^\/+/, '')
-  return { id: m[1], relPath }
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return null
+  }
+  if (parsed.protocol !== 'plugin:') return null
+  const id = parsed.hostname || parsed.pathname.replace(/^\/+/, '').split('/')[0] || ''
+  if (!/^[A-Za-z0-9._-]+$/.test(id)) return null
+  // `plugin://<id>/a/b.js` 里 hostname 就是 id、pathname 是 `/a/b.js`；
+  // `plugin:///<id>/a/b.js`（无 authority）则要把 pathname 里的 id 段切掉。
+  const rawPath = parsed.hostname
+    ? parsed.pathname
+    : parsed.pathname.replace(new RegExp(`^/+${id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`), '')
+  let relPath = rawPath
+  try {
+    relPath = decodeURIComponent(rawPath)
+  } catch {
+    // 编码非法：保留原文（下游会当成普通路径处理）
+  }
+  return { id, relPath: relPath.replace(/^\/+/, '') }
 }
 
 /** 插件文件 URL helper：plugin://<id>/<relPath> */

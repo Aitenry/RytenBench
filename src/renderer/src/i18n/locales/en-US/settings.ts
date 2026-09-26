@@ -17,18 +17,26 @@ export const enUSSettings: typeof zhCNSettings = {
   },
   plugins: {
     pageTitle: 'Plugin Manager',
-    pageDescription: 'Enable/disable built-in features or manage external plugins',
+    pageDescription: 'Uninstall/install plugins, or temporarily disable a feature',
     listTitle: 'Installed Plugins',
     listDescription:
       'Disabled features are removed from the app immediately and restored on re-enable',
     builtinBadge: 'Built-in',
-    externalBadge: 'External',
+    externalBadge: 'Third-party',
     switchFail: 'Failed to toggle plugin state',
-    install: 'Install Plugin',
+    install: 'Install third-party plugin',
+    reinstall: 'Install',
+    reinstallDone: 'Plugin reinstalled',
     uninstall: 'Uninstall',
     installFail: 'Failed to install plugin',
-    uninstallConfirmTitle: 'Uninstall Plugin',
-    uninstallConfirmContent: 'Uninstall this plugin? Its directory will be removed.'
+    uninstallFail: 'Failed to uninstall plugin',
+    uninstallDone: 'Plugin uninstalled',
+    uninstallConfirmTitle: 'Uninstall "{{name}}"',
+    uninstallConfirmContent:
+      'Uninstalling deletes all of this plugin\u2019s data (for example the music library records and app-managed playlist folders). This cannot be undone. To keep the data, choose Cancel and use the toggle instead.',
+    uninstallPurgeOk: 'Uninstall and delete data',
+    availableTitle: 'Built-in plugins available to install',
+    availableDescription: 'Shipped with the app; can be installed again at any time'
   },
   general: {
     pageTitle: 'General',

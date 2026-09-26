@@ -6,17 +6,20 @@ import React, {
   useRef,
   useSyncExternalStore
 } from 'react'
+import { i18n } from '@renderer/i18n'
 import { PluginHost } from './host'
+import { declaredMenuIcon } from './declared-icons'
 import type {
   AppProviderRegistration,
   BottomBarItemRegistration,
   GlobalComponentRegistration,
   Plugin,
+  PluginDeclaration,
   RegisteredMenuItem,
   RegisteredRoute,
   SettingsSectionRegistration
 } from './types'
-import type { PluginDescriptor } from '@shared/plugin/types'
+import type { PluginDescriptor, PluginListEntry } from '@shared/plugin/types'
 
 const PluginHostCtx = createContext<PluginHost | null>(null)
 
@@ -24,20 +27,82 @@ interface PluginHostProviderProps {
   plugins: Plugin[]
   /** 启用态覆写：id → 是否启用；缺省按 manifest.builtin（内置默认开、外部默认关） */
   enabledOverride?: Record<string, boolean>
+  /**
+   * 主进程**同步**插件清单（`api.plugin.listSync()`）。
+   * 首帧声明式预注册的元数据来源（`routes`/`menu`），见 `declarationsFromEntries`。
+   */
+  entries?: PluginListEntry[]
   /** 外部插件 vendor 模块（react/antd 等宿主唯一实例） */
   vendorModules?: Record<string, unknown>
   children: React.ReactNode
 }
 
 /**
+ * 主进程清单 → 声明式预注册项（只取 `enabled` 的条目）。
+ *
+ * 为什么：磁盘包插件的渲染模块要 `fetch` + `import` 之后才 `install(ctx)`，首帧侧栏与
+ * 路由表里没有它（实测 music 菜单要等几百毫秒才「弹出来」）。清单里的元数据足够先把
+ * 菜单/骨架路由放上去，插件模块加载完成后的真实注册按 `key`/`path` 覆盖（见 host 的
+ * `declare()`）。
+ *
+ * 三道过滤，都是为了「只占位、不添乱」：
+ * - 只处理 `enabled` 条目（停用插件不该有菜单）；
+ * - 字段形状校验：plugin.json 来自磁盘，运行期没有类型校验，脏数据不许进注册表；
+ * - `labelKey` 必须**现在就能译出来**（`i18n.exists`）：词条由插件自己在 install 里注册的
+ *   外部插件（如 `examples/demo-plugin` 的 `demo.menu.title`）此刻还没有词条，声明出去
+ *   只会先闪一串原始键名——这类条目等真实注册，不损失什么。
+ */
+function declarationsFromEntries(
+  entries: PluginListEntry[] | undefined
+): Array<{ id: string; declaration: PluginDeclaration }> {
+  if (!entries || entries.length === 0) return []
+  const out: Array<{ id: string; declaration: PluginDeclaration }> = []
+  for (const entry of entries) {
+    if (!entry.enabled) continue
+    const declaration: PluginDeclaration = {}
+
+    const menu = entry.menu
+    if (
+      menu &&
+      typeof menu.key === 'string' &&
+      menu.key.length > 0 &&
+      typeof menu.labelKey === 'string' &&
+      i18n.exists(menu.labelKey)
+    ) {
+      declaration.menu = {
+        key: menu.key,
+        labelKey: menu.labelKey,
+        icon: declaredMenuIcon(menu.icon),
+        order: typeof menu.order === 'number' ? menu.order : undefined
+      }
+    }
+
+    const routes = (entry.routes ?? []).filter(
+      (r) => r && typeof r.path === 'string' && r.path.startsWith('/')
+    )
+    if (routes.length > 0) {
+      declaration.routes = routes.map((r) => ({
+        path: r.path,
+        skeleton: typeof r.skeleton === 'string' ? r.skeleton : undefined
+      }))
+    }
+
+    if (declaration.menu || declaration.routes) out.push({ id: entry.id, declaration })
+  }
+  return out
+}
+
+/**
  * 插件宿主根 Provider：
  * - 创建 PluginHost 单例；
  * - 按 enabledOverride 装载插件（未指定则内置默认启用）；
+ * - 用同步清单里的元数据做**首帧声明式预注册**（构造期，早于任何子组件渲染）；
  * - enabledOverride 变化时 diff 式重放（启停即时生效）。
  */
 export const PluginHostProvider: React.FC<PluginHostProviderProps> = ({
   plugins,
   enabledOverride,
+  entries,
   vendorModules,
   children
 }) => {
@@ -55,7 +120,13 @@ export const PluginHostProvider: React.FC<PluginHostProviderProps> = ({
 
   // 宿主随构造期同步预装载默认启用的内置插件（首帧即注册路由/菜单）
   const hostRef = useRef<PluginHost | null>(null)
-  if (!hostRef.current) hostRef.current = new PluginHost(plugins, enabledMap)
+  if (!hostRef.current) {
+    hostRef.current = new PluginHost(plugins, enabledMap)
+    // 首帧声明式预注册（必须在任何子组件渲染之前）：静态内置插件此刻已完成真实注册，
+    // 它们的声明是冗余的（合并时真实优先）；真正受益的是磁盘包插件——渲染模块还在异步
+    // 加载，靠这份声明，首帧侧栏/路由表就是完整的。
+    for (const d of declarationsFromEntries(entries)) hostRef.current.declare(d.id, d.declaration)
+  }
   const host = hostRef.current
   if (vendorModules) host.setVendorModules(vendorModules)
 

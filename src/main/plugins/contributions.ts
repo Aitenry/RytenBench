@@ -57,3 +57,38 @@ export function listContributions<T>(key: string): T[] {
 export function contributionKeys(): string[] {
   return [...registry.keys()]
 }
+
+/**
+ * 贡献点键：**插件自清数据**（`plugin.purge`）。
+ *
+ * 卸载插件时宿主会先问一次「要不要保留数据」：用户选「不保留」才真正卸载，此时宿主
+ * 调这里的贡献，让**插件自己**删自己的数据——表在 core 的 schema 里、行在同一个 PGlite 库里，
+ * 但「哪些表 / 哪些托管目录属于我」只有插件自己知道，core 不该硬编码任何插件表名。
+ *
+ * 契约（与 `app-hooks.ts` 的钩子同构，只是单值语义更贴切——一个插件只有一份清理逻辑）：
+ * - 插件在 `install(ctx)` 里 `ctx.contribute(PLUGIN_PURGE, { run, label })`；
+ * - 宿主在**插件仍处于装载状态**时调用 `run()`（要读自己的 mapper / 托管目录），
+ *   因此 `run` 可以放心 import 自己插件的模块（不会拿到已 dispose 的上下文）；
+ * - `run` 只删**数据**：不删表结构（迁移不动，避免出现「卸载后迁移对不上」的库），
+ *   也不碰用户自己的原始文件（例如 music 只删应用托管的歌单目录，不删用户音乐）。
+ */
+export const PLUGIN_PURGE = 'plugin.purge'
+
+/** `plugin.purge` 贡献的值：`label` 只用于日志/确认框，`run` 是插件自己的清数据动作 */
+export interface PluginPurgeContribution {
+  run: () => void | Promise<void>
+  label: string
+}
+
+/**
+ * 取某插件的清数据动作（未贡献返回 null）。
+ *
+ * 用**末项**：同一插件重复贡献时后写的生效；不同插件之间互不影响
+ * （贡献注册表按 pluginId 记账，停用时只摘自己的）。
+ */
+export function pluginPurge(id: string): PluginPurgeContribution | null {
+  const all = (registry.get(PLUGIN_PURGE) ?? []).filter((entry) => entry.pluginId === id)
+  const value = all[all.length - 1]?.value as Partial<PluginPurgeContribution> | undefined
+  if (!value || typeof value.run !== 'function') return null
+  return { run: value.run, label: typeof value.label === 'string' ? value.label : id }
+}

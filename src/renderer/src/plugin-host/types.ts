@@ -31,6 +31,21 @@ export interface RegisteredMenuItem {
   order: number
 }
 
+/**
+ * **声明式预注册项**：来自主进程清单（`PluginListEntry.routes/menu`）的纯元数据，
+ * 没有任何组件与加载器。
+ *
+ * 与真实注册的区别：真实注册由插件 `install(ctx)` 给出（带 `Component`/`load` 与
+ * 组件形态的 `icon`），是权威；声明只是首帧占位，同 `key`/`path` 时被真实注册覆盖
+ * （见 `host.ts` 的 `declare()` 与 `getMenus`/`getRoutes`）。
+ */
+export interface PluginDeclaration {
+  /** 侧栏菜单（`icon` 已由 `declaredMenuIcon()` 按清单里的名字解析成节点） */
+  menu?: { key: string; labelKey: string; icon: ReactNode; order?: number }
+  /** 路由（无 `load`/`Component` → `MainRoutes` 渲染 `RouteSkeleton` 骨架） */
+  routes?: { path: string; skeleton?: string }[]
+}
+
 export interface SettingsSectionRegistration {
   pluginId: string
   tabKey: string

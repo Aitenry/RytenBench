@@ -3,8 +3,11 @@ import * as fs from 'fs'
 import * as path from 'path'
 import logger from 'electron-log'
 import { getEnabledOverride } from './store'
-import { findExternalPlugin, scanExternalPlugins } from './scanner'
+import { findExternalPlugin, isPluginInstalled, scanExternalPlugins } from './scanner'
+import { ensureBundledPluginsInstalled } from './installer'
+import { installHostRuntime } from './runtime'
 import { registerCoreIpc } from '../ipc'
+import { BUILTIN_PLUGIN_MANIFESTS } from '../../plugins/manifests'
 import { builtinMainModules } from './builtin'
 import { MainPluginContextImpl } from './context'
 import { IPC_PLUGIN_CHANNELS_SYNC, IPC_PLUGIN_CHANNELS_UPDATED } from '../../shared/plugin/protocol'
@@ -98,6 +101,13 @@ export function syncBuiltinPluginIpcs(next: Record<string, boolean>, ids: string
  * 拿不到就会把首个插件订阅判为「通道未启用」。
  */
 export function initPluginHost(): void {
+  // 顺序不可换：
+  // ① 宿主运行时表（`globalThis.__RB_HOST_RESOLVE__`）必须在**任何插件 main.cjs 被 require
+  //    之前**挂上——插件包里的 `require('@host/main/x')` 会立刻调它；
+  // ② 首次安装把应用包里的插件铺到 userData/plugins/，之后的扫描/装载就只剩「磁盘包」一条路径；
+  // ③ core 自己的 IPC 与 preload 的通道同步入口（都必须在窗口创建之前）。
+  installHostRuntime()
+  ensureBundledPluginsInstalled()
   registerCoreIpc()
   registerPluginChannelsSync()
   for (const id of Object.keys(builtinMainModules)) {
@@ -199,7 +209,7 @@ export function unloadExternalMain(id: string): void {
 /** 启动时装载所有已启用的外部插件主模块 */
 function initExternalMains(): void {
   for (const scanned of scanExternalPlugins()) {
-    if (getEnabledOverride(scanned.id) ?? false) {
+    if (isEnabledPlugin(scanned.id)) {
       try {
         loadExternalMain(scanned.id)
       } catch (err) {
@@ -207,4 +217,73 @@ function initExternalMains(): void {
       }
     }
   }
+}
+
+/** 内置插件 id 集合（不 import 插件实现，只借 manifests 的 id 面） */
+const BUILTIN_MAIN_IDS: Record<string, true> = Object.fromEntries(
+  BUILTIN_PLUGIN_MANIFESTS.map((m) => [m.id, true as const])
+)
+
+/**
+ * 已安装 plugin id 的**默认启用态**。
+ *
+ * 内置插件铺包后就走磁盘包这条装载路径，但它们的语义仍是「内置：默认启用」——
+ * 若这里按外部插件的默认值（停用）算，首次安装后音乐播放器在重启时就再也不装载了。
+ * 第三方插件保持默认停用（用户装完要自己打开）。
+ */
+export function isBundledPluginId(id: string): boolean {
+  return Object.prototype.hasOwnProperty.call(BUILTIN_MAIN_IDS, id)
+}
+
+/** 已安装插件的最终启用态（显式覆写优先，否则内置默认启用 / 第三方默认停用） */
+export function isEnabledPlugin(id: string): boolean {
+  const override = getEnabledOverride(id)
+  if (override !== undefined) return override
+  return isBundledPluginId(id)
+}
+
+// ---------- 只读诊断（工装/面板核对「插件到底从哪来」） ----------
+
+/** 某插件主模块的装载来源 */
+export interface PluginLoadInfo {
+  /** userData/plugins/<id>/ 下是否有插件包（内置铺包或第三方） */
+  installed: boolean
+  /** package = 由磁盘包提供；builtin = 静态注册表回退；absent = 当前未装载 */
+  source: 'package' | 'builtin' | 'absent'
+  /** 磁盘包主入口绝对路径（installed 时才有；工装用它证明是包在应答） */
+  file?: string
+}
+
+/**
+ * 各插件主模块的装载来源。
+ *
+ * 为什么需要它：P1 的过渡共存期里同一个插件既可能来自磁盘包、又可能来自静态注册表
+ * （dev 没跑打包脚本时的回退），光看「通道可用」分不出来源。这个函数让 CDP 工装能断言
+ * 「music 的 handler 确实由 userData/plugins/music/main.cjs 提供」，也能断言
+ * 「卸载后目录没了、包来源消失」。
+ */
+export function pluginLoadInfo(): Record<string, PluginLoadInfo> {
+  const out: Record<string, PluginLoadInfo> = {}
+  for (const id of externalMains.keys()) {
+    const scanned = findExternalPlugin(id)
+    const entryRel = scanned?.manifest.entry?.main ?? 'main.js'
+    out[id] = {
+      installed: true,
+      source: 'package',
+      ...(scanned ? { file: path.join(scanned.dir, entryRel) } : {})
+    }
+  }
+  for (const id of builtinPlugins.keys()) {
+    out[id] = { installed: isPluginInstalled(id), source: 'builtin' }
+  }
+  // 已铺包但当前停用（未装载）的插件：也如实报 installed，避免工装把「停用」误判成「没装」
+  for (const scanned of scanExternalPlugins()) {
+    if (out[scanned.id]) continue
+    out[scanned.id] = {
+      installed: true,
+      source: 'absent',
+      file: path.join(scanned.dir, scanned.manifest.entry?.main ?? 'main.js')
+    }
+  }
+  return out
 }

@@ -17,6 +17,14 @@ export interface ScannedExternalPlugin {
   manifest: PluginManifest
 }
 
+/**
+ * **宿主保留 id**：`plugin://host/ui.js` 是渲染层宿主 UI 桥的地址（见
+ * `src/main/plugins/host-ui-bridge.ts`），路径形态 `plugin://<id>/<relPath>` 会让协议
+ * 处理器把 `host` 当成插件 id 先匹配。若用户真在 `userData/plugins/host/` 放一个插件，
+ * 它永远取不到自己的文件，还会让桥的行为变得难以预测——所以扫描时直接跳过并告警。
+ */
+export const RESERVED_PLUGIN_IDS: ReadonlySet<string> = new Set(['host'])
+
 /** 外部插件根目录（userData/plugins），确保存在 */
 export function externalPluginsRoot(): string {
   const root = path.join(app.getPath('userData'), 'plugins')
@@ -51,6 +59,13 @@ export function scanExternalPlugins(): ScannedExternalPlugin[] {
         logger.warn(`[Plugins] ${entry.name}: manifest.id(${manifest.id}) 与目录名不一致，跳过`)
         continue
       }
+      // 宿主保留 id（host 是宿主 UI 桥的地址段）：即便目录与清单都合法也不装载
+      if (RESERVED_PLUGIN_IDS.has(entry.name)) {
+        logger.warn(
+          `[Plugins] ${entry.name}: 这是宿主的保留 id（plugin://host/… 供宿主 UI 桥使用），跳过`
+        )
+        continue
+      }
       out.push({ id: entry.name, dir, manifest })
     } catch (err) {
       logger.warn(`[Plugins] ${entry.name}: plugin.json 读取失败，跳过:`, err)
@@ -62,4 +77,29 @@ export function scanExternalPlugins(): ScannedExternalPlugin[] {
 /** 按 id 查找单个外部插件 */
 export function findExternalPlugin(id: string): ScannedExternalPlugin | null {
   return scanExternalPlugins().find((p) => p.id === id) ?? null
+}
+
+/**
+ * 已安装插件的 id 集合（缓存）。
+ *
+ * 为什么缓存：调用方是**热路径**——`builtin.ts` 的过渡共存判断（每次读内置注册表都要问
+ * 「这个 id 是不是已经被磁盘包接管」）与插件面板的列表合并。每次真去 readdir + 解析 N 份
+ * plugin.json 太浪费。安装 / 卸载 / 重装目录之后调 `invalidateInstalledPluginIds()` 刷新。
+ */
+let installedIdsCache: Set<string> | null = null
+
+/** 已安装插件的 id 集合（含内置铺包与第三方） */
+export function installedPluginIds(): Set<string> {
+  installedIdsCache ??= new Set(scanExternalPlugins().map((p) => p.id))
+  return installedIdsCache
+}
+
+/** 目录被改动过（安装/卸载/重装）后刷新缓存 */
+export function invalidateInstalledPluginIds(): void {
+  installedIdsCache = null
+}
+
+/** 该 id 是否已作为插件包安装在 userData/plugins/ 下 */
+export function isPluginInstalled(id: string): boolean {
+  return installedPluginIds().has(id)
 }

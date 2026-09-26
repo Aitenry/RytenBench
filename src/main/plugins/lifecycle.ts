@@ -2,19 +2,24 @@ import { dialog } from 'electron'
 import * as fs from 'fs'
 import * as path from 'path'
 import logger from 'electron-log'
-import { externalPluginsRoot, findExternalPlugin } from './scanner'
+import { externalPluginsRoot, findExternalPlugin, invalidateInstalledPluginIds } from './scanner'
 import { isValidManifest, type PluginManifest } from '../../shared/plugin/types'
-import { getEnabledOverride, setEnabledOverride } from './store'
+import { isEnabledPlugin } from './host'
+import { setEnabledOverride } from './store'
 import { broadcastPluginStateChanged } from '../ipc/plugins'
 import { unloadExternalMain } from './host'
 
 /**
- * 外部插件安装/卸载流程：
- * - 安装：选目录 → 校验 plugin.json → 复制到 userData/plugins/<id> → 广播刷新；
+ * 插件目录的安装/卸载流程（内置铺包与第三方共用同一套目录语义）：
+ * - 安装（第三方）：选目录 → 校验 plugin.json → 复制到 userData/plugins/<id> → 广播刷新；
  * - 卸载：若启用先停用（主进程注销 IPC + 广播渲染层卸载）→ 删除目录 → 广播。
+ *
+ * 内置插件（`bundled: true`）的卸载走 `ipc/plugins.ts` 的 `uninstallPlugin()`：它在删目录
+ * 之前还要先问数据、调 `plugin.purge` 贡献、写 `uninstalled` 记录，因此不直接复用这里的
+ * `uninstallExternalPlugin`（后者是第三方语义：用户自己装的目录，删掉就没有了）。
  */
 
-/** 读取并校验目录下的 plugin.json（外部插件 manifest；builtin 恒为 false） */
+/** 读取并校验目录下的 plugin.json（外部插件 manifest；bundled 插件不可作为第三方安装） */
 export function readExternalManifest(dir: string): PluginManifest {
   const raw = JSON.parse(fs.readFileSync(path.join(dir, 'plugin.json'), 'utf-8'))
   if (!isValidManifest(raw)) {
@@ -22,7 +27,7 @@ export function readExternalManifest(dir: string): PluginManifest {
   }
   const manifest = raw as unknown as PluginManifest
   if (manifest.builtin) {
-    throw new Error('内置插件不可作为外部插件安装')
+    throw new Error('随应用分发的内置插件不可作为第三方插件安装（请用设置 → 插件里的「安装」）')
   }
   return { ...manifest, builtin: false }
 }
@@ -43,24 +48,26 @@ export async function installExternalPlugin(): Promise<string> {
   }
   const dest = path.join(externalPluginsRoot(), manifest.id)
   fs.cpSync(src, dest, { recursive: true })
+  invalidateInstalledPluginIds()
   logger.info(`[Plugins] 外部插件安装: ${manifest.id} → ${dest}`)
   broadcastPluginStateChanged()
   return manifest.id
 }
 
-/** 卸载外部插件：启用中先停用（含主进程模块注销）再删除目录 */
+/** 卸载第三方插件：启用中先停用（含主进程模块注销）再删除目录（无数据询问语义） */
 export function uninstallExternalPlugin(id: string): void {
   const found = findExternalPlugin(id)
   if (!found) {
     throw new Error(`插件 '${id}' 不存在`)
   }
-  if (getEnabledOverride(id) ?? false) {
+  if (isEnabledPlugin(id)) {
     setEnabledOverride(id, false)
     unloadExternalMain(id)
   }
   // 若主模块此前加载失败（未入 externalMains），再兜底注销一次（幂等）
   unloadExternalMain(id)
   fs.rmSync(found.dir, { recursive: true, force: true })
+  invalidateInstalledPluginIds()
   logger.info(`[Plugins] 外部插件卸载: ${id}`)
   broadcastPluginStateChanged()
 }

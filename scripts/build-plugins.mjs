@@ -8,16 +8,24 @@
  *   resources/plugins/<id>/renderer.mjs  渲染层入口（ESM，default export { manifest, install(ctx) }）
  *
  * 关键约束（方案见 src/plugins/PACKAGING.md）：
- * - **宿主运行时必须外置**：插件源码里指向 core 的导入（`../../main/**`）与宿主 UI 的导入
- *   （`@renderer/**`）在打包时统一改成 `@host/*` 虚拟模块并标记 external——运行期由宿主注入
- *   （主进程经 globalThis 交接、渲染层经 plugin://host/ui 的 ESM 桥）。这样既能避免把
- *   PGlite 连接 / React / i18n 实例打成两份，又**不用改 288 处 import**，源码仍按真实 core 类型检查。
- * - 渲染层只外置宿主 UI 与 vendor（react/antd/图标）；自己的依赖（codemirror 等）打进包。
+ * - **宿主能力一律经宿主运行时取**：插件源码里指向 core 的导入（`../../main/**`）、宿主 UI 的导入
+ *   （`@renderer/**`）以及第三方裸模块（react/antd/electron/zod/drizzle…）在打包时都被解析成
+ *   **虚拟模块**，`onLoad` 生成一句 `宿主运行时解析("<原 spec>")`——主进程是
+ *   `globalThis.__RB_HOST_RESOLVE__(spec)`（`src/main/plugins/runtime.ts` 挂载，返回宿主自己那份
+ *   实例），渲染层是 `plugin://host/ui.js?m=<key>` 的 ESM 桥（`src/renderer/src/plugin-host/host-ui.ts`）。
+ *   这样既能避免把 PGlite 连接 / React / i18n 打成两份，又**不用改 288 处 import**，
+ *   源码仍按真实 core 类型检查。
+ * - **不再标记 external**：external 会让产物里留一条裸的 `require("@host/main/x")`，而在
+ *   `userData/plugins/<id>/` 下没有 node_modules、也没有解析 `@host/*` 的办法（CJS 里加 require
+ *   垫片又会因为产物已是 ESM/严格模式而 SyntaxError）。改成虚拟模块后，产物里只有对
+ *   `__RB_HOST_RESOLVE__` 的调用与静态 ESM import。
+ * - 渲染层自己的依赖（codemirror 等）仍然打进包。
  *
  * 跑法：node scripts/build-plugins.mjs [--plugin music] [--out resources/plugins] [--dev]
  */
 import { build } from 'esbuild'
 import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs'
+import { builtinModules } from 'node:module'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -44,21 +52,79 @@ const ALIASES = [
   [/^@shared\/(.*)$/, SHARED_DIR]
 ]
 
+/**
+ * 渲染层交给宿主 UI 桥的第三方 vendor（宿主里已有唯一实例，插件包不得自带第二份）。
+ *
+ * 这份名单必须与 `src/renderer/src/plugin-host/host-ui.ts` 的 `@host/vendor/*` 键**一致**：
+ * 打包器把命中的说明符改成桥引用，运行时渲染层 loader 再按 host-ui 表判断哪些说明符
+ * 真的走桥（表里没有的裸模块保持原样，由 esbuild 打进包）。
+ */
+const RENDERER_VENDOR = ['react', 'react-dom', 'antd', '@remixicon/react', '@ant-design/icons']
+
+/** Node 内置模块（含 `node:` 前缀形式）：保持 external，运行期由 Node 自己解析 */
+const NODE_BUILTINS = new Set([
+  ...builtinModules,
+  ...builtinModules.map((m) => `node:${m}`),
+  'node:test',
+  'node:sea',
+  'node:sqlite'
+])
+
+/** 虚拟模块命名空间：onResolve 落到这里，onLoad 生成「去向宿主运行时取」的源码 */
+const HOST_MODULE_NS = 'host-runtime'
+
+/** 主进程：`module.exports = globalThis.__RB_HOST_RESOLVE__("<spec>")`（CJS 产物，require 即可） */
+const cjsHostModule = (spec) =>
+  `module.exports = globalThis.__RB_HOST_RESOLVE__(${JSON.stringify(spec)});\n`
+
+/**
+ * 渲染层：把宿主说明符指向宿主 UI 桥模块。
+ *
+ * 两句话，各有原因：
+ * - `export * from "<桥 URL>"` 重新导出桥的全部具名导出，并把它标记为 external——这样
+ *   esbuild **不需要**知道宿主模块有哪些具名导出（真实导出面在运行期由桥决定，桥的内容由
+ *   主进程按渲染层上报的宿主 UI 表生成，见 src/main/plugins/host-ui-bridge.ts）。
+ *   之前生成 `import * as m …` 再逐名 re-export，esbuild 会因为拿不到静态导出表而报
+ *   "No matching export for import useState"（antd/图标这类上千个导出的包无法穷举）。
+ * - **默认导出必须自己补**：ESM 的 `export *` **不转发 default**，而插件源码里
+ *   `import React from 'react'` / `import antd from 'antd'` 依赖默认导出（CJS 互操作），
+ *   少了它就会在运行期变成 `Cannot read properties of undefined (reading 'memo')`。
+ *   这里让 default 指向「桥模块自己的 default，缺失时退回整个命名空间」，与
+ *   webpack/esbuild 对 CJS 模块的默认导出语义一致。
+ */
+const esmHostModule = (spec) => {
+  const url = `plugin://host/ui.js?m=${encodeURIComponent(spec)}`
+  return (
+    `import * as __hostNs from ${JSON.stringify(url)};\n` +
+    `export * from ${JSON.stringify(url)};\n` +
+    `export default __hostNs.default ?? __hostNs;\n`
+  )
+}
+
 const isAbsoluteSpec = (spec) => /^[A-Za-z]:[\\/]/.test(spec) || spec.startsWith('/')
 const isBare = (spec) => !spec.startsWith('.') && !isAbsoluteSpec(spec) && !spec.startsWith('@host/')
 
 /**
  * 解析插件里的导入：
- * - `@renderer/**`（宿主 UI）、`../../main/**`（core）、`@shared/**` → `@host/<side>/<相对路径>`，标记 external；
+ * - `@renderer/**`（宿主 UI）、`../../main/**`（core）、`@shared/**` → `@host/<side>/<相对路径>`
+ *   虚拟模块，运行期由宿主运行时给实例；
  * - `@plugins/**` 与插件内部相对导入 → 正常打进包；
- * - 其它裸模块（react/antd/langchain/zod/drizzle/electron…）→ 一律 external，运行期由宿主解析
- *   （主进程经 require 垫片、渲染层经 ctx.require / 宿主 ESM 桥），避免每个插件包各带一份 langchain/zod。
+ * - 其它裸模块（react/antd/langchain/zod/drizzle/electron…）：
+ *   主进程侧统一 `@host/main/...` 之外的原样 spec（宿主用应用根的解析路径 require）；
+ *   渲染层侧的 vendor 换成 `@host/vendor/<spec>`，其余（插件自己的依赖）打进包；
+ * - `node:*` / Node 内置 → external。
  */
-const hostExternalPlugin = (side) => ({
-  name: 'host-external',
+const hostRuntimePlugin = (side) => ({
+  name: 'host-runtime',
   setup(build) {
     build.onResolve({ filter: /.*/ }, (args_) => {
       const spec = args_.path
+
+      // 0) Node 内置：交给 esbuild 默认的 external 判定（node: 前缀会原样留在产物里）
+      if (NODE_BUILTINS.has(spec)) return { path: spec, external: true }
+
+      // 0.5) plugin:// 的桥模块（本插件生成的虚拟模块 import 它）：原样留给运行时
+      if (spec.startsWith('plugin://')) return { path: spec, external: true }
 
       // 1) 先判 tsconfig 别名（否则 @renderer/* 会被当成裸模块直接外置，路径就漏给了宿主）
       let abs = null
@@ -70,14 +136,24 @@ const hostExternalPlugin = (side) => ({
         }
       }
 
-      // 2) @host/* 与第三方裸模块（react/antd/langchain/zod/drizzle/electron…）一律外置，
-      //    运行期由宿主解析（主进程 require 垫片、渲染层 ctx.require / 宿主 ESM 桥）
-      if (!abs) {
-        if (spec.startsWith('@host/')) return { path: spec, external: true }
-        if (isBare(spec)) return { path: spec, external: true }
+      // 2) 显式写死的 @host/*（理论上插件源码不会写，防御性处理）→ 直接进宿主运行时
+      if (!abs && spec.startsWith('@host/')) {
+        return { path: spec, namespace: HOST_MODULE_NS }
       }
 
-      // 3) 相对/绝对路径 → 绝对路径
+      // 3) 第三方裸模块
+      if (!abs && isBare(spec)) {
+        if (side === 'renderer') {
+          if (!RENDERER_VENDOR.some((v) => spec === v || spec.startsWith(v + '/'))) {
+            return null // 插件自己的依赖（codemirror 等）：打进包
+          }
+          return { path: `@host/vendor/${spec}`, namespace: HOST_MODULE_NS }
+        }
+        // 主进程：spec 原样交给宿主运行时（宿主按应用根解析，拿同一实例）
+        return { path: spec, namespace: HOST_MODULE_NS }
+      }
+
+      // 4) 相对/绝对路径 → 绝对路径
       if (!abs) {
         const from = args_.importer ? dirname(args_.importer) : ROOT
         abs = resolve(from, spec)
@@ -86,16 +162,21 @@ const hostExternalPlugin = (side) => ({
       if (withSep(PLUGINS_DIR)) return null // 插件自己的代码：打进包
 
       if (withSep(HOST_MAIN_DIR)) {
-        return { path: '@host/main/' + relOf(HOST_MAIN_DIR, abs), external: true }
+        return { path: '@host/main/' + relOf(HOST_MAIN_DIR, abs), namespace: HOST_MODULE_NS }
       }
       if (side === 'renderer' && withSep(HOST_RENDERER_DIR)) {
-        return { path: '@host/renderer/' + relOf(HOST_RENDERER_DIR, abs), external: true }
+        return { path: '@host/renderer/' + relOf(HOST_RENDERER_DIR, abs), namespace: HOST_MODULE_NS }
       }
       if (withSep(SHARED_DIR)) {
-        return { path: '@host/shared/' + relOf(SHARED_DIR, abs), external: true }
+        return { path: '@host/shared/' + relOf(SHARED_DIR, abs), namespace: HOST_MODULE_NS }
       }
       return null
     })
+
+    build.onLoad({ filter: /.*/, namespace: HOST_MODULE_NS }, (args_) => ({
+      contents: side === 'renderer' ? esmHostModule(args_.path) : cjsHostModule(args_.path),
+      loader: 'js'
+    }))
   }
 })
 
@@ -132,7 +213,7 @@ async function buildPlugin(id) {
 
   const manifest = await emitManifest(id, outDir)
 
-  // 主进程入口：CJS，external 掉 electron / node 内置 / @host/**
+  // 主进程入口：CJS；宿主能力（@host/** + 第三方裸模块）经虚拟模块转成 __RB_HOST_RESOLVE__ 调用
   const mainEntry = join(srcDir, 'main/index.ts')
   if (existsSync(mainEntry)) {
     await build({
@@ -142,15 +223,14 @@ async function buildPlugin(id) {
       platform: 'node',
       format: 'cjs',
       target: 'node20',
-      external: ['electron'],
-      plugins: [hostExternalPlugin('main')],
+      plugins: [hostRuntimePlugin('main')],
       minify: !isDev,
       sourcemap: isDev ? 'inline' : false,
       logLevel: 'warning'
     })
   }
 
-  // 渲染层入口：ESM（blob import 加载），external 掉 react/antd/图标与 @host/**
+  // 渲染层入口：ESM（blob import 加载）；宿主 UI 与 vendor 经 plugin://host/ui.js 桥
   const rendererEntry = join(srcDir, 'renderer/plugin.tsx')
   if (existsSync(rendererEntry)) {
     await build({
@@ -161,8 +241,7 @@ async function buildPlugin(id) {
       format: 'esm',
       target: 'chrome120',
       jsx: 'automatic',
-      external: ['react', 'react-dom', 'antd', '@remixicon/react'],
-      plugins: [hostExternalPlugin('renderer')],
+      plugins: [hostRuntimePlugin('renderer')],
       loader: { '.css': 'css', '.svg': 'dataurl' },
       minify: !isDev,
       sourcemap: isDev ? 'inline' : false,

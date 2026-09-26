@@ -4,12 +4,13 @@ import { pathToFileURL } from 'url'
 import logger from 'electron-log'
 import { parsePluginUrl } from '../../shared/plugin/protocol'
 import { findExternalPlugin } from './scanner'
-import { getEnabledOverride } from './store'
-
+import { isEnabledPlugin } from './host'
+import { hostUiBridgeSource, HOST_UI_BRIDGE_PATH, parseHostUiKey } from './host-ui-bridge'
 /**
- * plugin:// 自定义协议：服务外部插件的静态文件（renderer.js/main 附属资源/图标）。
+ * plugin:// 自定义协议：服务插件的静态文件（renderer.js/main 附属资源/图标）
+ * 以及**渲染层宿主 UI 桥**（`plugin://host/ui.js?m=<key>`）。
  * 安全约束：
- * - 仅限「已发现且已启用」的外部插件目录；
+ * - 文件服务仅限「已发现且已启用」的插件目录；
  * - 路径解析后必须落在插件根目录内（防目录穿越）；
  * - 按扩展名提供正确 MIME（renderer.js 以 text/javascript 供 fetch+blob import）。
  */
@@ -50,10 +51,26 @@ export function registerPluginProtocolHandler(): void {
   protocol.handle('plugin', async (request) => {
     const parsed = parsePluginUrl(request.url)
     if (!parsed) return new Response('bad plugin url', { status: 400 })
+
+    // 宿主 UI 桥：`plugin://host/ui.js?m=<key>` 由宿主生成 ESM（不是磁盘文件）。
+    // 放在这里而不是走插件目录，是因为它的内容取决于**当前注册的宿主模块表**。
+    if (parsed.id === 'host') {
+      if (parsed.relPath !== HOST_UI_BRIDGE_PATH) {
+        return new Response('host module not found', { status: 404 })
+      }
+      const key = parseHostUiKey(new URL(request.url).search)
+      if (!key) return new Response('missing ?m=<key>', { status: 400 })
+      return new Response(hostUiBridgeSource(key), {
+        status: 200,
+        headers: { 'content-type': 'text/javascript' }
+      })
+    }
+
     const scanned = findExternalPlugin(parsed.id)
     if (!scanned) return new Response('plugin not found', { status: 404 })
-    // 外部插件默认停用；停用状态不可访问任何文件
-    if (!(getEnabledOverride(parsed.id) ?? false)) {
+    // 停用状态不可访问任何文件。用 isEnabledPlugin（而不是「覆写非真即假」）：
+    // 内置插件铺包后默认启用，用错默认值会让它们连自己的 renderer.mjs 都取不到（403）。
+    if (!isEnabledPlugin(parsed.id)) {
       return new Response('plugin disabled', { status: 403 })
     }
     const abs = resolve(scanned.dir, parsed.relPath || '')
